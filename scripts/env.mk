@@ -1,0 +1,29 @@
+include scripts/utils.mk
+
+SDKPATH ?= er-301
+
+PROFILE ?= testing
+
+ifndef ARCH
+  SYSTEM_NAME := $(shell uname -s)
+  ifeq ($(SYSTEM_NAME),Linux)
+    ARCH = linux
+  else ifeq ($(SYSTEM_NAME),Darwin)
+    ARCH = darwin
+  else
+    $(error Unsupported system $(SYSTEM_NAME))
+  endif
+endif
+
+ifeq ($(ARCH),am335x)
+  TI_INSTALL_DIR ?= $(HOME)/ti
+  include $(SDKPATH)/scripts/am335x.mk
+endif
+
+ifeq ($(ARCH),linux)
+  include $(SDKPATH)/scripts/linux.mk
+endif
+
+ifeq ($(ARCH),darwin)
+  include $(SDKPATH)/scripts/darwin.mk
+endif
