@@ -1,4 +1,4 @@
-PROJECTS = plaits nr
+PROJECTS = plaits nr grids stratos clouds kryos
 
 all: $(PROJECTS)
 

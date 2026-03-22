@@ -7,16 +7,28 @@
 - [ ] Grids (single channel, no accent — pattern generator with clock/reset inputs)
 - [ ] Warps (meta-modulator)
 - [ ] Extract Clouds reverb engine, create a standalone unit named Stratos
+- [ ] Marbles X algorithm extracted to single channel unit
+- [ ] Marbles Y algorithm extracted to single channel unit
 
 ## Plaits Improvements
 
-- [ ] Add fundamental frequency control on top of V/Oct — can't hit real bass currently
+- [x] Add fundamental frequency control on top of V/Oct
+- [x] Fix engine switch crash on am335x (define TEST for stmlib)
 
 ## Teletype NR Ops
 
-- [ ] Implement as single channel gate sequencer
-- [ ] Reuse graphics from tomf's euclid unit
+- [x] Implement as single channel gate sequencer
+- [x] Reuse circle graphic from tomf's euclid unit
 
 ## Sequencer Suite
 
 - [ ] Ideate and build a decent sequencer suite — ER-301 is lacking here
+
+## Filterbank
+
+- [ ] based on disting ex filterbank
+- [ ] controls for filter type, band gain, band res, band freq, band spread/arrangement
+
+## 4ms SMR
+
+- [ ] Port of 4ms Spectral Multiband Resonator — 6 resonant bandpass filters with rotation/spread
