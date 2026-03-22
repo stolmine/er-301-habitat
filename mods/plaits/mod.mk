@@ -42,10 +42,7 @@ ASSETS := $(call rwildcard, $(ASSET_DIR), *)
 INCLUDES = $(MOD_DIR) mods $(SDKPATH) $(SDKPATH)/arch/$(ARCH) $(SDKPATH)/emu $(EURORACK)
 
 # Symbols
-SYMBOLS =
-ifneq ($(ARCH),am335x)
-SYMBOLS += TEST
-endif
+SYMBOLS = TEST
 
 # Compiler flags
 CFLAGS.common = -Wall -ffunction-sections -fdata-sections
