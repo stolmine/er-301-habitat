@@ -1,4 +1,4 @@
-PROJECTS = plaits
+PROJECTS = plaits nr
 
 all: $(PROJECTS)
 

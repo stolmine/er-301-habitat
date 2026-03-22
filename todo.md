@@ -6,6 +6,7 @@
 - [ ] Rings (resonator)
 - [ ] Grids (single channel, no accent — pattern generator with clock/reset inputs)
 - [ ] Warps (meta-modulator)
+- [ ] Extract Clouds reverb engine, create a standalone unit named Stratos
 
 ## Plaits Improvements
 
