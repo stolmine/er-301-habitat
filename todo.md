@@ -29,6 +29,12 @@
 - [ ] based on disting ex filterbank
 - [ ] controls for filter type, band gain, band res, band freq, band spread/arrangement
 
+## Kryos (spectral freeze)
+
+- [ ] Debug hang on load — test in emulator first to isolate hardware vs code issue
+- [ ] If emulator works: hardware-specific issue (alignment, memory, toolchain)
+- [ ] If emulator hangs: DSP bug in process() or constructor
+
 ## 4ms SMR
 
 - [ ] Port of 4ms Spectral Multiband Resonator — 6 resonant bandpass filters with rotation/spread
