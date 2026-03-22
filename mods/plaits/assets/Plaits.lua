@@ -15,6 +15,9 @@ local engineMap = app.LinearDialMap(0, 23)
 engineMap:setSteps(1, 1, 1, 1)
 engineMap:setRounding(1)
 
+local freqMap = app.LinearDialMap(-48, 48)
+freqMap:setSteps(1, 1, 0.1, 0.01)
+
 -- Fader 0-23 maps to: original 16 first, then v1.2 additions
 -- C++ applies the same remap to the actual Plaits engine index
 local engineNames = {
@@ -99,6 +102,12 @@ function Plaits:onLoadGraph(channelCount)
   tie(voice, "Morph", morph, "Out")
   self:addMonoBranch("morph", morph, "In", morph, "Out")
 
+  -- Freq (semitone offset from C4)
+  local freq = self:addObject("freq", app.ParameterAdapter())
+  freq:hardSet("Bias", 0.0)
+  tie(voice, "Freq", freq, "Out")
+  self:addMonoBranch("freq", freq, "In", freq, "Out")
+
   -- FM Amount
   local fmAmt = self:addObject("fmAmt", app.ParameterAdapter())
   fmAmt:hardSet("Bias", 0.0)
@@ -147,6 +156,7 @@ end
 local views = {
   expanded = {
     "tune",
+    "freq",
     "engine",
     "harmonics",
     "timbre",
@@ -154,6 +164,7 @@ local views = {
   },
   osc = {
     "tune",
+    "freq",
     "engine",
     "harmonics",
     "timbre",
@@ -162,6 +173,7 @@ local views = {
   trig = {
     "gate",
     "tune",
+    "freq",
     "engine",
     "harmonics",
     "timbre",
@@ -245,6 +257,17 @@ function Plaits:onLoadViews(objects, branches)
     description = "V/oct",
     offset = objects.tune,
     range = objects.tuneRange
+  }
+
+  controls.freq = GainBias {
+    button = "freq",
+    description = "Fundamental",
+    branch = branches.freq,
+    gainbias = objects.freq,
+    range = objects.freq,
+    biasMap = freqMap,
+    biasPrecision = 1,
+    initialBias = 0
   }
 
   controls.engine = EngineSelector {

@@ -33,6 +33,7 @@ namespace mi
     od::Parameter mFMAmount{"FM Amount", 0.0f};
     od::Parameter mTimbreAmount{"Timbre CV", 0.0f};
     od::Parameter mMorphAmount{"Morph CV", 0.0f};
+    od::Parameter mFreq{"Freq", 0.0f};
     od::Parameter mDecay{"Decay", 0.5f};
     od::Parameter mLPGColour{"LPG Colour", 0.5f};
     od::Option mOutputMode{"Output Mode", 0}; // 0=main, 1=aux, 2=main+main, 3=aux+main

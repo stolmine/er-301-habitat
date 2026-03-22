@@ -58,6 +58,7 @@ namespace mi
     addParameter(mHarmonics);
     addParameter(mTimbre);
     addParameter(mMorph);
+    addParameter(mFreq);
     addParameter(mFMAmount);
     addParameter(mTimbreAmount);
     addParameter(mMorphAmount);
@@ -138,7 +139,7 @@ namespace mi
       // Sample modulation inputs at block boundaries
       // V/Oct: ER-301 uses 1.0 = 1V. Plaits uses MIDI note numbers.
       // 0V = C4 (MIDI 60), each volt = 12 semitones
-      s.patch.note = 60.0f + voct[pos] * 12.0f;
+      s.patch.note = 60.0f + mFreq.value() + voct[pos] * 12.0f;
 
       s.modulations.note = 0.0f;
       s.modulations.frequency = fm[pos] * 6.0f;
