@@ -1,0 +1,1 @@
+../../eurorack/rings/resources.h
