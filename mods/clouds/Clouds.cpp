@@ -78,17 +78,22 @@ namespace clouds_unit
     // 0=granular, 1=delay (spectral moved to Kryos unit)
     static const clouds::PlaybackMode modeMap[] = {
         clouds::PLAYBACK_MODE_GRANULAR,      // 0
-        clouds::PLAYBACK_MODE_LOOPING_DELAY  // 1
+        clouds::PLAYBACK_MODE_LOOPING_DELAY, // 1
+        clouds::PLAYBACK_MODE_SPECTRAL       // 2
     };
-    int mode = CLAMP(0, 1, (int)(mMode.value() + 0.5f));
+    int mode = CLAMP(0, 2, (int)(mMode.value() + 0.5f));
     if (mode != s.cachedMode)
     {
       s.processor.set_playback_mode(modeMap[mode]);
       s.cachedMode = mode;
     }
 
-    // Set quality
-    s.processor.set_quality(mQuality.value());
+    // Set quality (force mono for spectral mode — CPU budget)
+    if (mode == 2) {
+      s.processor.set_quality(1);
+    } else {
+      s.processor.set_quality(mQuality.value());
+    }
 
     // Map parameters
     clouds::Parameters *p = s.processor.mutable_parameters();

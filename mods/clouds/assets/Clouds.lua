@@ -8,7 +8,7 @@ local OptionControl = require "Unit.MenuControl.OptionControl"
 local Encoder = require "Encoder"
 
 local modeMap = (function()
-  local map = app.LinearDialMap(0, 1)
+  local map = app.LinearDialMap(0, 2)
   map:setSteps(1, 1, 1, 1)
   map:setRounding(1)
   return map
