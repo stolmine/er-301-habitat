@@ -40,12 +40,23 @@
 
 ## Sequencer Suite
 
-- [ ] Ideate and build a decent sequencer suite — ER-301 is lacking here
+- [ ] 101 Sequencer — 64-step CV sequencer inspired by the SH-101
+  - Step index fader (0-63), each step has its own pitch/CV fader
+  - Dynamic viewport: selected step's fader appears in view, switches with index
+  - Global math transforms: add/subtract/multiply/divide/mod/randomize all steps
+  - Integer factor fader for transform operations (e.g. add 7, div 3)
+  - Global pitch/CV scaling and snap-to-scale mode
 
 ## Filterbank
 
 - [ ] based on disting ex filterbank
 - [ ] controls for filter type, band gain, band res, band freq, band spread/arrangement
+
+## Scope
+
+- [ ] Inline scope unit — insert into chain for signal visualization
+- [ ] 1-channel and 2-channel (stereo) versions
+- [ ] Passthrough audio (no DSP, just viz)
 
 ## Kryos (spectral freeze)
 
