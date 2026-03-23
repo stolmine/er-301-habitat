@@ -16,7 +16,6 @@ namespace grids
     addParameter(mChaos);
     addParameter(mWidth);
     addParameter(mChannel);
-    addOption(mMode);
   }
 
   Grids::~Grids() {}
@@ -72,7 +71,6 @@ namespace grids
     uint8_t density = (uint8_t)CLAMP(0, 255, (int)(mDensity.value() * 255.0f));
     uint8_t chaos = (uint8_t)CLAMP(0, 255, (int)(mChaos.value() * 255.0f));
     float width = CLAMP(0.0f, 1.0f, mWidth.value());
-    int mode = mMode.value();
     int channel = (int)CLAMP(0, 2, mChannel.value());
     uint8_t threshold = ~density;
 
@@ -141,18 +139,7 @@ namespace grids
       float value = 0.0f;
       if (mGateSamplesRemaining > 0)
       {
-        switch (mode)
-        {
-        case GRIDS_MODE_TRIGGER:
-          value = clockRise ? 1.0f : 0.0f;
-          break;
-        case GRIDS_MODE_GATE:
-          value = 1.0f;
-          break;
-        case GRIDS_MODE_THROUGH:
-          value = clock[i];
-          break;
-        }
+        value = 1.0f;
         mGateSamplesRemaining--;
       }
 

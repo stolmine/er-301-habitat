@@ -5,7 +5,6 @@ local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
 local GridsCircle = require "grids.GridsCircle"
-local OptionControl = require "Unit.MenuControl.OptionControl"
 local Encoder = require "Encoder"
 
 local Grids = Class {}
@@ -71,14 +70,8 @@ function Grids:onLoadGraph(channelCount)
   end
 end
 
-function Grids:onShowMenu(objects)
-  return {
-    mode = OptionControl {
-      description = "Output Mode",
-      option      = objects.op:getOption("Mode"),
-      choices     = { "trigger", "gate", "through" }
-    },
-  }, { "mode" }
+function Grids:onShowMenu()
+  return {}, {}
 end
 
 function Grids:onLoadViews()

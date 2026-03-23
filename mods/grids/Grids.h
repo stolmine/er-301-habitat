@@ -6,9 +6,6 @@
 #include <stdint.h>
 #include "grids_resources.h"
 
-#define GRIDS_MODE_TRIGGER 1
-#define GRIDS_MODE_GATE 2
-#define GRIDS_MODE_THROUGH 3
 
 namespace grids
 {
@@ -34,7 +31,6 @@ namespace grids
 
     od::Parameter mChannel{"Channel", 0.0f}; // 0=BD, 1=SD, 2=HH
 
-    od::Option mMode{"Mode", GRIDS_MODE_TRIGGER};
 #endif
 
     int getStep() { return mStep; }

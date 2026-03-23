@@ -5,7 +5,6 @@ local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
 local NRCircle = require "nr.NRCircle"
-local OptionControl = require "Unit.MenuControl.OptionControl"
 local Encoder = require "Encoder"
 
 local function intMap(min, max)
@@ -77,14 +76,8 @@ function NR:onLoadGraph(channelCount)
   end
 end
 
-function NR:onShowMenu(objects)
-  return {
-    mode = OptionControl {
-      description = "Output Mode",
-      option      = objects.op:getOption("Mode"),
-      choices     = { "trigger", "gate", "through" }
-    }
-  }, { "mode" }
+function NR:onShowMenu()
+  return {}, {}
 end
 
 function NR:onLoadViews()

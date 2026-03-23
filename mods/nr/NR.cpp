@@ -15,7 +15,6 @@ namespace nr
     addParameter(mFactor);
     addParameter(mLength);
     addParameter(mWidth);
-    addOption(mMode);
   }
 
   NR::~NR() {}
@@ -69,7 +68,6 @@ namespace nr
     int factor = (int)CLAMP(0, 16, (int)mFactor.value());
     int length = (int)CLAMP(1, 16, (int)mLength.value());
     float width = CLAMP(0.0f, 1.0f, mWidth.value());
-    int mode = mMode.value();
 
     mCachedLength = length;
 
@@ -135,18 +133,7 @@ namespace nr
       float value = 0.0f;
       if (mGateSamplesRemaining > 0)
       {
-        switch (mode)
-        {
-        case NR_MODE_TRIGGER:
-          value = (clockRise) ? 1.0f : 0.0f;
-          break;
-        case NR_MODE_GATE:
-          value = 1.0f;
-          break;
-        case NR_MODE_THROUGH:
-          value = clock[i];
-          break;
-        }
+        value = 1.0f;
         mGateSamplesRemaining--;
       }
 

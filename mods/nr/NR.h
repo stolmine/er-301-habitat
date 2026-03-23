@@ -5,9 +5,6 @@
 #include <hal/ops.h>
 #include <stdint.h>
 
-#define NR_MODE_TRIGGER 1
-#define NR_MODE_GATE 2
-#define NR_MODE_THROUGH 3
 
 namespace nr
 {
@@ -40,7 +37,6 @@ namespace nr
     od::Parameter mLength{"Length", 16.0f};
     od::Parameter mWidth{"Width", 0.5f};
 
-    od::Option mMode{"Mode", NR_MODE_TRIGGER};
 #endif
 
     int getStep() { return mStep; }

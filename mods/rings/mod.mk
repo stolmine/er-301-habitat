@@ -16,7 +16,8 @@ ASSET_DIR = $(MOD_DIR)/assets
 MOD_CPP = $(wildcard $(MOD_DIR)/*.cpp)
 
 # Rings DSP sources (follow symlinks)
-RINGS_CC = $(shell find -L $(MOD_DIR)/dsp -name '*.cc')
+RINGS_CC = $(shell find -L $(MOD_DIR)/dsp -name '*.cc' ! -name 'part.cc')
+RINGS_CC += $(MOD_DIR)/part.cc
 RINGS_CC += $(MOD_DIR)/resources.cc
 
 # stmlib sources
