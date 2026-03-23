@@ -52,7 +52,7 @@ namespace mi
       outputRMS = 0.0f;
       gainComp = 1.0f;
       // Filter bank coefficients are designed for 96kHz sub-rates
-      modulator.Init(96000.0f);
+      modulator.Init(48000.0f);
     }
 
     void RenderBlock(int startPos)

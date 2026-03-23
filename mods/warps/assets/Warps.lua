@@ -9,18 +9,20 @@ local MenuHeader = require "Unit.MenuControl.Header"
 local Task = require "Unit.MenuControl.Task"
 local Encoder = require "Encoder"
 
-local algoMap = app.LinearDialMap(0, 1.0)
+-- 6 xmod algorithms, continuous crossfade 0.0-0.625
+-- (vocoder range >0.7 disabled pending 96kHz SRC implementation)
+local algoMap = app.LinearDialMap(0, 0.625)
 algoMap:setSteps(0.125, 0.01, 0.001, 0.0001)
 
 local algoNames = {
   "XFade", "Fold", "AnaRM", "DigRM",
-  "XOR", "Compar", "Xtion", "Vocod", "Vocod+"
+  "XOR", "Compar"
 }
 
 local function getAlgoName(value)
-  local idx = math.floor(value * 8 + 0.5)
+  local idx = math.floor(value * 5 / 0.625 + 0.5)
   if idx < 0 then idx = 0 end
-  if idx > 8 then idx = 8 end
+  if idx > 5 then idx = 5 end
   return algoNames[idx + 1] or "XFade"
 end
 
