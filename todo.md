@@ -12,6 +12,12 @@
 - [ ] Marbles X algorithm extracted to single channel unit
 - [ ] Marbles Y algorithm extracted to single channel unit
 
+## Clouds Improvements
+
+- [x] Fix CPU spike on trigger — capped grain spawns per block (density=0 burst)
+- [ ] General CPU optimization — investigate NEON vectorization for granular engine
+- [ ] Gain compensation toggle — auto-scale output to match input level
+
 ## Warps Improvements
 
 - [ ] Vocoder: implement 2x upsample→process→downsample for correct 96kHz filter bank operation
