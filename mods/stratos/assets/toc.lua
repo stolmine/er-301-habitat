@@ -7,7 +7,7 @@ return {
     {
       title = "Stratos",
       moduleName = "Stratos",
-      category = "Audio Effects",
+      category = "Mutable",
       keywords = "reverb, effect, delay, diffusion"
     }
   }

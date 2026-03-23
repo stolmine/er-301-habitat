@@ -2,6 +2,8 @@
 
 ## Mutable Instruments Ports
 
+- [ ] correct categories, plaits still shows up in its own
+
 - [ ] Clouds (granular processor)
 - [ ] Rings (resonator)
 - [ ] Grids (single channel, no accent — pattern generator with clock/reset inputs)

@@ -7,6 +7,7 @@ return {
     {
       title = "Plaits",
       moduleName = "Plaits",
+      category = "Mutable",
       keywords = "oscillator, source, synthesis, plaits"
     }
   }

@@ -7,7 +7,7 @@ return {
     {
       title = "Clouds",
       moduleName = "Clouds",
-      category = "Audio Effects",
+      category = "Mutable",
       keywords = "granular, effect, delay, spectral, pitch, freeze"
     }
   }

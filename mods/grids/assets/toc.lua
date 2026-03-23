@@ -7,7 +7,7 @@ return {
     {
       title = "Grids",
       moduleName = "Grids",
-      category = "Timing",
+      category = "Mutable",
       keywords = "rhythm, gate, sequencer, trigger, drums"
     }
   }
