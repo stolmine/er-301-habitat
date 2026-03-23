@@ -1,6 +1,6 @@
 return {
   title = "Grids",
-  author = "stolmine",
+  author = "Émilie Gillet / ER-301 port by stolmine",
   name = "grids",
   keyword = "rhythm, gate, sequencer",
   units = {

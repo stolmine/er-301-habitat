@@ -1,6 +1,6 @@
 return {
   title = "Rings",
-  author = "Émilie Gillet / ER-301 port",
+  author = "Émilie Gillet / ER-301 port by stolmine",
   name = "rings",
   keyword = "resonator, physical modelling, mutable",
   units = {

@@ -1,3 +1,6 @@
+// Mutable Instruments Clouds granular processor wrapper for ER-301
+// Based on code by Émilie Gillet, MIT License
+
 #include "Clouds.h"
 #include <od/config.h>
 #include <hal/ops.h>

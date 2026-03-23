@@ -1,6 +1,6 @@
 return {
   title = "Commotio",
-  author = "stolmine",
+  author = "Émilie Gillet / ER-301 port by stolmine",
   name = "commotio",
   keyword = "exciter, noise, texture",
   units = {

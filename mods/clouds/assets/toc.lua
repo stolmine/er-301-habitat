@@ -1,6 +1,6 @@
 return {
   title = "Clouds",
-  author = "stolmine",
+  author = "Émilie Gillet / ER-301 port by stolmine",
   name = "clouds",
   keyword = "granular, effect, delay, spectral",
   units = {

@@ -1,3 +1,6 @@
+// Stratos — Clouds reverb engine extracted as standalone ER-301 unit
+// Based on code by Émilie Gillet, MIT License
+
 #include "Stratos.h"
 #include <od/config.h>
 #include <hal/ops.h>

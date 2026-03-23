@@ -1,6 +1,6 @@
 return {
   title = "Stratos",
-  author = "stolmine",
+  author = "Émilie Gillet / ER-301 port by stolmine",
   name = "stratos",
   keyword = "reverb, effect",
   units = {

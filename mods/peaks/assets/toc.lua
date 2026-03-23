@@ -1,6 +1,6 @@
 return {
   title = "Peaks",
-  author = "stolmine",
+  author = "Émilie Gillet & Tim Churches / ER-301 port by stolmine",
   name = "peaks",
   keyword = "drums, modulation, envelope, sequencer",
   units = {

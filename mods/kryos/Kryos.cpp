@@ -1,3 +1,6 @@
+// Kryos — spectral freeze unit for ER-301
+// Spectral analysis inspired by Mutable Instruments Clouds, code by Émilie Gillet, MIT License
+
 #include "Kryos.h"
 #include <od/config.h>
 #include <hal/ops.h>

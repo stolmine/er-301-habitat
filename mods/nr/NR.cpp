@@ -1,3 +1,6 @@
+// NR — gate sequencer inspired by the Noise Engineering Numeric Repetitor
+// Original implementation for ER-301
+
 #include "NR.h"
 #include <od/config.h>
 #include <hal/ops.h>

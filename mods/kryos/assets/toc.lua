@@ -1,6 +1,6 @@
 return {
   title = "Kryos",
-  author = "stolmine",
+  author = "Émilie Gillet / ER-301 port by stolmine",
   name = "kryos",
   keyword = "freeze, spectral, texture",
   units = {
