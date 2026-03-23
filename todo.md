@@ -53,6 +53,13 @@
 - [ ] If emulator works: hardware-specific issue (alignment, memory, toolchain)
 - [ ] If emulator hangs: DSP bug in process() or constructor
 
+## Commotio (Elements exciter)
+
+- [ ] Split versions: standalone units for each exciter algo (bow, blow, strike variants)
+- [ ] User sample loading: allow custom buffers in strike sample player
+- [ ] UI: sub-displays for timbre/meta pairs (tomf pattern) or expanded controls (polygon pattern)
+- [ ] NEON optimization pass
+
 ## Monokit
 
 - [ ] Gladiola — saturation/discontinuity unit
