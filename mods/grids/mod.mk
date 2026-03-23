@@ -64,6 +64,7 @@ SWIGFLAGS += $(addprefix -I,$(INCLUDES))
 CFLAGS.swig = $(CFLAGS.common) $(CFLAGS.$(ARCH)) $(CFLAGS.size)
 CFLAGS.swig += $(addprefix -I,$(INCLUDES)) -I$(SDKPATH)/libs/lua54
 CFLAGS.swig += $(addprefix -D,$(SYMBOLS))
+CFLAGS.swig += -include cstdint
 
 all: $(PACKAGE_FILE)
 
