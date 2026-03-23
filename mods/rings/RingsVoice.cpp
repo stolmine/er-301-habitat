@@ -61,8 +61,10 @@ namespace mi
     addParameter(mModel);
     addParameter(mFreq);
     addOption(mPolyphony);
+    addOption(mResolution);
     addOption(mEasterEgg);
     addOption(mInternalExciter);
+    addOption(mStereo);
 
     mpInternal = new Internal();
     mpInternal->Init();
@@ -104,6 +106,11 @@ namespace mi
       s.part.set_polyphony(polyphony);
       s.last_polyphony = polyphony;
     }
+
+    // Resolution: 0=16, 1=32, 2=60
+    static const int32_t resValues[] = {16, 32, 60};
+    int resOpt = (int)CLAMP(0, 2, mResolution.value());
+    s.part.set_max_resolution(resValues[resOpt]);
 
     // Performance state
     s.performance_state.internal_exciter = mInternalExciter.value() == 1;
@@ -147,6 +154,15 @@ namespace mi
       }
 
       pos += chunk;
+    }
+
+    // In mono mode, mix aux into out so all poly voices are heard
+    if (mStereo.value() == 0)
+    {
+      for (int i = 0; i < FRAMELENGTH; i++)
+      {
+        outBuf[i] += auxBuf[i];
+      }
     }
   }
 

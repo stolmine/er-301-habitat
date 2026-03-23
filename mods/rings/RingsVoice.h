@@ -28,8 +28,10 @@ namespace mi
     od::Parameter mFreq{"Freq", 0.0f};
 
     od::Option mPolyphony{"Polyphony", 0};
+    od::Option mResolution{"Resolution", 1};
     od::Option mEasterEgg{"Easter Egg", 0};
     od::Option mInternalExciter{"Int Exciter", 1};
+    od::Option mStereo{"Stereo", 0};
 #endif
 
   private:

@@ -47,6 +47,16 @@
 - [ ] If emulator works: hardware-specific issue (alignment, memory, toolchain)
 - [ ] If emulator hangs: DSP bug in process() or constructor
 
+## Monokit
+
+- [ ] Gladiola — saturation/discontinuity unit
+- [ ] HD2 clone — Monokit synth voice
+
+## Effects
+
+- [ ] Tilt EQ
+- [ ] 3 Sisters clone
+
 ## 4ms SMR
 
 - [ ] Port of 4ms Spectral Multiband Resonator — 6 resonant bandpass filters with rotation/spread

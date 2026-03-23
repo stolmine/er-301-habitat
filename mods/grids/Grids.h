@@ -36,6 +36,7 @@ namespace grids
     int getStep() { return mStep; }
     bool isSet(int i);
 
+#ifndef SWIGLUA
   private:
     int mStep = 0;
 
@@ -55,6 +56,7 @@ namespace grids
     static uint8_t u8mix(uint8_t a, uint8_t b, uint8_t mix);
     static uint8_t readDrumMap(uint8_t step, uint8_t instrument,
                                uint8_t x, uint8_t y);
+#endif
   };
 
 } // namespace grids

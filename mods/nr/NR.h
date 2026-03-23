@@ -43,6 +43,7 @@ namespace nr
     int getLength() { return mCachedLength; }
     bool isSet(int i);
 
+#ifndef SWIGLUA
   private:
     int mStep = 0;
     int mCachedLength = 16;
@@ -60,6 +61,7 @@ namespace nr
     int mCachedFactor = -1;
 
     uint16_t computePattern(int prime, int mask, int factor);
+#endif
   };
 
 } // namespace nr

@@ -56,6 +56,7 @@ function Rings:onLoadGraph(channelCount)
   connect(voice, "Out", self, "Out1")
   if channelCount > 1 then
     connect(voice, "Aux", self, "Out2")
+    voice:setOptionValue("Stereo", 1)
   end
 
   -- Model
@@ -100,9 +101,13 @@ function Rings:onLoadGraph(channelCount)
 end
 
 -- Config menu
+local resLabels = { "low (16)", "medium (32)", "full (60)" }
+
 local menu = {
   "polyHeader",
   "poly1", "poly2", "poly4",
+  "resHeader",
+  "res0", "res1", "res2",
   "exciterHeader",
   "exciterToggle",
   "easterEggHeader",
@@ -128,6 +133,17 @@ function Rings:onShowMenu(objects, branches)
     description = "4 voices",
     task = function() objects.voice:setOptionValue("Polyphony", 2) end
   }
+
+  local res = objects.voice:getOption("Resolution"):value()
+  controls.resHeader = MenuHeader {
+    description = string.format("Resolution: %s", resLabels[res + 1])
+  }
+  for i = 0, 2 do
+    controls["res" .. i] = Task {
+      description = resLabels[i + 1],
+      task = function() objects.voice:setOptionValue("Resolution", i) end
+    }
+  end
 
   local intExc = objects.voice:getOption("Int Exciter"):value() == 1
   controls.exciterHeader = MenuHeader {
@@ -158,6 +174,7 @@ local views = {
   expanded = {
     "strum",
     "tune",
+    "freq",
     "model",
     "struct",
     "bright",
@@ -183,6 +200,18 @@ function Rings:onLoadViews(objects, branches)
     description = "V/oct",
     offset = objects.tune,
     range = objects.tuneRange
+  }
+
+  controls.freq = GainBias {
+    button = "freq",
+    description = "Freq",
+    branch = branches.freq,
+    gainbias = objects.freq,
+    range = objects.freq,
+    biasMap = freqMap,
+    biasUnits = app.unitSemitoneName,
+    biasPrecision = 1,
+    initialBias = 0
   }
 
   controls.model = EngineSelector {

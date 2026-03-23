@@ -45,6 +45,7 @@ void Part::Init(uint16_t* reverb_buffer) {
   bypass_ = false;
   polyphony_ = 1;
   model_ = RESONATOR_MODEL_MODAL;
+  max_resolution_ = 32;
   dirty_ = true;
   
   for (int32_t i = 0; i < kMaxPolyphony; ++i) {
@@ -72,7 +73,7 @@ void Part::ConfigureResonators() {
   switch (model_) {
     case RESONATOR_MODEL_MODAL:
       {
-        int32_t resolution = std::min(64 / polyphony_ - 4, (int32_t)32);
+        int32_t resolution = std::min(64 / polyphony_ - 4, max_resolution_);
         for (int32_t i = 0; i < polyphony_; ++i) {
           resonator_[i].Init();
           resonator_[i].set_resolution(resolution);
