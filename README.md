@@ -47,7 +47,7 @@ Based on code by Émilie Gillet (MIT License).
 | **warps** | Warps | Meta-modulator — 6 crossmodulation algorithms with auto gain compensation |
 | **grids** | Grids | Topographic drum pattern generator |
 | **commotio** | Commotio | Elements exciter section (bow/blow/strike) at native 48kHz |
-| **kryos** | Kryos | Spectral freeze (WIP) |
+| **kryos** | Kryos | Spectral freeze (WIP) | WILL CRASH DO NOT INSTALL
 
 ### Peaks / Dead Man's Catch
 
