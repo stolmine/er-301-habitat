@@ -1,4 +1,4 @@
-PROJECTS = plaits nr grids stratos clouds kryos warps rings commotio
+PROJECTS = plaits nr grids stratos clouds kryos warps rings commotio peaks
 
 all: $(PROJECTS)
 

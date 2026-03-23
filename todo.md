@@ -60,6 +60,25 @@
 - [ ] UI: sub-displays for timbre/meta pairs (tomf pattern) or expanded controls (polygon pattern)
 - [ ] NEON optimization pass
 
+## Peaks / DMC Ports
+
+Source: eurorack/peaks/ + ~/repos/Mutated-Mutables/peaks/
+
+- [ ] Tap LFO — clock-synced LFO (rate, shape, param, phase)
+- [ ] Bass Drum — 808 kick (pitch, punch, tone, decay)
+- [ ] Snare Drum — 808 snare (freq, tone, snappy, decay)
+- [ ] High Hat — 808 hi-hat
+- [ ] FM Drum — FM synthesis drum (freq, FM amt, decay, noise)
+- [ ] Bouncing Ball — physics bounce envelope (gravity, bounce loss, amplitude, velocity)
+- [ ] Mini Sequencer — 4-step CV sequencer
+- [ ] Number Station — radio transmission generator (tone, probability, noise, distortion)
+- [ ] Randomised AD Envelope (DMC) — stochastic envelope (attack, decay, amp rand, decay rand)
+- [ ] Mod Sequencer (DMC) — extended step sequencer
+- [ ] FM LFO / Randomised FM LFO (DMC) — LFO with FM modulation
+- [ ] Waveshape-Mod LFO / Randomised WSM LFO (DMC) — LFO with waveshape modulation
+- [ ] PLO (DMC) — phase-locked oscillator synced to input clock
+- [ ] ByteBeats (DMC) — algorithmic bytebeat generator
+
 ## Monokit
 
 - [ ] Gladiola — saturation/discontinuity unit

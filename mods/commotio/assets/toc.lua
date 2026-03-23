@@ -7,7 +7,7 @@ return {
     {
       title = "Commotio",
       moduleName = "Commotio",
-      category = "Mutable Instruments",
+      category = "Mutable",
       keywords = "exciter, noise, texture, bow, blow, strike"
     }
   }
