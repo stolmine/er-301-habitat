@@ -25,7 +25,7 @@ function BassDrum:onLoadGraph(channelCount)
   self:addMonoBranch("gate", gate, "In", gate, "Out")
 
   local p1 = self:addObject("p1", app.ParameterAdapter())
-  p1:hardSet("Bias", 0.5)
+  p1:hardSet("Bias", 0.0)
   tie(op, "Param1", p1, "Out")
   self:addMonoBranch("p1", p1, "In", p1, "Out")
 
@@ -56,8 +56,8 @@ function BassDrum:onLoadViews()
     p1 = GainBias {
       button = "pitch", description = "Pitch",
       branch = self.branches.p1, gainbias = self.objects.p1,
-      range = self.objects.p1, biasMap = Encoder.getMap("[0,1]"),
-      biasPrecision = 2, initialBias = 0.5
+      range = self.objects.p1, biasMap = Encoder.getMap("[-1,1]"),
+      biasPrecision = 2, initialBias = 0.0
     },
     p2 = GainBias {
       button = "punch", description = "Punch",

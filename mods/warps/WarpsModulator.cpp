@@ -133,7 +133,7 @@ namespace mi
     float drive = CLAMP(0.0f, 1.0f, mDrive.value());
     p->channel_drive[0] = drive;
     p->channel_drive[1] = drive;
-    p->modulation_algorithm = CLAMP(0.0f, 1.0f, mAlgorithm.value());
+    p->modulation_algorithm = CLAMP(0.0f, 0.625f, mAlgorithm.value());
     p->modulation_parameter = CLAMP(0.0f, 1.0f, mTimbre.value());
     p->frequency_shift_pot = 0.5f;
     p->frequency_shift_cv = 0.0f;

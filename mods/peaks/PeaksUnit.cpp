@@ -22,15 +22,16 @@
 namespace peaks_unit
 {
 
-// Internal struct holds the actual Peaks processor + gate state
-#define DEFINE_INTERNAL(ProcessorType)                                       \
-  struct Internal {                                                          \
-    ProcessorType processor;                                                 \
-    peaks::GateFlags previousGate;                                           \
-  };
+// Parameter conversion: unipolar [0,1] and bipolar [-1,1] to uint16
+static inline uint16_t toUni(float v) {
+  return static_cast<uint16_t>(CLAMP(0.0f, 1.0f, v) * 65535);
+}
+static inline uint16_t toBip(float v) {
+  return static_cast<uint16_t>((CLAMP(-1.0f, 1.0f, v) * 0.5f + 0.5f) * 65535);
+}
 
-// Common constructor/destructor/process implementation
-#define IMPLEMENT_PEAKS_UNIT(UnitName, ProcessorType, InitExtra)             \
+// bipMask: bit 0=p1, bit 1=p2, bit 2=p3, bit 3=p4. Set = bipolar.
+#define IMPLEMENT_PEAKS_UNIT(UnitName, ProcessorType, bipMask, InitExtra)    \
   struct UnitName::Internal {                                                \
     ProcessorType processor;                                                 \
     peaks::GateFlags previousGate;                                           \
@@ -54,10 +55,10 @@ namespace peaks_unit
     float *gate = mGate.buffer();                                            \
     float *out = mOut.buffer();                                              \
     uint16_t params[4] = {                                                   \
-      static_cast<uint16_t>(CLAMP(0.0f, 1.0f, mParam1.value()) * 65535),    \
-      static_cast<uint16_t>(CLAMP(0.0f, 1.0f, mParam2.value()) * 65535),    \
-      static_cast<uint16_t>(CLAMP(0.0f, 1.0f, mParam3.value()) * 65535),    \
-      static_cast<uint16_t>(CLAMP(0.0f, 1.0f, mParam4.value()) * 65535)     \
+      (bipMask & 1) ? toBip(mParam1.value()) : toUni(mParam1.value()),      \
+      (bipMask & 2) ? toBip(mParam2.value()) : toUni(mParam2.value()),      \
+      (bipMask & 4) ? toBip(mParam3.value()) : toUni(mParam3.value()),      \
+      (bipMask & 8) ? toBip(mParam4.value()) : toUni(mParam4.value())       \
     };                                                                       \
     s.processor.Configure(params, peaks::CONTROL_MODE_FULL);                 \
     peaks::GateFlags gateFlags[FRAMELENGTH];                                 \
@@ -73,22 +74,22 @@ namespace peaks_unit
     }                                                                        \
   }
 
-  // Peaks units
-  IMPLEMENT_PEAKS_UNIT(BassDrum, peaks::BassDrum, )
-  IMPLEMENT_PEAKS_UNIT(SnareDrum, peaks::SnareDrum, )
-  IMPLEMENT_PEAKS_UNIT(HighHat, peaks::HighHat, )
-  IMPLEMENT_PEAKS_UNIT(FmDrum, peaks::FmDrum, )
-  IMPLEMENT_PEAKS_UNIT(BouncingBall, peaks::BouncingBall, )
-  IMPLEMENT_PEAKS_UNIT(MiniSequencer, peaks::MiniSequencer, )
-  IMPLEMENT_PEAKS_UNIT(NumberStation, peaks::NumberStation, )
-  IMPLEMENT_PEAKS_UNIT(TapLfo, peaks::Lfo, mpInternal->processor.set_sync(true);)
+  // Peaks units                                    bipolar mask
+  IMPLEMENT_PEAKS_UNIT(BassDrum,      peaks::BassDrum,      0x1, )  // p1
+  IMPLEMENT_PEAKS_UNIT(SnareDrum,     peaks::SnareDrum,     0x0, )
+  IMPLEMENT_PEAKS_UNIT(HighHat,       peaks::HighHat,       0x0, )
+  IMPLEMENT_PEAKS_UNIT(FmDrum,        peaks::FmDrum,        0x0, )
+  IMPLEMENT_PEAKS_UNIT(BouncingBall,  peaks::BouncingBall,  0x8, )  // p4
+  IMPLEMENT_PEAKS_UNIT(MiniSequencer, peaks::MiniSequencer,  0xF, )  // all
+  IMPLEMENT_PEAKS_UNIT(NumberStation, peaks::NumberStation,  0x0, )
+  IMPLEMENT_PEAKS_UNIT(TapLfo,        peaks::Lfo,           0xC, mpInternal->processor.set_sync(true);) // p3,p4
 
   // DMC units
-  IMPLEMENT_PEAKS_UNIT(RandomisedEnvelope, peaks::RandomisedEnvelope, )
-  IMPLEMENT_PEAKS_UNIT(ModSequencer, peaks::ModSequencer, )
-  IMPLEMENT_PEAKS_UNIT(FmLfo, peaks::FmLfo, )
-  IMPLEMENT_PEAKS_UNIT(WsmLfo, peaks::WsmLfo, )
-  IMPLEMENT_PEAKS_UNIT(Plo, peaks::Plo, )
-  IMPLEMENT_PEAKS_UNIT(ByteBeats, peaks::ByteBeats, )
+  IMPLEMENT_PEAKS_UNIT(RandomisedEnvelope, peaks::RandomisedEnvelope, 0x0, )
+  IMPLEMENT_PEAKS_UNIT(ModSequencer,  peaks::ModSequencer,   0xF, )  // all
+  IMPLEMENT_PEAKS_UNIT(FmLfo,         peaks::FmLfo,         0xC, )  // p3,p4
+  IMPLEMENT_PEAKS_UNIT(WsmLfo,        peaks::WsmLfo,        0xC, )  // p3,p4
+  IMPLEMENT_PEAKS_UNIT(Plo,           peaks::Plo,           0x4, )  // p3
+  IMPLEMENT_PEAKS_UNIT(ByteBeats,     peaks::ByteBeats,     0x0, )
 
 } // namespace peaks_unit

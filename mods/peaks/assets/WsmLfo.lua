@@ -35,12 +35,12 @@ function WsmLfo:onLoadGraph(channelCount)
   self:addMonoBranch("p2", p2, "In", p2, "Out")
 
   local p3 = self:addObject("p3", app.ParameterAdapter())
-  p3:hardSet("Bias", 0.5)
+  p3:hardSet("Bias", 0.0)
   tie(op, "Param3", p3, "Out")
   self:addMonoBranch("p3", p3, "In", p3, "Out")
 
   local p4 = self:addObject("p4", app.ParameterAdapter())
-  p4:hardSet("Bias", 0.5)
+  p4:hardSet("Bias", 0.0)
   tie(op, "Param4", p4, "Out")
   self:addMonoBranch("p4", p4, "In", p4, "Out")
 end
@@ -68,14 +68,14 @@ function WsmLfo:onLoadViews()
     p3 = GainBias {
       button = "wsm", description = "WSM Amount",
       branch = self.branches.p3, gainbias = self.objects.p3,
-      range = self.objects.p3, biasMap = Encoder.getMap("[0,1]"),
-      biasPrecision = 2, initialBias = 0.5
+      range = self.objects.p3, biasMap = Encoder.getMap("[-1,1]"),
+      biasPrecision = 2, initialBias = 0.0
     },
     p4 = GainBias {
       button = "w.rt", description = "WSM Rate",
       branch = self.branches.p4, gainbias = self.objects.p4,
-      range = self.objects.p4, biasMap = Encoder.getMap("[0,1]"),
-      biasPrecision = 2, initialBias = 0.5
+      range = self.objects.p4, biasMap = Encoder.getMap("[-1,1]"),
+      biasPrecision = 2, initialBias = 0.0
     }
   }, {
     expanded  = { "gate", "p1", "p2", "p3", "p4" },
