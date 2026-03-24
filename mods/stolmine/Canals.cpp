@@ -107,7 +107,10 @@ namespace stolmine
     {
       float q = 0.5f;
       if (quality >= 0.0f) {
-        q = 0.5f + quality * quality * 49.5f;
+        // Exponential curve: gentle resonance buildup, self-osc only at very end
+        // q=0.5 at 0, ~2 at 0.5, ~10 at 0.8, ~100 at 0.95, ~500 at 1.0
+        float t = quality * quality * quality; // cubic for gentle low end
+        q = 0.5f + t * 500.0f;
       }
 
       float totalSemitones = v * 12.0f * 5.0f + fundamental;
