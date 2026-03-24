@@ -1,7 +1,9 @@
-PKGNAME ?= nr
+PKGNAME ?= stolmine
 PKGVERSION ?= 0.1.0
 
 include scripts/env.mk
+
+EURORACK = eurorack
 
 LIBNAME = lib$(PKGNAME)
 OUT_DIR = $(PROFILE)/$(ARCH)
@@ -13,24 +15,23 @@ ASSET_DIR = $(MOD_DIR)/assets
 
 MOD_CPP = $(wildcard $(MOD_DIR)/*.cpp)
 
-OBJECTS = $(addprefix $(OUT_DIR)/,$(MOD_CPP:%.cpp=%.o))
+# stmlib for Svf filter (used by LatchFilter)
+STMLIB_CC = $(EURORACK)/stmlib/dsp/units.cc
 
-# SWIG
+OBJECTS = $(addprefix $(OUT_DIR)/,$(MOD_CPP:%.cpp=%.o))
+OBJECTS += $(addprefix $(OUT_DIR)/,$(STMLIB_CC:%.cc=%.o))
+
 SWIG_SOURCE = $(MOD_DIR)/$(PKGNAME).cpp.swig
 SWIG_WRAPPER = $(OUT_DIR)/$(MOD_DIR)/$(PKGNAME)_swig.cpp
 SWIG_OBJECT = $(SWIG_WRAPPER:%.cpp=%.o)
 OBJECTS += $(SWIG_OBJECT)
 
-# Assets
 ASSETS := $(call rwildcard, $(ASSET_DIR), *)
 
-# Includes
-INCLUDES = $(MOD_DIR) mods $(SDKPATH) $(SDKPATH)/arch/$(ARCH) $(SDKPATH)/emu
+INCLUDES = $(MOD_DIR) mods $(SDKPATH) $(SDKPATH)/arch/$(ARCH) $(SDKPATH)/emu $(EURORACK)
 
-# Symbols
-SYMBOLS =
+SYMBOLS = TEST
 
-# Compiler flags
 CFLAGS.common = -Wall -ffunction-sections -fdata-sections
 CFLAGS.speed = -O3 -ftree-vectorize -ffast-math
 CFLAGS.size = -Os
@@ -85,6 +86,11 @@ $(PACKAGE_FILE): $(LIB_FILE) $(ASSETS)
 	@zip -jq $@ $(LIB_FILE)
 
 $(OUT_DIR)/%.o: %.cpp
+	@echo [C++ $<]
+	@mkdir -p $(@D)
+	@$(CPP) $(CFLAGS) -std=gnu++11 -c $< -o $@
+
+$(OUT_DIR)/%.o: %.cc
 	@echo [C++ $<]
 	@mkdir -p $(@D)
 	@$(CPP) $(CFLAGS) -std=gnu++11 -c $< -o $@

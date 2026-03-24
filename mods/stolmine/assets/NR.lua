@@ -1,5 +1,5 @@
 local app = app
-local libnr = require "nr.libnr"
+local libstolmine = require "stolmine.libstolmine"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
@@ -29,7 +29,7 @@ function NR:init(args)
 end
 
 function NR:onLoadGraph(channelCount)
-  local op = self:addObject("op", libnr.NR())
+  local op = self:addObject("op", libstolmine.NR())
 
   -- Clock from In1
   connect(self, "In1", op, "Clock")

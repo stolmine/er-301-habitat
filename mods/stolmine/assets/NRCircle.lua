@@ -1,5 +1,5 @@
 local app = app
-local libnr = require "nr.libnr"
+local libstolmine = require "nr.libstolmine"
 local Class = require "Base.Class"
 local Base = require "Unit.ViewControl.EncoderControl"
 local Encoder = require "Encoder"
@@ -35,7 +35,7 @@ function NRCircle:init(args)
   local width = args.width or (2 * ply)
 
   local graphic = app.Graphic(0, 0, width, 64)
-  self.pDisplay = libnr.NRCircle(0, 0, width, 64)
+  self.pDisplay = libstolmine.NRCircle(0, 0, width, 64)
   graphic:addChild(self.pDisplay)
   self:setMainCursorController(self.pDisplay)
   self:setControlGraphic(graphic)

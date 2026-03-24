@@ -1,11 +1,11 @@
 local Class = require "Base.Class"
 local Library = require "Package.Library"
 
-local NR = Class {}
-NR:include(Library)
+local Stolmine = Class {}
+Stolmine:include(Library)
 
-function NR:init(args)
+function Stolmine:init(args)
   Library.init(self, args)
 end
 
-return NR
+return Stolmine
