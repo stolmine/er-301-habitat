@@ -66,9 +66,10 @@ Refinements:
 
 ## Scope
 
-- [ ] Inline scope unit — insert into chain for signal visualization
-- [ ] 1-channel and 2-channel (stereo) versions
-- [ ] Passthrough audio (no DSP, just viz)
+- [x] Inline scope unit — Scope (1 slot), Scope 2x (2 slot), Scope Stereo
+- [x] Passthrough audio with MiniScope waveform display
+- [ ] Timebase and gain controls (requires custom graphic or MiniScope subclass)
+- [ ] Research headerless unit display (SDK hardcodes header — not currently possible)
 
 ## Ratchet
 
