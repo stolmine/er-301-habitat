@@ -19,10 +19,10 @@ function WsmLfo:onLoadGraph(channelCount)
   local op = self:addObject("op", libpeaks.WsmLfo())
   connect(op, "Out", self, "Out1")
 
-  local gate = self:addObject("gate", app.Comparator())
-  gate:setGateMode()
-  connect(gate, "Out", op, "Gate")
-  self:addMonoBranch("gate", gate, "In", gate, "Out")
+  local reset = self:addObject("reset", app.Comparator())
+  reset:setTriggerMode()
+  connect(reset, "Out", op, "Reset")
+  self:addMonoBranch("reset", reset, "In", reset, "Out")
 
   local p1 = self:addObject("p1", app.ParameterAdapter())
   p1:hardSet("Bias", 0.5)
@@ -47,11 +47,11 @@ end
 
 function WsmLfo:onLoadViews()
   return {
-    gate = Gate {
-      button      = "gate",
-      description = "Gate",
-      branch      = self.branches.gate,
-      comparator  = self.objects.gate
+    reset = Gate {
+      button      = "reset",
+      description = "Reset",
+      branch      = self.branches.reset,
+      comparator  = self.objects.reset
     },
     p1 = GainBias {
       button = "rate", description = "Rate",
@@ -78,7 +78,7 @@ function WsmLfo:onLoadViews()
       biasPrecision = 2, initialBias = 0.0
     }
   }, {
-    expanded  = { "gate", "p1", "p2", "p3", "p4" },
+    expanded  = { "reset", "p1", "p2", "p3", "p4" },
     collapsed = {}
   }
 end

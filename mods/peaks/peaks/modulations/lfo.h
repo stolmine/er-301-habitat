@@ -516,7 +516,7 @@ class Plo {
   int32_t wsm_value_;
   int32_t wsm_next_value_;
 
-  int8_t pitch_multiplier_ ;
+  float pitch_mult_ ;
 
   static ComputeSampleFn compute_sample_fn_table_[];
 

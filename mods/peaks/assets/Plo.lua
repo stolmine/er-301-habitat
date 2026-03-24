@@ -19,10 +19,15 @@ function Plo:onLoadGraph(channelCount)
   local op = self:addObject("op", libpeaks.Plo())
   connect(op, "Out", self, "Out1")
 
-  local gate = self:addObject("gate", app.Comparator())
-  gate:setGateMode()
-  connect(gate, "Out", op, "Gate")
-  self:addMonoBranch("gate", gate, "In", gate, "Out")
+  local clock = self:addObject("clock", app.Comparator())
+  clock:setGateMode()
+  connect(clock, "Out", op, "Clock")
+  self:addMonoBranch("clock", clock, "In", clock, "Out")
+
+  local reset = self:addObject("reset", app.Comparator())
+  reset:setTriggerMode()
+  connect(reset, "Out", op, "Reset")
+  self:addMonoBranch("reset", reset, "In", reset, "Out")
 
   local p1 = self:addObject("p1", app.ParameterAdapter())
   p1:hardSet("Bias", 0.5)
@@ -35,7 +40,7 @@ function Plo:onLoadGraph(channelCount)
   self:addMonoBranch("p2", p2, "In", p2, "Out")
 
   local p3 = self:addObject("p3", app.ParameterAdapter())
-  p3:hardSet("Bias", 0.0)
+  p3:hardSet("Bias", 0.5)
   tie(op, "Param3", p3, "Out")
   self:addMonoBranch("p3", p3, "In", p3, "Out")
 
@@ -47,11 +52,17 @@ end
 
 function Plo:onLoadViews()
   return {
-    gate = Gate {
-      button      = "gate",
-      description = "Gate",
-      branch      = self.branches.gate,
-      comparator  = self.objects.gate
+    clock = Gate {
+      button      = "clock",
+      description = "Clock",
+      branch      = self.branches.clock,
+      comparator  = self.objects.clock
+    },
+    reset = Gate {
+      button      = "reset",
+      description = "Reset",
+      branch      = self.branches.reset,
+      comparator  = self.objects.reset
     },
     p1 = GainBias {
       button = "ptch", description = "Pitch",
@@ -66,19 +77,19 @@ function Plo:onLoadViews()
       biasPrecision = 2, initialBias = 0.5
     },
     p3 = GainBias {
-      button = "param", description = "Parameter",
+      button = "w.rt", description = "WSM Rate",
       branch = self.branches.p3, gainbias = self.objects.p3,
-      range = self.objects.p3, biasMap = Encoder.getMap("[-1,1]"),
-      biasPrecision = 2, initialBias = 0.0
+      range = self.objects.p3, biasMap = Encoder.getMap("[0,1]"),
+      biasPrecision = 2, initialBias = 0.5
     },
     p4 = GainBias {
-      button = "lvl", description = "Level",
+      button = "w.dp", description = "WSM Depth",
       branch = self.branches.p4, gainbias = self.objects.p4,
       range = self.objects.p4, biasMap = Encoder.getMap("[0,1]"),
       biasPrecision = 2, initialBias = 0.5
     }
   }, {
-    expanded  = { "gate", "p1", "p2", "p3", "p4" },
+    expanded  = { "clock", "reset", "p1", "p2", "p3", "p4" },
     collapsed = {}
   }
 end

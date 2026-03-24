@@ -84,7 +84,6 @@ void Lfo::Process(const GateFlags* gate_flags, int16_t* out, size_t size) {
     ++sync_counter_;
     GateFlags gate_flag = *gate_flags++;
     if (gate_flag & GATE_FLAG_RISING) {
-      bool reset_phase = true;
       if (sync_) {
         if (sync_counter_ < kSyncCounterMaxTime) {
           uint32_t period = 0;
@@ -92,20 +91,26 @@ void Lfo::Process(const GateFlags* gate_flags, int16_t* out, size_t size) {
             period = sync_counter_;
           } else if (sync_counter_ < 1920) {
             period = (3 * period_ + sync_counter_) >> 2;
-            reset_phase = false;
           } else {
             period = pattern_predictor_.Predict(sync_counter_);
           }
           if (period != period_) {
             period_ = period;
-            phase_increment_ = 0xffffffff / period_;
+            uint32_t base_inc = 0xffffffff / period_;
+            // Rate knob acts as clock multiplier in sync mode:
+            // 0 = /8, 32768 = 1x, 65535 = 8x
+            int32_t shift = (static_cast<int32_t>(rate_) - 32768) >> 12; // -8 to +7
+            phase_increment_ = shift >= 0
+                ? base_inc << shift
+                : base_inc >> (-shift);
           }
         }
         sync_counter_ = 0;
       }
-      if (reset_phase) {
-        phase_ = reset_phase_;
-      }
+    }
+    // Reset phase only on auxiliary (reset input), not on clock
+    if (gate_flag & GATE_FLAG_AUXILIARY_RISING) {
+      phase_ = reset_phase_;
     }
     phase_ += phase_increment_;
     int32_t sample = (this->*compute_sample_fn_table_[shape_])();
@@ -243,11 +248,11 @@ void FmLfo::Process(const GateFlags* gate_flags, int16_t* out, size_t size) {
     fm_phase_increment_ = fm_a + (((fm_b - fm_a) >> 1) * (fm_rate_ & 0xff) >> 7);
 
     GateFlags gate_flag = *gate_flags++;
-    if (gate_flag & GATE_FLAG_RISING) {
-      bool fm_reset_phase = true;
-      if (fm_reset_phase) {
-        fm_phase_ = fm_reset_phase_;
-      }
+
+    // Reset phases only on auxiliary (reset input)
+    if (gate_flag & GATE_FLAG_AUXILIARY_RISING) {
+      fm_phase_ = fm_reset_phase_;
+      phase_ = reset_phase_;
     }
 
     fm_phase_ += fm_phase_increment_;
@@ -265,12 +270,6 @@ void FmLfo::Process(const GateFlags* gate_flags, int16_t* out, size_t size) {
     int32_t b = lut_lfo_increments[(modulated_rate >> 8) + 1];
     phase_increment_ = a + (((b - a) >> 1) * (modulated_rate & 0xff) >> 7);
 
-    if (gate_flag & GATE_FLAG_RISING) {
-      bool reset_phase = true;
-      if (reset_phase) {
-        phase_ = reset_phase_;
-      }
-    }
     phase_ += phase_increment_;
     int32_t sample = (this->*compute_sample_fn_table_[shape_])();
     *out++ = sample * level_ >> 15;
@@ -445,11 +444,10 @@ void WsmLfo::Process(const GateFlags* gate_flags, int16_t* out, size_t size) {
     int32_t wsm_b = lut_lfo_increments[(wsm_rate_ >> 8) + 1];
     wsm_phase_increment_ = wsm_a + (((wsm_b - wsm_a) >> 1) * (wsm_rate_ & 0xff) >> 7);
     GateFlags gate_flag = *gate_flags++;
-    if (gate_flag & GATE_FLAG_RISING) {
-      bool wsm_reset_phase = true;
-      if (wsm_reset_phase) {
-        wsm_phase_ = wsm_reset_phase_;
-      }
+    // Reset phases only on auxiliary (reset input)
+    if (gate_flag & GATE_FLAG_AUXILIARY_RISING) {
+      wsm_phase_ = wsm_reset_phase_;
+      phase_ = reset_phase_;
     }
     wsm_phase_ += wsm_phase_increment_;
     int32_t wsm_sample = WsmLfo::ComputeModulation();
@@ -459,12 +457,6 @@ void WsmLfo::Process(const GateFlags* gate_flags, int16_t* out, size_t size) {
     int32_t a = lut_lfo_increments[rate_ >> 8];
     int32_t b = lut_lfo_increments[(rate_ >> 8) + 1];
     phase_increment_ = a + (((b - a) >> 1) * (rate_ & 0xff) >> 7);
-    if (gate_flag & GATE_FLAG_RISING) {
-      bool reset_phase = true;
-      if (reset_phase) {
-        phase_ = reset_phase_;
-      }
-    }
     phase_ += phase_increment_;
     int32_t sample = (this->*compute_sample_fn_table_[shape_])();
     *out++ = sample;
@@ -628,7 +620,7 @@ void Plo::Init() {
   sync_counter_ = kSyncCounterMaxTime;
   pattern_predictor_.Init();
 
-  pitch_multiplier_ = 0;
+  pitch_mult_ = 1.0f;
 }
 
 void Plo::set_shape_parameter_preset(uint16_t value) {
@@ -638,7 +630,16 @@ void Plo::set_shape_parameter_preset(uint16_t value) {
 }
 
 void Plo::set_pitch_coefficient(uint16_t value) {
-  pitch_multiplier_ = static_cast<int8_t>(static_cast<int16_t>(-32767 + value) >> 13);
+  // Continuous multiplier: 0 = /16, 32768 = 1x, 65535 = 16x
+  // Piecewise linear in log domain for simplicity (no libm needed)
+  float x = static_cast<float>(value) / 65535.0f; // 0 to 1
+  if (x < 0.5f) {
+    // 0→0.5 maps to /16→1x (multiply by x*2 * 15/16 + 1/16)
+    pitch_mult_ = (1.0f / 16.0f) + x * 2.0f * (15.0f / 16.0f);
+  } else {
+    // 0.5→1 maps to 1x→16x
+    pitch_mult_ = 1.0f + (x - 0.5f) * 2.0f * 15.0f;
+  }
 }
 
 void Plo::Process(const GateFlags* gate_flags, int16_t* out, size_t size) {
@@ -666,17 +667,18 @@ void Plo::Process(const GateFlags* gate_flags, int16_t* out, size_t size) {
           }
           if (period != period_) {
             period_ = period;
-            phase_increment_ = 0xffffffff / period;
-            phase_increment_ = pitch_multiplier_ < 0 ?
-                                phase_increment_ >> -pitch_multiplier_ :
-                                phase_increment_ << pitch_multiplier_ ;
           }
+          uint32_t base_inc = 0xffffffff / period_;
+          phase_increment_ = static_cast<uint32_t>(
+              static_cast<float>(base_inc) * pitch_mult_);
         }
         sync_counter_ = 0;
     }
+    // Reset phase only on auxiliary (reset input)
+    if (gate_flag & GATE_FLAG_AUXILIARY_RISING) {
+      phase_ = 0;
+    }
     phase_ += phase_increment_;
-    // int32_t sample = (this->*compute_sample_fn_table_[shape_])();
-    // output_buffer->Overwrite(sample);
     *out++ = (this->*compute_sample_fn_table_[shape_])();
   }
 }

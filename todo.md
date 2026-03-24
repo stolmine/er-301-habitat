@@ -2,41 +2,55 @@
 
 ## Mutable Instruments Ports
 
-- [x] correct categories, plaits still shows up in its own
-
-- [x] Clouds (granular processor)
-- [ ] Rings (resonator)
+- [x] Plaits (macro-oscillator — all 24 engines)
+- [x] Clouds (granular processor — granular, delay, spectral modes)
+- [x] Rings (modal/sympathetic string resonator)
 - [x] Grids (single channel, no accent — pattern generator with clock/reset inputs)
-- [x] Warps (meta-modulator) — 6 xmod algorithms working, vocoder pending 96kHz SRC
-- [x] Extract Clouds reverb engine, create a standalone unit named Stratos
+- [x] Warps (meta-modulator — 6 xmod algorithms, vocoder pending)
+- [x] Stratos (Clouds reverb engine extracted as standalone unit)
+- [x] Commotio (Elements exciter — bow/blow/strike at native 48kHz)
 - [ ] Marbles X algorithm extracted to single channel unit
 - [ ] Marbles Y algorithm extracted to single channel unit
 
+## Peaks / DMC Ports
+
+- [x] Initial port of 14 units (drums, modulation, sequencers, generators)
+
+Refinements:
+- [ ] Tap LFO: remove phase reset on clock edge — should free-run at tracked tempo
+- [ ] Tap LFO: rename gate to "Clock", add separate "Reset" input
+- [ ] Tap LFO: add frequency counter display on clock input (research ER-301 SDK)
+- [ ] PLO pitch control: recalculate phase_increment continuously (not just on clock edge), improve responsiveness between clock pulses
+- [ ] Mini Sequencer / Mod Sequencer: add separate reset input (GATE_FLAG_AUXILIARY_RISING already in DSP, just needs second inlet)
+- [ ] Step position visualization — adapt tomf's polygon voice indicator or simple bar display
+  - Apply to Mini Sequencer, Mod Sequencer, and future 101 Sequencer
+
+## Controls Audit
+
+- [x] Bipolar parameter correctness — fixed Peaks/DMC bipolar faders and defaults
+- [x] Warps algorithm range clamped to match Lua fader
+- [x] Modulation gain scaling — verified default gainMap [-10,10] is correct for both polarities
+
 ## Clouds Improvements
 
-- [x] Fix CPU spike on trigger — capped grain spawns per block (density=0 burst)
-- [ ] General CPU optimization — investigate NEON vectorization for granular engine
+- [x] Fix CPU spike on trigger — capped grain spawns per block
+- [x] NEON envelope rendering and spectral frame transforms
+- [x] Spectral mode enabled (2048-point mono)
 - [ ] Gain compensation toggle — auto-scale output to match input level
+- [ ] Further NEON optimization — ShyFFT butterflies, SRC polyphase FIR
 
 ## Warps Improvements
 
-- [ ] Vocoder: implement 2x upsample→process→downsample for correct 96kHz filter bank operation
+- [ ] Vocoder: implement 2x upsample/downsample for correct 96kHz filter bank
 - [ ] Easter egg (frequency shifter): test and verify
 - [ ] Consider exposing carrier/modulator drive as separate controls
 
-## Plaits Improvements
+## Commotio Improvements
 
-- [x] Add fundamental frequency control on top of V/Oct
-- [x] Fix engine switch crash on am335x (define TEST for stmlib)
-- [x] Engine name display on fader (EngineSelector subclass)
-- [x] Osc/Trig mode toggle with dynamic view switching
-- [x] Output routing config menu (mono/stereo options)
-- [x] Engine order: original 16 first, v1.2 additions after
-
-## Teletype NR Ops
-
-- [x] Implement as single channel gate sequencer
-- [x] Reuse circle graphic from tomf's euclid unit
+- [ ] Split versions: standalone units for each exciter algo (bow, blow, strike)
+- [ ] User sample loading: allow custom buffers in strike sample player
+- [ ] UI: sub-displays for timbre/meta pairs (tomf pattern) or expanded controls (polygon pattern)
+- [ ] NEON optimization pass
 
 ## Sequencer Suite
 
@@ -47,48 +61,24 @@
   - Integer factor fader for transform operations (e.g. add 7, div 3)
   - Global pitch/CV scaling and snap-to-scale mode
 
-## Filterbank
-
-- [ ] based on disting ex filterbank
-- [ ] controls for filter type, band gain, band res, band freq, band spread/arrangement
-
 ## Scope
 
 - [ ] Inline scope unit — insert into chain for signal visualization
 - [ ] 1-channel and 2-channel (stereo) versions
 - [ ] Passthrough audio (no DSP, just viz)
 
+## Ratchet
+
+- [ ] Clock input, gate input, clock output
+- [ ] When gated, outputs clock multiplied by fader value (e.g. 2x, 3x, 4x)
+- [ ] When not gated, passes clock through unchanged
+- [ ] Integer fader for multiplication factor
+
 ## Kryos (spectral freeze)
 
 - [ ] Debug hang on load — test in emulator first to isolate hardware vs code issue
 - [ ] If emulator works: hardware-specific issue (alignment, memory, toolchain)
 - [ ] If emulator hangs: DSP bug in process() or constructor
-
-## Commotio (Elements exciter)
-
-- [ ] Split versions: standalone units for each exciter algo (bow, blow, strike variants)
-- [ ] User sample loading: allow custom buffers in strike sample player
-- [ ] UI: sub-displays for timbre/meta pairs (tomf pattern) or expanded controls (polygon pattern)
-- [ ] NEON optimization pass
-
-## Peaks / DMC Ports
-
-Source: eurorack/peaks/ + ~/repos/Mutated-Mutables/peaks/
-
-- [ ] Tap LFO — clock-synced LFO (rate, shape, param, phase)
-- [ ] Bass Drum — 808 kick (pitch, punch, tone, decay)
-- [ ] Snare Drum — 808 snare (freq, tone, snappy, decay)
-- [ ] High Hat — 808 hi-hat
-- [ ] FM Drum — FM synthesis drum (freq, FM amt, decay, noise)
-- [ ] Bouncing Ball — physics bounce envelope (gravity, bounce loss, amplitude, velocity)
-- [ ] Mini Sequencer — 4-step CV sequencer
-- [ ] Number Station — radio transmission generator (tone, probability, noise, distortion)
-- [ ] Randomised AD Envelope (DMC) — stochastic envelope (attack, decay, amp rand, decay rand)
-- [ ] Mod Sequencer (DMC) — extended step sequencer
-- [ ] FM LFO / Randomised FM LFO (DMC) — LFO with FM modulation
-- [ ] Waveshape-Mod LFO / Randomised WSM LFO (DMC) — LFO with waveshape modulation
-- [ ] PLO (DMC) — phase-locked oscillator synced to input clock
-- [ ] ByteBeats (DMC) — algorithmic bytebeat generator
 
 ## Monokit
 
@@ -100,15 +90,14 @@ Source: eurorack/peaks/ + ~/repos/Mutated-Mutables/peaks/
 - [ ] Tilt EQ
 - [ ] 3 Sisters clone
 
+## Filterbank
+
+- [ ] Based on disting ex filterbank
+- [ ] Controls for filter type, band gain, band res, band freq, band spread/arrangement
+
 ## 4ms SMR
 
 - [ ] Port of 4ms Spectral Multiband Resonator — 6 resonant bandpass filters with rotation/spread
-
-## Community Package Compatibility
-
-- [x] tomf: sloop, lojik, strike, polygon — build against v0.7.0 (darwin build fixes only)
-- [x] SuperNiCd: Accents — build against v0.7.0 (darwin build + hardcoded path fixes)
-- [ ] Build all community packages for am335x on Linux machine
 
 ## TXo I2C Output (separate repo: er-301-stolmine)
 
