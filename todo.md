@@ -95,7 +95,7 @@ Refinements:
 ## Effects
 
 - [ ] Tilt EQ
-- [ ] 3 Sisters clone
+- [x] Canals (Three Sisters clone) — linked resonant filter with crossover/formant modes
 
 ## Filterbank
 
@@ -113,3 +113,13 @@ Refinements:
 - [x] Gain control and V/Oct mode
 - [x] Emulator monitor (txo-monitor.py)
 - [ ] Hardware testing on real ER-301 + TXo
+- [ ] Recompile core package for TXo firmware — core unit failed to load errors
+
+## Release / Compatibility
+
+- [ ] Release latest Habitat updates (v0.2.0?)
+- [ ] Look into vanilla ER-301 firmware compatibility for Habitat packages
+
+## Rings Improvements
+
+- [ ] Crossfade control for main/aux outputs on mono chains
