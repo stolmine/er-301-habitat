@@ -5,8 +5,10 @@
 #include <od/config.h>
 #include <hal/ops.h>
 #include <string.h>
+#include <math.h>
 
 #include "stmlib/dsp/filter.h"
+#include "stmlib/dsp/units.h"
 
 namespace stolmine
 {
@@ -28,10 +30,11 @@ namespace stolmine
   LatchFilter::LatchFilter()
   {
     addInput(mIn);
+    addInput(mVOct);
     addOutput(mOut);
-    addParameter(mCutoff);
+    addParameter(mFundamental);
     addParameter(mResonance);
-    addOption(mMode);
+    addParameter(mMode);
 
     mpInternal = new Internal();
     mpInternal->Init();
@@ -47,40 +50,50 @@ namespace stolmine
     Internal &s = *mpInternal;
 
     float *in = mIn.buffer();
+    float *voct = mVOct.buffer();
     float *out = mOut.buffer();
 
-    float cutoff = mCutoff.value();
-    if (cutoff < 20.0f) cutoff = 20.0f;
-    if (cutoff > 20000.0f) cutoff = 20000.0f;
-
+    float fundamental = mFundamental.value(); // semitones offset
     float resonance = mResonance.value();
     if (resonance < 0.0f) resonance = 0.0f;
     if (resonance > 1.0f) resonance = 1.0f;
 
-    int mode = mMode.value();
+    int mode = (int)(mMode.value() + 0.5f);
+    if (mode < 0) mode = 0;
+    if (mode > 1) mode = 1;
 
-    // S&H rate is cutoff / 8, clamped to 100-20000 Hz
-    float latchFreq = cutoff / 8.0f;
-    if (latchFreq < 100.0f) latchFreq = 100.0f;
-    if (latchFreq > 20000.0f) latchFreq = 20000.0f;
-    float latchPeriod = 48000.0f / latchFreq;
-
-    // SVF setup: Q from 0.5 (low res) to 20 (high res)
+    // Q from 0.5 (low res) to 20 (high res)
     float q = 0.5f + resonance * 19.5f;
-    float normalizedCutoff = cutoff / 48000.0f;
-    if (normalizedCutoff > 0.499f) normalizedCutoff = 0.499f;
-    s.svf.set_f_q<stmlib::FREQUENCY_FAST>(normalizedCutoff, q);
 
-    // Process: S&H then filter
+    // Process per-sample for V/Oct tracking
     float latchBuf[FRAMELENGTH];
     for (int i = 0; i < FRAMELENGTH; i++)
     {
+      // Cutoff from V/Oct + fundamental offset (semitones)
+      // V/Oct: 0V = middle C (261.63 Hz), 1V = +12 semitones
+      float totalSemitones = voct[i] * 12.0f * 5.0f + fundamental;
+      // MIDI note 60 = middle C = 261.63 Hz
+      float cutoff = 261.63f * stmlib::SemitonesToRatio(totalSemitones);
+      if (cutoff < 20.0f) cutoff = 20.0f;
+      if (cutoff > 20000.0f) cutoff = 20000.0f;
+
+      // S&H: latch input at cutoff/8 rate
+      float latchFreq = cutoff / 8.0f;
+      if (latchFreq < 100.0f) latchFreq = 100.0f;
+      if (latchFreq > 20000.0f) latchFreq = 20000.0f;
+      float latchPeriod = 48000.0f / latchFreq;
+
       s.latchCounter += 1.0f;
       if (s.latchCounter >= latchPeriod) {
         s.latchCounter -= latchPeriod;
         s.latchValue = in[i];
       }
       latchBuf[i] = s.latchValue;
+
+      // Update SVF cutoff per sample for smooth tracking
+      float normalizedCutoff = cutoff / 48000.0f;
+      if (normalizedCutoff > 0.499f) normalizedCutoff = 0.499f;
+      s.svf.set_f_q<stmlib::FREQUENCY_FAST>(normalizedCutoff, q);
     }
 
     if (mode == 0) {

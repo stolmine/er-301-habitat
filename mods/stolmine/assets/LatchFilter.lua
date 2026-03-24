@@ -3,14 +3,27 @@ local libstolmine = require "stolmine.libstolmine"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
-local OptionControl = require "Unit.MenuControl.OptionControl"
+local Pitch = require "Unit.ViewControl.Pitch"
+local ModeSelector = require "stolmine.ModeSelector"
 local Encoder = require "Encoder"
 
-local cutoffMap = (function()
-  local map = app.LinearDialMap(20, 20000)
-  map:setSteps(100, 10, 1, 0.1)
+local freqMap = (function()
+  local map = app.LinearDialMap(-48, 48)
+  map:setSteps(1, 1, 0.1, 0.01)
   return map
 end)()
+
+local modeMap = (function()
+  local map = app.LinearDialMap(0, 1)
+  map:setSteps(1, 1, 1, 1)
+  map:setRounding(1)
+  return map
+end)()
+
+local modeNames = {
+  [0] = "LP",
+  [1] = "HP"
+}
 
 local LatchFilter = Class {}
 LatchFilter:include(Unit)
@@ -26,40 +39,49 @@ function LatchFilter:onLoadGraph(channelCount)
   connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
 
-  local cutoff = self:addObject("cutoff", app.ParameterAdapter())
-  cutoff:hardSet("Bias", 1000.0)
-  tie(op, "Cutoff", cutoff, "Out")
-  self:addMonoBranch("cutoff", cutoff, "In", cutoff, "Out")
+  -- V/Oct
+  local tune = self:addObject("tune", app.ConstantOffset())
+  local tuneRange = self:addObject("tuneRange", app.MinMax())
+  connect(tune, "Out", tuneRange, "In")
+  connect(tune, "Out", op, "V/Oct")
 
+  -- Fundamental (semitone offset)
+  local fundamental = self:addObject("fundamental", app.ParameterAdapter())
+  fundamental:hardSet("Bias", 0.0)
+  tie(op, "Fundamental", fundamental, "Out")
+  self:addMonoBranch("fundamental", fundamental, "In", fundamental, "Out")
+
+  -- Resonance
   local resonance = self:addObject("resonance", app.ParameterAdapter())
   resonance:hardSet("Bias", 0.5)
   tie(op, "Resonance", resonance, "Out")
   self:addMonoBranch("resonance", resonance, "In", resonance, "Out")
-end
 
-function LatchFilter:onShowMenu(objects)
-  return {
-    mode = OptionControl {
-      description = "Mode",
-      option      = objects.op:getOption("Mode"),
-      choices     = { "LP", "HP" },
-      boolean     = true
-    }
-  }, { "mode" }
+  -- Mode
+  local mode = self:addObject("mode", app.ParameterAdapter())
+  mode:hardSet("Bias", 0)
+  tie(op, "Mode", mode, "Out")
+  self:addMonoBranch("mode", mode, "In", mode, "Out")
 end
 
 function LatchFilter:onLoadViews()
   return {
-    cutoff = GainBias {
+    tune = Pitch {
+      button      = "V/oct",
+      branch      = self.branches.tune,
+      description = "V/oct",
+      offset      = self.objects.tune,
+      range       = self.objects.tuneRange
+    },
+    fundamental = GainBias {
       button        = "freq",
-      description   = "Cutoff",
-      branch        = self.branches.cutoff,
-      gainbias      = self.objects.cutoff,
-      range         = self.objects.cutoff,
-      biasMap       = cutoffMap,
-      biasUnits     = app.unitHertz,
-      biasPrecision = 0,
-      initialBias   = 1000.0
+      description   = "Fundamental",
+      branch        = self.branches.fundamental,
+      gainbias      = self.objects.fundamental,
+      range         = self.objects.fundamental,
+      biasMap       = freqMap,
+      biasPrecision = 1,
+      initialBias   = 0.0
     },
     resonance = GainBias {
       button        = "res",
@@ -70,9 +92,21 @@ function LatchFilter:onLoadViews()
       biasMap       = Encoder.getMap("[0,1]"),
       biasPrecision = 2,
       initialBias   = 0.5
+    },
+    mode = ModeSelector {
+      button        = "mode",
+      description   = "Mode",
+      branch        = self.branches.mode,
+      gainbias      = self.objects.mode,
+      range         = self.objects.mode,
+      biasMap       = modeMap,
+      biasUnits     = app.unitNone,
+      biasPrecision = 0,
+      initialBias   = 0,
+      modeNames     = modeNames
     }
   }, {
-    expanded  = { "cutoff", "resonance" },
+    expanded  = { "tune", "fundamental", "resonance", "mode" },
     collapsed = {}
   }
 end

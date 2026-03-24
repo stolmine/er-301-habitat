@@ -15,10 +15,11 @@ namespace stolmine
     virtual void process();
 
     od::Inlet mIn{"In"};
+    od::Inlet mVOct{"V/Oct"};
     od::Outlet mOut{"Out"};
-    od::Parameter mCutoff{"Cutoff", 1000.0f};
+    od::Parameter mFundamental{"Fundamental", 0.0f};
     od::Parameter mResonance{"Resonance", 0.5f};
-    od::Option mMode{"Mode", 0}; // 0=LP, 1=HP
+    od::Parameter mMode{"Mode", 0.0f}; // 0=LP, 1=HP
 #endif
 
   private:
