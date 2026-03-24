@@ -7,6 +7,7 @@
 #include "NRCircle.h"
 #include "Discont.h"
 #include "LatchFilter.h"
+#include "Canals.h"
 #define SWIGLUA
 %}
 
@@ -14,3 +15,4 @@
 %include "NRCircle.h"
 %include "Discont.h"
 %include "LatchFilter.h"
+%include "Canals.h"
