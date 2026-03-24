@@ -34,7 +34,7 @@ namespace stolmine
     float *in = mIn.buffer();
     float *out = mOut.buffer();
 
-    float amount = CLAMP(0.0f, 4.0f, mAmount.value());
+    float amount = CLAMP(0.0f, 10.0f, mAmount.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
     int mode = CLAMP(0, 6, (int)(mMode.value() + 0.5f));
 

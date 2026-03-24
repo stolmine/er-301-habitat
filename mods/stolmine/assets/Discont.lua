@@ -73,7 +73,7 @@ function Discont:onLoadViews()
       branch        = self.branches.amount,
       gainbias      = self.objects.amount,
       range         = self.objects.amount,
-      biasMap       = Encoder.getMap("[0,4]"),
+      biasMap       = Encoder.getMap("[0,10]"),
       biasPrecision = 2,
       initialBias   = 1.0
     },
