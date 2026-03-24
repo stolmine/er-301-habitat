@@ -75,4 +75,17 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 | Package | Unit(s) | Description |
 |---------|---------|-------------|
 | **nr** | NR | Gate sequencer inspired by the Noise Engineering Numeric Repetitor |
+| **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization — passthrough with waveform display |
+
+## Acknowledgements
+
+Special thanks to...
+
+tomf - I reused your clever circle graphic for the drum sequencers, and learned a lot from your units
+
+Joe Filbrun - I drew directly from your menu paging schemes in Accents
+
+Brian Clarkson - For making my favorite instrument
+
+Émilie Gillet - For the incredible, generous gift of your code
 
