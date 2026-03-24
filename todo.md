@@ -17,11 +17,14 @@
 - [x] Initial port of 14 units (drums, modulation, sequencers, generators)
 
 Refinements:
-- [ ] Tap LFO: remove phase reset on clock edge — should free-run at tracked tempo
-- [ ] Tap LFO: rename gate to "Clock", add separate "Reset" input
+- [x] Tap LFO: removed phase reset on clock edge — free-runs at tracked tempo
+- [x] Tap LFO: renamed gate to "Clock", added separate "Reset" input
+- [x] Tap LFO: rate knob acts as clock multiplier when synced
+- [x] FmLfo/WsmLfo: removed clock input (free-running), reset-only
+- [x] Mini Sequencer / Mod Sequencer: added reset input (GATE_FLAG_AUXILIARY_RISING)
+- [x] PLO: continuous /16x–16x pitch multiplier, corrected param labels (WSM Rate/Depth)
 - [ ] Tap LFO: add frequency counter display on clock input (research ER-301 SDK)
-- [ ] PLO pitch control: recalculate phase_increment continuously (not just on clock edge), improve responsiveness between clock pulses
-- [ ] Mini Sequencer / Mod Sequencer: add separate reset input (GATE_FLAG_AUXILIARY_RISING already in DSP, just needs second inlet)
+- [ ] PLO: recalculate phase_increment continuously between clock pulses for smoother pitch response
 - [ ] Step position visualization — adapt tomf's polygon voice indicator or simple bar display
   - Apply to Mini Sequencer, Mod Sequencer, and future 101 Sequencer
 
