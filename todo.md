@@ -39,6 +39,7 @@ Refinements:
 - [x] Fix CPU spike on trigger — capped grain spawns per block
 - [x] NEON envelope rendering and spectral frame transforms
 - [x] Spectral mode enabled (2048-point mono)
+- [ ] switching to mode 2 while freeze is active causes crash
 - [ ] Gain compensation toggle — auto-scale output to match input level
 - [ ] Further NEON optimization — ShyFFT butterflies, SRC polyphase FIR
 
