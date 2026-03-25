@@ -40,6 +40,7 @@ Refinements:
 - [x] NEON envelope rendering and spectral frame transforms
 - [x] Spectral mode enabled (2048-point mono)
 - [ ] switching to mode 2 while freeze is active causes crash
+- [ ] Trig input should fire on rising edge only — currently acts as gate, causing continuous grain generation while high
 - [ ] Gain compensation toggle — auto-scale output to match input level
 - [ ] Further NEON optimization — ShyFFT butterflies, SRC polyphase FIR
 
