@@ -98,6 +98,15 @@ Refinements:
 - [ ] Tilt EQ
 - [x] Canals (Three Sisters clone) — linked resonant filter with crossover/formant modes
 
+## Canals Improvements (Three Sisters fidelity)
+
+- [ ] Custom SistersSvf primitive with tanh-saturating integrators (OTA-style nonlinearity)
+  - Fast tanh approximation tuned for AM335x (rational, piecewise cubic, or x/(1+|x|))
+  - Multi-output per sample (LP/BP/HP simultaneously, no template mode selection)
+- [ ] Cross-coupled filter topology — serial signal decomposition instead of 6 independent SVFs
+- [ ] Tune Q curve and saturation character to match analog behavior
+- [ ] Bench CPU cost on hardware; NEON vectorize if needed
+
 ## Filterbank
 
 - [ ] Based on disting ex filterbank

@@ -1,5 +1,5 @@
 PKGNAME ?= clouds
-PKGVERSION ?= 0.1.0
+PKGVERSION ?= 0.2.0
 
 include scripts/env.mk
 
