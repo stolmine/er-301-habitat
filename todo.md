@@ -128,9 +128,10 @@ Refinements:
 
 ## Release / Compatibility
 
-- [ ] Release latest Habitat updates (v0.2.0?)
-- [ ] Look into vanilla ER-301 firmware compatibility for Habitat packages
+- [x] Release latest Habitat updates (v0.2.0)
+- [x] Vanilla ER-301 firmware compatibility for Habitat packages
 
 ## Rings Improvements
 
 - [ ] Crossfade control for main/aux outputs on mono chains
+- [ ] NEON optimization check for sympathetic string and FM modes (currently only modal is vectorized)
