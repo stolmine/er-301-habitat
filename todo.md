@@ -84,7 +84,8 @@ Refinements:
   - Clock input for step advance, reset input
 - [ ] Tracker Sequencer — MondrianList-based step editor
   - Layout (6 ply):
-    - [1-2] Step list: 2-ply custom graphic, L side = step numbers + param labels, R side = values + sequence progress
+    - [1] Step list: scrollable, per-step editing via sub-display (offset, length, slew)
+    - [2] Sequence info: progress/playhead, sequence length (editable via sub-display)
     - [3] Clock input
     - [4] Reset input
     - [5] Slew (global, scales per-step slew values; uniform if per-step is 0)
@@ -93,7 +94,9 @@ Refinements:
     - Offset: CV value
     - Length: duration in clock ticks
     - Slew: per-step glide time
+  - Sequence info sub-display: sequence length, loop length
   - Math sub-display: function selector, integer/bound, probability of application
+  - Research: can separate plies of a ViewControl span have independent sub-displays? If not, use two separate 1-ply controls for step list and sequence info
   - Potential: separate probability variant as its own unit
 
 ### Sequencer UI Research
