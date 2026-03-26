@@ -24,7 +24,9 @@ local function intMap(min, max)
   return map
 end
 
-local offsetMap = floatMap(-5, 5)
+local offsetMap10 = floatMap(-5, 5)
+local offsetMap2 = floatMap(-1, 1)
+local offsetMap = offsetMap10
 local lengthMap = intMap(1, 16)
 local slewMap = floatMap(0, 1)
 
@@ -109,6 +111,11 @@ function StepListControl:init(args)
   self.pDisplay:setEditParam(seq:getParameter("EditOffset"))
   seq:loadStep(0)
   self:updateTitle()
+end
+
+function StepListControl:setOffsetRange(is10v)
+  local map = is10v and offsetMap10 or offsetMap2
+  self.offsetReadout:setAttributes(app.unitNone, map)
 end
 
 function StepListControl:updateTitle()

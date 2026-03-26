@@ -44,6 +44,11 @@ namespace stolmine
       }
       fb.text(GRAY7, mWorldLeft + 2, mWorldBottom + mHeight - 24, buf, 10);
 
+      // Total tick length
+      int totalTicks = mpSeq->getTotalTicks();
+      snprintf(buf, sizeof(buf), "%dt", totalTicks);
+      fb.text(GRAY7, mWorldLeft + 2, mWorldBottom + mHeight - 36, buf, 10);
+
       // Progress bar
       int barLeft = mWorldLeft + 2;
       int barRight = mWorldLeft + mWidth - 3;

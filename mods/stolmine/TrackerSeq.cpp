@@ -85,6 +85,14 @@ namespace stolmine
     mEditSlew.hardSet(mpInternal->slew[i]);
   }
 
+  int TrackerSeq::getTotalTicks()
+  {
+    int total = 0;
+    for (int i = 0; i < mCachedSeqLength; i++)
+      total += mpInternal->length[i];
+    return total;
+  }
+
   void TrackerSeq::storeStep(int i)
   {
     i = CLAMP(0, kMaxSteps - 1, i);

@@ -37,6 +37,7 @@ namespace stolmine
     int getStep() { return mStep; }
     int getSeqLength() { return mCachedSeqLength; }
     int getLoopLength() { return mCachedLoopLength; }
+    int getTotalTicks();
 
     float getStepOffset(int i);
     void setStepOffset(int i, float v);

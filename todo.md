@@ -98,6 +98,7 @@ Refinements:
   - Math sub-display: function selector, integer/bound, probability of application
   - Research: can separate plies of a ViewControl span have independent sub-displays? If not, use two separate 1-ply controls for step list and sequence info
   - Potential: separate probability variant as its own unit
+  - Potential: addressable variant (CV address input instead of clock, for random access / external sequencing)
 
 ### Sequencer UI Research
 

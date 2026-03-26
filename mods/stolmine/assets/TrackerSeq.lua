@@ -85,9 +85,29 @@ function TrackerSeq:onShowMenu(objects, branches)
     task = function() self:setAllStepLengths(4) end
   }
 
+  controls.rangeHeader = MenuHeader {
+    description = "Offset Range"
+  }
+  controls.range10v = Task {
+    description = "10Vpp (-5 to +5)",
+    task = function()
+      self.offsetRange10v = true
+      self.controls.steps:setOffsetRange(true)
+    end
+  }
+  controls.range2v = Task {
+    description = "2Vpp (-1 to +1)",
+    task = function()
+      self.offsetRange10v = false
+      self.controls.steps:setOffsetRange(false)
+    end
+  }
+
   return controls, {
     "stepLenHeader",
-    "stepLen1", "stepLen2", "stepLen4"
+    "stepLen1", "stepLen2", "stepLen4",
+    "rangeHeader",
+    "range10v", "range2v"
   }
 end
 
