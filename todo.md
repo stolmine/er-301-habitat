@@ -67,8 +67,13 @@ Refinements:
 ## Sequencer Suite
 
 - [ ] 101 Sequencer — 64-step CV sequencer inspired by the SH-101
-  - Step index fader (0-63), each step has its own pitch/CV fader
-  - Dynamic viewport: selected step's fader appears in view, switches with index
+  - Gate input for step advance, reset input
+  - Address fader (0-63): moves editing cursor through steps
+  - Optional UI tracking: couple address fader to playhead on command
+  - Sequence length fader (1-64)
+  - Loop length fader: when > 0, loops N steps from current playhead position
+  - Each step has its own pitch/CV fader
+  - Dynamic viewport: selected step's fader appears in view, switches with address
   - Global math transforms: add/subtract/multiply/divide/mod/randomize all steps
   - Integer factor fader for transform operations (e.g. add 7, div 3)
   - Global pitch/CV scaling and snap-to-scale mode
