@@ -18,7 +18,6 @@ end
 function Commotio:onLoadGraph(channelCount)
   local op = self:addObject("op", libcommotio.Commotio())
 
-  connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
 
   -- Gate

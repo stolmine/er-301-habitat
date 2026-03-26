@@ -54,6 +54,7 @@ Refinements:
 
 ## Commotio Improvements
 
+- [x] Disconnected chain input passthrough (pure generator, no exciter bleed)
 - [ ] Split versions: standalone units for each exciter algo (bow, blow, strike)
 - [ ] User sample loading: allow custom buffers in strike sample player
 - [ ] UI: sub-displays for timbre/meta pairs (tomf pattern) or expanded controls (polygon pattern)
