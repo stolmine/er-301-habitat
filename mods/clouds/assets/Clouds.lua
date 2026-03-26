@@ -167,9 +167,9 @@ function Clouds:onLoadViews()
       branch        = self.branches.density,
       gainbias      = self.objects.density,
       range         = self.objects.density,
-      biasMap       = Encoder.getMap("[0,1]"),
+      biasMap       = Encoder.getMap("[-1,1]"),
       biasPrecision = 2,
-      initialBias   = 0.5
+      initialBias   = 0.0
     },
     texture = GainBias {
       button        = "text",

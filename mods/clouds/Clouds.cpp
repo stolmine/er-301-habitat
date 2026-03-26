@@ -104,7 +104,7 @@ namespace clouds_unit
     p->position = CLAMP(0.0f, 1.0f, mPosition.value());
     p->size = CLAMP(0.0f, 1.0f, mSize.value());
     p->pitch = CLAMP(-48.0f, 48.0f, mPitch.value());
-    p->density = CLAMP(0.0f, 1.0f, mDensity.value());
+    p->density = CLAMP(0.0f, 1.0f, mDensity.value() * 0.5f + 0.5f);
     p->texture = CLAMP(0.0f, 1.0f, mTexture.value());
     p->dry_wet = CLAMP(0.0f, 1.0f, mDryWet.value());
     p->feedback = CLAMP(0.0f, 1.0f, mFeedback.value());
