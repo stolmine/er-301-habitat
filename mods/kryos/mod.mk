@@ -1,5 +1,5 @@
 PKGNAME ?= kryos
-PKGVERSION ?= 0.2.0
+PKGVERSION ?= 1.0.0
 
 include scripts/env.mk
 

@@ -26,7 +26,7 @@ make
 make ARCH=am335x
 ```
 
-Output: `testing/<arch>/<package>-0.2.0.pkg`
+Output: `testing/<arch>/<package>-1.0.0.pkg`
 
 ## Install
 
@@ -82,7 +82,7 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 
 ## Changelog
 
-### v0.2.0
+### v1.0.0
 
 Compatible with both vanilla ER-301 firmware and er-301-stolmine (TXo) firmware.
 
