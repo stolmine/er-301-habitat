@@ -53,9 +53,12 @@ function TrackerSeq:onLoadGraph(channelCount)
   tie(op, "LoopLength", loopLength, "Out")
   self:addMonoBranch("loopLength", loopLength, "In", loopLength, "Out")
 
-  -- Output
+  -- Output via passthrough (ensures monitoring scope visibility)
+  local level = self:addObject("level", app.ConstantGain())
+  level:hardSet("Gain", 1.0)
+  connect(op, "Out", level, "In")
   for i = 1, channelCount do
-    connect(op, "Out", self, "Out" .. i)
+    connect(level, "Out", self, "Out" .. i)
   end
 end
 

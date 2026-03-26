@@ -90,6 +90,7 @@ Refinements:
   - Config: offset range (2Vpp/10Vpp), batch set all step lengths (1/2/4)
 
 ### Excel Improvements
+  - [ ] Randomize all offsets (config menu item)
   - [ ] Math transform gate (ply 6): non-destructive transforms with function/bound/probability
   - [ ] Addressable variant: CV address input instead of clock for random access
   - [ ] Expanded variant: CV inputs for sequence length and loop length
