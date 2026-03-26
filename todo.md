@@ -42,6 +42,7 @@ Refinements:
 - [x] switching to mode 2 while freeze is active causes crash — pffft bump allocator reset fix
 - [x] Trig input fires on rising edge only — one grain per tick
 - [x] Spectral mode CPU overrun — halved hop ratio (4→2), restored pffft NEON FFT path
+- [ ] Adaptive labelling for mode control (ModeSelector pattern)
 - [ ] Gain compensation toggle — auto-scale output to match input level
 - [ ] Further NEON optimization — ShyFFT butterflies, SRC polyphase FIR
 
