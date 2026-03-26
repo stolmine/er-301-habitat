@@ -214,9 +214,13 @@ end
 
 function StepListControl:upReleased(shifted)
   if self.focusedReadout then
-    -- Return to main scroll mode instead of losing focus entirely
+    -- Step 1: readout focused -> return to list scroll mode
     self.focusedReadout = nil
     self:setSubCursorController(nil)
+    return true
+  elseif self:hasFocus("encoder") then
+    -- Step 2: list scroll mode -> release focus entirely
+    self:unfocus()
     return true
   end
   return false
