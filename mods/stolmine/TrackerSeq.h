@@ -30,7 +30,7 @@ namespace stolmine
     // Edit buffer: scratch params for Readout binding
     od::Parameter mEditOffset{"EditOffset", 0.0f};
     od::Parameter mEditLength{"EditLength", 1.0f};
-    od::Parameter mEditSlew{"EditSlew", 0.0f};
+    od::Parameter mEditDeviation{"EditDeviation", 0.0f};
 #endif
 
     // SWIG-visible getters/setters for UI and serialization
@@ -43,8 +43,8 @@ namespace stolmine
     void setStepOffset(int i, float v);
     int getStepLength(int i);
     void setStepLength(int i, int v);
-    float getStepSlew(int i);
-    void setStepSlew(int i, float v);
+    float getStepDeviation(int i);
+    void setStepDeviation(int i, float v);
 
     void loadStep(int i);
     void storeStep(int i);
@@ -59,6 +59,7 @@ namespace stolmine
     int mCachedSeqLength = 16;
     int mCachedLoopLength = 0;
     float mCurrentOutput = 0.0f;
+    float mDeviationOffset = 0.0f;
 
     bool mClockWasHigh = false;
     bool mResetWasHigh = false;

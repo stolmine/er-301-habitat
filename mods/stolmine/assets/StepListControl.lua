@@ -28,7 +28,7 @@ local offsetMap10 = floatMap(-5, 5)
 local offsetMap2 = floatMap(-1, 1)
 local offsetMap = offsetMap10
 local lengthMap = intMap(1, 16)
-local slewMap = floatMap(0, 1)
+local deviationMap = floatMap(0, 1)
 
 local StepListControl = Class {
   type = "StepListControl",
@@ -78,11 +78,11 @@ function StepListControl:init(args)
     return g
   end)()
 
-  self.slewReadout = (function()
+  self.deviationReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
-    local param = seq:getParameter("EditSlew")
+    local param = seq:getParameter("EditDeviation")
     g:setParameter(param)
-    g:setAttributes(app.unitNone, slewMap)
+    g:setAttributes(app.unitNone, deviationMap)
     g:setPrecision(2)
     g:setCenter(col3, center4)
     return g
@@ -101,11 +101,11 @@ function StepListControl:init(args)
   self.subGraphic = app.Graphic(0, 0, 128, 64)
   self.subGraphic:addChild(self.offsetReadout)
   self.subGraphic:addChild(self.lengthReadout)
-  self.subGraphic:addChild(self.slewReadout)
+  self.subGraphic:addChild(self.deviationReadout)
   self.subGraphic:addChild(self.description)
   self.subGraphic:addChild(app.SubButton("offset", 1))
   self.subGraphic:addChild(app.SubButton("length", 2))
-  self.subGraphic:addChild(app.SubButton("slew", 3))
+  self.subGraphic:addChild(app.SubButton("dev", 3))
 
   self.pDisplay:follow(seq)
   self.pDisplay:setEditParam(seq:getParameter("EditOffset"))
@@ -177,7 +177,7 @@ function StepListControl:subReleased(i, shifted)
   elseif i == 2 then
     args = { selected = self.lengthReadout, message = "Step length (1-16 ticks).", commit = "Updated length." }
   elseif i == 3 then
-    args = { selected = self.slewReadout, message = "Step slew (0-1).", commit = "Updated slew." }
+    args = { selected = self.deviationReadout, message = "Step deviation (0-1).", commit = "Updated deviation." }
   end
 
   if args then

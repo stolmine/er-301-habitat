@@ -9,11 +9,19 @@
 namespace stolmine
 {
 
+  // Simple LCG random for deviation
+  static uint32_t sRandState = 12345;
+  static inline float randFloat()
+  {
+    sRandState = sRandState * 1664525u + 1013904223u;
+    return (float)(int32_t)(sRandState >> 1) / (float)0x40000000 ; // -1 to +1
+  }
+
   struct TrackerSeq::Internal
   {
     float offset[kMaxSteps];
     int length[kMaxSteps];
-    float slew[kMaxSteps];
+    float deviation[kMaxSteps];
 
     void Init()
     {
@@ -21,7 +29,7 @@ namespace stolmine
       {
         offset[i] = 0.0f;
         length[i] = 1;
-        slew[i] = 0.0f;
+        deviation[i] = 0.0f;
       }
     }
   };
@@ -36,7 +44,7 @@ namespace stolmine
     addParameter(mLoopLength);
     addParameter(mEditOffset);
     addParameter(mEditLength);
-    addParameter(mEditSlew);
+    addParameter(mEditDeviation);
 
     mpInternal = new Internal();
     mpInternal->Init();
@@ -67,14 +75,14 @@ namespace stolmine
     mpInternal->length[CLAMP(0, kMaxSteps - 1, i)] = MAX(1, v);
   }
 
-  float TrackerSeq::getStepSlew(int i)
+  float TrackerSeq::getStepDeviation(int i)
   {
-    return mpInternal->slew[CLAMP(0, kMaxSteps - 1, i)];
+    return mpInternal->deviation[CLAMP(0, kMaxSteps - 1, i)];
   }
 
-  void TrackerSeq::setStepSlew(int i, float v)
+  void TrackerSeq::setStepDeviation(int i, float v)
   {
-    mpInternal->slew[CLAMP(0, kMaxSteps - 1, i)] = CLAMP(0.0f, 1.0f, v);
+    mpInternal->deviation[CLAMP(0, kMaxSteps - 1, i)] = CLAMP(0.0f, 1.0f, v);
   }
 
   void TrackerSeq::loadStep(int i)
@@ -82,7 +90,7 @@ namespace stolmine
     i = CLAMP(0, kMaxSteps - 1, i);
     mEditOffset.hardSet(mpInternal->offset[i]);
     mEditLength.hardSet((float)mpInternal->length[i]);
-    mEditSlew.hardSet(mpInternal->slew[i]);
+    mEditDeviation.hardSet(mpInternal->deviation[i]);
   }
 
   int TrackerSeq::getTotalTicks()
@@ -98,7 +106,7 @@ namespace stolmine
     i = CLAMP(0, kMaxSteps - 1, i);
     mpInternal->offset[i] = mEditOffset.value();
     mpInternal->length[i] = MAX(1, (int)(mEditLength.value() + 0.5f));
-    mpInternal->slew[i] = CLAMP(0.0f, 1.0f, mEditSlew.value());
+    mpInternal->deviation[i] = CLAMP(0.0f, 1.0f, mEditDeviation.value());
   }
 
   void TrackerSeq::process()
@@ -141,7 +149,6 @@ namespace stolmine
           mTickCount = 0;
           if (loopLen > 0)
           {
-            // Loop within window of loopLen steps
             int loopStart = mStep - (mStep % loopLen);
             mStep = loopStart + ((mStep - loopStart + 1) % loopLen);
           }
@@ -149,21 +156,21 @@ namespace stolmine
           {
             mStep = (mStep + 1) % seqLen;
           }
+
+          // Compute deviation on step change (new random per step transition)
+          float dev = s.deviation[mStep % seqLen];
+          mDeviationOffset = dev > 0.001f ? randFloat() * dev : 0.0f;
         }
       }
 
-      // Target output from current step
-      // Scale by 0.1: offset 1 = 0.1V = 1 octave in ER-301 V/Oct convention
-      float target = s.offset[mStep % seqLen] * 0.1f;
+      // Target output: base offset + deviation, scaled for V/Oct
+      float base = s.offset[mStep % seqLen];
+      float target = (base + mDeviationOffset) * 0.1f;
 
-      // Compute slew coefficient
-      float perStepSlew = s.slew[mStep % seqLen];
-      float effectiveSlew = perStepSlew > 0.0f ? perStepSlew * globalSlew : globalSlew;
-
-      if (effectiveSlew > 0.001f)
+      // Global slew: one-pole smoothing
+      if (globalSlew > 0.001f)
       {
-        // One-pole smoothing: higher slew = slower response
-        float alpha = effectiveSlew * effectiveSlew;
+        float alpha = globalSlew * globalSlew;
         mCurrentOutput += (target - mCurrentOutput) * (1.0f - alpha);
       }
       else

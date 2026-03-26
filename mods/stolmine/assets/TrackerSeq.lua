@@ -160,7 +160,7 @@ function TrackerSeq:onSerialize()
     steps[tostring(i)] = {
       offset = op:getStepOffset(i),
       length = op:getStepLength(i),
-      slew = op:getStepSlew(i)
+      deviation = op:getStepDeviation(i)
     }
   end
   return { steps = steps }
@@ -174,7 +174,7 @@ function TrackerSeq:onDeserialize(t)
       if s then
         op:setStepOffset(i, s.offset or 0.0)
         op:setStepLength(i, s.length or 1)
-        op:setStepSlew(i, s.slew or 0.0)
+        op:setStepDeviation(i, s.deviation or s.slew or 0.0)
       end
     end
   end
