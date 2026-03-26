@@ -15,6 +15,7 @@ ASSET_DIR = $(MOD_DIR)/assets
 
 # Mod wrapper sources
 MOD_CPP = $(wildcard $(MOD_DIR)/*.cpp)
+MOD_C = $(wildcard $(MOD_DIR)/*.c)
 
 # Clouds DSP sources (via eurorack submodule)
 CLOUDS_CC = $(EURORACK)/clouds/dsp/granular_processor.cc \
@@ -34,6 +35,7 @@ STMLIB_CC = $(EURORACK)/stmlib/dsp/units.cc \
 
 # Objects
 OBJECTS = $(addprefix $(OUT_DIR)/,$(MOD_CPP:%.cpp=%.o))
+OBJECTS += $(addprefix $(OUT_DIR)/,$(MOD_C:%.c=%.o))
 OBJECTS += $(addprefix $(OUT_DIR)/,$(CLOUDS_CC:%.cc=%.o))
 OBJECTS += $(addprefix $(OUT_DIR)/,$(RESOURCES_CC:%.cc=%.o))
 OBJECTS += $(addprefix $(OUT_DIR)/,$(STMLIB_CC:%.cc=%.o))
@@ -112,6 +114,12 @@ $(OUT_DIR)/%.o: %.cpp
 	@echo [C++ $<]
 	@mkdir -p $(@D)
 	@$(CPP) $(CFLAGS) -std=gnu++11 -c $< -o $@
+
+# .c (pffft)
+$(OUT_DIR)/%.o: %.c
+	@echo [CC $<]
+	@mkdir -p $(@D)
+	@$(CC) $(CFLAGS) -std=gnu11 -c $< -o $@
 
 # .cc (Clouds/stmlib sources)
 $(OUT_DIR)/%.o: %.cc

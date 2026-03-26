@@ -27,14 +27,11 @@ static size_t pffft_heap_pos = 0;
 static int pffft_setup_count = 0;
 
 void *malloc(size_t size) {
-  // Reset heap when a new PFFFT_Setup is allocated (first malloc per init cycle)
-  // pffft_new_setup's first malloc is for the setup struct (~64-128 bytes)
+  // Reset heap unconditionally on each setup allocation.
+  // STFT::Init is only called on mode switch, so all prior allocations
+  // are dead — safe to reclaim the entire heap.
   if (size < 256) {
-    pffft_setup_count++;
-    // Reset on first setup of each init cycle (phase_vocoder calls init twice for stereo)
-    if (pffft_setup_count == 1) {
-      pffft_heap_pos = 0;
-    }
+    pffft_heap_pos = 0;
   }
 
   // 64-byte alignment for NEON cache line optimization
@@ -49,6 +46,5 @@ void *malloc(size_t size) {
 
 void free(void *p) {
   (void)p;
-  // Track setup destructions to know when to allow reset
-  if (p) pffft_setup_count--;
+  // Bump allocator — no-op free
 }

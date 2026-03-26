@@ -22,6 +22,7 @@ namespace clouds_unit
     uint8_t small_buffer[65536];  // ~64KB
 
     int cachedMode = -1;
+    bool lastTrig = false;
 
     void Init()
     {
@@ -110,10 +111,8 @@ namespace clouds_unit
     p->stereo_spread = CLAMP(0.0f, 1.0f, mSpread.value());
     p->reverb = 0.0f; // No internal reverb — use Stratos
 
-    // Sample freeze and trigger at block boundary
+    // Initial freeze state (trigger/gate handled per block below)
     p->freeze = freeze[0] > 0.1f;
-    p->trigger = trig[0] > 0.1f;
-    p->gate = trig[0] > 0.1f;
 
     // Preamp gain
     static const float preampGain[] = {1.0f, 2.0f, 3.0f};
@@ -140,7 +139,10 @@ namespace clouds_unit
       }
 
       // Update trigger/freeze per block
-      p->trigger = trig[pos] > 0.1f;
+      bool trigHigh = trig[pos] > 0.1f;
+      p->trigger = trigHigh && !s.lastTrig;
+      p->gate = trigHigh;
+      s.lastTrig = trigHigh;
       p->freeze = freeze[pos] > 0.1f;
 
       s.processor.Prepare();

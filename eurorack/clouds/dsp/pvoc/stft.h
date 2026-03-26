@@ -31,7 +31,7 @@
 
 #include "stmlib/stmlib.h"
 
-// #define USE_ARM_FFT
+#define USE_ARM_FFT
 
 #ifdef USE_ARM_FFT
   #include <arm_math.h>
@@ -43,7 +43,7 @@ namespace clouds {
 
 struct Parameters;
 
-const size_t kMaxFftSize = 4096;
+const size_t kMaxFftSize = 2048;
 #ifdef USE_ARM_FFT
   typedef arm_rfft_fast_instance_f32 FFT;
 #else

@@ -48,7 +48,7 @@ void PhaseVocoder::Init(
   num_channels_ = num_channels;
 
   size_t fft_size = largest_fft_size;
-  size_t hop_ratio = 4;
+  size_t hop_ratio = 2;
   
   BufferAllocator allocator_0(buffer[0], buffer_size[0]);
   BufferAllocator allocator_1(buffer[1], buffer_size[1]);
