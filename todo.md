@@ -77,6 +77,32 @@ Refinements:
   - Global math transforms: add/subtract/multiply/divide/mod/randomize all steps
   - Integer factor fader for transform operations (e.g. add 7, div 3)
   - Global pitch/CV scaling and snap-to-scale mode
+- [ ] Gesture Sequencer — record fader gestures into a clocked step buffer
+  - Offset fader (CV value source) + gate input (punch in/out)
+  - Gate engaged: record/overdub fader position to buffer at clock rate
+  - Gate disengaged: record null (rest), preserving existing data
+  - Clock input for step advance, reset input
+- [ ] Tracker Sequencer — MondrianList-based step editor
+  - Scrollable step list (tracker style), encoder scrolls through steps
+  - Per-step parameters via sub-display (tomf euclid pattern):
+    - Offset: CV value
+    - Length: duration in clock ticks
+    - Third param TBD (mute/skip? probability? slew?)
+  - Top-level controls:
+    - Step list (focused, scrollable)
+    - Step index count
+    - Clock input
+    - Reset input
+    - Math toggle: gate control, shift+sub-display for non-destructive transforms
+      - Sub-display: function selector, integer/bound, probability of application
+
+### Sequencer UI Research
+
+- Bar graph custom Graphic (2-4 ply): 8-16 steps as vertical bars, paged navigation
+- MondrianList tracker: scrollable step rows with sub-display per-step editing
+- Dual-zone: miniature 64-step overview (L) + focused step controls (R)
+- NRCircle ring: good for short patterns, crowded at 64 steps
+- Playhead/cursor coupling: auto-scroll follows playback, manual nav decouples
 
 ## Scope
 
