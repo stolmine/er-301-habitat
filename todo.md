@@ -97,6 +97,7 @@ Refinements:
 - [x] NR — gate sequencer (migrated from standalone package)
 - [x] 94 Discont — 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush)
 - [x] Latch Filter — switched-capacitor S&H → SVF with V/Oct tracking
+- [ ] Stereo passthrough for Canals, 94 Discont, and Latch Filter (currently mono only)
 - [ ] HD2-style FM oscillator pair (dual osc with FM index + feedback)
 - [ ] Additional filter models from monokit (MoogFF, DFM1, BMoog)
 
