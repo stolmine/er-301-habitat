@@ -1,6 +1,7 @@
 #pragma once
 
 #include <od/graphics/Graphic.h>
+#include <od/objects/Parameter.h>
 #include <TrackerSeq.h>
 #include <string.h>
 #include <stdio.h>
@@ -66,8 +67,10 @@ namespace stolmine
         snprintf(buf, sizeof(buf), "%02d", step + 1);
         fb.text(GRAY7, mWorldLeft + 2, y + 1, buf, 10);
 
-        // Offset value
-        float val = mpSeq->getStepOffset(step);
+        // Offset value: show live edit buffer for selected step
+        float val = (step == mSelectedStep && mpEditOffset)
+            ? mpEditOffset->value()
+            : mpSeq->getStepOffset(step);
         snprintf(buf, sizeof(buf), "%+.1f", val);
         fb.text(WHITE, mWorldLeft + 18, y + 1, buf, 10);
       }
@@ -94,9 +97,11 @@ namespace stolmine
 
     void setSelectedStep(int step) { mSelectedStep = step; }
     int getSelectedStep() { return mSelectedStep; }
+    void setEditParam(od::Parameter *editOffset) { mpEditOffset = editOffset; }
 
   private:
     TrackerSeq *mpSeq = 0;
+    od::Parameter *mpEditOffset = 0;
     int mSelectedStep = 0;
     int mScrollOffset = 0;
   };

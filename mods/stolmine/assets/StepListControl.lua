@@ -106,7 +106,13 @@ function StepListControl:init(args)
   self.subGraphic:addChild(app.SubButton("slew", 3))
 
   self.pDisplay:follow(seq)
+  self.pDisplay:setEditParam(seq:getParameter("EditOffset"))
   seq:loadStep(0)
+  self:updateTitle()
+end
+
+function StepListControl:updateTitle()
+  self.description:setText(string.format("Step %d", self.currentStep + 1))
 end
 
 function StepListControl:switchToStep(newStep)
@@ -118,6 +124,7 @@ function StepListControl:switchToStep(newStep)
   self.currentStep = newStep
   self.seq:loadStep(newStep)
   self.pDisplay:setSelectedStep(newStep)
+  self:updateTitle()
 end
 
 function StepListControl:setFocusedReadout(readout)
@@ -187,14 +194,25 @@ function StepListControl:encoder(change, shifted)
     self:switchToStep(self.currentStep + change)
     return true
   elseif self.focusedReadout then
-    -- Normal: edit focused param
+    -- Normal: edit focused param, store immediately for live update
     self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Coarse)
+    self.seq:storeStep(self.currentStep)
     return true
   else
     -- No focus: scroll step list
     self:switchToStep(self.currentStep + change)
     return true
   end
+end
+
+function StepListControl:upReleased(shifted)
+  if self.focusedReadout then
+    -- Return to main scroll mode instead of losing focus entirely
+    self.focusedReadout = nil
+    self:setSubCursorController(nil)
+    return true
+  end
+  return false
 end
 
 return StepListControl

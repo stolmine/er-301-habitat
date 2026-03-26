@@ -36,6 +36,7 @@ namespace stolmine
     // SWIG-visible getters/setters for UI and serialization
     int getStep() { return mStep; }
     int getSeqLength() { return mCachedSeqLength; }
+    int getLoopLength() { return mCachedLoopLength; }
 
     float getStepOffset(int i);
     void setStepOffset(int i, float v);

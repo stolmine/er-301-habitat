@@ -8,6 +8,9 @@ local StepListControl = require "stolmine.StepListControl"
 local SeqInfoControl = require "stolmine.SeqInfoControl"
 local Encoder = require "Encoder"
 
+local MenuHeader = require "Unit.MenuControl.Header"
+local Task = require "Unit.MenuControl.Task"
+
 local TrackerSeq = Class {}
 TrackerSeq:include(Unit)
 
@@ -54,6 +57,38 @@ function TrackerSeq:onLoadGraph(channelCount)
   for i = 1, channelCount do
     connect(op, "Out", self, "Out" .. i)
   end
+end
+
+function TrackerSeq:setAllStepLengths(len)
+  local op = self.objects.op
+  for i = 0, 63 do
+    op:setStepLength(i, len)
+  end
+end
+
+function TrackerSeq:onShowMenu(objects, branches)
+  local controls = {}
+
+  controls.stepLenHeader = MenuHeader {
+    description = "Set All Step Lengths"
+  }
+  controls.stepLen1 = Task {
+    description = "1 tick",
+    task = function() self:setAllStepLengths(1) end
+  }
+  controls.stepLen2 = Task {
+    description = "2 ticks",
+    task = function() self:setAllStepLengths(2) end
+  }
+  controls.stepLen4 = Task {
+    description = "4 ticks",
+    task = function() self:setAllStepLengths(4) end
+  }
+
+  return controls, {
+    "stepLenHeader",
+    "stepLen1", "stepLen2", "stepLen4"
+  }
 end
 
 function TrackerSeq:onLoadViews()

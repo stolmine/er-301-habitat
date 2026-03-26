@@ -26,11 +26,23 @@ namespace stolmine
 
       int seqLen = mpSeq->getSeqLength();
       int playhead = mpSeq->getStep();
+      int loopLen = mpSeq->getLoopLength();
 
       // Step counter: "04/16"
-      char buf[12];
+      char buf[16];
       snprintf(buf, sizeof(buf), "%02d/%02d", playhead + 1, seqLen);
       fb.text(WHITE, mWorldLeft + 2, mWorldBottom + mHeight - 12, buf, 10);
+
+      // Loop indicator
+      if (loopLen > 0)
+      {
+        snprintf(buf, sizeof(buf), "lp:%d", loopLen);
+      }
+      else
+      {
+        snprintf(buf, sizeof(buf), "lp:off");
+      }
+      fb.text(GRAY7, mWorldLeft + 2, mWorldBottom + mHeight - 24, buf, 10);
 
       // Progress bar
       int barLeft = mWorldLeft + 2;
@@ -49,9 +61,6 @@ namespace stolmine
                   barLeft + fillWidth, barTop - 1);
         }
       }
-
-      // Label
-      fb.text(GRAY7, mWorldLeft + 2, mWorldBottom + mHeight - 24, "seq", 10);
     }
 #endif
 
