@@ -8,6 +8,7 @@ local Pitch = require "Unit.ViewControl.Pitch"
 local EngineSelector = require "plaits.EngineSelector"
 local MenuHeader = require "Unit.MenuControl.Header"
 local Task = require "Unit.MenuControl.Task"
+local MixControl = require "rings.MixControl"
 local Encoder = require "Encoder"
 
 local modelMap = app.LinearDialMap(0, 5)
@@ -52,12 +53,18 @@ function Rings:onLoadGraph(channelCount)
   strum:setGateMode()
   connect(strum, "Out", voice, "Strum")
 
-  -- Output
+  -- Output routing
   connect(voice, "Out", self, "Out1")
   if channelCount > 1 then
     connect(voice, "Aux", self, "Out2")
     voice:setOptionValue("Stereo", 1)
   end
+
+  -- Mix (output crossfade handled in C++ via parameter)
+  local mix = self:addObject("mix", app.ParameterAdapter())
+  mix:hardSet("Bias", 0.5)
+  tie(voice, "Mix", mix, "Out")
+  self:addMonoBranch("mix", mix, "In", mix, "Out")
 
   -- Model
   local model = self:addObject("model", app.ParameterAdapter())
@@ -94,6 +101,12 @@ function Rings:onLoadGraph(channelCount)
   position:hardSet("Bias", 0.5)
   tie(voice, "Position", position, "Out")
   self:addMonoBranch("position", position, "In", position, "Out")
+
+  -- Mix (output crossfade)
+  local mix = self:addObject("mix", app.ParameterAdapter())
+  mix:hardSet("Bias", 0.0)
+  tie(voice, "Mix", mix, "Out")
+  self:addMonoBranch("mix", mix, "In", mix, "Out")
 
   -- Branches
   self:addMonoBranch("strum", strum, "In", strum, "Out")
@@ -179,7 +192,8 @@ local views = {
     "struct",
     "bright",
     "damp",
-    "pos"
+    "pos",
+    "mix"
   },
   collapsed = {}
 }
@@ -268,6 +282,20 @@ function Rings:onLoadViews(objects, branches)
     biasMap = Encoder.getMap("[0,1]"),
     biasPrecision = 2,
     initialBias = 0.5
+  }
+
+  controls.mix = MixControl {
+    button = "mix",
+    description = "Out Mix",
+    branch = branches.mix,
+    gainbias = objects.mix,
+    range = objects.mix,
+    biasMap = Encoder.getMap("[0,1]"),
+    biasPrecision = 2,
+    initialBias = 0.5,
+    stereoOption = objects.voice:getOption("Stereo"),
+    monoLabels = { "Main", "Main>", "Equal", "<Aux", "Aux" },
+    stereoLabels = { "M:L", "M>L", "Equal", "A>L", "A:L" }
   }
 
   return controls, views

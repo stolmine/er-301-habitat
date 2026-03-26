@@ -31,6 +31,8 @@ namespace mi
     od::Option mResolution{"Resolution", 1};
     od::Option mEasterEgg{"Easter Egg", 0};
     od::Option mInternalExciter{"Int Exciter", 1};
+    od::Parameter mMix{"Mix", 0.5f};
+
     od::Option mStereo{"Stereo", 0};
 #endif
 

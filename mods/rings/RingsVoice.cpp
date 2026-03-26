@@ -21,6 +21,7 @@ namespace mi
     rings::Patch patch;
     rings::PerformanceState performance_state;
     uint16_t reverb_buffer[32768]; // 64KB for reverb FxEngine
+    float auxWork[256];
     bool prev_strum;
     int last_model;
     int last_polyphony;
@@ -64,6 +65,7 @@ namespace mi
     addOption(mResolution);
     addOption(mEasterEgg);
     addOption(mInternalExciter);
+    addParameter(mMix);
     addOption(mStereo);
 
     mpInternal = new Internal();
@@ -83,7 +85,8 @@ namespace mi
     float *voctBuf = mVOct.buffer();
     float *strumBuf = mStrum.buffer();
     float *outBuf = mOut.buffer();
-    float *auxBuf = mAux.buffer();
+    float *auxOutBuf = mAux.buffer();
+    float *auxBuf = s.auxWork; // internal buffer — outlet may discard writes
 
     // Set patch parameters
     s.patch.structure = CLAMP(0.0f, 0.9995f, mStructure.value());
@@ -156,12 +159,44 @@ namespace mi
       pos += chunk;
     }
 
-    // In mono mode, mix aux into out so all poly voices are heard
+    // Output mix: 0 = main only, 0.5 = equal, 1 = aux only
+    float mix = CLAMP(0.0f, 1.0f, mMix.value());
+    float mainGain = mix >= 0.5f ? 2.0f * (1.0f - mix) : 1.0f;
+    float auxGain  = mix <= 0.5f ? 2.0f * mix : 1.0f;
+
     if (mStereo.value() == 0)
     {
       for (int i = 0; i < FRAMELENGTH; i++)
       {
-        outBuf[i] += auxBuf[i];
+        outBuf[i] = outBuf[i] * mainGain + auxBuf[i] * auxGain;
+      }
+    }
+    else
+    {
+      // Stereo: mix swaps routing. 0 = main→L/aux→R, 1 = aux→L/main→R
+      float mainToL, auxToL, mainToR, auxToR;
+      if (mix <= 0.5f)
+      {
+        float t = mix * 2.0f; // 0→1 over left half
+        mainToL = 1.0f;
+        auxToL  = t;
+        mainToR = t;
+        auxToR  = 1.0f;
+      }
+      else
+      {
+        float t = (mix - 0.5f) * 2.0f; // 0→1 over right half
+        mainToL = 1.0f - t;
+        auxToL  = 1.0f;
+        mainToR = 1.0f;
+        auxToR  = 1.0f - t;
+      }
+      for (int i = 0; i < FRAMELENGTH; i++)
+      {
+        float main = outBuf[i];
+        float aux = auxBuf[i];
+        outBuf[i]    = main * mainToL + aux * auxToL;
+        auxOutBuf[i] = main * mainToR + aux * auxToR;
       }
     }
   }
