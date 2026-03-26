@@ -18,13 +18,13 @@ function MixControl:updateLabel()
       and self.stereoLabels or self.monoLabels
 
   local label
-  if value < 0.1 then
+  if value < -0.66 then
     label = labels[1]
-  elseif value < 0.4 then
+  elseif value < -0.33 then
     label = labels[2]
-  elseif value < 0.6 then
+  elseif value < 0.33 then
     label = labels[3]
-  elseif value < 0.9 then
+  elseif value < 0.66 then
     label = labels[4]
   else
     label = labels[5]

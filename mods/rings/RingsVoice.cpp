@@ -159,8 +159,8 @@ namespace mi
       pos += chunk;
     }
 
-    // Output mix: 0 = main only, 0.5 = equal, 1 = aux only
-    float mix = CLAMP(0.0f, 1.0f, mMix.value());
+    // Output mix: UI is [-1,1], remap to [0,1] for crossfade
+    float mix = CLAMP(0.0f, 1.0f, mMix.value() * 0.5f + 0.5f);
     float mainGain = mix >= 0.5f ? 2.0f * (1.0f - mix) : 1.0f;
     float auxGain  = mix <= 0.5f ? 2.0f * mix : 1.0f;
 

@@ -62,7 +62,7 @@ function Rings:onLoadGraph(channelCount)
 
   -- Mix (output crossfade handled in C++ via parameter)
   local mix = self:addObject("mix", app.ParameterAdapter())
-  mix:hardSet("Bias", 0.5)
+  mix:hardSet("Bias", 0.0)
   tie(voice, "Mix", mix, "Out")
   self:addMonoBranch("mix", mix, "In", mix, "Out")
 
@@ -290,9 +290,9 @@ function Rings:onLoadViews(objects, branches)
     branch = branches.mix,
     gainbias = objects.mix,
     range = objects.mix,
-    biasMap = Encoder.getMap("[0,1]"),
+    biasMap = Encoder.getMap("[-1,1]"),
     biasPrecision = 2,
-    initialBias = 0.5,
+    initialBias = 0.0,
     stereoOption = objects.voice:getOption("Stereo"),
     monoLabels = { "Main", "Main>", "Equal", "<Aux", "Aux" },
     stereoLabels = { "M:L", "M>L", "Equal", "A>L", "A:L" }
