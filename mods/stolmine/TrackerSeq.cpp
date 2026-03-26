@@ -153,7 +153,8 @@ namespace stolmine
       }
 
       // Target output from current step
-      float target = s.offset[mStep % seqLen];
+      // Scale by 0.1: offset 1 = 0.1V = 1 octave in ER-301 V/Oct convention
+      float target = s.offset[mStep % seqLen] * 0.1f;
 
       // Compute slew coefficient
       float perStepSlew = s.slew[mStep % seqLen];
