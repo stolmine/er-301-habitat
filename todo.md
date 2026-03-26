@@ -82,24 +82,20 @@ Refinements:
   - Gate engaged: record/overdub fader position to buffer at clock rate
   - Gate disengaged: record null (rest), preserving existing data
   - Clock input for step advance, reset input
-- [ ] Tracker Sequencer — MondrianList-based step editor
-  - Layout (6 ply):
-    - [1] Step list: scrollable, per-step editing via sub-display (offset, length, slew)
-    - [2] Sequence info: progress/playhead, sequence length (editable via sub-display)
-    - [3] Clock input
-    - [4] Reset input
-    - [5] Slew (global, scales per-step slew values; uniform if per-step is 0)
-    - [6] Math transform gate (shift+sub-display for non-destructive transforms)
-  - Per-step parameters via sub-display when step list focused:
-    - Offset: CV value
-    - Length: duration in clock ticks
-    - Slew: per-step glide time
-  - Sequence info sub-display: sequence length, loop length
-  - Math sub-display: function selector, integer/bound, probability of application
-  - Research: can separate plies of a ViewControl span have independent sub-displays? If not, use two separate 1-ply controls for step list and sequence info
-  - Potential: separate probability variant as its own unit
-  - Potential: addressable variant (CV address input instead of clock, for random access / external sequencing)
-  - Potential: expanded variant with CV inputs for sequence length and loop length
+- [x] Excel — 64-step CV tracker sequencer (implemented)
+  - Per-step offset, length (ticks), slew
+  - Scrollable step list with live editing, shift+scroll for rapid multi-step edits
+  - Sequence info ply: playhead, loop status, total tick count
+  - Clock/reset gate inputs, global slew, V/Oct scaled output (offset 1 = 1 octave)
+  - Config: offset range (2Vpp/10Vpp), batch set all step lengths (1/2/4)
+
+### Excel Improvements
+  - [ ] Math transform gate (ply 6): non-destructive transforms with function/bound/probability
+  - [ ] Addressable variant: CV address input instead of clock for random access
+  - [ ] Expanded variant: CV inputs for sequence length and loop length
+  - [ ] Probability variant: per-step probability of firing as separate unit
+  - [ ] Snap-to-scale mode for offset values
+  - [ ] Playhead/cursor coupling: auto-scroll display follows playback, manual nav decouples
 
 ### Sequencer UI Research
 
