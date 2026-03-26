@@ -18,6 +18,10 @@ function ScopeWide:onLoadGraph(channelCount)
   local op = self:addObject("op", libscope.Scope())
   connect(self, "In1", op, "In L")
   connect(op, "Out L", self, "Out1")
+  if channelCount > 1 then
+    connect(self, "In2", op, "In R")
+    connect(op, "Out R", self, "Out2")
+  end
 end
 
 function ScopeWide:onLoadViews()
