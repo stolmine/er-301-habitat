@@ -152,3 +152,7 @@ Refinements:
 ## NEON Optimization Audit
 
 - [ ] Repo-wide NEON check — identify hot DSP paths without SIMD and assess vectorization opportunities
+
+## Video
+
+- [ ] Intro video for Habitat packages (see video.md for script)
