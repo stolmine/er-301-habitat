@@ -136,3 +136,7 @@ Refinements:
 
 - [x] Crossfade control for main/aux outputs on mono and stereo chains
 - [ ] NEON optimization check for sympathetic string and FM modes (currently only modal is vectorized)
+
+## NEON Optimization Audit
+
+- [ ] Repo-wide NEON check — identify hot DSP paths without SIMD and assess vectorization opportunities
