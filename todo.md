@@ -52,6 +52,10 @@ Refinements:
 - [ ] Easter egg (frequency shifter): test and verify
 - [ ] Consider exposing carrier/modulator drive as separate controls
 
+## Stratos Improvements
+
+- [ ] Defaults should match Clouds' fixed reverb settings
+
 ## Commotio Improvements
 
 - [x] Disconnected chain input passthrough (pure generator, no exciter bleed)
