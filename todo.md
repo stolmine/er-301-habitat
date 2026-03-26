@@ -134,5 +134,5 @@ Refinements:
 
 ## Rings Improvements
 
-- [ ] Crossfade control for main/aux outputs on mono chains
+- [x] Crossfade control for main/aux outputs on mono and stereo chains
 - [ ] NEON optimization check for sympathetic string and FM modes (currently only modal is vectorized)
