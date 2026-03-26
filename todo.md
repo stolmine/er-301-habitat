@@ -39,8 +39,9 @@ Refinements:
 - [x] Fix CPU spike on trigger — capped grain spawns per block
 - [x] NEON envelope rendering and spectral frame transforms
 - [x] Spectral mode enabled (2048-point mono)
-- [ ] switching to mode 2 while freeze is active causes crash
-- [ ] Trig input should fire on rising edge only — currently acts as gate, causing continuous grain generation while high
+- [x] switching to mode 2 while freeze is active causes crash — pffft bump allocator reset fix
+- [x] Trig input fires on rising edge only — one grain per tick
+- [x] Spectral mode CPU overrun — halved hop ratio (4→2), restored pffft NEON FFT path
 - [ ] Gain compensation toggle — auto-scale output to match input level
 - [ ] Further NEON optimization — ShyFFT butterflies, SRC polyphase FIR
 
