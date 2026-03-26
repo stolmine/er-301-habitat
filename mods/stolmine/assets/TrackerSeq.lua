@@ -15,8 +15,8 @@ local TrackerSeq = Class {}
 TrackerSeq:include(Unit)
 
 function TrackerSeq:init(args)
-  args.title = "Tracker Seq"
-  args.mnemonic = "TS"
+  args.title = "Excel"
+  args.mnemonic = "Ex"
   Unit.init(self, args)
 end
 
