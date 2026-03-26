@@ -26,7 +26,7 @@ make
 make ARCH=am335x
 ```
 
-Output: `testing/<arch>/<package>-0.1.0.pkg`
+Output: `testing/<arch>/<package>-0.2.0.pkg`
 
 ## Install
 
@@ -41,13 +41,13 @@ Based on code by Émilie Gillet (MIT License).
 | Package | Unit(s) | Description |
 |---------|---------|-------------|
 | **plaits** | Plaits | Macro-oscillator — all 24 synthesis engines, V/Oct, engine selector |
-| **clouds** | Clouds | Granular processor — granular, looping delay, and spectral modes. NEON-optimized envelope rendering and spectral frame transforms |
+| **clouds** | Clouds | Granular processor — granular, looping delay, and spectral modes. NEON-optimized pffft FFT, rising-edge trigger control |
 | **stratos** | Stratos | Clouds reverb engine extracted as standalone effect |
-| **rings** | Rings | Modal/sympathetic string resonator with NEON-vectorized SVF bank |
+| **rings** | Rings | Modal/sympathetic string resonator with NEON-vectorized SVF bank, main/aux output mix control |
 | **warps** | Warps | Meta-modulator — 6 crossmodulation algorithms with auto gain compensation |
 | **grids** | Grids | Topographic drum pattern generator |
 | **commotio** | Commotio | Elements exciter section (bow/blow/strike) at native 48kHz |
-| **kryos** | Kryos | Spectral freeze (WIP) | WILL CRASH DO NOT INSTALL
+| **kryos** | Kryos | Spectral freeze (WIP) — WILL CRASH, DO NOT INSTALL |
 
 ### Peaks / Dead Man's Catch
 
@@ -74,8 +74,43 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 
 | Package | Unit(s) | Description |
 |---------|---------|-------------|
-| **nr** | NR | Gate sequencer inspired by the Noise Engineering Numeric Repetitor |
-| **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization — passthrough with waveform display |
+| **stolmine** | NR | Gate sequencer inspired by the Noise Engineering Numeric Repetitor |
+| | 94 Discont | 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush) |
+| | Latch Filter | Switched-capacitor S&H into SVF with V/Oct tracking |
+| | Canals | Linked resonant filter inspired by Three Sisters — crossover/formant modes |
+| **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization — stereo-aware passthrough with waveform display |
+
+## Changelog
+
+### v0.2.0
+
+Compatible with both vanilla ER-301 firmware and er-301-stolmine (TXo) firmware.
+
+**Clouds**
+- Restored NEON-optimized spectral mode via pffft (lost in submodule migration)
+- Fixed crash when switching to spectral mode while freeze is active
+- Reduced spectral CPU load by halving FFT hop ratio (4→2) while retaining 2048-point resolution
+- Trigger input now fires on rising edge only (one grain per tick, not continuous gate)
+- Density control is now bipolar (-1 gridded, +1 random)
+
+**Rings**
+- Added output mix control — bipolar crossfade between main and aux outputs
+- Mono: -1 = main only, 0 = equal sum, +1 = aux only
+- Stereo: smoothly swaps routing between outlets
+
+**Scope**
+- Fixed stereo passthrough on Scope and Scope 2x (previously dropped R channel on stereo chains)
+
+**stolmine**
+- New package consolidating NR, 94 Discont, Latch Filter, and Canals
+
+**Build**
+- All packages bumped to v0.2.0
+- Rebuilt against latest firmware with SWIG 4.2.1 compatibility
+
+### v0.1.0
+
+Initial release.
 
 ## Acknowledgements
 
