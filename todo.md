@@ -101,6 +101,11 @@ Refinements:
 - [ ] HD2-style FM oscillator pair (dual osc with FM index + feedback)
 - [ ] Additional filter models from monokit (MoogFF, DFM1, BMoog)
 
+## Polyphonic Sample Playback
+
+- [ ] Polyphonic sample player with voice management (reference: Polygon voice allocation)
+- [ ] Manual grain triggering (reference: Manual Grains)
+
 ## Effects
 
 - [ ] Tilt EQ
