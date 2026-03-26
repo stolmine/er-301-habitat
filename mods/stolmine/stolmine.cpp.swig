@@ -8,6 +8,9 @@
 #include "Discont.h"
 #include "LatchFilter.h"
 #include "Canals.h"
+#include "TrackerSeq.h"
+#include "StepListGraphic.h"
+#include "SeqInfoGraphic.h"
 #define SWIGLUA
 %}
 
@@ -16,3 +19,6 @@
 %include "Discont.h"
 %include "LatchFilter.h"
 %include "Canals.h"
+%include "TrackerSeq.h"
+%include "StepListGraphic.h"
+%include "SeqInfoGraphic.h"
