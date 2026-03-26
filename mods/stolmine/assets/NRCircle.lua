@@ -1,5 +1,5 @@
 local app = app
-local libstolmine = require "nr.libstolmine"
+local libstolmine = require "stolmine.libstolmine"
 local Class = require "Base.Class"
 local Base = require "Unit.ViewControl.EncoderControl"
 local Encoder = require "Encoder"

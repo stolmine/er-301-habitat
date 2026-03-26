@@ -4,7 +4,7 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
-local NRCircle = require "nr.NRCircle"
+local NRCircle = require "stolmine.NRCircle"
 local Encoder = require "Encoder"
 
 local function intMap(min, max)
