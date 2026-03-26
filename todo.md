@@ -83,18 +83,18 @@ Refinements:
   - Gate disengaged: record null (rest), preserving existing data
   - Clock input for step advance, reset input
 - [ ] Tracker Sequencer — MondrianList-based step editor
-  - Scrollable step list (tracker style), encoder scrolls through steps
-  - Per-step parameters via sub-display (tomf euclid pattern):
+  - Layout (6 ply):
+    - [1-2] Step list: 2-ply custom graphic, L side = step numbers + param labels, R side = values + sequence progress
+    - [3] Clock input
+    - [4] Reset input
+    - [5] Slew (global, scales per-step slew values; uniform if per-step is 0)
+    - [6] Math transform gate (shift+sub-display for non-destructive transforms)
+  - Per-step parameters via sub-display when step list focused:
     - Offset: CV value
     - Length: duration in clock ticks
-    - Third param TBD (mute/skip? probability? slew?)
-  - Top-level controls:
-    - Step list (focused, scrollable)
-    - Step index count
-    - Clock input
-    - Reset input
-    - Math toggle: gate control, shift+sub-display for non-destructive transforms
-      - Sub-display: function selector, integer/bound, probability of application
+    - Slew: per-step glide time
+  - Math sub-display: function selector, integer/bound, probability of application
+  - Potential: separate probability variant as its own unit
 
 ### Sequencer UI Research
 
