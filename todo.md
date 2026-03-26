@@ -71,6 +71,10 @@ Refinements:
 
 - [x] Inline scope unit — Scope (1 slot), Scope 2x (2 slot), Scope Stereo
 - [x] Passthrough audio with MiniScope waveform display
+- [x] Stereo passthrough on Scope and Scope 2x (adapt to chain channel count)
+- [ ] Channel focus display switching — show L or R based on channel button selection
+  - MiniScope supports runtime watchOutlet(), but SDK has no channel focus callback for custom ViewControls
+  - Need to find where channel button events are dispatched in Lua UI layer
 - [ ] Timebase and gain controls (requires custom graphic or MiniScope subclass)
 - [ ] Research headerless unit display (SDK hardcodes header — not currently possible)
 
