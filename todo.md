@@ -202,7 +202,7 @@ Refinements:
 ## V/Oct Scaling Audit
 
 - [x] Check V/Oct scaling: fixed * 12 to * 120 (FULLSCALE_IN_VOLTS = 10) for Plaits, Rings, Canals, LatchFilter
-- [ ] Plaits crash on trig mode / mode switching: investigate. Note clamped to 0-127, chunk forced to kBlockSize. May be pre-existing.
+- [ ] Plaits V/Oct crash: * 120 scaling causes crash on engine switch (even with note clamped to 0-127). Reverted to * 12. Rings handles * 120 fine. Need to investigate why Plaits engines are sensitive to note range during transitions.
 
 ## NEON Optimization Audit
 
