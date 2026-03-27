@@ -90,7 +90,7 @@ Refinements:
   - Config: offset range (2Vpp/10Vpp), batch set all step lengths (1/2/4)
 
 ### Excel Improvements
-  - [ ] Output scope visibility: OutputScope shows "no signal" despite working output. Commotio has the same issue. Investigate pUnit:getOutput(0) for generator units that don't consume In1
+  - [ ] Output scope visibility: OutputScope shows "no signal" despite working output. Commotio has same issue. connect() correctly calls pUnit:setOutput(). Likely cause: graph compiler may not schedule objects whose inlets aren't connected to the chain signal path, so outlet buffers aren't probed. Need to investigate od/units/GraphCompiler.cpp
   - [ ] Randomize all offsets (config menu item)
   - [ ] Math transform gate (ply 6): non-destructive transforms with function/bound/probability
   - [ ] Addressable variant: CV address input instead of clock for random access
