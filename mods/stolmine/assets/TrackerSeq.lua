@@ -89,6 +89,7 @@ function TrackerSeq:onLoadGraph(channelCount)
   local xformScope = self:addObject("xformScope", app.ParameterAdapter())
   xformScope:hardSet("Bias", 0)
   tie(op, "TransformScope", xformScope, "Out")
+  self:addMonoBranch("xformScope", xformScope, "In", xformScope, "Out")
 
   -- Output
   connect(op, "Out", self, "Out1")
@@ -274,6 +275,7 @@ function TrackerSeq:onLoadViews()
     xformScope = GainBias {
       button = "scope",
       description = "Xform Scope",
+      branch = self.branches.xformScope,
       gainbias = self.objects.xformScope,
       range = self.objects.xformScope,
       biasMap = scopeMap,
