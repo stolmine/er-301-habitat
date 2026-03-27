@@ -1,5 +1,5 @@
 PKGNAME ?= stratos
-PKGVERSION ?= 1.0.0
+PKGVERSION ?= 1.1.0
 
 include scripts/env.mk
 
