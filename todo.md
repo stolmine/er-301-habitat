@@ -96,6 +96,7 @@ Refinements:
   - [ ] Transform ply graphic: draw simple function icons, flash on gate
   - [ ] Reuse SDK gate fire graphic on transform sub-display fire button
   - [ ] Transform ply: gate activity indicator (comparator state viz)
+  - [ ] Expandable overview ply: show full fader controls for length, loop, scope (reference: Polygon euclid pattern)
   - [ ] Addressable variant: CV address input instead of clock for random access
   - [ ] Expanded variant: CV inputs for sequence length and loop length
   - [ ] Probability variant: per-step probability of firing as separate unit
