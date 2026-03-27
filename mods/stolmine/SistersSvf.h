@@ -36,10 +36,15 @@ namespace stolmine
       float bp = g * hp + s1;
       float lp = g * bp + s2;
 
-      // Tanh saturation on integrator state updates
-      // Models OTA current limiting - bounds energy in feedback path
-      s1 = fastTanh(g * hp + bp);
-      s2 = fastTanh(g * bp + lp);
+      // State updates - saturation applied gently to prevent runaway
+      // without killing resonance
+      float newS1 = g * hp + bp;
+      float newS2 = g * bp + lp;
+
+      // Soft clip only when states get large (>2.0)
+      // Below that, filter behaves like a pure linear SVF
+      s1 = softClip(newS1);
+      s2 = softClip(newS2);
 
       return {lp, bp, hp};
     }
@@ -50,15 +55,17 @@ namespace stolmine
       s2 = 0.0f;
     }
 
-    // Scaled soft saturation: allows integrator states up to ~4.0
-    // before compression, enabling self-oscillation while still
-    // preventing the runaway that causes digital clipping
-    static inline float fastTanh(float x)
+    // Soft clip: linear below threshold, smoothly compressed above.
+    // Preserves filter dynamics at normal levels, prevents blowup at extremes.
+    // At |x| < 2: output ~= x (nearly transparent)
+    // At |x| > 2: output compresses toward +/-4
+    static inline float softClip(float x)
     {
-      const float scale = 4.0f;
-      const float inv = 1.0f / scale;
-      float xs = x * inv;
-      return scale * xs / (1.0f + fabsf(xs));
+      if (x > 2.0f)
+        return 2.0f + (x - 2.0f) / (1.0f + (x - 2.0f) * 0.5f);
+      else if (x < -2.0f)
+        return -2.0f + (x + 2.0f) / (1.0f - (x + 2.0f) * 0.5f);
+      return x;
     }
   };
 
