@@ -160,11 +160,13 @@ Refinements:
 
 ## Canals Improvements (Three Sisters fidelity)
 
-- [ ] Custom SistersSvf primitive with tanh-saturating integrators (OTA-style nonlinearity)
-  - Fast tanh approximation tuned for AM335x (rational, piecewise cubic, or x/(1+|x|))
-  - Multi-output per sample (LP/BP/HP simultaneously, no template mode selection)
-- [ ] Cross-coupled filter topology — serial signal decomposition instead of 6 independent SVFs
-- [ ] Tune Q curve and saturation character to match analog behavior
+- [x] Custom SistersSvf primitive with soft-clip saturating integrators
+  - Multi-output per sample (LP/BP/HP simultaneously)
+  - Threshold-based soft clip: linear below |2|, compressed above
+- [x] Per-sample processing with cascaded filter topology
+- [ ] Q tuning: longer resonant decay with less gain boost. Want musical ping without volume spike.
+- [ ] Gain compensation at high Q: attenuate input or output proportional to resonance
+- [ ] Tune soft clip threshold and curve for best saturation character
 - [ ] Bench CPU cost on hardware; NEON vectorize if needed
 
 ## Filterbank
