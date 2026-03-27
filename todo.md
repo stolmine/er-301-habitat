@@ -95,12 +95,15 @@ Refinements:
   - [ ] Math transform gate (ply 6):
     - Gate input triggers transform application (for automation)
     - Shift on gate control toggles sub-display between gate view and math params
-    - Math sub-display: function selector (integer), factor (integer), manual fire button
-    - Functions (from ER-101): add, subtract, multiply, divide, mod, reverse, rotate, invert
-    - Factor is integer only
-    - Transform applies to all step offsets momentarily as additive offset
-    - Manual gate in sub-display for one-shot application without automation
-    - Overview ply free row: show active transform state (e.g. "+3", "x2", "rev") when applied
+    - Math sub-display (3 sub-buttons): scope(1), func(2), factor(3)
+      - Scope: scrollable selector for transform target (offset, length, deviation, all)
+      - Func: add, subtract, multiply, divide, mod, reverse, rotate, invert, random
+      - Factor: integer only
+    - Dial press fires transform (manual one-shot)
+    - Config menu: destructive/non-destructive toggle
+      - Destructive: permanently modifies step arrays
+      - Non-destructive: snapshot before first transform, "undo last" restores from snapshot
+    - Overview ply free row: show active transform state (e.g. "+3:ofs", "rev:all")
   - [ ] Addressable variant: CV address input instead of clock for random access
   - [ ] Expanded variant: CV inputs for sequence length and loop length
   - [ ] Probability variant: per-step probability of firing as separate unit
