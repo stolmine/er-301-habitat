@@ -100,6 +100,7 @@ Refinements:
     - Factor is integer only
     - Transform applies to all step offsets momentarily as additive offset
     - Manual gate in sub-display for one-shot application without automation
+    - Overview ply free row: show active transform state (e.g. "+3", "x2", "rev") when applied
   - [ ] Addressable variant: CV address input instead of clock for random access
   - [ ] Expanded variant: CV inputs for sequence length and loop length
   - [ ] Probability variant: per-step probability of firing as separate unit
