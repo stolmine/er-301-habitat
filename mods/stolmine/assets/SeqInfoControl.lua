@@ -28,6 +28,8 @@ local scopeMap = (function()
   return m
 end)()
 
+local scopeNames = { [0] = "ofst", "len", "dev", "all" }
+
 local SeqInfoControl = Class {
   type = "SeqInfoControl",
   canEdit = false,
@@ -100,10 +102,15 @@ function SeqInfoControl:init(args)
     return g
   end)()
 
+  self.scopeLabel = app.Label("ofst", 10)
+  self.scopeLabel:fitToText(0)
+  self.scopeLabel:setCenter(col3, center3 + 1)
+
   self.subGraphic = app.Graphic(0, 0, 128, 64)
   self.subGraphic:addChild(self.seqLenReadout)
   self.subGraphic:addChild(self.loopLenReadout)
   self.subGraphic:addChild(self.scopeReadout)
+  self.subGraphic:addChild(self.scopeLabel)
   self.subGraphic:addChild(self.description)
   self.subGraphic:addChild(app.SubButton("length", 1))
   self.subGraphic:addChild(app.SubButton("loop", 2))
@@ -147,6 +154,13 @@ end
 function SeqInfoControl:encoder(change, shifted)
   if self.focusedReadout then
     self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Coarse)
+    if self.focusedReadout == self.scopeReadout then
+      local val = math.floor(self.scopeReadout:getValueInUnits() + 0.5)
+      local name = scopeNames[val]
+      if name then
+        self.scopeLabel:setText(name)
+      end
+    end
   end
   return true
 end

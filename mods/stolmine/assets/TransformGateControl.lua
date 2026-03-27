@@ -58,6 +58,19 @@ gateInstructions:triangle(col3, line1 - 2, 90, 3)
 gateInstructions:vline(col3, line4, center3 - 8)
 gateInstructions:triangle(col3, center3 - 11, 90, 3)
 
+-- Math mode fire graphic (col3: fire -> arrow -> circle -> arrow -> title)
+local mathInstructions = app.DrawingInstructions()
+-- circle at col3
+mathInstructions:circle(col3, center3, 8)
+-- arrow: fire to circle
+mathInstructions:vline(col3, line4, center3 - 8)
+mathInstructions:triangle(col3, center3 - 11, 90, 3)
+-- arrow: circle to title
+mathInstructions:vline(col3, center3 + 8, line1 - 2)
+mathInstructions:triangle(col3, line1 - 2, 90, 3)
+
+local scopeNames = { [0] = "ofst", "len", "dev", "all" }
+
 local TransformGateControl = Class {
   type = "TransformGateControl",
   canEdit = false,
@@ -138,6 +151,11 @@ function TransformGateControl:init(args)
 
   ---- MATH MODE ELEMENTS ----
 
+  -- Fire flow graphic
+  self.mathDrawing = app.Drawing(0, 0, 128, 64)
+  self.mathDrawing:add(mathInstructions)
+  self.subGraphic:addChild(self.mathDrawing)
+
   self.funcReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
     local param = args.funcParam
@@ -158,12 +176,18 @@ function TransformGateControl:init(args)
     return g
   end)()
 
+  -- Func label (shows name instead of number)
+  self.funcLabel = app.Label("add", 10)
+  self.funcLabel:fitToText(0)
+  self.funcLabel:setCenter(col1, center3 + 1)
+  self.subGraphic:addChild(self.funcLabel)
+
   self.mathDesc = app.Label("Transform", 10)
   self.mathDesc:fitToText(3)
-  self.mathDesc:setSize(ply * 3, self.mathDesc.mHeight)
+  self.mathDesc:setSize(ply * 2, self.mathDesc.mHeight)
   self.mathDesc:setBorder(1)
   self.mathDesc:setCornerRadius(3, 0, 0, 3)
-  self.mathDesc:setCenter(col2, center1 + 1)
+  self.mathDesc:setCenter(0.5 * (col1 + col2), center1 + 1)
 
   self.mathSub1 = app.SubButton("func", 1)
   self.mathSub2 = app.SubButton("factor", 2)
@@ -222,15 +246,19 @@ function TransformGateControl:setMathMode(enabled)
 
   -- Math elements
   if enabled then
+    self.mathDrawing:show()
     self.funcReadout:show()
     self.factorReadout:show()
+    self.funcLabel:show()
     self.mathDesc:show()
     self.mathSub1:show()
     self.mathSub2:show()
     self.mathSub3:show()
   else
+    self.mathDrawing:hide()
     self.funcReadout:hide()
     self.factorReadout:hide()
+    self.funcLabel:hide()
     self.mathDesc:hide()
     self.mathSub1:hide()
     self.mathSub2:hide()
@@ -351,7 +379,7 @@ function TransformGateControl:encoder(change, shifted)
       local val = math.floor(self.funcReadout:getValueInUnits() + 0.5)
       local name = funcNames[val]
       if name then
-        self.mathDesc:setText("xf: " .. name)
+        self.funcLabel:setText(name)
       end
     end
   end
