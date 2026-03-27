@@ -6,6 +6,7 @@ local Encoder = require "Encoder"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
+local center3 = app.GRID5_CENTER3
 local center4 = app.GRID5_CENTER4
 local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
