@@ -73,7 +73,7 @@ namespace stolmine
           snprintf(buf, sizeof(buf), "%s:%s", funcLabels[lastFunc], sl);
         else
           snprintf(buf, sizeof(buf), "%s%d:%s", funcLabels[lastFunc], lastFactor, sl);
-        fb.text(WHITE, right - getTextWidth(buf) + 5, mWorldBottom + mHeight - 48, buf, 10);
+        fb.text(WHITE, right - getTextWidth(buf) + 3, mWorldBottom + mHeight - 48, buf, 10);
       }
 
       // Progress bar
