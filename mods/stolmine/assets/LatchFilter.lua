@@ -38,30 +38,39 @@ function LatchFilter:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.LatchFilter())
   connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
+  if channelCount > 1 then
+    local opR = self:addObject("opR", libstolmine.LatchFilter())
+    connect(self, "In2", opR, "In")
+    connect(opR, "Out", self, "Out2")
+  end
 
   -- V/Oct
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
   connect(tune, "Out", tuneRange, "In")
   connect(tune, "Out", op, "V/Oct")
+  if channelCount > 1 then connect(tune, "Out", self.objects.opR, "V/Oct") end
   self:addMonoBranch("tune", tune, "In", tune, "Out")
 
   -- Fundamental (semitone offset)
   local fundamental = self:addObject("fundamental", app.ParameterAdapter())
   fundamental:hardSet("Bias", 0.0)
   tie(op, "Fundamental", fundamental, "Out")
+  if channelCount > 1 then tie(self.objects.opR, "Fundamental", fundamental, "Out") end
   self:addMonoBranch("fundamental", fundamental, "In", fundamental, "Out")
 
   -- Resonance
   local resonance = self:addObject("resonance", app.ParameterAdapter())
   resonance:hardSet("Bias", 0.5)
   tie(op, "Resonance", resonance, "Out")
+  if channelCount > 1 then tie(self.objects.opR, "Resonance", resonance, "Out") end
   self:addMonoBranch("resonance", resonance, "In", resonance, "Out")
 
   -- Mode
   local mode = self:addObject("mode", app.ParameterAdapter())
   mode:hardSet("Bias", 0)
   tie(op, "Mode", mode, "Out")
+  if channelCount > 1 then tie(self.objects.opR, "Mode", mode, "Out") end
   self:addMonoBranch("mode", mode, "In", mode, "Out")
 end
 

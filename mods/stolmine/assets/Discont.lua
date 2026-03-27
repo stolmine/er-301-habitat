@@ -36,15 +36,22 @@ function Discont:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.Discont())
   connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
+  if channelCount > 1 then
+    local opR = self:addObject("opR", libstolmine.Discont())
+    connect(self, "In2", opR, "In")
+    connect(opR, "Out", self, "Out2")
+  end
 
   local mode = self:addObject("mode", app.ParameterAdapter())
   mode:hardSet("Bias", 0)
   tie(op, "Mode", mode, "Out")
+  if channelCount > 1 then tie(self.objects.opR, "Mode", mode, "Out") end
   self:addMonoBranch("mode", mode, "In", mode, "Out")
 
   local amount = self:addObject("amount", app.ParameterAdapter())
   amount:hardSet("Bias", 1.0)
   tie(op, "Amount", amount, "Out")
+  if channelCount > 1 then tie(self.objects.opR, "Amount", amount, "Out") end
   self:addMonoBranch("amount", amount, "In", amount, "Out")
 
   local mix = self:addObject("mix", app.ParameterAdapter())

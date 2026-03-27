@@ -187,7 +187,7 @@ function TransformGateControl:init(args)
   self.mathDesc:setSize(ply * 2, self.mathDesc.mHeight)
   self.mathDesc:setBorder(1)
   self.mathDesc:setCornerRadius(3, 0, 0, 3)
-  self.mathDesc:setCenter(0.5 * (col1 + col2), center1 + 1)
+  self.mathDesc:setCenter(0.5 * (col2 + col3), center1 + 1)
 
   self.mathSub1 = app.SubButton("func", 1)
   self.mathSub2 = app.SubButton("factor", 2)

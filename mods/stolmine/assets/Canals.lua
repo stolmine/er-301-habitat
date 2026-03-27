@@ -51,42 +51,53 @@ function Canals:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.Canals())
   connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
+  if channelCount > 1 then
+    local opR = self:addObject("opR", libstolmine.Canals())
+    connect(self, "In2", opR, "In")
+    connect(opR, "Out", self, "Out2")
+  end
 
   -- V/Oct
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
   connect(tune, "Out", tuneRange, "In")
   connect(tune, "Out", op, "V/Oct")
+  if channelCount > 1 then connect(tune, "Out", self.objects.opR, "V/Oct") end
   self:addMonoBranch("tune", tune, "In", tune, "Out")
 
   -- Fundamental
   local fundamental = self:addObject("fundamental", app.ParameterAdapter())
   fundamental:hardSet("Bias", 0.0)
   tie(op, "Fundamental", fundamental, "Out")
+  if channelCount > 1 then tie(self.objects.opR, "Fundamental", fundamental, "Out") end
   self:addMonoBranch("fundamental", fundamental, "In", fundamental, "Out")
 
   -- Span
   local span = self:addObject("span", app.ParameterAdapter())
   span:hardSet("Bias", 0.25)
   tie(op, "Span", span, "Out")
+  if channelCount > 1 then tie(self.objects.opR, "Span", span, "Out") end
   self:addMonoBranch("span", span, "In", span, "Out")
 
   -- Quality
   local quality = self:addObject("quality", app.ParameterAdapter())
   quality:hardSet("Bias", 0.0)
   tie(op, "Quality", quality, "Out")
+  if channelCount > 1 then tie(self.objects.opR, "Quality", quality, "Out") end
   self:addMonoBranch("quality", quality, "In", quality, "Out")
 
   -- Output
   local output = self:addObject("output", app.ParameterAdapter())
   output:hardSet("Bias", 0.0)
   tie(op, "Output", output, "Out")
+  if channelCount > 1 then tie(self.objects.opR, "Output", output, "Out") end
   self:addMonoBranch("output", output, "In", output, "Out")
 
   -- Mode
   local mode = self:addObject("mode", app.ParameterAdapter())
   mode:hardSet("Bias", 0)
   tie(op, "Mode", mode, "Out")
+  if channelCount > 1 then tie(self.objects.opR, "Mode", mode, "Out") end
   self:addMonoBranch("mode", mode, "In", mode, "Out")
 end
 

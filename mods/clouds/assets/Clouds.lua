@@ -5,6 +5,7 @@ local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
 local OptionControl = require "Unit.MenuControl.OptionControl"
+local ModeSelector = require "clouds.ModeSelector"
 local Encoder = require "Encoder"
 
 local modeMap = (function()
@@ -130,7 +131,7 @@ end
 
 function Clouds:onLoadViews()
   return {
-    mode = GainBias {
+    mode = ModeSelector {
       button        = "mode",
       description   = "Mode",
       branch        = self.branches.mode,
@@ -139,7 +140,8 @@ function Clouds:onLoadViews()
       biasMap       = modeMap,
       biasUnits     = app.unitNone,
       biasPrecision = 0,
-      initialBias   = 0
+      initialBias   = 0,
+      modeNames     = { [0] = "Gran", "Delay", "Spect" }
     },
     position = GainBias {
       button        = "pos",
