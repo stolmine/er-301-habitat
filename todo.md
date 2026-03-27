@@ -167,6 +167,7 @@ Refinements:
 - [ ] Q tuning: longer resonant decay with less gain boost. Want musical ping without volume spike.
 - [ ] Gain compensation at high Q: attenuate input or output proportional to resonance
 - [ ] Tune soft clip threshold and curve for best saturation character
+- [ ] Investigate how SDK builtin filters handle audio-rate modulation cleanly (parameter interpolation? per-sample coefficient update?)
 - [ ] Bench CPU cost on hardware; NEON vectorize if needed
 
 ## Filterbank
