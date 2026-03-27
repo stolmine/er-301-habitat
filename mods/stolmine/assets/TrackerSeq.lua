@@ -12,6 +12,22 @@ local Encoder = require "Encoder"
 local MenuHeader = require "Unit.MenuControl.Header"
 local Task = require "Unit.MenuControl.Task"
 
+local function intMap(min, max)
+  local map = app.LinearDialMap(min, max)
+  map:setSteps(4, 1, 0.25, 0.25)
+  map:setRounding(1)
+  return map
+end
+
+local seqLenMap = intMap(1, 64)
+local loopLenMap = intMap(0, 64)
+local scopeMap = (function()
+  local m = app.LinearDialMap(0, 3)
+  m:setSteps(1, 1, 1, 1)
+  m:setRounding(1)
+  return m
+end)()
+
 local TrackerSeq = Class {}
 TrackerSeq:include(Unit)
 
@@ -231,10 +247,44 @@ function TrackerSeq:onLoadViews()
       branch = self.branches.xform,
       funcParam = self.objects.xformFunc:getParameter("Bias"),
       factorParam = self.objects.xformFactor:getParameter("Bias")
+    },
+    -- Expanded view controls (visible when info ply is focused)
+    seqLen = GainBias {
+      button = "len",
+      description = "Seq Length",
+      branch = self.branches.seqLength,
+      gainbias = self.objects.seqLength,
+      range = self.objects.seqLength,
+      biasMap = seqLenMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 16
+    },
+    loopLen = GainBias {
+      button = "loop",
+      description = "Loop Length",
+      branch = self.branches.loopLength,
+      gainbias = self.objects.loopLength,
+      range = self.objects.loopLength,
+      biasMap = loopLenMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 0
+    },
+    xformScope = GainBias {
+      button = "scope",
+      description = "Xform Scope",
+      gainbias = self.objects.xformScope,
+      range = self.objects.xformScope,
+      biasMap = scopeMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 0
     }
   }, {
     expanded = { "steps", "info", "clock", "reset", "slew", "xform" },
-    collapsed = {}
+    collapsed = {},
+    info = { "info", "seqLen", "loopLen", "xformScope" }
   }
 end
 
