@@ -90,19 +90,16 @@ Refinements:
   - Clock/reset gate inputs, global slew, V/Oct scaled output (offset 1 = 1 octave)
   - Config: offset range (2Vpp/10Vpp), batch step lengths, randomize/clear offsets
 
-### Untested (built but not yet verified on hardware)
-  - Canals/Discont/LatchFilter true stereo (dual DSP instances, shared params)
-  - Clouds adaptive mode labelling (Gran/Delay/Spect via ModeSelector)
-  - Stratos defaults matched to Clouds reverb (amount=0.54, time=0.98, damping=0.6)
-  - Excel overview polish (spinner, right-justified text, title bar consistency)
-  - Old packages (0.1.0, 0.2.0) need to be cleaned from SD before installing 1.0.0
+### Verified on hardware
+  - [x] Canals/Discont/LatchFilter true stereo (dual DSP instances, shared params)
+  - [x] Clouds adaptive mode labelling (Gran/Delay/Spect via ModeSelector)
+  - [x] Stratos defaults matched to Clouds reverb (hardSet in Lua)
+  - [x] Excel overview: spinner, right-justified text, title bar consistency
 
 ### Excel Improvements
   - [ ] Pretty up Excel:
-    - Spinner graphic on top line of overview ply, left of step count/total
     - Animated fire circle in xform math sub-display
-    - Transform sub-display title bar consistent positioning across shift modes
-    - Right-justified text in overview ply
+    - Transform ply: function icons, gate activity indicator
   - [ ] Output scope visibility: graph compiler may not schedule objects with no chain inlets. Investigate od/units/GraphCompiler.cpp. Commotio has same issue.
   - [ ] Addressable variant: CV address input instead of clock for random access
   - [ ] Expanded variant: CV inputs for sequence length and loop length
