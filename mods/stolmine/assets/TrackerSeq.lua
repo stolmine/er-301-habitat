@@ -67,6 +67,29 @@ function TrackerSeq:setAllStepLengths(len)
   end
 end
 
+function TrackerSeq:randomizeOffsets()
+  local op = self.objects.op
+  local is10v = self.offsetRange10v ~= false
+  local range = is10v and 5 or 1
+  for i = 0, 63 do
+    op:setStepOffset(i, (math.random() * 2 - 1) * range)
+  end
+  -- Reload current step into edit buffer
+  if self.controls and self.controls.steps then
+    op:loadStep(self.controls.steps.currentStep or 0)
+  end
+end
+
+function TrackerSeq:clearAllOffsets()
+  local op = self.objects.op
+  for i = 0, 63 do
+    op:setStepOffset(i, 0.0)
+  end
+  if self.controls and self.controls.steps then
+    op:loadStep(self.controls.steps.currentStep or 0)
+  end
+end
+
 function TrackerSeq:onShowMenu(objects, branches)
   local controls = {}
 
@@ -104,11 +127,25 @@ function TrackerSeq:onShowMenu(objects, branches)
     end
   }
 
+  controls.offsetHeader = MenuHeader {
+    description = "Offsets"
+  }
+  controls.randomize = Task {
+    description = "Randomize all offsets",
+    task = function() self:randomizeOffsets() end
+  }
+  controls.clearOffsets = Task {
+    description = "Clear all offsets",
+    task = function() self:clearAllOffsets() end
+  }
+
   return controls, {
     "stepLenHeader",
     "stepLen1", "stepLen2", "stepLen4",
     "rangeHeader",
-    "range10v", "range2v"
+    "range10v", "range2v",
+    "offsetHeader",
+    "randomize", "clearOffsets"
   }
 end
 
