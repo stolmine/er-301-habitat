@@ -185,6 +185,10 @@ function TransformGateControl:shiftPressed()
   return true
 end
 
+function TransformGateControl:shiftReleased()
+  return true
+end
+
 function TransformGateControl:subReleased(i, shifted)
   if shifted then return false end
 

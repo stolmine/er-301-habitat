@@ -14,7 +14,8 @@ namespace stolmine
   static inline float randFloat()
   {
     sRandState = sRandState * 1664525u + 1013904223u;
-    return (float)(int32_t)(sRandState >> 1) / (float)0x40000000; // -1 to +1
+    // Map full uint32 range to [-1, +1]
+    return (float)((int32_t)sRandState) / (float)0x7FFFFFFF;
   }
 
   struct TrackerSeq::Internal
