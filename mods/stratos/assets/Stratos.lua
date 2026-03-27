@@ -31,13 +31,13 @@ function Stratos:onLoadGraph(channelCount)
 
   -- Amount
   local amount = self:addObject("amount", app.ParameterAdapter())
-  amount:hardSet("Bias", 0.5)
+  amount:hardSet("Bias", 0.54)
   tie(op, "Amount", amount, "Out")
   self:addMonoBranch("amount", amount, "In", amount, "Out")
 
   -- Time
   local time = self:addObject("time", app.ParameterAdapter())
-  time:hardSet("Bias", 0.5)
+  time:hardSet("Bias", 0.98)
   tie(op, "Time", time, "Out")
   self:addMonoBranch("time", time, "In", time, "Out")
 
@@ -49,7 +49,7 @@ function Stratos:onLoadGraph(channelCount)
 
   -- Damping
   local damping = self:addObject("damping", app.ParameterAdapter())
-  damping:hardSet("Bias", 0.5)
+  damping:hardSet("Bias", 0.6)
   tie(op, "Damping", damping, "Out")
   self:addMonoBranch("damping", damping, "In", damping, "Out")
 
@@ -70,7 +70,7 @@ function Stratos:onLoadViews()
       range         = self.objects.amount,
       biasMap       = Encoder.getMap("[0,1]"),
       biasPrecision = 2,
-      initialBias   = 0.5
+      initialBias   = 0.54
     },
     time = GainBias {
       button        = "time",
@@ -80,7 +80,7 @@ function Stratos:onLoadViews()
       range         = self.objects.time,
       biasMap       = Encoder.getMap("[0,1]"),
       biasPrecision = 2,
-      initialBias   = 0.5
+      initialBias   = 0.98
     },
     diffusion = GainBias {
       button        = "diff",
@@ -100,7 +100,7 @@ function Stratos:onLoadViews()
       range         = self.objects.damping,
       biasMap       = Encoder.getMap("[0,1]"),
       biasPrecision = 2,
-      initialBias   = 0.5
+      initialBias   = 0.6
     },
     gain = GainBias {
       button        = "gain",

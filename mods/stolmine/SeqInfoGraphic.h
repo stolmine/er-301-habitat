@@ -95,13 +95,13 @@ namespace stolmine
       }
     }
 
-    // Simple text width estimation (size 10 font ~6px per char)
+    // Text width estimation (size 10 font ~6px per char + 6px right margin)
     static int getTextWidth(const char *text, int size)
     {
       int len = 0;
       while (text[len])
         len++;
-      return len * (size * 6 / 10);
+      return len * (size * 6 / 10) + 6;
     }
 #endif
 
