@@ -1,11 +1,12 @@
-// Canals — linked resonant filter (Three Sisters clone)
+// Canals - linked resonant filter (Three Sisters inspired)
+// Custom SVF core with tanh-saturating integrators
 
 #include "Canals.h"
+#include "SistersSvf.h"
 #include <od/config.h>
 #include <hal/ops.h>
 #include <string.h>
 
-#include "stmlib/dsp/filter.h"
 #include "stmlib/dsp/units.h"
 
 namespace stolmine
@@ -15,17 +16,14 @@ namespace stolmine
 
   struct Canals::Internal
   {
-    stmlib::Svf low1, low2;
-    stmlib::Svf ctr1, ctr2;
-    stmlib::Svf hi1, hi2;
+    SistersSvf low1, low2;
+    SistersSvf ctr1, ctr2;
+    SistersSvf hi1, hi2;
 
-    // Heap-allocated work buffers (avoid stack overflow)
     float lowOut[kMaxFrameLength];
     float ctrOut[kMaxFrameLength];
     float hiOut[kMaxFrameLength];
-    float stage1[kMaxFrameLength];
 
-    // Cached params for change detection
     float prevFundamental;
     float prevSpan;
     float prevQuality;
@@ -34,9 +32,9 @@ namespace stolmine
 
     void Init()
     {
-      low1.Init(); low2.Init();
-      ctr1.Init(); ctr2.Init();
-      hi1.Init();  hi2.Init();
+      low1.reset(); low2.reset();
+      ctr1.reset(); ctr2.reset();
+      hi1.reset();  hi2.reset();
       prevFundamental = -999.0f;
       prevSpan = -1.0f;
       prevQuality = -999.0f;
@@ -82,66 +80,60 @@ namespace stolmine
     float *out = mOut.buffer();
 
     float fundamental = mFundamental.value();
-    float span = mSpan.value();
-    if (span < 0.0f) span = 0.0f;
-    if (span > 1.0f) span = 1.0f;
-
-    float quality = mQuality.value();
-    if (quality < -1.0f) quality = -1.0f;
-    if (quality > 1.0f) quality = 1.0f;
-
-    float outputPos = mOutput.value();
-    if (outputPos < 0.0f) outputPos = 0.0f;
-    if (outputPos > 1.0f) outputPos = 1.0f;
-
-    int mode = (int)(mMode.value() + 0.5f);
-    if (mode < 0) mode = 0;
-    if (mode > 1) mode = 1;
+    float span = CLAMP(0.0f, 1.0f, mSpan.value());
+    float quality = CLAMP(-1.0f, 1.0f, mQuality.value());
+    float outputPos = CLAMP(0.0f, 3.0f, mOutput.value());
+    int mode = CLAMP(0, 1, (int)(mMode.value() + 0.5f));
 
     float v = voct[0];
 
-    // Reconfigure SVFs only when parameters change
+    // Reconfigure SVFs when parameters change
     if (fundamental != s.prevFundamental || span != s.prevSpan ||
         quality != s.prevQuality || mode != s.prevMode ||
         (v > s.prevVoct + 0.001f || v < s.prevVoct - 0.001f))
     {
+      // Q mapping: 0.5 at quality=0, up to 100 at quality=1
+      // Cubic curve for gentle low end, aggressive high end
       float q = 0.5f;
-      if (quality >= 0.0f) {
-        // Exponential curve: gentle resonance buildup, self-osc only at very end
-        // q=0.5 at 0, ~2 at 0.5, ~10 at 0.8, ~100 at 0.95, ~500 at 1.0
-        float t = quality * quality * quality; // cubic for gentle low end
-        q = 0.5f + t * 500.0f;
+      if (quality >= 0.0f)
+      {
+        float t = quality * quality * quality;
+        q = 0.5f + t * 99.5f;
       }
 
       float totalSemitones = v * 12.0f * 5.0f + fundamental;
       float freqHz = 261.63f * stmlib::SemitonesToRatio(totalSemitones);
-      if (freqHz < 20.0f) freqHz = 20.0f;
-      if (freqHz > 20000.0f) freqHz = 20000.0f;
+      freqHz = CLAMP(20.0f, 20000.0f, freqHz);
 
       float spanSemitones = span * 48.0f;
-      float lowHz  = freqHz * stmlib::SemitonesToRatio(-spanSemitones);
-      float highHz = freqHz * stmlib::SemitonesToRatio(+spanSemitones);
-      if (lowHz < 20.0f) lowHz = 20.0f;
-      if (highHz > 20000.0f) highHz = 20000.0f;
+      float lowHz = CLAMP(20.0f, 20000.0f,
+                          freqHz * stmlib::SemitonesToRatio(-spanSemitones));
+      float highHz = CLAMP(20.0f, 20000.0f,
+                           freqHz * stmlib::SemitonesToRatio(+spanSemitones));
 
-      float lowF  = clampNorm(lowHz);
+      float lowF = clampNorm(lowHz);
       float highF = clampNorm(highHz);
-      float ctrF  = clampNorm(freqHz);
+      float ctrF = clampNorm(freqHz);
 
-      if (mode == 0) {
-        s.low1.set_f_q<stmlib::FREQUENCY_DIRTY>(lowF, q);
-        s.low2.set_f_q<stmlib::FREQUENCY_DIRTY>(lowF, q);
-        s.ctr1.set_f_q<stmlib::FREQUENCY_DIRTY>(lowF, q);
-        s.ctr2.set_f_q<stmlib::FREQUENCY_DIRTY>(highF, q);
-        s.hi1.set_f_q<stmlib::FREQUENCY_DIRTY>(highF, q);
-        s.hi2.set_f_q<stmlib::FREQUENCY_DIRTY>(highF, q);
-      } else {
-        s.low1.set_f_q<stmlib::FREQUENCY_DIRTY>(lowF, q);
-        s.low2.set_f_q<stmlib::FREQUENCY_DIRTY>(lowF, q);
-        s.ctr1.set_f_q<stmlib::FREQUENCY_DIRTY>(ctrF, q);
-        s.ctr2.set_f_q<stmlib::FREQUENCY_DIRTY>(ctrF, q);
-        s.hi1.set_f_q<stmlib::FREQUENCY_DIRTY>(highF, q);
-        s.hi2.set_f_q<stmlib::FREQUENCY_DIRTY>(highF, q);
+      if (mode == 0)
+      {
+        // Crossover: LOW at lowF, CENTRE spans lowF->highF, HIGH at highF
+        s.low1.setFreqQ(lowF, q);
+        s.low2.setFreqQ(lowF, q);
+        s.ctr1.setFreqQ(lowF, q);
+        s.ctr2.setFreqQ(highF, q);
+        s.hi1.setFreqQ(highF, q);
+        s.hi2.setFreqQ(highF, q);
+      }
+      else
+      {
+        // Formant: each at its own frequency
+        s.low1.setFreqQ(lowF, q);
+        s.low2.setFreqQ(lowF, q);
+        s.ctr1.setFreqQ(ctrF, q);
+        s.ctr2.setFreqQ(ctrF, q);
+        s.hi1.setFreqQ(highF, q);
+        s.hi2.setFreqQ(highF, q);
       }
 
       s.prevFundamental = fundamental;
@@ -153,48 +145,80 @@ namespace stolmine
 
     float antiRes = (quality < 0.0f) ? -quality : 0.0f;
 
-    // Process all three filter blocks
     float *lowOut = s.lowOut;
     float *ctrOut = s.ctrOut;
     float *hiOut = s.hiOut;
-    float *stage1 = s.stage1;
 
-    if (mode == 0) {
-      s.low1.Process<stmlib::FILTER_MODE_LOW_PASS>(in, stage1, FRAMELENGTH);
-      s.low2.Process<stmlib::FILTER_MODE_LOW_PASS>(stage1, lowOut, FRAMELENGTH);
-      s.ctr1.Process<stmlib::FILTER_MODE_HIGH_PASS>(in, stage1, FRAMELENGTH);
-      s.ctr2.Process<stmlib::FILTER_MODE_LOW_PASS>(stage1, ctrOut, FRAMELENGTH);
-      s.hi1.Process<stmlib::FILTER_MODE_HIGH_PASS>(in, stage1, FRAMELENGTH);
-      s.hi2.Process<stmlib::FILTER_MODE_HIGH_PASS>(stage1, hiOut, FRAMELENGTH);
-    } else {
-      s.low1.Process<stmlib::FILTER_MODE_LOW_PASS>(in, stage1, FRAMELENGTH);
-      s.low2.Process<stmlib::FILTER_MODE_HIGH_PASS>(stage1, lowOut, FRAMELENGTH);
-      s.ctr1.Process<stmlib::FILTER_MODE_HIGH_PASS>(in, stage1, FRAMELENGTH);
-      s.ctr2.Process<stmlib::FILTER_MODE_LOW_PASS>(stage1, ctrOut, FRAMELENGTH);
-      s.hi1.Process<stmlib::FILTER_MODE_LOW_PASS>(in, stage1, FRAMELENGTH);
-      s.hi2.Process<stmlib::FILTER_MODE_HIGH_PASS>(stage1, hiOut, FRAMELENGTH);
-    }
+    // Per-sample processing with cascaded SVFs
+    for (int i = 0; i < FRAMELENGTH; i++)
+    {
+      float x = in[i];
 
-    // Anti-resonance
-    if (antiRes > 0.0f) {
-      for (int i = 0; i < FRAMELENGTH; i++) {
-        float dry = in[i];
-        lowOut[i] = lowOut[i] * (1.0f - antiRes) + (dry - lowOut[i]) * antiRes;
-        ctrOut[i] = ctrOut[i] * (1.0f - antiRes) + (dry - ctrOut[i]) * antiRes;
-        hiOut[i]  = hiOut[i]  * (1.0f - antiRes) + (dry - hiOut[i])  * antiRes;
+      if (mode == 0)
+      {
+        // Crossover: LP->LP, HP->LP, HP->HP
+        auto lo1 = s.low1.process(x);
+        auto lo2 = s.low2.process(lo1.lp);
+
+        auto ct1 = s.ctr1.process(x);
+        auto ct2 = s.ctr2.process(ct1.hp);
+
+        auto hi1 = s.hi1.process(x);
+        auto hi2 = s.hi2.process(hi1.hp);
+
+        lowOut[i] = lo2.lp;
+        ctrOut[i] = ct2.lp;
+        hiOut[i] = hi2.hp;
+      }
+      else
+      {
+        // Formant: all bandpass (LP->HP, HP->LP, LP->HP)
+        auto lo1 = s.low1.process(x);
+        auto lo2 = s.low2.process(lo1.lp);
+
+        auto ct1 = s.ctr1.process(x);
+        auto ct2 = s.ctr2.process(ct1.hp);
+
+        auto hi1 = s.hi1.process(x);
+        auto hi2 = s.hi2.process(hi1.lp);
+
+        lowOut[i] = lo2.hp;
+        ctrOut[i] = ct2.lp;
+        hiOut[i] = hi2.hp;
       }
     }
 
-    // Output crossfade
-    float pos = outputPos * 3.0f;
+    // Anti-resonance: notch by mixing complementary signal
+    if (antiRes > 0.0f)
+    {
+      for (int i = 0; i < FRAMELENGTH; i++)
+      {
+        float dry = in[i];
+        lowOut[i] = lowOut[i] * (1.0f - antiRes) + (dry - lowOut[i]) * antiRes;
+        ctrOut[i] = ctrOut[i] * (1.0f - antiRes) + (dry - ctrOut[i]) * antiRes;
+        hiOut[i] = hiOut[i] * (1.0f - antiRes) + (dry - hiOut[i]) * antiRes;
+      }
+    }
+
+    // Output crossfade: LOW -> CENTRE -> HIGH -> ALL
+    float pos = outputPos;
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float wL, wC, wH;
-      if (pos <= 1.0f) {
-        wL = 1.0f - pos; wC = pos; wH = 0.0f;
-      } else if (pos <= 2.0f) {
-        wL = 0.0f; wC = 2.0f - pos; wH = pos - 1.0f;
-      } else {
+      if (pos <= 1.0f)
+      {
+        wL = 1.0f - pos;
+        wC = pos;
+        wH = 0.0f;
+      }
+      else if (pos <= 2.0f)
+      {
+        wL = 0.0f;
+        wC = 2.0f - pos;
+        wH = pos - 1.0f;
+      }
+      else
+      {
         float t = pos - 2.0f;
         wL = t * 0.333f;
         wC = t * 0.333f;
