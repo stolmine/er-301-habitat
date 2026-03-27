@@ -198,6 +198,10 @@ Refinements:
 - [x] Crossfade control for main/aux outputs on mono and stereo chains
 - [ ] NEON optimization check for sympathetic string and FM modes (currently only modal is vectorized)
 
+## V/Oct Scaling Audit
+
+- [ ] Check V/Oct scaling consistency across all Mutable ports (Plaits, Rings, Clouds, Warps, Grids, Commotio)
+
 ## NEON Optimization Audit
 
 - [ ] Repo-wide NEON check — identify hot DSP paths without SIMD and assess vectorization opportunities
