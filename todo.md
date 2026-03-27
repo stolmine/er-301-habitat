@@ -90,6 +90,13 @@ Refinements:
   - Clock/reset gate inputs, global slew, V/Oct scaled output (offset 1 = 1 octave)
   - Config: offset range (2Vpp/10Vpp), batch step lengths, randomize/clear offsets
 
+### Untested (built but not yet verified on hardware)
+  - Canals/Discont/LatchFilter true stereo (dual DSP instances, shared params)
+  - Clouds adaptive mode labelling (Gran/Delay/Spect via ModeSelector)
+  - Stratos defaults matched to Clouds reverb (amount=0.54, time=0.98, damping=0.6)
+  - Excel overview polish (spinner, right-justified text, title bar consistency)
+  - Old packages (0.1.0, 0.2.0) need to be cleaned from SD before installing 1.0.0
+
 ### Excel Improvements
   - [ ] Pretty up Excel:
     - Spinner graphic on top line of overview ply, left of step count/total
