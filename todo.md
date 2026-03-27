@@ -202,7 +202,7 @@ Refinements:
 ## V/Oct Scaling Audit
 
 - [x] Check V/Oct scaling: fixed * 12 to * 120 (FULLSCALE_IN_VOLTS = 10) for Plaits, Rings, Canals, LatchFilter
-- [ ] Plaits V/Oct crash: * 120 scaling causes crash on engine switch (even with note clamped to 0-127). Reverted to * 12. Rings handles * 120 fine. Need to investigate why Plaits engines are sensitive to note range during transitions.
+- [ ] Plaits hard crash on engine switch: fully reverted to last working source, binary size matches, still crashes. Test on vanilla firmware to isolate: if crashes on both FWs, issue is internal to Plaits unit. If TXo only, firmware interaction. V/Oct scaling reverted to * 12.
 
 ## NEON Optimization Audit
 
