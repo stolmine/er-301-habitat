@@ -91,19 +91,11 @@ Refinements:
 
 ### Excel Improvements
   - [ ] Output scope visibility: OutputScope shows "no signal" despite working output. Commotio has same issue. connect() correctly calls pUnit:setOutput(). Likely cause: graph compiler may not schedule objects whose inlets aren't connected to the chain signal path, so outlet buffers aren't probed. Need to investigate od/units/GraphCompiler.cpp
-  - [ ] Randomize all offsets (config menu item)
-  - [ ] Math transform gate (ply 6):
-    - Gate input triggers transform application (for automation)
-    - Shift on gate control toggles sub-display between gate view and math params
-    - Math sub-display (3 sub-buttons): func(1), factor(2), fire(3)
-      - Func: add, subtract, multiply, divide, mod, reverse, rotate, invert, random
-      - Factor: integer only
-      - Fire: manual one-shot application
-    - Transform scope selector on overview sub-display (sub-button 3): offset, length, deviation, all
-    - Config menu: destructive/non-destructive toggle
-      - Destructive: permanently modifies step arrays
-      - Non-destructive: snapshot before first transform, "undo last" restores from snapshot
-    - Overview ply free row: show active transform state (e.g. "+3:ofs", "rev:all")
+  - [x] Randomize/clear all offsets (config menu)
+  - [x] Math transform gate (ply 6): func/factor/fire, scope selector, snapshot save/restore
+  - [ ] Transform ply graphic: draw simple function icons, flash on gate
+  - [ ] Reuse SDK gate fire graphic on transform sub-display fire button
+  - [ ] Transform ply: gate activity indicator (comparator state viz)
   - [ ] Addressable variant: CV address input instead of clock for random access
   - [ ] Expanded variant: CV inputs for sequence length and loop length
   - [ ] Probability variant: per-step probability of firing as separate unit

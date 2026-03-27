@@ -170,6 +170,21 @@ function TransformGateControl:spotReleased(spot, shifted)
   return true
 end
 
+function TransformGateControl:onCursorEnter(spot)
+  Base.onCursorEnter(self, spot)
+  self:grabFocus("shiftPressed", "shiftReleased")
+end
+
+function TransformGateControl:onCursorLeave(spot)
+  self:releaseFocus("shiftPressed", "shiftReleased")
+  Base.onCursorLeave(self, spot)
+end
+
+function TransformGateControl:shiftPressed()
+  self:setMathMode(not self.mathMode)
+  return true
+end
+
 function TransformGateControl:subReleased(i, shifted)
   if shifted then return false end
 
