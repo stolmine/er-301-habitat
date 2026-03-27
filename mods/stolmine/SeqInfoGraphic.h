@@ -52,7 +52,7 @@ namespace stolmine
         snprintf(buf, sizeof(buf), "lp:%d", loopLen);
       else
         snprintf(buf, sizeof(buf), "lp:off");
-      fb.text(GRAY7, right - getTextWidth(buf), mWorldBottom + mHeight - 24, buf, 10);
+      fb.text(GRAY7, right - getTextWidth(buf) + 5, mWorldBottom + mHeight - 24, buf, 10);
 
       // Row 3: total tick length
       int totalTicks = mpSeq->getTotalTicks();
