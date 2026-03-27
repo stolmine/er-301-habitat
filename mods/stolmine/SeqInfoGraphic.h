@@ -45,19 +45,19 @@ namespace stolmine
         fb.line(WHITE, sx, sy, sx + dx, sy + dy);
       }
       snprintf(buf, sizeof(buf), "%02d/%02d", playhead + 1, seqLen);
-      fb.text(WHITE, right - getTextWidth(buf, 10), mWorldBottom + mHeight - 12, buf, 10);
+      fb.text(WHITE, right - getTextWidth(buf), mWorldBottom + mHeight - 12, buf, 10);
 
       // Row 2: loop indicator
       if (loopLen > 0)
         snprintf(buf, sizeof(buf), "lp:%d", loopLen);
       else
         snprintf(buf, sizeof(buf), "lp:off");
-      fb.text(GRAY7, right - getTextWidth(buf, 10), mWorldBottom + mHeight - 24, buf, 10);
+      fb.text(GRAY7, right - getTextWidth(buf), mWorldBottom + mHeight - 24, buf, 10);
 
       // Row 3: total tick length
       int totalTicks = mpSeq->getTotalTicks();
       snprintf(buf, sizeof(buf), "%dt", totalTicks);
-      fb.text(GRAY7, right - getTextWidth(buf, 10), mWorldBottom + mHeight - 36, buf, 10);
+      fb.text(GRAY7, right - getTextWidth(buf), mWorldBottom + mHeight - 36, buf, 10);
 
       // Row 4: transform state
       int lastFunc = mpSeq->getLastTransformFunc();
@@ -73,7 +73,7 @@ namespace stolmine
           snprintf(buf, sizeof(buf), "%s:%s", funcLabels[lastFunc], sl);
         else
           snprintf(buf, sizeof(buf), "%s%d:%s", funcLabels[lastFunc], lastFactor, sl);
-        fb.text(WHITE, right - getTextWidth(buf, 10), mWorldBottom + mHeight - 48, buf, 10);
+        fb.text(WHITE, right - getTextWidth(buf), mWorldBottom + mHeight - 48, buf, 10);
       }
 
       // Progress bar
@@ -95,13 +95,13 @@ namespace stolmine
       }
     }
 
-    // Text width estimation (size 10 font ~6px per char + 6px right margin)
-    static int getTextWidth(const char *text, int size)
+    // Text width estimation for size-10 font (~5px per char)
+    static int getTextWidth(const char *text)
     {
       int len = 0;
       while (text[len])
         len++;
-      return len * (size * 6 / 10) + 6;
+      return len * 5;
     }
 #endif
 
