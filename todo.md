@@ -201,7 +201,8 @@ Refinements:
 
 ## V/Oct Scaling Audit
 
-- [ ] Check V/Oct scaling consistency across all Mutable ports (Plaits, Rings, Clouds, Warps, Grids, Commotio)
+- [x] Check V/Oct scaling: fixed * 12 to * 120 (FULLSCALE_IN_VOLTS = 10) for Plaits, Rings, Canals, LatchFilter
+- [ ] Plaits crash on trig mode / mode switching: investigate. Note clamped to 0-127, chunk forced to kBlockSize. May be pre-existing.
 
 ## NEON Optimization Audit
 
