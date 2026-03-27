@@ -43,6 +43,7 @@ function TransformGateControl:init(args)
   self:setClassName("TransformGateControl")
 
   self.seq = seq
+  self.comparator = args.comparator
   self.mathMode = false
 
   -- Main graphic
@@ -59,16 +60,44 @@ function TransformGateControl:init(args)
   self.subGraphic = app.Graphic(0, 0, 128, 64)
 
   -- Gate mode elements
-  self.gateDesc = app.Label("Transform Gate", 10)
+  local line4 = app.GRID5_LINE4
+  local center3 = app.GRID5_CENTER3
+
+  self.gateScope = app.MiniScope(col1 - 20, line4, 40, 45)
+  self.gateScope:setBorder(1)
+  self.gateScope:setCornerRadius(3, 3, 3, 3)
+  if args.branch then
+    self.gateScope:watchOutlet(args.branch:getMonitoringOutput(1))
+  end
+  self.subGraphic:addChild(self.gateScope)
+
+  local threshParam = args.comparator:getParameter("Threshold")
+  threshParam:enableSerialization()
+  self.threshReadout = app.Readout(0, 0, ply, 10)
+  self.threshReadout:setParameter(threshParam)
+  self.threshReadout:setAttributes(app.unitNone, Encoder.getMap("default"))
+  self.threshReadout:setCenter(col2, center4)
+  self.subGraphic:addChild(self.threshReadout)
+
+  self.gateDesc = app.Label("Xform Gate", 10)
   self.gateDesc:fitToText(3)
-  self.gateDesc:setSize(ply * 3, self.gateDesc.mHeight)
+  self.gateDesc:setSize(ply * 2, self.gateDesc.mHeight)
   self.gateDesc:setBorder(1)
   self.gateDesc:setCornerRadius(3, 0, 0, 3)
-  self.gateDesc:setCenter(col2, center1 + 1)
+  self.gateDesc:setCenter(0.5 * (col2 + col3), center1 + 1)
   self.subGraphic:addChild(self.gateDesc)
 
-  self.gateSub1 = app.SubButton("shift:math", 1)
+  self.gateOrLabel = app.Label("or", 10)
+  self.gateOrLabel:fitToText(0)
+  self.gateOrLabel:setCenter(col3, center3 + 1)
+  self.subGraphic:addChild(self.gateOrLabel)
+
+  self.gateSub1 = app.SubButton("input", 1)
+  self.gateSub2 = app.SubButton("thresh", 2)
+  self.gateSub3 = app.SubButton("fire", 3)
   self.subGraphic:addChild(self.gateSub1)
+  self.subGraphic:addChild(self.gateSub2)
+  self.subGraphic:addChild(self.gateSub3)
 
   -- Math mode elements
   self.funcReadout = (function()
@@ -118,11 +147,21 @@ function TransformGateControl:setMathMode(enabled)
 
   -- Gate elements
   if enabled then
+    self.gateScope:hide()
+    self.threshReadout:hide()
     self.gateDesc:hide()
+    self.gateOrLabel:hide()
     self.gateSub1:hide()
+    self.gateSub2:hide()
+    self.gateSub3:hide()
   else
+    self.gateScope:show()
+    self.threshReadout:show()
     self.gateDesc:show()
+    self.gateOrLabel:show()
     self.gateSub1:show()
+    self.gateSub2:show()
+    self.gateSub3:show()
   end
 
   -- Math elements
@@ -211,8 +250,18 @@ function TransformGateControl:subReleased(i, shifted)
       self.seq:fireTransform()
     end
   else
-    if i == 1 then
-      self:setMathMode(true)
+    if i == 2 then
+      -- Threshold readout
+      if self:hasFocus("encoder") then
+        self:setFocusedReadout(self.threshReadout)
+      else
+        self:focus()
+        self:setFocusedReadout(self.threshReadout)
+      end
+    elseif i == 3 then
+      -- Fire gate manually
+      self.comparator:simulateRisingEdge()
+      self.comparator:simulateFallingEdge()
     end
   end
   return true

@@ -227,6 +227,8 @@ function TrackerSeq:onLoadViews()
       button = "xform",
       description = "Transform",
       seq = self.objects.op,
+      comparator = self.objects.xformGate,
+      branch = self.branches.xform,
       funcParam = self.objects.xformFunc:getParameter("Bias"),
       factorParam = self.objects.xformFactor:getParameter("Bias")
     }
