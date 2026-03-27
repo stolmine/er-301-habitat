@@ -86,7 +86,7 @@ function SeqInfoControl:init(args)
     g:setSize(ply * 3, g.mHeight)
     g:setBorder(1)
     g:setCornerRadius(3, 0, 0, 3)
-    g:setCenter(col1 + ply / 2, center1 + 1)
+    g:setCenter(col2, center1 + 1)
     return g
   end)()
 
