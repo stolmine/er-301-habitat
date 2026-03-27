@@ -50,10 +50,15 @@ namespace stolmine
       s2 = 0.0f;
     }
 
-    // x/(1+|x|) - smooth, cheap, no branches with fabsf
+    // Scaled soft saturation: allows integrator states up to ~4.0
+    // before compression, enabling self-oscillation while still
+    // preventing the runaway that causes digital clipping
     static inline float fastTanh(float x)
     {
-      return x / (1.0f + fabsf(x));
+      const float scale = 4.0f;
+      const float inv = 1.0f / scale;
+      float xs = x * inv;
+      return scale * xs / (1.0f + fabsf(xs));
     }
   };
 
