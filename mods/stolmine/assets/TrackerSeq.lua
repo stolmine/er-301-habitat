@@ -7,6 +7,7 @@ local Gate = require "Unit.ViewControl.Gate"
 local StepListControl = require "stolmine.StepListControl"
 local SeqInfoControl = require "stolmine.SeqInfoControl"
 local TransformGateControl = require "stolmine.TransformGateControl"
+local ModeSelector = require "stolmine.ModeSelector"
 local Encoder = require "Encoder"
 
 local MenuHeader = require "Unit.MenuControl.Header"
@@ -272,7 +273,7 @@ function TrackerSeq:onLoadViews()
       biasPrecision = 0,
       initialBias = 0
     },
-    xformScope = GainBias {
+    xformScope = ModeSelector {
       button = "scope",
       description = "Xform Scope",
       branch = self.branches.xformScope,
@@ -281,7 +282,8 @@ function TrackerSeq:onLoadViews()
       biasMap = scopeMap,
       biasUnits = app.unitNone,
       biasPrecision = 0,
-      initialBias = 0
+      initialBias = 0,
+      modeNames = { [0] = "ofst", "len", "dev", "all" }
     }
   }, {
     expanded = { "steps", "info", "clock", "reset", "slew", "xform" },
