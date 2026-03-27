@@ -53,6 +53,7 @@ namespace stolmine
     addParameter(mTransformFunc);
     addParameter(mTransformFactor);
     addParameter(mTransformScope);
+    addParameter(mOffsetRange);
     addParameter(mEditOffset);
     addParameter(mEditLength);
     addParameter(mEditDeviation);
@@ -290,13 +291,24 @@ namespace stolmine
     int seqLen = mCachedSeqLength;
 
     if (scope == SCOPE_OFFSET || scope == SCOPE_ALL)
+    {
       transformFloatArray(s.offset, seqLen, func, factor);
+      // Clamp offsets to Vpp range
+      float range = mOffsetRange.value();
+      for (int i = 0; i < seqLen; i++)
+        s.offset[i] = CLAMP(-range, range, s.offset[i]);
+    }
 
     if (scope == SCOPE_LENGTH || scope == SCOPE_ALL)
       transformIntArray(s.length, seqLen, func, factor);
 
     if (scope == SCOPE_DEVIATION || scope == SCOPE_ALL)
+    {
       transformFloatArray(s.deviation, seqLen, func, factor);
+      // Clamp deviation to [0,1]
+      for (int i = 0; i < seqLen; i++)
+        s.deviation[i] = CLAMP(0.0f, 1.0f, s.deviation[i]);
+    }
 
     mLastTransformFunc = func;
     mLastTransformFactor = factor;

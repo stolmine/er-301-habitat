@@ -45,7 +45,7 @@ function TransformGateControl:init(args)
   self.seq = seq
   self.mathMode = false
 
-  -- Main graphic: simple label
+  -- Main graphic
   local graphic = app.Graphic(0, 0, ply, 64)
   local label = app.Label("xform", 10)
   label:setCenter(ply / 2, 32)
@@ -55,20 +55,22 @@ function TransformGateControl:init(args)
 
   self:addSpotDescriptor { center = 0.5 * ply }
 
-  -- Gate sub-display
-  self.gateSubGraphic = app.Graphic(0, 0, 128, 64)
-  local gateDesc = app.Label("Transform Gate", 10)
-  gateDesc:fitToText(3)
-  gateDesc:setSize(ply * 3, gateDesc.mHeight)
-  gateDesc:setBorder(1)
-  gateDesc:setCornerRadius(3, 0, 0, 3)
-  gateDesc:setCenter(col2, center1 + 1)
-  self.gateSubGraphic:addChild(gateDesc)
-  self.gateSubGraphic:addChild(app.SubButton("shift:math", 1))
+  -- Single sub-graphic with both modes as show/hide groups
+  self.subGraphic = app.Graphic(0, 0, 128, 64)
 
-  -- Math sub-display
-  self.mathSubGraphic = app.Graphic(0, 0, 128, 64)
+  -- Gate mode elements
+  self.gateDesc = app.Label("Transform Gate", 10)
+  self.gateDesc:fitToText(3)
+  self.gateDesc:setSize(ply * 3, self.gateDesc.mHeight)
+  self.gateDesc:setBorder(1)
+  self.gateDesc:setCornerRadius(3, 0, 0, 3)
+  self.gateDesc:setCenter(col2, center1 + 1)
+  self.subGraphic:addChild(self.gateDesc)
 
+  self.gateSub1 = app.SubButton("shift:math", 1)
+  self.subGraphic:addChild(self.gateSub1)
+
+  -- Math mode elements
   self.funcReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
     local param = args.funcParam
@@ -89,25 +91,59 @@ function TransformGateControl:init(args)
     return g
   end)()
 
-  self.mathDesc = (function()
-    local g = app.Label("Transform", 10)
-    g:fitToText(3)
-    g:setSize(ply * 3, g.mHeight)
-    g:setBorder(1)
-    g:setCornerRadius(3, 0, 0, 3)
-    g:setCenter(col2, center1 + 1)
-    return g
-  end)()
+  self.mathDesc = app.Label("Transform", 10)
+  self.mathDesc:fitToText(3)
+  self.mathDesc:setSize(ply * 3, self.mathDesc.mHeight)
+  self.mathDesc:setBorder(1)
+  self.mathDesc:setCornerRadius(3, 0, 0, 3)
+  self.mathDesc:setCenter(col2, center1 + 1)
 
-  self.mathSubGraphic:addChild(self.funcReadout)
-  self.mathSubGraphic:addChild(self.factorReadout)
-  self.mathSubGraphic:addChild(self.mathDesc)
-  self.mathSubGraphic:addChild(app.SubButton("func", 1))
-  self.mathSubGraphic:addChild(app.SubButton("factor", 2))
-  self.mathSubGraphic:addChild(app.SubButton("fire!", 3))
+  self.mathSub1 = app.SubButton("func", 1)
+  self.mathSub2 = app.SubButton("factor", 2)
+  self.mathSub3 = app.SubButton("fire!", 3)
+
+  self.subGraphic:addChild(self.funcReadout)
+  self.subGraphic:addChild(self.factorReadout)
+  self.subGraphic:addChild(self.mathDesc)
+  self.subGraphic:addChild(self.mathSub1)
+  self.subGraphic:addChild(self.mathSub2)
+  self.subGraphic:addChild(self.mathSub3)
 
   -- Start in gate mode
-  self.subGraphic = self.gateSubGraphic
+  self:setMathMode(false)
+end
+
+function TransformGateControl:setMathMode(enabled)
+  self.mathMode = enabled
+
+  -- Gate elements
+  if enabled then
+    self.gateDesc:hide()
+    self.gateSub1:hide()
+  else
+    self.gateDesc:show()
+    self.gateSub1:show()
+  end
+
+  -- Math elements
+  if enabled then
+    self.funcReadout:show()
+    self.factorReadout:show()
+    self.mathDesc:show()
+    self.mathSub1:show()
+    self.mathSub2:show()
+    self.mathSub3:show()
+  else
+    self.funcReadout:hide()
+    self.factorReadout:hide()
+    self.mathDesc:hide()
+    self.mathSub1:hide()
+    self.mathSub2:hide()
+    self.mathSub3:hide()
+  end
+
+  self.focusedReadout = nil
+  self:setSubCursorController(nil)
 end
 
 function TransformGateControl:setFocusedReadout(readout)
@@ -128,11 +164,7 @@ end
 
 function TransformGateControl:spotReleased(spot, shifted)
   if shifted then
-    -- Toggle math/gate sub-display
-    self.mathMode = not self.mathMode
-    self.subGraphic = self.mathMode and self.mathSubGraphic or self.gateSubGraphic
-    self.focusedReadout = nil
-    self:setSubCursorController(nil)
+    self:setMathMode(not self.mathMode)
     return true
   end
   return true
@@ -157,16 +189,11 @@ function TransformGateControl:subReleased(i, shifted)
         self:setFocusedReadout(self.factorReadout)
       end
     elseif i == 3 then
-      -- Fire!
       self.seq:fireTransform()
     end
   else
     if i == 1 then
-      -- Toggle to math mode
-      self.mathMode = true
-      self.subGraphic = self.mathSubGraphic
-      self.focusedReadout = nil
-      self:setSubCursorController(nil)
+      self:setMathMode(true)
     end
   end
   return true
@@ -175,7 +202,6 @@ end
 function TransformGateControl:encoder(change, shifted)
   if self.focusedReadout then
     self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Coarse)
-    -- Update func label
     if self.focusedReadout == self.funcReadout then
       local val = math.floor(self.funcReadout:getValueInUnits() + 0.5)
       local name = funcNames[val]

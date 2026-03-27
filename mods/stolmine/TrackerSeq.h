@@ -54,6 +54,7 @@ namespace stolmine
     od::Parameter mTransformFunc{"TransformFunc", 0.0f};
     od::Parameter mTransformFactor{"TransformFactor", 1.0f};
     od::Parameter mTransformScope{"TransformScope", 0.0f};
+    od::Parameter mOffsetRange{"OffsetRange", 5.0f}; // half-range: 5 = 10Vpp, 1 = 2Vpp
 
     // Edit buffer: scratch params for Readout binding
     od::Parameter mEditOffset{"EditOffset", 0.0f};

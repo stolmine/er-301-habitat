@@ -138,6 +138,7 @@ function TrackerSeq:onShowMenu(objects, branches)
     task = function()
       self.offsetRange10v = true
       self.controls.steps:setOffsetRange(true)
+      self.objects.op:getParameter("OffsetRange"):hardSet(5.0)
     end
   }
   controls.range2v = Task {
@@ -145,6 +146,7 @@ function TrackerSeq:onShowMenu(objects, branches)
     task = function()
       self.offsetRange10v = false
       self.controls.steps:setOffsetRange(false)
+      self.objects.op:getParameter("OffsetRange"):hardSet(1.0)
     end
   }
 
