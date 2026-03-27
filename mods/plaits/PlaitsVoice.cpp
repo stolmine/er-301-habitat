@@ -131,9 +131,10 @@ namespace mi
     const int blockSize = plaits::kBlockSize;
     int pos = 0;
 
-    while (pos + blockSize <= FRAMELENGTH)
+    while (pos < FRAMELENGTH)
     {
-      int chunk = blockSize;
+      int remaining = FRAMELENGTH - pos;
+      int chunk = (remaining >= blockSize) ? blockSize : remaining;
 
       // Sample modulation inputs at block boundaries
       // V/Oct: ER-301 fullscale is 10V, so signal 0.1 = 1V = 1 octave.
