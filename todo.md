@@ -92,7 +92,14 @@ Refinements:
 ### Excel Improvements
   - [ ] Output scope visibility: OutputScope shows "no signal" despite working output. Commotio has same issue. connect() correctly calls pUnit:setOutput(). Likely cause: graph compiler may not schedule objects whose inlets aren't connected to the chain signal path, so outlet buffers aren't probed. Need to investigate od/units/GraphCompiler.cpp
   - [ ] Randomize all offsets (config menu item)
-  - [ ] Math transform gate (ply 6): non-destructive transforms with function/bound/probability
+  - [ ] Math transform gate (ply 6):
+    - Gate input triggers transform application (for automation)
+    - Shift on gate control toggles sub-display between gate view and math params
+    - Math sub-display: function selector (integer), factor (integer), manual fire button
+    - Functions (from ER-101): add, subtract, multiply, divide, mod, reverse, rotate, invert
+    - Factor is integer only
+    - Transform applies to all step offsets momentarily as additive offset
+    - Manual gate in sub-display for one-shot application without automation
   - [ ] Addressable variant: CV address input instead of clock for random access
   - [ ] Expanded variant: CV inputs for sequence length and loop length
   - [ ] Probability variant: per-step probability of firing as separate unit
