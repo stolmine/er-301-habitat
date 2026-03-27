@@ -82,21 +82,21 @@ Refinements:
   - Gate engaged: record/overdub fader position to buffer at clock rate
   - Gate disengaged: record null (rest), preserving existing data
   - Clock input for step advance, reset input
-- [x] Excel — 64-step CV tracker sequencer (implemented)
-  - Per-step offset, length (ticks), slew
+- [x] Excel — 64-step CV tracker sequencer
+  - Per-step offset, length (ticks), deviation (random)
   - Scrollable step list with live editing, shift+scroll for rapid multi-step edits
-  - Sequence info ply: playhead, loop status, total tick count
+  - Expandable overview ply: playhead, loop, total ticks, fader controls for length/loop/scope
+  - Math transform gate: 9 functions, scope selector, snapshot save/restore, shift-toggle sub-display
   - Clock/reset gate inputs, global slew, V/Oct scaled output (offset 1 = 1 octave)
-  - Config: offset range (2Vpp/10Vpp), batch set all step lengths (1/2/4)
+  - Config: offset range (2Vpp/10Vpp), batch step lengths, randomize/clear offsets
 
 ### Excel Improvements
-  - [ ] Output scope visibility: OutputScope shows "no signal" despite working output. Commotio has same issue. connect() correctly calls pUnit:setOutput(). Likely cause: graph compiler may not schedule objects whose inlets aren't connected to the chain signal path, so outlet buffers aren't probed. Need to investigate od/units/GraphCompiler.cpp
-  - [x] Randomize/clear all offsets (config menu)
-  - [x] Math transform gate (ply 6): func/factor/fire, scope selector, snapshot save/restore
-  - [ ] Transform ply graphic: draw simple function icons, flash on gate
-  - [ ] Reuse SDK gate fire graphic on transform sub-display fire button
-  - [ ] Transform ply: gate activity indicator (comparator state viz)
-  - [x] Expandable overview ply: full fader controls for length, loop, scope via contextual view
+  - [ ] Pretty up Excel:
+    - Spinner graphic on top line of overview ply, left of step count/total
+    - Animated fire circle in xform math sub-display
+    - Transform sub-display title bar consistent positioning across shift modes
+    - Right-justified text in overview ply
+  - [ ] Output scope visibility: graph compiler may not schedule objects with no chain inlets. Investigate od/units/GraphCompiler.cpp. Commotio has same issue.
   - [ ] Addressable variant: CV address input instead of clock for random access
   - [ ] Expanded variant: CV inputs for sequence length and loop length
   - [ ] Probability variant: per-step probability of firing as separate unit
