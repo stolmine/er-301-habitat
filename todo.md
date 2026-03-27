@@ -95,11 +95,11 @@ Refinements:
   - [ ] Math transform gate (ply 6):
     - Gate input triggers transform application (for automation)
     - Shift on gate control toggles sub-display between gate view and math params
-    - Math sub-display (3 sub-buttons): scope(1), func(2), factor(3)
-      - Scope: scrollable selector for transform target (offset, length, deviation, all)
+    - Math sub-display (3 sub-buttons): func(1), factor(2), fire(3)
       - Func: add, subtract, multiply, divide, mod, reverse, rotate, invert, random
       - Factor: integer only
-    - Dial press fires transform (manual one-shot)
+      - Fire: manual one-shot application
+    - Transform scope selector on overview sub-display (sub-button 3): offset, length, deviation, all
     - Config menu: destructive/non-destructive toggle
       - Destructive: permanently modifies step arrays
       - Non-destructive: snapshot before first transform, "undo last" restores from snapshot
