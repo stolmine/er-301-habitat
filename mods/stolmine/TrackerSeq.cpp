@@ -331,7 +331,7 @@ namespace stolmine
 
     int seqLen = CLAMP(1, kMaxSteps, (int)(mSeqLength.value() + 0.5f));
     int loopLen = CLAMP(0, seqLen, (int)(mLoopLength.value() + 0.5f));
-    float globalSlew = CLAMP(0.0f, 1.0f, mSlew.value());
+    float slewTime = CLAMP(0.0f, 1000.0f, mSlew.value()); // in seconds
 
     mCachedSeqLength = seqLen;
     mCachedLoopLength = loopLen;
@@ -389,11 +389,16 @@ namespace stolmine
       float base = s.offset[mStep % seqLen];
       float target = (base + mDeviationOffset) * 0.1f;
 
-      // Global slew: one-pole smoothing
-      if (globalSlew > 0.001f)
+      // Global slew: one-pole smoothing with time in seconds
+      if (slewTime > 0.001f)
       {
-        float alpha = globalSlew * globalSlew;
-        mCurrentOutput += (target - mCurrentOutput) * (1.0f - alpha);
+        // One-pole coefficient from time constant:
+        // alpha = exp(-1 / (time * sampleRate))
+        // Approximation: 1 - 1/(time * sampleRate) for small values
+        float samples = slewTime * globalConfig.sampleRate;
+        float coeff = 1.0f - 1.0f / samples;
+        if (coeff < 0.0f) coeff = 0.0f;
+        mCurrentOutput += (target - mCurrentOutput) * (1.0f - coeff);
       }
       else
       {

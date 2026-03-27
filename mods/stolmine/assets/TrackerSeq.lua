@@ -233,13 +233,15 @@ function TrackerSeq:onLoadViews()
     },
     slew = GainBias {
       button = "slew",
-      description = "Slew",
+      description = "Slew Time",
       branch = self.branches.slew,
       gainbias = self.objects.slew,
       range = self.objects.slew,
-      biasMap = Encoder.getMap("[0,1]"),
-      biasPrecision = 2,
-      initialBias = 0.0
+      biasMap = Encoder.getMap("slewTimes"),
+      biasUnits = app.unitSecs,
+      initialBias = 0.0,
+      scaling = app.octaveScaling,
+      gainMap = Encoder.getMap("gain")
     },
     xform = TransformGateControl {
       button = "xform",

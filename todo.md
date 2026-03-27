@@ -106,6 +106,7 @@ Refinements:
   - [ ] Probability variant: per-step probability of firing as separate unit
   - [ ] Snap-to-scale mode for offset values
   - [ ] Playhead/cursor coupling: auto-scroll display follows playback, manual nav decouples
+  - [ ] Excel-style gate sequencer (step pattern with gate output instead of CV)
 
 ### Sequencer UI Research
 
