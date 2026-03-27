@@ -102,6 +102,7 @@ namespace stolmine
     bool mResetWasHigh = false;
     bool mTransformWasHigh = false;
     bool mManualFire = false;
+    int mEditingStep = 0;
 
     int mLastTransformFunc = -1;
     int mLastTransformFactor = 0;

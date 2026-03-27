@@ -101,6 +101,7 @@ namespace stolmine
   void TrackerSeq::loadStep(int i)
   {
     i = CLAMP(0, kMaxSteps - 1, i);
+    mEditingStep = i;
     mEditOffset.hardSet(mpInternal->offset[i]);
     mEditLength.hardSet((float)mpInternal->length[i]);
     mEditDeviation.hardSet(mpInternal->deviation[i]);
@@ -314,6 +315,9 @@ namespace stolmine
     mLastTransformFunc = func;
     mLastTransformFactor = factor;
     mLastTransformScope = scope;
+
+    // Reload edit buffer so selected step reflects the transform
+    loadStep(mEditingStep);
   }
 
   void TrackerSeq::process()
