@@ -49,6 +49,23 @@ namespace stolmine
       snprintf(buf, sizeof(buf), "%dt", totalTicks);
       fb.text(GRAY7, mWorldLeft + 2, mWorldBottom + mHeight - 36, buf, 10);
 
+      // Transform state
+      int lastFunc = mpSeq->getLastTransformFunc();
+      if (lastFunc >= 0)
+      {
+        static const char *funcLabels[] = {
+            "+", "-", "x", "/", "%%", "rev", "rot", "inv", "rnd"};
+        static const char *scopeLabels[] = {"ofs", "len", "dev", "all"};
+        int lastFactor = mpSeq->getLastTransformFactor();
+        int lastScope = mpSeq->getLastTransformScope();
+        const char *sl = scopeLabels[CLAMP(0, 3, lastScope)];
+        if (lastFunc == XFORM_REVERSE || lastFunc == XFORM_INVERT)
+          snprintf(buf, sizeof(buf), "%s:%s", funcLabels[lastFunc], sl);
+        else
+          snprintf(buf, sizeof(buf), "%s%d:%s", funcLabels[lastFunc], lastFactor, sl);
+        fb.text(WHITE, mWorldLeft + 2, mWorldBottom + mHeight - 48, buf, 10);
+      }
+
       // Progress bar
       int barLeft = mWorldLeft + 2;
       int barRight = mWorldLeft + mWidth - 3;

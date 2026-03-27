@@ -6,6 +6,7 @@ local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
 local StepListControl = require "stolmine.StepListControl"
 local SeqInfoControl = require "stolmine.SeqInfoControl"
+local TransformGateControl = require "stolmine.TransformGateControl"
 local Encoder = require "Encoder"
 
 local MenuHeader = require "Unit.MenuControl.Header"
@@ -52,6 +53,26 @@ function TrackerSeq:onLoadGraph(channelCount)
   loopLength:hardSet("Bias", 0)
   tie(op, "LoopLength", loopLength, "Out")
   self:addMonoBranch("loopLength", loopLength, "In", loopLength, "Out")
+
+  -- Transform gate
+  local xformGate = self:addObject("xformGate", app.Comparator())
+  xformGate:setGateMode()
+  connect(xformGate, "Out", op, "Transform")
+  self:addMonoBranch("xform", xformGate, "In", xformGate, "Out")
+
+  -- Transform function and factor
+  local xformFunc = self:addObject("xformFunc", app.ParameterAdapter())
+  xformFunc:hardSet("Bias", 0)
+  tie(op, "TransformFunc", xformFunc, "Out")
+
+  local xformFactor = self:addObject("xformFactor", app.ParameterAdapter())
+  xformFactor:hardSet("Bias", 1)
+  tie(op, "TransformFactor", xformFactor, "Out")
+
+  -- Transform scope
+  local xformScope = self:addObject("xformScope", app.ParameterAdapter())
+  xformScope:hardSet("Bias", 0)
+  tie(op, "TransformScope", xformScope, "Out")
 
   -- Output
   connect(op, "Out", self, "Out1")
@@ -139,13 +160,27 @@ function TrackerSeq:onShowMenu(objects, branches)
     task = function() self:clearAllOffsets() end
   }
 
+  controls.snapshotHeader = MenuHeader {
+    description = "Snapshot"
+  }
+  controls.snapshotSave = Task {
+    description = "Save snapshot",
+    task = function() self.objects.op:snapshotSave() end
+  }
+  controls.snapshotRestore = Task {
+    description = "Restore snapshot",
+    task = function() self.objects.op:snapshotRestore() end
+  }
+
   return controls, {
     "stepLenHeader",
     "stepLen1", "stepLen2", "stepLen4",
     "rangeHeader",
     "range10v", "range2v",
     "offsetHeader",
-    "randomize", "clearOffsets"
+    "randomize", "clearOffsets",
+    "snapshotHeader",
+    "snapshotSave", "snapshotRestore"
   }
 end
 
@@ -161,7 +196,8 @@ function TrackerSeq:onLoadViews()
       width = app.SECTION_PLY,
       seq = self.objects.op,
       seqLength = self.objects.seqLength:getParameter("Bias"),
-      loopLength = self.objects.loopLength:getParameter("Bias")
+      loopLength = self.objects.loopLength:getParameter("Bias"),
+      transformScope = self.objects.xformScope:getParameter("Bias")
     },
     clock = Gate {
       button = "clock",
@@ -184,9 +220,16 @@ function TrackerSeq:onLoadViews()
       biasMap = Encoder.getMap("[0,1]"),
       biasPrecision = 2,
       initialBias = 0.0
+    },
+    xform = TransformGateControl {
+      button = "xform",
+      description = "Transform",
+      seq = self.objects.op,
+      funcParam = self.objects.xformFunc:getParameter("Bias"),
+      factorParam = self.objects.xformFactor:getParameter("Bias")
     }
   }, {
-    expanded = { "steps", "info", "clock", "reset", "slew" },
+    expanded = { "steps", "info", "clock", "reset", "slew", "xform" },
     collapsed = {}
   }
 end
