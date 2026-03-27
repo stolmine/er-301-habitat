@@ -101,7 +101,7 @@ namespace stolmine
         q = 0.5f + t * 99.5f;
       }
 
-      float totalSemitones = v * 12.0f * 5.0f + fundamental;
+      float totalSemitones = v * 120.0f + fundamental;
       float freqHz = 261.63f * stmlib::SemitonesToRatio(totalSemitones);
       freqHz = CLAMP(20.0f, 20000.0f, freqHz);
 

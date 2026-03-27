@@ -70,8 +70,8 @@ namespace stolmine
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       // Cutoff from V/Oct + fundamental offset (semitones)
-      // V/Oct: 0V = middle C (261.63 Hz), 1V = +12 semitones
-      float totalSemitones = voct[i] * 12.0f * 5.0f + fundamental;
+      // ER-301 fullscale 10V: signal 0.1 = 1V = 12 semitones
+      float totalSemitones = voct[i] * 120.0f + fundamental;
       // MIDI note 60 = middle C = 261.63 Hz
       float cutoff = 261.63f * stmlib::SemitonesToRatio(totalSemitones);
       if (cutoff < 20.0f) cutoff = 20.0f;

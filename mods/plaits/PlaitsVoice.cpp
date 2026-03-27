@@ -137,9 +137,10 @@ namespace mi
       int chunk = (remaining >= blockSize) ? blockSize : remaining;
 
       // Sample modulation inputs at block boundaries
-      // V/Oct: ER-301 uses 1.0 = 1V. Plaits uses MIDI note numbers.
-      // 0V = C4 (MIDI 60), each volt = 12 semitones
-      s.patch.note = 60.0f + mFreq.value() + voct[pos] * 12.0f;
+      // V/Oct: ER-301 fullscale is 10V, so signal 0.1 = 1V = 1 octave.
+      // Plaits uses MIDI note numbers: each semitone = 1.0.
+      // 0V = C4 (MIDI 60). Scale: voct * 10V * 12 semitones = voct * 120.
+      s.patch.note = 60.0f + mFreq.value() + voct[pos] * 120.0f;
 
       s.modulations.note = 0.0f;
       s.modulations.frequency = fm[pos] * 6.0f;

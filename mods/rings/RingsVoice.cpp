@@ -134,7 +134,7 @@ namespace mi
       // Pitch: base note + freq offset + V/Oct
       float freqOffset = mFreq.value();
       s.performance_state.tonic = 48.0f + freqOffset;
-      s.performance_state.note = voctBuf[pos] * 12.0f;
+      s.performance_state.note = voctBuf[pos] * 120.0f;
       s.performance_state.fm = 0.0f;
 
       // Strum: edge detect from gate
