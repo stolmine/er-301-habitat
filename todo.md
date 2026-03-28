@@ -42,7 +42,7 @@ Refinements:
 - [x] switching to mode 2 while freeze is active causes crash — pffft bump allocator reset fix
 - [x] Trig input fires on rising edge only — one grain per tick
 - [x] Spectral mode CPU overrun — halved hop ratio (4→2), restored pffft NEON FFT path
-- [ ] Adaptive labelling for mode control (ModeSelector pattern)
+- [x] Adaptive labelling for mode control (Gran/Delay/Spect)
 - [ ] Gain compensation toggle — auto-scale output to match input level
 - [ ] Further NEON optimization — ShyFFT butterflies, SRC polyphase FIR
 
@@ -54,7 +54,7 @@ Refinements:
 
 ## Stratos Improvements
 
-- [ ] Defaults should match Clouds' fixed reverb settings
+- [x] Defaults match Clouds' fixed reverb settings
 
 ## Commotio Improvements
 
@@ -145,7 +145,7 @@ Refinements:
 - [x] NR — gate sequencer (migrated from standalone package)
 - [x] 94 Discont — 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush)
 - [x] Latch Filter — switched-capacitor S&H → SVF with V/Oct tracking
-- [ ] Stereo passthrough for Canals, 94 Discont, and Latch Filter (currently mono only)
+- [x] Stereo processing for Canals, 94 Discont, and Latch Filter (dual DSP instances)
 - [ ] HD2-style FM oscillator pair (dual osc with FM index + feedback)
 - [ ] Additional filter models from monokit (MoogFF, DFM1, BMoog)
 
