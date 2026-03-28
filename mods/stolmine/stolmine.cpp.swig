@@ -11,6 +11,8 @@
 #include "TrackerSeq.h"
 #include "StepListGraphic.h"
 #include "SeqInfoGraphic.h"
+#include "GateSeq.h"
+#include "ChaselightGraphic.h"
 #define SWIGLUA
 %}
 
@@ -22,3 +24,5 @@
 %include "TrackerSeq.h"
 %include "StepListGraphic.h"
 %include "SeqInfoGraphic.h"
+%include "GateSeq.h"
+%include "ChaselightGraphic.h"
