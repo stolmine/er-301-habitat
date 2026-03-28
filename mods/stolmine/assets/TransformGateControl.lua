@@ -339,7 +339,7 @@ end
 function TransformGateControl:subPressed(i, shifted)
   if shifted then return false end
   if self.mathMode then
-    if i == 3 then
+    if i == 3 and not self.hasParamB then
       self.seq:fireTransform()
     end
   else
