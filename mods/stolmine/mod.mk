@@ -1,5 +1,5 @@
 PKGNAME ?= stolmine
-PKGVERSION ?= 1.1.0
+PKGVERSION ?= 1.2.0
 
 include scripts/env.mk
 
