@@ -59,6 +59,11 @@ end
 function Plaits:onLoadGraph(channelCount)
   local voice = self:addObject("voice", libplaits.PlaitsVoice())
 
+  -- Consume chain input to prevent it from reaching branches
+  local sink = self:addObject("sink", app.ConstantGain())
+  sink:hardSet("Gain", 0.0)
+  connect(self, "In1", sink, "In")
+
   -- V/Oct input (scaled 10x to match FULLSCALE_IN_VOLTS)
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
