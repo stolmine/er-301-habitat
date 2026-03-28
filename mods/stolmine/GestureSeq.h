@@ -19,11 +19,12 @@ namespace stolmine
 
     od::Inlet mRun{"Run"};
     od::Inlet mReset{"Reset"};
-    od::Inlet mWrite{"Write"};
+    od::Inlet mErase{"Erase"};
     od::Outlet mOut{"Out"};
 
     od::Parameter mOffset{"Offset", 0.0f};
     od::Option mBufferSize{"Buffer Size", 0}; // 0=5s, 1=10s, 2=20s
+    od::Option mWriteActive{"Write Active", 0}; // 0=idle, 1=writing (read-only, for UI)
 #endif
 
   private:

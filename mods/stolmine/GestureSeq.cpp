@@ -41,10 +41,11 @@ namespace stolmine
   {
     addInput(mRun);
     addInput(mReset);
-    addInput(mWrite);
+    addInput(mErase);
     addOutput(mOut);
     addParameter(mOffset);
     addOption(mBufferSize);
+    addOption(mWriteActive);
 
     mpInternal = new Internal();
     mpInternal->buffer = nullptr;
@@ -91,7 +92,7 @@ namespace stolmine
   {
     float *run = mRun.buffer();
     float *reset = mReset.buffer();
-    float *write = mWrite.buffer();
+    float *erase = mErase.buffer();
     float *out = mOut.buffer();
     Internal &s = *mpInternal;
 
@@ -115,7 +116,6 @@ namespace stolmine
     }
 
     float offset = mOffset.value();
-    bool writeConnected = mWrite.isConnected();
 
     // Movement detection (frame-level since offset is a Parameter)
     float delta = fabsf(offset - s.prevOffset);
@@ -126,15 +126,27 @@ namespace stolmine
     }
     s.prevOffset = offset;
 
+    // Holdoff countdown (frame-level)
+    if (s.holdoffCounter > 0)
+    {
+      s.holdoffCounter -= FRAMELENGTH;
+      if (s.holdoffCounter <= 0)
+      {
+        s.holdoffCounter = 0;
+        s.moving = false;
+      }
+    }
+
+    // Expose write state to UI
+    mWriteActive.set(s.moving ? 1 : 0);
+
     for (int i = 0; i < FRAMELENGTH; i++)
     {
-      // Edge detection
       bool runHigh = run[i] > 0.0f;
       bool resetHigh = reset[i] > 0.0f;
       bool resetRise = resetHigh && !s.resetWasHigh;
       s.resetWasHigh = resetHigh;
 
-      // Reset
       if (resetRise)
       {
         s.position = 0;
@@ -142,28 +154,14 @@ namespace stolmine
 
       if (runHigh)
       {
-        // Determine write state
-        bool writeActive;
-        if (writeConnected)
+        // Write > erase > playback
+        if (s.moving)
         {
-          writeActive = write[i] > 0.0f;
+          s.buffer[s.position] = offset;
         }
-        else
+        else if (erase[i] > 0.0f)
         {
-          writeActive = s.moving;
-        }
-
-        // Write to buffer
-        if (writeActive)
-        {
-          if (s.moving)
-          {
-            s.buffer[s.position] = offset;
-          }
-          else
-          {
-            s.buffer[s.position] = 0.0f;
-          }
+          s.buffer[s.position] = 0.0f;
         }
 
         // Output current buffer position
@@ -175,17 +173,6 @@ namespace stolmine
       else
       {
         out[i] = 0.0f;
-      }
-    }
-
-    // Holdoff countdown (frame-level)
-    if (s.holdoffCounter > 0)
-    {
-      s.holdoffCounter -= FRAMELENGTH;
-      if (s.holdoffCounter <= 0)
-      {
-        s.holdoffCounter = 0;
-        s.moving = false;
       }
     }
   }

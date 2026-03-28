@@ -4,10 +4,26 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
+local ViewControl = require "Unit.ViewControl"
 local MenuHeader = require "Unit.MenuControl.Header"
 local OptionControl = require "Unit.MenuControl.OptionControl"
 local Task = require "Unit.MenuControl.Task"
 local Encoder = require "Encoder"
+
+local ply = app.SECTION_PLY
+
+-- Write indicator (display only, no interaction)
+local WriteControl = Class {}
+WriteControl:include(ViewControl)
+
+function WriteControl:init(args)
+  ViewControl.init(self, "write")
+  self:setClassName("WriteControl")
+
+  local graphic = libstolmine.WriteIndicator(0, 0, ply, 64)
+  graphic:setOption(args.option)
+  self:setControlGraphic(graphic)
+end
 
 local GestureSeq = Class {}
 GestureSeq:include(Unit)
@@ -26,15 +42,15 @@ function GestureSeq:onLoadGraph(channelCount)
   sink:hardSet("Gain", 0.0)
   connect(self, "In1", sink, "In")
 
-  -- Run gate
+  -- Run gate (toggle)
   local run = self:addObject("run", app.Comparator())
-  run:setGateMode()
+  run:setToggleMode()
   connect(run, "Out", op, "Run")
   self:addMonoBranch("run", run, "In", run, "Out")
 
   -- Reset gate
   local reset = self:addObject("reset", app.Comparator())
-  reset:setGateMode()
+  reset:setTriggerMode()
   connect(reset, "Out", op, "Reset")
   self:addMonoBranch("reset", reset, "In", reset, "Out")
 
@@ -44,11 +60,11 @@ function GestureSeq:onLoadGraph(channelCount)
   tie(op, "Offset", offset, "Out")
   self:addMonoBranch("offset", offset, "In", offset, "Out")
 
-  -- Write gate
-  local write = self:addObject("write", app.Comparator())
-  write:setGateMode()
-  connect(write, "Out", op, "Write")
-  self:addMonoBranch("write", write, "In", write, "Out")
+  -- Erase gate
+  local erase = self:addObject("erase", app.Comparator())
+  erase:setGateMode()
+  connect(erase, "Out", op, "Erase")
+  self:addMonoBranch("erase", erase, "In", erase, "Out")
 
   -- Output
   for i = 1, channelCount do
@@ -97,14 +113,17 @@ function GestureSeq:onLoadViews()
       biasPrecision = 3,
       initialBias   = 0.0
     },
-    write = Gate {
-      button      = "write",
-      description = "Write",
-      branch      = self.branches.write,
-      comparator  = self.objects.write
+    erase = Gate {
+      button      = "erase",
+      description = "Erase",
+      branch      = self.branches.erase,
+      comparator  = self.objects.erase
+    },
+    write = WriteControl {
+      option = self.objects.op:getOption("Write Active")
     }
   }, {
-    expanded  = { "run", "reset", "offset", "write" },
+    expanded  = { "run", "reset", "offset", "erase", "write" },
     collapsed = {}
   }
 end

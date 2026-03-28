@@ -136,7 +136,7 @@ Refinements:
 - [x] Ballot (GateSeq): persist RatchetLen, RatchetVel options
 - [x] Excel (TrackerSeq): persist offsetRange10v config
 - [x] Excel/Ballot: persist transform func/params/scope (ParameterAdapter Bias values)
-- [ ] Verify OptionControl-based serialization works: Clouds (Quality, Preamp), MarblesT (Model), MarblesX (Control Mode), GestureSeq (Buffer Size)
+- [x] Verify OptionControl-based serialization works (confirmed via Clouds)
 - [ ] GestureSeq: persist recorded buffer contents (needs C++ getter/setter)
 
 ## Passthrough Audit
