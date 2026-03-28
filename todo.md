@@ -201,8 +201,8 @@ Refinements:
 
 ## V/Oct Scaling Audit
 
-- [x] Check V/Oct scaling: fixed * 12 to * 120 (FULLSCALE_IN_VOLTS = 10) for Plaits, Rings, Canals, LatchFilter
-- [x] Plaits crash on engine switch: was SWIG mismatch (packages built against txo.6, running on txo.5). Resolved by running matching firmware. V/Oct still at * 12, needs proper scaling investigation.
+- [x] V/Oct scaling: * 120 (FULLSCALE_IN_VOLTS=10 * 12 semitones) confirmed working for Plaits, Rings, Canals, LatchFilter
+- [x] Plaits crash + V/Oct: was SWIG mismatch (txo.5 vs txo.6). V/Oct scaling confirmed correct at * 120.
 
 ## NEON Optimization Audit
 
