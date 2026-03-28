@@ -47,6 +47,7 @@ Based on code by Émilie Gillet (MIT License).
 | **warps** | Warps | Meta-modulator — 6 crossmodulation algorithms with auto gain compensation |
 | **grids** | Grids | Topographic drum pattern generator |
 | **commotio** | Commotio | Elements exciter section (bow/blow/strike) at native 48kHz |
+| **marbles** | Marbles T, Marbles X | Random sampler -- probabilistic gate generator (7 models) and random CV generator (beta distribution, deja vu looping, 3 control modes) |
 | **kryos** | Kryos | Spectral freeze (WIP) — WILL CRASH, DO NOT INSTALL |
 
 ### Peaks / Dead Man's Catch
@@ -77,7 +78,8 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 | **stolmine** | NR | Gate sequencer inspired by the Noise Engineering Numeric Repetitor |
 | | 94 Discont | 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush) |
 | | Latch Filter | Switched-capacitor S&H into SVF with V/Oct tracking |
-| | Canals | Linked resonant filter inspired by Three Sisters — crossover/formant modes |
+| | Canals | Linked resonant filter inspired by Three Sisters -- crossover/formant modes |
+| | Gesture | Continuous gesture recorder/looper -- 5/10/20s buffer, movement-detected auto-write |
 | **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization — stereo-aware passthrough with waveform display |
 
 ## Changelog

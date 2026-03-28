@@ -9,8 +9,8 @@
 - [x] Warps (meta-modulator — 6 xmod algorithms, vocoder pending)
 - [x] Stratos (Clouds reverb engine extracted as standalone unit)
 - [x] Commotio (Elements exciter — bow/blow/strike at native 48kHz)
-- [ ] Marbles X algorithm extracted to single channel unit
-- [ ] Marbles Y algorithm extracted to single channel unit
+- [x] Marbles T (probabilistic gate generator) -- 7 models, jitter, deja vu, T1/T2 crossfade
+- [x] Marbles X (random CV generator) -- spread, bias, steps, deja vu, X1/X2/X3 selector, 3 control modes
 
 ## Peaks / DMC Ports
 
@@ -77,11 +77,10 @@ Refinements:
   - Global math transforms: add/subtract/multiply/divide/mod/randomize all steps
   - Integer factor fader for transform operations (e.g. add 7, div 3)
   - Global pitch/CV scaling and snap-to-scale mode
-- [ ] Gesture Sequencer — record fader gestures into a clocked step buffer
-  - Offset fader (CV value source) + gate input (punch in/out)
-  - Gate engaged: record/overdub fader position to buffer at clock rate
-  - Gate disengaged: record null (rest), preserving existing data
-  - Clock input for step advance, reset input
+- [x] Gesture Sequencer — continuous gesture recorder/looper
+  - Offset fader records into sample-rate buffer (5/10/20s selectable)
+  - Auto-write from movement detection (hysteresis/debounce), de-normals when write patched
+  - Run/reset gate inputs, loops automatically, null outputs 0 for VCA silence
 - [x] Excel — 64-step CV tracker sequencer
   - Per-step offset, length (ticks), deviation (random)
   - Scrollable step list with live editing, shift+scroll for rapid multi-step edits
