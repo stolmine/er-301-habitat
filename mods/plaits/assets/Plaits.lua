@@ -59,11 +59,14 @@ end
 function Plaits:onLoadGraph(channelCount)
   local voice = self:addObject("voice", libplaits.PlaitsVoice())
 
-  -- V/Oct input
+  -- V/Oct input (scaled 10x to match FULLSCALE_IN_VOLTS)
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
+  local voctGain = self:addObject("voctGain", app.ConstantGain())
+  voctGain:hardSet("Gain", 10.0)
   connect(tune, "Out", tuneRange, "In")
-  connect(tune, "Out", voice, "V/Oct")
+  connect(tune, "Out", voctGain, "In")
+  connect(voctGain, "Out", voice, "V/Oct")
 
   -- Trigger input
   local trig = self:addObject("trig", app.Comparator())

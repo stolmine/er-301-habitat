@@ -21,9 +21,8 @@ namespace mi
     plaits::Voice::Frame frames[plaits::kMaxBlockSize];
     stmlib::BufferAllocator allocator;
 
-    // Arena for engine allocations - must hold the largest single engine.
-    // particle_engine needs 16KB+ for diffuser alone. 64KB to be safe.
-    static const size_t kArenaSize = 65536;
+    // Arena for engine allocations (~32KB should be generous)
+    static const size_t kArenaSize = 32768;
     uint8_t arena[kArenaSize];
 
     void Init()
@@ -138,9 +137,9 @@ namespace mi
       int chunk = (remaining >= blockSize) ? blockSize : remaining;
 
       // Sample modulation inputs at block boundaries
-      // V/Oct: FULLSCALE_IN_VOLTS=10, 12 semitones per octave.
-      // ConstantOffset outputs 0.1 at 1200 cents. 0.1 * 120 = 12 semitones.
-      s.patch.note = 60.0f + mFreq.value() + voct[pos] * 120.0f;
+      // V/Oct: ER-301 uses 1.0 = 1V. Plaits uses MIDI note numbers.
+      // 0V = C4 (MIDI 60), each volt = 12 semitones
+      s.patch.note = 60.0f + mFreq.value() + voct[pos] * 12.0f;
 
       s.modulations.note = 0.0f;
       s.modulations.frequency = fm[pos] * 6.0f;
