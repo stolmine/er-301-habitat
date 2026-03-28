@@ -217,6 +217,9 @@ function GateSeqUnit:onLoadViews()
       branch = self.branches.xform,
       funcParam = self.objects.xformFunc:getParameter("Bias"),
       factorParam = self.objects.xformParamA:getParameter("Bias"),
+      paramBParam = self.objects.xformParamB:getParameter("Bias"),
+      paramALabel = "prm A",
+      paramBLabel = "prm B",
       funcNames = { [0] = "euc", "nr", "grd", "nkl", "inv", "rot", "den" },
       funcMap = (function()
         local m = app.LinearDialMap(0, 6)

@@ -191,12 +191,28 @@ function TransformGateControl:init(args)
   self.mathDesc:setCornerRadius(3, 0, 0, 3)
   self.mathDesc:setCenter(0.5 * (col2 + col3), center1 + 1)
 
+  -- Optional paramB readout (replaces fire button on sub3)
+  self.hasParamB = args.paramBParam ~= nil
+  if self.hasParamB then
+    self.paramBReadout = (function()
+      local g = app.Readout(0, 0, ply, 10)
+      g:setParameter(args.paramBParam)
+      g:setAttributes(app.unitNone, args.paramBMap or factorMap)
+      g:setPrecision(0)
+      g:setCenter(col3, center4)
+      return g
+    end)()
+  end
+
   self.mathSub1 = app.SubButton("func", 1)
-  self.mathSub2 = app.SubButton("factor", 2)
-  self.mathSub3 = app.SubButton("fire!", 3)
+  self.mathSub2 = app.SubButton(args.paramALabel or "factor", 2)
+  self.mathSub3 = app.SubButton(self.hasParamB and (args.paramBLabel or "prm B") or "fire!", 3)
 
   self.subGraphic:addChild(self.funcReadout)
   self.subGraphic:addChild(self.factorReadout)
+  if self.hasParamB then
+    self.subGraphic:addChild(self.paramBReadout)
+  end
   self.subGraphic:addChild(self.mathDesc)
   self.subGraphic:addChild(self.mathSub1)
   self.subGraphic:addChild(self.mathSub2)
@@ -248,9 +264,10 @@ function TransformGateControl:setMathMode(enabled)
 
   -- Math elements
   if enabled then
-    self.mathDrawing:show()
+    if not self.hasParamB then self.mathDrawing:show() end
     self.funcReadout:show()
     self.factorReadout:show()
+    if self.hasParamB and self.paramBReadout then self.paramBReadout:show() end
     self.funcLabel:show()
     self.mathDesc:show()
     self.mathSub1:show()
@@ -260,6 +277,7 @@ function TransformGateControl:setMathMode(enabled)
     self.mathDrawing:hide()
     self.funcReadout:hide()
     self.factorReadout:hide()
+    if self.hasParamB and self.paramBReadout then self.paramBReadout:hide() end
     self.funcLabel:hide()
     self.mathDesc:hide()
     self.mathSub1:hide()
@@ -351,7 +369,14 @@ function TransformGateControl:subReleased(i, shifted)
         self:setFocusedReadout(self.factorReadout)
       end
     elseif i == 3 then
-      -- Rising edge was in subPressed
+      if self.hasParamB then
+        if self:hasFocus("encoder") then
+          self:setFocusedReadout(self.paramBReadout)
+        else
+          self:focus()
+          self:setFocusedReadout(self.paramBReadout)
+        end
+      end
     end
   else
     if i == 1 then
