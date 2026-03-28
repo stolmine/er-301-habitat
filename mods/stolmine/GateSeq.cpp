@@ -393,9 +393,15 @@ namespace stolmine
           mClockPeriodSamples = mSamplesSinceLastClock;
         mSamplesSinceLastClock = 0;
 
-        // Advance step
-        mTickCount++;
+        // Advance step: only move on when tick count reaches step length
+        bool newStep = false;
         int stepLen = s.length[mStep % seqLen];
+        if (mTickCount == 0)
+        {
+          // First tick of current step - fire gate below
+          newStep = true;
+        }
+        mTickCount++;
         if (mTickCount >= stepLen)
         {
           mTickCount = 0;
@@ -410,53 +416,53 @@ namespace stolmine
           }
         }
 
-        // Fire gate if step is ON
-        bool stepOn = s.gate[mStep % seqLen];
-        if (stepOn)
+        // Fire gate only on the first tick of a step
+        if (newStep)
         {
-          float vel = s.velocity[mStep % seqLen];
-          int gateLen = s.length[mStep % seqLen];
-
-          // Calculate gate duration in samples
-          int gateSamples = 48; // ~1ms default
-          if (mClockPeriodSamples > 0)
+          bool stepOn = s.gate[mStep % seqLen];
+          if (stepOn)
           {
-            // Gate length as proportion of clock period
-            // gateLen=1 means short gate, higher = longer
-            gateSamples = (mClockPeriodSamples * gateLen) / 16;
-            if (gateSamples < 1) gateSamples = 1;
-          }
+            float vel = s.velocity[mStep % seqLen];
+            int gateLen = s.length[mStep % seqLen];
 
-          if (ratchetGateHigh && ratchetMult > 1)
-          {
-            // Start ratchet: subdivide clock period
-            mRatchetActive = true;
-            mRatchetSubGateTotal = ratchetMult;
-            mRatchetSubGateIndex = 0;
-            mRatchetSubGateSamples = mClockPeriodSamples / ratchetMult;
-            mRatchetBaseVelocity = vel;
-            mRatchetBaseLength = gateSamples;
-            mRatchetSubGateRemaining = mRatchetSubGateSamples;
+            // Gate duration spans the full step length in clock ticks
+            int gateSamples = 48;
+            if (mClockPeriodSamples > 0)
+            {
+              gateSamples = mClockPeriodSamples * gateLen;
+              if (gateSamples < 1) gateSamples = 1;
+            }
 
-            // First sub-gate
-            float subVel = vel;
-            int subLen = gateSamples;
-            if (ratchetLenOn)
-              subLen = MAX(1, gateSamples / ratchetMult);
-            mGateSamplesRemaining = subLen;
-            mGateAmplitude = subVel;
+            if (ratchetGateHigh && ratchetMult > 1)
+            {
+              // Start ratchet: subdivide clock period
+              mRatchetActive = true;
+              mRatchetSubGateTotal = ratchetMult;
+              mRatchetSubGateIndex = 0;
+              mRatchetSubGateSamples = mClockPeriodSamples / ratchetMult;
+              mRatchetBaseVelocity = vel;
+              mRatchetBaseLength = gateSamples;
+              mRatchetSubGateRemaining = mRatchetSubGateSamples;
+
+              float subVel = vel;
+              int subLen = gateSamples;
+              if (ratchetLenOn)
+                subLen = MAX(1, gateSamples / ratchetMult);
+              mGateSamplesRemaining = subLen;
+              mGateAmplitude = subVel;
+            }
+            else
+            {
+              // Normal gate
+              mRatchetActive = false;
+              mGateSamplesRemaining = gateSamples;
+              mGateAmplitude = vel;
+            }
           }
           else
           {
-            // Normal gate
             mRatchetActive = false;
-            mGateSamplesRemaining = gateSamples;
-            mGateAmplitude = vel;
           }
-        }
-        else
-        {
-          mRatchetActive = false;
         }
       }
 

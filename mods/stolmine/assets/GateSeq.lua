@@ -163,10 +163,24 @@ function GateSeqUnit:onShowMenu(objects, branches)
     end
   end }
 
-  controls.clearHeader = MenuHeader { description = "Clear" }
+  controls.clearHeader = MenuHeader { description = "Clear / Reset" }
   controls.clearGates = Task { description = "Clear all gates", task = function()
     local op = self.objects.op
     for i = 0, 63 do op:setStepGate(i, false) end
+    if self.controls and self.controls.steps then
+      op:loadStep(self.controls.steps.currentStep or 0)
+    end
+  end }
+  controls.clearLengths = Task { description = "Reset lengths to 1", task = function()
+    local op = self.objects.op
+    for i = 0, 63 do op:setStepLength(i, 1) end
+    if self.controls and self.controls.steps then
+      op:loadStep(self.controls.steps.currentStep or 0)
+    end
+  end }
+  controls.clearVelocities = Task { description = "Reset velocities to 100%", task = function()
+    local op = self.objects.op
+    for i = 0, 63 do op:setStepVelocity(i, 1.0) end
     if self.controls and self.controls.steps then
       op:loadStep(self.controls.steps.currentStep or 0)
     end
@@ -184,7 +198,7 @@ function GateSeqUnit:onShowMenu(objects, branches)
     "stepLenHeader", "stepLen1", "stepLen2", "stepLen4",
     "velHeader", "vel25", "vel50", "vel100",
     "randomHeader", "randomGates", "randomLengths", "randomVelocities",
-    "clearHeader", "clearGates",
+    "clearHeader", "clearGates", "clearLengths", "clearVelocities",
     "snapshotHeader", "snapshotSave", "snapshotRestore"
   }
 end
