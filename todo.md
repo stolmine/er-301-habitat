@@ -12,6 +12,9 @@
 - [x] Marbles T (probabilistic gate generator) -- 7 models, jitter, deja vu, T1/T2 crossfade
 - [x] Marbles X (random CV generator) -- spread, bias, steps, deja vu, X1/X2/X3 selector, 3 control modes
 
+### Marbles Fixes
+  - [ ] Both units produce full-scale noise when driven by gates from the 301's G jacks, or when a user removes a hardware gate input from an ABCD CV jack. Internal gate sources work fine. Plan: add explicit gate controls on unit and eliminate passthrough
+
 ## Peaks / DMC Ports
 
 - [x] Initial port of 14 units (drums, modulation, sequencers, generators)
@@ -125,6 +128,20 @@ Refinements:
   - Need to find where channel button events are dispatched in Lua UI layer
 - [ ] Timebase and gain controls (requires custom graphic or MiniScope subclass)
 - [ ] Research headerless unit display (SDK hardcodes header — not currently possible)
+
+## Serialization Audit
+
+- [x] Rings: persist Polyphony, Resolution, Easter Egg, Int Exciter options
+- [x] Warps: persist Easter Egg option
+- [x] Ballot (GateSeq): persist RatchetLen, RatchetVel options
+- [x] Excel (TrackerSeq): persist offsetRange10v config
+- [x] Excel/Ballot: persist transform func/params/scope (ParameterAdapter Bias values)
+- [ ] Verify OptionControl-based serialization works: Clouds (Quality, Preamp), MarblesT (Model), MarblesX (Control Mode), GestureSeq (Buffer Size)
+- [ ] GestureSeq: persist recorded buffer contents (needs C++ getter/setter)
+
+## Passthrough Audit
+
+- [ ] Review all units for clean delineation between passthrough and non-passthrough behavior
 
 ## Ratchet
 

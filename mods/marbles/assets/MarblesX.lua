@@ -20,8 +20,11 @@ end
 function MarblesX:onLoadGraph(channelCount)
   local op = self:addObject("op", libmarbles.MarblesX())
 
-  -- Clock from chain input
-  connect(self, "In1", op, "Clock")
+  -- Clock
+  local clock = self:addObject("clock", app.Comparator())
+  clock:setGateMode()
+  connect(clock, "Out", op, "Clock")
+  self:addMonoBranch("clock", clock, "In", clock, "Out")
 
   -- Reset
   local reset = self:addObject("reset", app.Comparator())
@@ -86,6 +89,12 @@ end
 
 function MarblesX:onLoadViews()
   return {
+    clock = Gate {
+      button      = "clock",
+      description = "Clock",
+      branch      = self.branches.clock,
+      comparator  = self.objects.clock
+    },
     reset = Gate {
       button      = "reset",
       description = "Reset",
@@ -159,7 +168,7 @@ function MarblesX:onLoadViews()
       initialBias   = 0.0
     }
   }, {
-    expanded  = { "reset", "spread", "bias", "steps", "dejavu", "length", "output" },
+    expanded  = { "clock", "reset", "spread", "bias", "steps", "dejavu", "length", "output" },
     collapsed = {}
   }
 end

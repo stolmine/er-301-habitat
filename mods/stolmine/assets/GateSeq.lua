@@ -305,7 +305,8 @@ function GateSeqUnit:onLoadViews()
   }
 end
 
-function GateSeqUnit:onSerialize()
+function GateSeqUnit:serialize()
+  local t = Unit.serialize(self)
   local op = self.objects.op
   local steps = {}
   for i = 0, 63 do
@@ -315,11 +316,19 @@ function GateSeqUnit:onSerialize()
       velocity = op:getStepVelocity(i)
     }
   end
-  return { steps = steps }
+  t.steps = steps
+  t.ratchetLen = op:getOption("RatchetLen"):value()
+  t.ratchetVel = op:getOption("RatchetVel"):value()
+  t.xformFunc = self.objects.xformFunc:getParameter("Bias"):target()
+  t.xformParamA = self.objects.xformParamA:getParameter("Bias"):target()
+  t.xformParamB = self.objects.xformParamB:getParameter("Bias"):target()
+  t.xformScope = self.objects.xformScope:getParameter("Bias"):target()
+  return t
 end
 
-function GateSeqUnit:onDeserialize(t)
-  if t and t.steps then
+function GateSeqUnit:deserialize(t)
+  Unit.deserialize(self, t)
+  if t.steps then
     local op = self.objects.op
     for i = 0, 63 do
       local s = t.steps[tostring(i)]
@@ -329,6 +338,21 @@ function GateSeqUnit:onDeserialize(t)
         op:setStepVelocity(i, s.velocity or 1.0)
       end
     end
+  end
+  local op = self.objects.op
+  if t.ratchetLen ~= nil then op:getOption("RatchetLen"):set(t.ratchetLen) end
+  if t.ratchetVel ~= nil then op:getOption("RatchetVel"):set(t.ratchetVel) end
+  if t.xformFunc ~= nil then
+    self.objects.xformFunc:hardSet("Bias", t.xformFunc)
+  end
+  if t.xformParamA ~= nil then
+    self.objects.xformParamA:hardSet("Bias", t.xformParamA)
+  end
+  if t.xformParamB ~= nil then
+    self.objects.xformParamB:hardSet("Bias", t.xformParamB)
+  end
+  if t.xformScope ~= nil then
+    self.objects.xformScope:hardSet("Bias", t.xformScope)
   end
 end
 

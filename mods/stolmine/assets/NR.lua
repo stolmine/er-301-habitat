@@ -31,8 +31,11 @@ end
 function NR:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.NR())
 
-  -- Clock from In1
-  connect(self, "In1", op, "Clock")
+  -- Clock from chain input (Comparator filters noise from G jacks / hot-unplug)
+  local clock = self:addObject("clock", app.Comparator())
+  clock:setGateMode()
+  connect(self, "In1", clock, "In")
+  connect(clock, "Out", op, "Clock")
 
   -- Reset
   local reset = self:addObject("reset", app.Comparator())

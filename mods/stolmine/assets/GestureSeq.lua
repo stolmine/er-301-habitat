@@ -21,8 +21,16 @@ end
 function GestureSeq:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.GestureSeq())
 
-  -- Run from chain input
-  connect(self, "In1", op, "Run")
+  -- Sink chain input (pure generator)
+  local sink = self:addObject("sink", app.ConstantGain())
+  sink:hardSet("Gain", 0.0)
+  connect(self, "In1", sink, "In")
+
+  -- Run gate
+  local run = self:addObject("run", app.Comparator())
+  run:setGateMode()
+  connect(run, "Out", op, "Run")
+  self:addMonoBranch("run", run, "In", run, "Out")
 
   -- Reset gate
   local reset = self:addObject("reset", app.Comparator())
@@ -67,6 +75,12 @@ end
 
 function GestureSeq:onLoadViews()
   return {
+    run = Gate {
+      button      = "run",
+      description = "Run",
+      branch      = self.branches.run,
+      comparator  = self.objects.run
+    },
     reset = Gate {
       button      = "reset",
       description = "Reset",
@@ -90,7 +104,7 @@ function GestureSeq:onLoadViews()
       comparator  = self.objects.write
     }
   }, {
-    expanded  = { "reset", "offset", "write" },
+    expanded  = { "run", "reset", "offset", "write" },
     collapsed = {}
   }
 end

@@ -31,6 +31,7 @@ namespace mi
     stmlib::GateFlags clock_flags[kMaxBlockSize];
     stmlib::GateFlags prev_clock_flag;
     bool resetWasHigh;
+    bool clockReceived;
   };
 
   MarblesT::MarblesT()
@@ -51,6 +52,7 @@ namespace mi
     mpInternal->t_gen.Init(&mpInternal->random_stream, globalConfig.sampleRate);
     mpInternal->prev_clock_flag = stmlib::GATE_FLAG_LOW;
     mpInternal->resetWasHigh = false;
+    mpInternal->clockReceived = false;
   }
 
   MarblesT::~MarblesT()
@@ -92,6 +94,8 @@ namespace mi
       stmlib::GateFlags flag;
       if (high)
       {
+        if (!(prev & stmlib::GATE_FLAG_HIGH))
+          s.clockReceived = true;
         flag = (prev & stmlib::GATE_FLAG_HIGH)
                    ? stmlib::GATE_FLAG_HIGH
                    : static_cast<stmlib::GateFlags>(stmlib::GATE_FLAG_RISING | stmlib::GATE_FLAG_HIGH);
@@ -106,6 +110,13 @@ namespace mi
       prev = flag;
     }
     s.prev_clock_flag = prev;
+
+    // Output silence until first clock arrives
+    if (!s.clockReceived)
+    {
+      memset(out, 0, FRAMELENGTH * sizeof(float));
+      return;
+    }
 
     // Detect reset rising edge
     bool reset = false;

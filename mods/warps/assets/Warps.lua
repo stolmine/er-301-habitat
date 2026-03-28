@@ -164,4 +164,17 @@ function Warps:onLoadViews(objects, branches)
   return controls, views
 end
 
+function Warps:serialize()
+  local t = Unit.serialize(self)
+  t.easterEgg = self.objects.warps:getOptionValue("Easter Egg")
+  return t
+end
+
+function Warps:deserialize(t)
+  Unit.deserialize(self, t)
+  if t.easterEgg ~= nil then
+    self.objects.warps:setOptionValue("Easter Egg", t.easterEgg)
+  end
+end
+
 return Warps

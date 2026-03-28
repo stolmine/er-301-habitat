@@ -301,4 +301,23 @@ function Rings:onLoadViews(objects, branches)
   return controls, views
 end
 
+function Rings:serialize()
+  local t = Unit.serialize(self)
+  local voice = self.objects.voice
+  t.polyphony  = voice:getOptionValue("Polyphony")
+  t.resolution = voice:getOptionValue("Resolution")
+  t.easterEgg  = voice:getOptionValue("Easter Egg")
+  t.intExciter = voice:getOptionValue("Int Exciter")
+  return t
+end
+
+function Rings:deserialize(t)
+  Unit.deserialize(self, t)
+  local voice = self.objects.voice
+  if t.polyphony  ~= nil then voice:setOptionValue("Polyphony",  t.polyphony)  end
+  if t.resolution ~= nil then voice:setOptionValue("Resolution", t.resolution) end
+  if t.easterEgg  ~= nil then voice:setOptionValue("Easter Egg", t.easterEgg)  end
+  if t.intExciter ~= nil then voice:setOptionValue("Int Exciter", t.intExciter) end
+end
+
 return Rings

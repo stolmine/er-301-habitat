@@ -293,7 +293,8 @@ function TrackerSeq:onLoadViews()
   }
 end
 
-function TrackerSeq:onSerialize()
+function TrackerSeq:serialize()
+  local t = Unit.serialize(self)
   local op = self.objects.op
   local steps = {}
   for i = 0, 63 do
@@ -303,11 +304,17 @@ function TrackerSeq:onSerialize()
       deviation = op:getStepDeviation(i)
     }
   end
-  return { steps = steps }
+  t.steps = steps
+  t.offsetRange10v = self.offsetRange10v ~= false
+  t.xformFunc = self.objects.xformFunc:getParameter("Bias"):target()
+  t.xformFactor = self.objects.xformFactor:getParameter("Bias"):target()
+  t.xformScope = self.objects.xformScope:getParameter("Bias"):target()
+  return t
 end
 
-function TrackerSeq:onDeserialize(t)
-  if t and t.steps then
+function TrackerSeq:deserialize(t)
+  Unit.deserialize(self, t)
+  if t.steps then
     local op = self.objects.op
     for i = 0, 63 do
       local s = t.steps[tostring(i)]
@@ -317,6 +324,23 @@ function TrackerSeq:onDeserialize(t)
         op:setStepDeviation(i, s.deviation or s.slew or 0.0)
       end
     end
+  end
+  if t.offsetRange10v ~= nil then
+    self.offsetRange10v = t.offsetRange10v
+    local range = t.offsetRange10v and 5.0 or 1.0
+    self.objects.op:getParameter("OffsetRange"):hardSet(range)
+    if self.controls and self.controls.steps then
+      self.controls.steps:setOffsetRange(t.offsetRange10v)
+    end
+  end
+  if t.xformFunc ~= nil then
+    self.objects.xformFunc:hardSet("Bias", t.xformFunc)
+  end
+  if t.xformFactor ~= nil then
+    self.objects.xformFactor:hardSet("Bias", t.xformFactor)
+  end
+  if t.xformScope ~= nil then
+    self.objects.xformScope:hardSet("Bias", t.xformScope)
   end
 end
 

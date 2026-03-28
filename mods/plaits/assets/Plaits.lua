@@ -59,7 +59,7 @@ end
 function Plaits:onLoadGraph(channelCount)
   local voice = self:addObject("voice", libplaits.PlaitsVoice())
 
-  -- Consume chain input to prevent upstream gates from bleeding into branches
+  -- Sink chain input to prevent upstream signal from bleeding through
   local sink = self:addObject("sink", app.ConstantGain())
   sink:hardSet("Gain", 0.0)
   connect(self, "In1", sink, "In")
@@ -146,8 +146,7 @@ function Plaits:onLoadGraph(channelCount)
   tie(voice, "LPG Colour", lpgColour, "Out")
   self:addMonoBranch("lpgColour", lpgColour, "In", lpgColour, "Out")
 
-  -- Level CV input
-  connect(self, "In1", voice, "Level")
+  -- Level CV input (fed from sunk chain input — no raw passthrough)
 
   -- CV mod branches
   self:addMonoBranch("fm", voice, "FM", voice, "FM")
@@ -354,13 +353,15 @@ function Plaits:onLoadViews(objects, branches)
   end
 end
 
-function Plaits:onSerialize()
-  local mode = self.objects.voice:getOptionValue("Trig Mode")
-  return { trigMode = mode }
+function Plaits:serialize()
+  local t = Unit.serialize(self)
+  t.trigMode = self.objects.voice:getOptionValue("Trig Mode")
+  return t
 end
 
-function Plaits:onDeserialize(t)
-  if t and t.trigMode ~= nil then
+function Plaits:deserialize(t)
+  Unit.deserialize(self, t)
+  if t.trigMode ~= nil then
     if t.trigMode == 0 then
       self:changeMode("trig")
     else

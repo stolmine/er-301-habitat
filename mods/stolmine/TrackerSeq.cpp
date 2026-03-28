@@ -385,9 +385,9 @@ namespace stolmine
         }
       }
 
-      // Target output: base offset + deviation, scaled for V/Oct
+      // Target output: base offset + deviation (1 offset = 1V)
       float base = s.offset[mStep % seqLen];
-      float target = (base + mDeviationOffset) * 0.1f;
+      float target = base + mDeviationOffset;
 
       // Global slew: one-pole smoothing with time in seconds
       if (slewTime > 0.001f)
