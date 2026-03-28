@@ -21,8 +21,9 @@ namespace mi
     plaits::Voice::Frame frames[plaits::kMaxBlockSize];
     stmlib::BufferAllocator allocator;
 
-    // Arena for engine allocations (~32KB should be generous)
-    static const size_t kArenaSize = 32768;
+    // Arena for engine allocations - must hold the largest single engine.
+    // particle_engine needs 16KB+ for diffuser alone. 64KB to be safe.
+    static const size_t kArenaSize = 65536;
     uint8_t arena[kArenaSize];
 
     void Init()
