@@ -13,6 +13,7 @@
 #include "SeqInfoGraphic.h"
 #include "GateSeq.h"
 #include "ChaselightGraphic.h"
+#include "GateSeqInfoGraphic.h"
 #define SWIGLUA
 %}
 
@@ -26,3 +27,4 @@
 %include "SeqInfoGraphic.h"
 %include "GateSeq.h"
 %include "ChaselightGraphic.h"
+%include "GateSeqInfoGraphic.h"

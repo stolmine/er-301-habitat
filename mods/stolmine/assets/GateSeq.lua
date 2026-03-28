@@ -5,7 +5,7 @@ local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
 local ChaselightControl = require "stolmine.ChaselightControl"
-local SeqInfoControl = require "stolmine.SeqInfoControl"
+local GateSeqInfoControl = require "stolmine.GateSeqInfoControl"
 local RatchetControl = require "stolmine.RatchetControl"
 local TransformGateControl = require "stolmine.TransformGateControl"
 local ModeSelector = require "stolmine.ModeSelector"
@@ -179,7 +179,7 @@ function GateSeqUnit:onLoadViews()
       width = app.SECTION_PLY,
       seq = self.objects.op
     },
-    info = SeqInfoControl {
+    info = GateSeqInfoControl {
       description = "Sequence",
       width = app.SECTION_PLY,
       seq = self.objects.op,
