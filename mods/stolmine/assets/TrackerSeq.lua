@@ -237,11 +237,10 @@ function TrackerSeq:onLoadViews()
       branch = self.branches.slew,
       gainbias = self.objects.slew,
       range = self.objects.slew,
-      biasMap = Encoder.getMap("slewTimes"),
+      biasMap = Encoder.getMap("[0,10]"),
       biasUnits = app.unitSecs,
-      initialBias = 0.0,
-      scaling = app.octaveScaling,
-      gainMap = Encoder.getMap("gain")
+      biasPrecision = 3,
+      initialBias = 0.0
     },
     xform = TransformGateControl {
       button = "xform",
