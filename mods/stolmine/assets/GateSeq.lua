@@ -34,8 +34,8 @@ local GateSeqUnit = Class {}
 GateSeqUnit:include(Unit)
 
 function GateSeqUnit:init(args)
-  args.title = "Gate Seq"
-  args.mnemonic = "GS"
+  args.title = "Ballot"
+  args.mnemonic = "Bl"
   Unit.init(self, args)
 end
 

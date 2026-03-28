@@ -9,6 +9,6 @@ return {
     { title = "Latch Filter",  moduleName = "LatchFilter", category = "stolmine", keywords = "filter, latch, digital, effect" },
     { title = "Canals",        moduleName = "Canals",      category = "stolmine", keywords = "filter, resonant, crossover, formant, three sisters" },
     { title = "Excel",         moduleName = "TrackerSeq",  category = "stolmine", keywords = "sequencer, cv, tracker, pitch, step" },
-    { title = "Gate Seq",      moduleName = "GateSeq",     category = "stolmine", keywords = "sequencer, gate, trigger, rhythm, euclidean, ratchet" }
+    { title = "Ballot",         moduleName = "GateSeq",     category = "stolmine", keywords = "sequencer, gate, trigger, rhythm, euclidean, ratchet" }
   }
 }
