@@ -84,6 +84,27 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 
 ## Changelog
 
+### v1.3.1
+
+**Serialization**
+- Fixed save/load across all units (onSerialize/onDeserialize replaced with proper serialize/deserialize overrides)
+- Plaits: trig mode now persists correctly
+- Rings: polyphony, resolution, easter egg, internal exciter options now persist
+- Warps: easter egg option now persists
+- Excel: offset range config, transform function/factor/scope now persist
+- Ballot: ratchet toggles, transform function/params/scope now persist
+- Excel/Ballot: step data and xform label correctly restored on load
+
+**Gate filtering**
+- Marbles T/X: replaced chain passthrough with explicit clock Gate controls (Comparator filtered)
+- Marbles T: silence output until first clock edge (fixes noise pop on insert)
+- Grids, NR: added Comparator filtering on chain clock input
+- GestureSeq: sunk chain input, added explicit run Gate control
+- Plaits: removed raw chain-to-Level connection that caused signal passthrough
+
+**Excel**
+- Removed 0.1x output scaling (1 offset = 1V)
+
 ### v1.3.0
 
 **New: Marbles**
