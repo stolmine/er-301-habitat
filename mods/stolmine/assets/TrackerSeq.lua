@@ -342,6 +342,14 @@ function TrackerSeq:deserialize(t)
   if t.xformScope ~= nil then
     self.objects.xformScope:hardSet("Bias", t.xformScope)
   end
+  -- Sync edit buffer with step 0 after framework restores stale edit params
+  self.objects.op:loadStep(0)
+  -- Update func label on xform control
+  if self.controls and self.controls.xform then
+    local val = math.floor(self.objects.xformFunc:getParameter("Bias"):target() + 0.5)
+    local name = self.controls.xform.funcNames[val]
+    if name then self.controls.xform.funcLabel:setText(name) end
+  end
 end
 
 return TrackerSeq
