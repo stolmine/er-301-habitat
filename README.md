@@ -84,6 +84,14 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 
 ## Changelog
 
+### v1.3.2
+
+**Gesture**
+- Auto-write: recording driven by offset movement detection, no manual write gate needed
+- Erase gate: zeros buffer under playhead when held (write takes priority)
+- Run is now toggle mode, reset is trigger mode
+- Write indicator: diamond graphic lights up when auto-write is active
+
 ### v1.3.1
 
 **Serialization**
