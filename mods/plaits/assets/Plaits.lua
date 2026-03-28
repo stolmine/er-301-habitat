@@ -59,7 +59,7 @@ end
 function Plaits:onLoadGraph(channelCount)
   local voice = self:addObject("voice", libplaits.PlaitsVoice())
 
-  -- Consume chain input to prevent it from reaching branches
+  -- Consume chain input to prevent upstream gates from bleeding into branches
   local sink = self:addObject("sink", app.ConstantGain())
   sink:hardSet("Gain", 0.0)
   connect(self, "In1", sink, "In")
