@@ -68,6 +68,7 @@ namespace stolmine
     od::Parameter mTransformParamA{"TransformParamA", 4.0f};
     od::Parameter mTransformParamB{"TransformParamB", 0.0f};
     od::Parameter mTransformScope{"TransformScope", 0.0f};
+    od::Parameter mGateWidth{"GateWidth", 0.5f}; // 0-1, fraction of step duration
 
     // Edit buffer
     od::Parameter mEditGate{"EditGate", 0.0f};

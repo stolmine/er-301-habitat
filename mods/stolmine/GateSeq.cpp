@@ -57,6 +57,7 @@ namespace stolmine
     addParameter(mTransformParamA);
     addParameter(mTransformParamB);
     addParameter(mTransformScope);
+    addParameter(mGateWidth);
     addParameter(mEditGate);
     addParameter(mEditLength);
     addParameter(mEditVelocity);
@@ -350,6 +351,7 @@ namespace stolmine
     int seqLen = CLAMP(1, kGateMaxSteps, (int)(mSeqLength.value() + 0.5f));
     int loopLen = CLAMP(0, seqLen, (int)(mLoopLength.value() + 0.5f));
     int ratchetMult = CLAMP(1, 8, (int)(mRatchetMult.value() + 0.5f));
+    float gateWidth = CLAMP(0.01f, 1.0f, mGateWidth.value());
     bool ratchetLenOn = mRatchetLenToggle.value() == 1;
     bool ratchetVelOn = mRatchetVelToggle.value() == 1;
 
@@ -425,11 +427,11 @@ namespace stolmine
             float vel = s.velocity[mStep % seqLen];
             int gateLen = s.length[mStep % seqLen];
 
-            // Gate duration spans the full step length in clock ticks
+            // Gate duration: step length in ticks * width fraction
             int gateSamples = 48;
             if (mClockPeriodSamples > 0)
             {
-              gateSamples = mClockPeriodSamples * gateLen;
+              gateSamples = (int)(mClockPeriodSamples * gateLen * gateWidth);
               if (gateSamples < 1) gateSamples = 1;
             }
 

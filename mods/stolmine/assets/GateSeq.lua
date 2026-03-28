@@ -102,6 +102,12 @@ function GateSeqUnit:onLoadGraph(channelCount)
   tie(op, "LoopLength", loopLength, "Out")
   self:addMonoBranch("loopLength", loopLength, "In", loopLength, "Out")
 
+  -- Gate width
+  local gateWidth = self:addObject("gateWidth", app.ParameterAdapter())
+  gateWidth:hardSet("Bias", 0.5)
+  tie(op, "GateWidth", gateWidth, "Out")
+  self:addMonoBranch("gateWidth", gateWidth, "In", gateWidth, "Out")
+
   -- Output
   connect(op, "Out", self, "Out1")
   if channelCount > 1 then
@@ -216,7 +222,7 @@ function GateSeqUnit:onLoadViews()
       seq = self.objects.op,
       seqLength = self.objects.seqLength:getParameter("Bias"),
       loopLength = self.objects.loopLength:getParameter("Bias"),
-      transformScope = self.objects.xformScope:getParameter("Bias")
+      gateWidth = self.objects.gateWidth:getParameter("Bias")
     },
     clock = Gate {
       button = "clock",
@@ -282,22 +288,20 @@ function GateSeqUnit:onLoadViews()
       biasPrecision = 0,
       initialBias = 0
     },
-    xformScope = ModeSelector {
-      button = "scope",
-      description = "Xform Scope",
-      branch = self.branches.xformScope,
-      gainbias = self.objects.xformScope,
-      range = self.objects.xformScope,
-      biasMap = scopeMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 0,
-      initialBias = 0,
-      modeNames = { [0] = "gate", "len", "vel", "all" }
+    gateWidthFader = GainBias {
+      button = "width",
+      description = "Gate Width",
+      branch = self.branches.gateWidth,
+      gainbias = self.objects.gateWidth,
+      range = self.objects.gateWidth,
+      biasMap = Encoder.getMap("[0,1]"),
+      biasPrecision = 2,
+      initialBias = 0.5
     }
   }, {
     expanded = { "steps", "info", "clock", "reset", "ratchet", "xform" },
     collapsed = {},
-    info = { "info", "seqLen", "loopLen", "xformScope" }
+    info = { "info", "seqLen", "loopLen", "gateWidthFader" }
   }
 end
 

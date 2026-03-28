@@ -22,15 +22,6 @@ end
 local seqLenMap = intMap(1, 64)
 local loopLenMap = intMap(0, 64)
 
-local scopeMap = (function()
-  local m = app.LinearDialMap(0, 3)
-  m:setSteps(1, 1, 1, 1)
-  m:setRounding(1)
-  return m
-end)()
-
-local scopeNames = { [0] = "gate", "len", "vel", "all" }
-
 local GateSeqInfoControl = Class {
   type = "GateSeqInfoControl",
   canEdit = false,
@@ -80,21 +71,19 @@ function GateSeqInfoControl:init(args)
     return g
   end)()
 
-  self.scopeReadout = (function()
+  self.widthReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
-    local param = args.transformScope
+    local param = args.gateWidth
     if param then
       g:setParameter(param)
     end
-    g:setAttributes(app.unitNone, scopeMap)
-    g:setPrecision(0)
+    local widthMap = app.LinearDialMap(0, 1)
+    widthMap:setSteps(0.25, 0.1, 0.01, 0.001)
+    g:setAttributes(app.unitNone, widthMap)
+    g:setPrecision(2)
     g:setCenter(col3, center4)
     return g
   end)()
-
-  self.scopeLabel = app.Label("gate", 10)
-  self.scopeLabel:fitToText(0)
-  self.scopeLabel:setCenter(col3, center3 + 1)
 
   self.description = (function()
     local g = app.Label("Sequence", 10)
@@ -109,12 +98,11 @@ function GateSeqInfoControl:init(args)
   self.subGraphic = app.Graphic(0, 0, 128, 64)
   self.subGraphic:addChild(self.seqLenReadout)
   self.subGraphic:addChild(self.loopLenReadout)
-  self.subGraphic:addChild(self.scopeReadout)
-  self.subGraphic:addChild(self.scopeLabel)
+  self.subGraphic:addChild(self.widthReadout)
   self.subGraphic:addChild(self.description)
   self.subGraphic:addChild(app.SubButton("length", 1))
   self.subGraphic:addChild(app.SubButton("loop", 2))
-  self.subGraphic:addChild(app.SubButton("scope", 3))
+  self.subGraphic:addChild(app.SubButton("width", 3))
 
   self.pDisplay:follow(seq)
 end
@@ -139,7 +127,7 @@ function GateSeqInfoControl:subReleased(i, shifted)
   if shifted then return false end
   local readout = i == 1 and self.seqLenReadout
       or i == 2 and self.loopLenReadout
-      or i == 3 and self.scopeReadout or nil
+      or i == 3 and self.widthReadout or nil
   if readout then
     if self:hasFocus("encoder") then
       self:setFocusedReadout(readout)
@@ -154,13 +142,6 @@ end
 function GateSeqInfoControl:encoder(change, shifted)
   if self.focusedReadout then
     self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Coarse)
-    if self.focusedReadout == self.scopeReadout then
-      local val = math.floor(self.scopeReadout:getValueInUnits() + 0.5)
-      local name = scopeNames[val]
-      if name then
-        self.scopeLabel:setText(name)
-      end
-    end
   end
   return true
 end
