@@ -137,9 +137,12 @@ namespace mi
       int chunk = (remaining >= blockSize) ? blockSize : remaining;
 
       // Sample modulation inputs at block boundaries
-      // V/Oct: ER-301 fullscale is 10V, so signal 0.1 = 1V = 1 octave.
-      // Plaits uses MIDI note numbers. Scale: voct * 10 * 12 = voct * 120.
-      s.patch.note = CLAMP(0.0f, 127.0f, 60.0f + mFreq.value() + voct[pos] * 120.0f);
+      // V/Oct: use modulations.note for pitch offset instead of patch.note.
+      // This bypasses Plaits' note computation and lets the engine handle
+      // the pitch shift directly via its modulation input.
+      float voctSemitones = voct[pos] * 10.0f * 12.0f; // FULLSCALE * semitones
+      s.patch.note = 60.0f + mFreq.value();
+      s.modulations.note = voctSemitones;
 
       s.modulations.note = 0.0f;
       s.modulations.frequency = fm[pos] * 6.0f;
