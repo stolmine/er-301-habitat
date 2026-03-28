@@ -147,6 +147,7 @@ Refinements:
 - [x] Latch Filter — switched-capacitor S&H → SVF with V/Oct tracking
 - [x] Stereo processing for Canals, 94 Discont, and Latch Filter (dual DSP instances)
 - [ ] HD2-style FM oscillator pair (dual osc with FM index + feedback)
+- [ ] 4-op FM voice (Akemie's Castle / TX81Z style, build on Accents XOXO voice)
 - [ ] Additional filter models from monokit (MoogFF, DFM1, BMoog)
 
 ## Polyphonic Sample Playback
