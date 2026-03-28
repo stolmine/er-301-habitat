@@ -137,12 +137,9 @@ namespace mi
       int chunk = (remaining >= blockSize) ? blockSize : remaining;
 
       // Sample modulation inputs at block boundaries
-      // V/Oct: use modulations.note for pitch offset instead of patch.note.
-      // This bypasses Plaits' note computation and lets the engine handle
-      // the pitch shift directly via its modulation input.
-      float voctSemitones = voct[pos] * 10.0f * 12.0f; // FULLSCALE * semitones
-      s.patch.note = 60.0f + mFreq.value();
-      s.modulations.note = voctSemitones;
+      // V/Oct: FULLSCALE_IN_VOLTS=10, 12 semitones per octave.
+      // ConstantOffset outputs 0.1 at 1200 cents. 0.1 * 120 = 12 semitones.
+      s.patch.note = 60.0f + mFreq.value() + voct[pos] * 120.0f;
 
       s.modulations.note = 0.0f;
       s.modulations.frequency = fm[pos] * 6.0f;
