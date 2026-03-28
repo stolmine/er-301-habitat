@@ -95,6 +95,7 @@ namespace stolmine
     void fireTransform();
     int getLastTransformFunc() { return mLastTransformFunc; }
     int getLastTransformParamA() { return mLastTransformParamA; }
+    int getLastTransformParamB() { return mLastTransformParamB; }
     int getLastTransformScope() { return mLastTransformScope; }
 
     void snapshotSave();
@@ -136,6 +137,7 @@ namespace stolmine
 
     int mLastTransformFunc = -1;
     int mLastTransformParamA = 0;
+    int mLastTransformParamB = 0;
     int mLastTransformScope = 0;
 
     void applyTransform();

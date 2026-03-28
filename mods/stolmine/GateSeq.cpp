@@ -332,6 +332,7 @@ namespace stolmine
 
     mLastTransformFunc = func;
     mLastTransformParamA = paramA;
+    mLastTransformParamB = paramB;
     mLastTransformScope = scope;
 
     // Reload edit buffer

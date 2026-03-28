@@ -64,14 +64,14 @@ namespace stolmine
       {
         static const char *funcLabels[] = {
             "euc", "nr", "grd", "nkl", "inv", "rot", "den"};
-        static const char *scopeLabels[] = {"gat", "len", "vel", "all"};
         int lastParamA = mpSeq->getLastTransformParamA();
-        int lastScope = mpSeq->getLastTransformScope();
-        const char *sl = scopeLabels[CLAMP(0, 3, lastScope)];
+        int lastParamB = mpSeq->getLastTransformParamB();
         if (lastFunc == GS_XFORM_INVERT)
-          snprintf(buf, sizeof(buf), "%s:%s", funcLabels[CLAMP(0, 6, lastFunc)], sl);
+          snprintf(buf, sizeof(buf), "%s", funcLabels[CLAMP(0, 6, lastFunc)]);
+        else if (lastFunc == GS_XFORM_ROTATE || lastFunc == GS_XFORM_DENSITY)
+          snprintf(buf, sizeof(buf), "%s %d", funcLabels[CLAMP(0, 6, lastFunc)], lastParamA);
         else
-          snprintf(buf, sizeof(buf), "%s%d:%s", funcLabels[CLAMP(0, 6, lastFunc)], lastParamA, sl);
+          snprintf(buf, sizeof(buf), "%s %d:%d", funcLabels[CLAMP(0, 6, lastFunc)], lastParamA, lastParamB);
         fb.text(WHITE, right - getTextWidth(buf) + 3, mWorldBottom + mHeight - 48, buf, 10);
       }
 
