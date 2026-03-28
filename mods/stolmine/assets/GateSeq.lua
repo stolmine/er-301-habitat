@@ -216,7 +216,14 @@ function GateSeqUnit:onLoadViews()
       comparator = self.objects.xformGate,
       branch = self.branches.xform,
       funcParam = self.objects.xformFunc:getParameter("Bias"),
-      factorParam = self.objects.xformParamA:getParameter("Bias")
+      factorParam = self.objects.xformParamA:getParameter("Bias"),
+      funcNames = { [0] = "euc", "nr", "grd", "nkl", "inv", "rot", "den" },
+      funcMap = (function()
+        local m = app.LinearDialMap(0, 6)
+        m:setSteps(1, 1, 1, 1)
+        m:setRounding(1)
+        return m
+      end)()
     },
     -- Expanded view controls
     seqLen = GainBias {

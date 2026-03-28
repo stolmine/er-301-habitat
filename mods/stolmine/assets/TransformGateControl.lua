@@ -14,11 +14,11 @@ local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
 local col3 = app.BUTTON3_CENTER
 
-local funcNames = {
+local defaultFuncNames = {
   [0] = "add", "sub", "mul", "div", "mod", "rev", "rot", "inv", "rnd"
 }
 
-local funcMap = (function()
+local defaultFuncMap = (function()
   local m = app.LinearDialMap(0, 8)
   m:setSteps(1, 1, 1, 1)
   m:setRounding(1)
@@ -92,6 +92,8 @@ function TransformGateControl:init(args)
   self.branch = branch
   self.comparator = comparator
   self.mathMode = false
+  self.funcNames = args.funcNames or defaultFuncNames
+  local funcMap = args.funcMap or defaultFuncMap
 
   -- Main graphic: ComparatorView (same as Gate)
   local graphic = app.ComparatorView(0, 0, ply, 64, comparator)
@@ -177,7 +179,7 @@ function TransformGateControl:init(args)
   end)()
 
   -- Func label (shows name instead of number)
-  self.funcLabel = app.Label("add", 10)
+  self.funcLabel = app.Label(self.funcNames[0] or "add", 10)
   self.funcLabel:fitToText(0)
   self.funcLabel:setCenter(col1, center3 + 1)
   self.subGraphic:addChild(self.funcLabel)
@@ -377,7 +379,7 @@ function TransformGateControl:encoder(change, shifted)
     self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
     if self.focusedReadout == self.funcReadout then
       local val = math.floor(self.funcReadout:getValueInUnits() + 0.5)
-      local name = funcNames[val]
+      local name = self.funcNames[val]
       if name then
         self.funcLabel:setText(name)
       end

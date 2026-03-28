@@ -4,6 +4,7 @@
 #include <od/objects/Parameter.h>
 #include <GateSeq.h>
 #include <math.h>
+#include <stdio.h>
 
 namespace stolmine
 {
@@ -32,11 +33,17 @@ namespace stolmine
       int page = mSelectedStep / 16;
       int pageStart = page * 16;
 
+      // Page number top right
+      int totalPages = (seqLen + 15) / 16;
+      char pageBuf[4];
+      snprintf(pageBuf, sizeof(pageBuf), "%d", page + 1);
+      fb.text(GRAY7, mWorldLeft + mWidth - 8, mWorldBottom + mHeight - 10, pageBuf, 10);
+
       // 4x4 grid layout
       const int cols = 4;
       const int rows = 4;
       const int cellW = mWidth / cols;
-      const int cellH = (mHeight - 8) / rows; // reserve 8px for page indicator
+      const int cellH = (mHeight - 16) / rows; // reserve 16px for page num + indicator
       const int r = 3; // circle radius
 
       for (int i = 0; i < 16; i++)
@@ -78,7 +85,6 @@ namespace stolmine
       }
 
       // Page indicator dots at bottom
-      int totalPages = (seqLen + 15) / 16;
       int dotSpacing = mWidth / (totalPages + 1);
       for (int p = 0; p < totalPages; p++)
       {
