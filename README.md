@@ -84,6 +84,64 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 
 ## Changelog
 
+### v1.3.0
+
+**New: Marbles**
+- Marbles T -- probabilistic gate generator with 7 models, jitter, deja vu, T1/T2 crossfade
+- Marbles X -- random CV generator with spread, bias, steps, deja vu, X1/X2/X3 selector, 3 control modes
+
+**stolmine**
+- New unit: Gesture -- continuous gesture recorder/looper with 5/10/20s selectable buffer, movement-detected auto-write with holdoff, explicit write gate override
+
+**Build**
+- All packages rebuilt against txo.8 firmware
+
+### v1.2.0
+
+**New: Ballot**
+- 64-step gate sequencer with chaselight display, per-step gate width/velocity/length
+- Algorithmic transforms (euclidean, NR, grids, necklace), randomize gates/lengths/velocities
+- Clear/reset menu items, fine encoder scrolling
+
+**Plaits**
+- Persist trig mode across save/reload
+- Sink chain input to prevent unpatched trigger firing
+- V/Oct scaling workaround: 10x ConstantGain in Lua graph to avoid engine switch crash
+
+**Excel**
+- Slew fader starts at 0 (instant), range 0-10s
+- Overview: step length readout replaces progress bar
+- Fine scrolling for step selection via encoder accumulator
+
+**Canals**
+- Custom SistersSvf filter core with soft-clip saturating integrators
+- Threshold-based soft clip: linear below |2|, compressed above
+
+### v1.1.0
+
+**New: Excel**
+- 64-step CV tracker sequencer with per-step offset, length, and deviation
+- Scrollable step list with live editing, shift+scroll for rapid multi-step edits
+- Expandable overview ply with playhead, loop, total ticks, fader controls
+- Math transform gate: 9 functions, scope selector, snapshot save/restore
+- Clock/reset gate inputs, global slew, V/Oct scaled output (offset 1 = 1 octave)
+- Config: offset range (2Vpp/10Vpp), batch step lengths, randomize/clear offsets
+
+**Clouds**
+- Adaptive labelling for mode control (Gran/Delay/Spect)
+
+**Commotio**
+- Disconnected chain input passthrough (pure generator, no exciter bleed)
+
+**Stratos**
+- Defaults now match Clouds' fixed reverb settings
+
+**stolmine**
+- Stereo processing for Canals, 94 Discont, and Latch Filter (dual DSP instances, shared params)
+
+**Build**
+- Bumped clouds, commotio, stolmine, stratos to v1.1.0
+
 ### v1.0.0
 
 Compatible with both vanilla ER-301 firmware and er-301-stolmine (TXo) firmware.
