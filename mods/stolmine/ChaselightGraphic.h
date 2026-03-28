@@ -33,21 +33,19 @@ namespace stolmine
       int page = mSelectedStep / 16;
       int pageStart = page * 16;
 
-      // Page progress bar top row
+      // Velocity bar graph top row (selected step)
       int totalPages = (seqLen + 15) / 16;
+      float vel = mpSeq->getStepVelocity(mSelectedStep);
       int barLeft = mWorldLeft + 2;
       int barRight = mWorldLeft + mWidth - 3;
       int barH = 4;
       int barBottom = mWorldBottom + mHeight - 3 - barH / 2;
       int barTop = barBottom + barH;
 
-      fb.box(GRAY5, barLeft, barBottom, barRight, barTop);
-      if (totalPages > 0)
-      {
-        int fillWidth = (barRight - barLeft - 1) * (page + 1) / totalPages;
-        if (fillWidth > 0)
-          fb.fill(GRAY10, barLeft + 1, barBottom + 1, barLeft + fillWidth, barTop - 1);
-      }
+      fb.box(GRAY3, barLeft, barBottom, barRight, barTop);
+      int fillWidth = (int)((barRight - barLeft - 1) * vel);
+      if (fillWidth > 0)
+        fb.fill(WHITE, barLeft + 1, barBottom + 1, barLeft + fillWidth, barTop - 1);
 
       // 4x4 grid layout
       const int cols = 4;
