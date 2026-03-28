@@ -33,17 +33,27 @@ namespace stolmine
       int page = mSelectedStep / 16;
       int pageStart = page * 16;
 
-      // Page number top right
+      // Progress bar top row (vertically centered in top 10px)
       int totalPages = (seqLen + 15) / 16;
-      char pageBuf[4];
-      snprintf(pageBuf, sizeof(pageBuf), "%d", page + 1);
-      fb.text(GRAY7, mWorldLeft + mWidth - 8, mWorldBottom + mHeight - 10, pageBuf, 10);
+      int barLeft = mWorldLeft + 2;
+      int barRight = mWorldLeft + mWidth - 3;
+      int barH = 4;
+      int barBottom = mWorldBottom + mHeight - 3 - barH / 2;
+      int barTop = barBottom + barH;
+
+      fb.box(GRAY5, barLeft, barBottom, barRight, barTop);
+      if (seqLen > 0)
+      {
+        int fillWidth = (barRight - barLeft - 1) * (playhead + 1) / seqLen;
+        if (fillWidth > 0)
+          fb.fill(GRAY10, barLeft + 1, barBottom + 1, barLeft + fillWidth, barTop - 1);
+      }
 
       // 4x4 grid layout
       const int cols = 4;
       const int rows = 4;
       const int cellW = mWidth / cols;
-      const int cellH = (mHeight - 16) / rows; // reserve 16px for page num + indicator
+      const int cellH = (mHeight - 14) / rows; // reserve 14px for progress bar + indicator
       const int r = 3; // circle radius
 
       for (int i = 0; i < 16; i++)
