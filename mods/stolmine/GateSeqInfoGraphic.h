@@ -73,7 +73,7 @@ namespace stolmine
           snprintf(buf, sizeof(buf), "%s %d", funcLabels[CLAMP(0, 6, lastFunc)], lastParamA);
         else
           snprintf(buf, sizeof(buf), "%s %d:%d", funcLabels[CLAMP(0, 6, lastFunc)], lastParamA, lastParamB);
-        fb.text(WHITE, right - getTextWidth(buf) + 3, mWorldBottom + mHeight - 48, buf, 10);
+        fb.text(WHITE, right - getTextWidth(buf), mWorldBottom + mHeight - 48, buf, 10);
       }
 
       // Width readout
