@@ -202,7 +202,7 @@ Refinements:
 ## V/Oct Scaling Audit
 
 - [x] V/Oct scaling: * 120 (FULLSCALE_IN_VOLTS=10 * 12 semitones) confirmed working for Plaits, Rings, Canals, LatchFilter
-- [x] Plaits crash + V/Oct: was SWIG mismatch (txo.5 vs txo.6). V/Oct scaling confirmed correct at * 120.
+- [x] Plaits V/Oct: scaling done via 10x ConstantGain in Lua graph (C++ stays * 12). Changing C++ to * 120 causes hard crash on engine switch due to compiler code generation issue. Workaround is stable.
 
 ## NEON Optimization Audit
 
