@@ -140,14 +140,30 @@ function GateSeqUnit:onShowMenu(objects, branches)
     for i = 0, 63 do op:setStepVelocity(i, 1.0) end
   end }
 
-  controls.gateHeader = MenuHeader { description = "Gates" }
-  controls.randomize = Task { description = "Randomize gates", task = function()
+  controls.randomHeader = MenuHeader { description = "Randomize" }
+  controls.randomGates = Task { description = "Randomize gates", task = function()
     local op = self.objects.op
     for i = 0, 63 do op:setStepGate(i, math.random() > 0.5) end
     if self.controls and self.controls.steps then
       op:loadStep(self.controls.steps.currentStep or 0)
     end
   end }
+  controls.randomLengths = Task { description = "Randomize lengths", task = function()
+    local op = self.objects.op
+    for i = 0, 63 do op:setStepLength(i, math.random(1, 4)) end
+    if self.controls and self.controls.steps then
+      op:loadStep(self.controls.steps.currentStep or 0)
+    end
+  end }
+  controls.randomVelocities = Task { description = "Randomize velocities", task = function()
+    local op = self.objects.op
+    for i = 0, 63 do op:setStepVelocity(i, math.random()) end
+    if self.controls and self.controls.steps then
+      op:loadStep(self.controls.steps.currentStep or 0)
+    end
+  end }
+
+  controls.clearHeader = MenuHeader { description = "Clear" }
   controls.clearGates = Task { description = "Clear all gates", task = function()
     local op = self.objects.op
     for i = 0, 63 do op:setStepGate(i, false) end
@@ -167,7 +183,8 @@ function GateSeqUnit:onShowMenu(objects, branches)
   return controls, {
     "stepLenHeader", "stepLen1", "stepLen2", "stepLen4",
     "velHeader", "vel25", "vel50", "vel100",
-    "gateHeader", "randomize", "clearGates",
+    "randomHeader", "randomGates", "randomLengths", "randomVelocities",
+    "clearHeader", "clearGates",
     "snapshotHeader", "snapshotSave", "snapshotRestore"
   }
 end
