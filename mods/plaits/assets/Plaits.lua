@@ -354,4 +354,19 @@ function Plaits:onLoadViews(objects, branches)
   end
 end
 
+function Plaits:onSerialize()
+  local mode = self.objects.voice:getOptionValue("Trig Mode")
+  return { trigMode = mode }
+end
+
+function Plaits:onDeserialize(t)
+  if t and t.trigMode ~= nil then
+    if t.trigMode == 0 then
+      self:changeMode("trig")
+    else
+      self:changeMode("osc")
+    end
+  end
+end
+
 return Plaits
