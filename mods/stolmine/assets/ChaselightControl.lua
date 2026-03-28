@@ -54,6 +54,7 @@ function ChaselightControl:init(args)
 
   self.seq = seq
   self.currentStep = 0
+  self.scrollAccum = 0
 
   -- On/off label (not a readout - toggled directly)
   self.gateLabel = app.Label("OFF", 10)
@@ -199,10 +200,19 @@ function ChaselightControl:subReleased(i, shifted)
   return true
 end
 
+function ChaselightControl:scrollStep(change)
+  self.scrollAccum = self.scrollAccum + change
+  local steps = math.floor(self.scrollAccum)
+  if steps ~= 0 then
+    self.scrollAccum = self.scrollAccum - steps
+    self:switchToStep(self.currentStep + steps)
+  end
+end
+
 function ChaselightControl:encoder(change, shifted)
   if self.focusedReadout and shifted then
     -- Shift held: scroll steps, keep readout focus
-    self:switchToStep(self.currentStep + change)
+    self:scrollStep(change)
     return true
   elseif self.focusedReadout then
     -- Normal: edit focused param, store immediately
@@ -210,8 +220,8 @@ function ChaselightControl:encoder(change, shifted)
     self.seq:storeStep(self.currentStep)
     return true
   else
-    -- No focus: scroll steps
-    self:switchToStep(self.currentStep + change)
+    -- No focus: scroll steps with fine control
+    self:scrollStep(change)
     return true
   end
 end

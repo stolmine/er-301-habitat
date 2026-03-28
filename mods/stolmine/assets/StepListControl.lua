@@ -56,6 +56,7 @@ function StepListControl:init(args)
 
   self.seq = seq
   self.currentStep = 0
+  self.scrollAccum = 0
 
   -- Sub-display readouts bound to edit buffer params
   self.offsetReadout = (function()
@@ -195,10 +196,19 @@ function StepListControl:subReleased(i, shifted)
   return true
 end
 
+function StepListControl:scrollStep(change)
+  self.scrollAccum = self.scrollAccum + change
+  local steps = math.floor(self.scrollAccum)
+  if steps ~= 0 then
+    self.scrollAccum = self.scrollAccum - steps
+    self:switchToStep(self.currentStep + steps)
+  end
+end
+
 function StepListControl:encoder(change, shifted)
   if self.focusedReadout and shifted then
     -- Shift held: scroll steps, keep readout focus
-    self:switchToStep(self.currentStep + change)
+    self:scrollStep(change)
     return true
   elseif self.focusedReadout then
     -- Normal: edit focused param, store immediately for live update
@@ -206,8 +216,8 @@ function StepListControl:encoder(change, shifted)
     self.seq:storeStep(self.currentStep)
     return true
   else
-    -- No focus: scroll step list
-    self:switchToStep(self.currentStep + change)
+    -- No focus: scroll step list with fine control
+    self:scrollStep(change)
     return true
   end
 end
