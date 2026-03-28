@@ -1,5 +1,5 @@
 PKGNAME ?= rings
-PKGVERSION ?= 1.2.0
+PKGVERSION ?= 1.3.0
 
 include scripts/env.mk
 
