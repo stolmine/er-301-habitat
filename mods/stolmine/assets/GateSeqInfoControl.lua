@@ -105,6 +105,9 @@ function GateSeqInfoControl:init(args)
   self.subGraphic:addChild(app.SubButton("width", 3))
 
   self.pDisplay:follow(seq)
+  if args.gateWidth then
+    self.pDisplay:setWidthParam(args.gateWidth)
+  end
 end
 
 function GateSeqInfoControl:setFocusedReadout(readout)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <od/graphics/Graphic.h>
+#include <od/objects/Parameter.h>
 #include <GateSeq.h>
 #include <stdio.h>
 #include <string.h>
@@ -75,22 +76,12 @@ namespace stolmine
         fb.text(WHITE, right - getTextWidth(buf) + 3, mWorldBottom + mHeight - 48, buf, 10);
       }
 
-      // Progress bar
-      int barLeft = mWorldLeft + 2;
-      int barRight = right;
-      int barBottom = mWorldBottom + 4;
-      int barTop = barBottom + 6;
-
-      fb.box(GRAY5, barLeft, barBottom, barRight, barTop);
-
-      if (seqLen > 0)
+      // Width readout
+      if (mpWidthParam)
       {
-        int fillWidth = (barRight - barLeft - 1) * (playhead + 1) / seqLen;
-        if (fillWidth > 0)
-        {
-          fb.fill(GRAY10, barLeft + 1, barBottom + 1,
-                  barLeft + fillWidth, barTop - 1);
-        }
+        int widthPct = (int)(mpWidthParam->value() * 100.0f + 0.5f);
+        snprintf(buf, sizeof(buf), "w:%d%%", widthPct);
+        fb.text(GRAY7, right - getTextWidth(buf), mWorldBottom + 2, buf, 10);
       }
     }
 
@@ -112,8 +103,11 @@ namespace stolmine
         mpSeq->attach();
     }
 
+    void setWidthParam(od::Parameter *p) { mpWidthParam = p; }
+
   private:
     GateSeq *mpSeq = 0;
+    od::Parameter *mpWidthParam = 0;
   };
 
 } // namespace stolmine
