@@ -80,6 +80,10 @@ Custom unit packages for the ER-301 sound computer (Eurorack DSP module by Ortho
 - Mark `mpSample->setDirty()` on write for display refresh
 - Inherit from `od::TapeHead` to get `mpSample`, `mCurrentIndex`, `mEndIndex`, and `TapeHeadDisplay` compatibility
 - Serialize with `pool.serializeSample()` / `pool.deserializeSample()`
+- For waveform display: subclass `TapeHeadDisplay`, call `invalidateInterval(lastPos, pos)` in draw() to update the cached waveform (setDirty alone is not enough)
+- Use `app.HeadSubDisplay(head)` for sub-display showing head position and buffer length
+- Lua ViewControl should extend `Zoomable` for time/height zoom support
+- Use the views table pattern (like FeedbackLooper/VariSpeed) to show waveform in context views, not at top level
 
 ## Unit Category Conventions
 - MI ports: use standard SDK categories ("Synthesizers", "Timing", etc.), not "Mutable Instruments"
