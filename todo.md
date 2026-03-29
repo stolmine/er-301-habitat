@@ -138,6 +138,7 @@ Refinements:
 - [x] Excel/Ballot: persist transform func/params/scope (ParameterAdapter Bias values)
 - [x] Verify OptionControl-based serialization works (confirmed via Clouds)
 - [ ] GestureSeq: persist recorded buffer contents (needs C++ getter/setter)
+- [ ] GestureSeq: show buffer waveform on offset and erase controls -- requires refactoring internal float* buffer to od::Sample, exposing via setSample(), marking mDirty on write. Then use TapeHeadDisplay or MiniScope in Lua (see sloop for reference pattern)
 
 ## Passthrough Audit
 

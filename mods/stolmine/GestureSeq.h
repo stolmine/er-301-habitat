@@ -1,18 +1,15 @@
 #pragma once
 
-#include <od/objects/Object.h>
+#include <od/objects/heads/TapeHead.h>
 
 namespace stolmine
 {
 
-  class GestureSeq : public od::Object
+  class GestureSeq : public od::TapeHead
   {
   public:
     GestureSeq();
     virtual ~GestureSeq();
-
-    void clear();
-    int getBufferSeconds();
 
 #ifndef SWIGLUA
     virtual void process();
@@ -23,8 +20,9 @@ namespace stolmine
     od::Outlet mOut{"Out"};
 
     od::Parameter mOffset{"Offset", 0.0f};
-    od::Option mBufferSize{"Buffer Size", 0}; // 0=5s, 1=10s, 2=20s
-    od::Option mWriteActive{"Write Active", 0}; // 0=idle, 1=writing (read-only, for UI)
+    od::Parameter mSlew{"Slew", 0.0f};
+    od::Option mWriteActive{"Write Active", 0};
+    od::Option mSensitivity{"Sensitivity", 1}; // 0=low, 1=medium, 2=high
 #endif
 
   private:
