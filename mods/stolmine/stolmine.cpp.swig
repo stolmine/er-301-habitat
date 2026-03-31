@@ -17,6 +17,9 @@
 #include "GestureSeq.h"
 #include "GestureHeadDisplay.h"
 #include "WriteIndicator.h"
+#include "Etcher.h"
+#include "SegmentListGraphic.h"
+#include "TransferCurveGraphic.h"
 #define SWIGLUA
 %}
 
@@ -34,3 +37,6 @@
 %include "GestureSeq.h"
 %include "GestureHeadDisplay.h"
 %include "WriteIndicator.h"
+%include "Etcher.h"
+%include "SegmentListGraphic.h"
+%include "TransferCurveGraphic.h"

@@ -13,7 +13,8 @@
 - [x] Marbles X (random CV generator) -- spread, bias, steps, deja vu, X1/X2/X3 selector, 3 control modes
 
 ### Marbles Fixes
-  - [ ] Both units produce full-scale noise when driven by gates from the 301's G jacks, or when a user removes a hardware gate input from an ABCD CV jack. Internal gate sources work fine. Plan: add explicit gate controls on unit and eliminate passthrough
+  - [x] Both units: explicit clock Gate controls with Comparator filtering (replaced chain passthrough)
+  - [x] Marbles T: silence output until first clock edge (fixes noise pop on insert)
 
 ## Peaks / DMC Ports
 
@@ -81,9 +82,11 @@ Refinements:
   - Integer factor fader for transform operations (e.g. add 7, div 3)
   - Global pitch/CV scaling and snap-to-scale mode
 - [x] Gesture Sequencer — continuous gesture recorder/looper
-  - Offset fader records into sample-rate buffer (5/10/20s selectable)
-  - Auto-write from movement detection (hysteresis/debounce), de-normals when write patched
-  - Run/reset gate inputs, loops automatically, null outputs 0 for VCA silence
+  - od::Sample buffer (5/10/20s via menu), waveform display in context views
+  - Auto-write from movement detection with tunable sensitivity (Low/Med/High)
+  - Erase gate zeros buffer under playhead (write takes priority)
+  - Output slew (0-10s), toggle run, trigger reset
+  - Write indicator diamond graphic
 - [x] Excel — 64-step CV tracker sequencer
   - Per-step offset, length (ticks), deviation (random)
   - Scrollable step list with live editing, shift+scroll for rapid multi-step edits
@@ -98,7 +101,8 @@ Refinements:
   - [x] Stratos defaults matched to Clouds reverb (hardSet in Lua)
   - [x] Excel overview: spinner, right-justified text, title bar consistency
 
-### Excel Improvements
+### Excel/Ballot Improvements
+  - [ ] Xform gate control: enter-menu context view with GainBias faders (and CV input) for transform function and params
   - [ ] Pretty up Excel:
     - Animated fire circle in xform math sub-display
     - Transform ply: function icons, gate activity indicator
@@ -137,19 +141,35 @@ Refinements:
 - [x] Excel (TrackerSeq): persist offsetRange10v config
 - [x] Excel/Ballot: persist transform func/params/scope (ParameterAdapter Bias values)
 - [x] Verify OptionControl-based serialization works (confirmed via Clouds)
-- [ ] GestureSeq: persist recorded buffer contents (needs C++ getter/setter)
-- [ ] GestureSeq: show buffer waveform on offset and erase controls -- requires refactoring internal float* buffer to od::Sample, exposing via setSample(), marking mDirty on write. Then use TapeHeadDisplay or MiniScope in Lua (see sloop for reference pattern)
+- [x] GestureSeq: od::Sample buffer with waveform display, serialization via Sample.Pool
+- [x] GestureSeq: context views with waveform on offset/slew/erase (FeedbackLooper pattern)
+
+## OptionControl Indexing Audit
+
+- [x] Fix off-by-one: add boolean=true to Plaits output, MarblesX control mode, MarblesT model, GestureSeq sensitivity
+- [x] Clouds quality labels renamed normal/hifi
+- [ ] MarblesT: 7 models but only 3 visible with OptionControl (max 3 choices) -- needs fader or paged UI
 
 ## Passthrough Audit
 
-- [ ] Review all units for clean delineation between passthrough and non-passthrough behavior
+- [x] Marbles T/X: explicit clock Gate with Comparator
+- [x] Grids, NR: Comparator on chain clock input
+- [x] GestureSeq: sunk chain input, explicit run gate
+- [x] Plaits: removed raw chain-to-Level connection
+- [ ] Review remaining units for clean delineation between passthrough and non-passthrough behavior
 
-## Ratchet
+## Ratchet / Strum
+
+Produces a burst of gates from a single trigger input.
 
 - [ ] Clock input, gate input, clock output
+- [ ] Count: number of gates in burst (1-16)
+- [ ] Spacing: time between gates (ms or tempo-synced)
+- [ ] Acceleration: speed up or slow down across the burst
+- [ ] Velocity curve: amplitude across burst (flat, decaying, crescendo)
+- [ ] Gate length: per-pulse gate width
 - [ ] When gated, outputs clock multiplied by fader value (e.g. 2x, 3x, 4x)
 - [ ] When not gated, passes clock through unchanged
-- [ ] Integer fader for multiplication factor
 
 ## Kryos (spectral freeze)
 
@@ -169,7 +189,10 @@ Refinements:
 
 ## Polyphonic Sample Playback
 
+Spreadsheet paradigm: N voices with per-voice params.
+
 - [ ] Polyphonic sample player with voice management (reference: Polygon voice allocation)
+- [ ] Per-voice params: sample assignment, pitch, envelope, filter
 - [ ] Manual grain triggering (reference: Manual Grains)
 
 ## Effects
@@ -189,10 +212,16 @@ Refinements:
 - [ ] Investigate how SDK builtin filters handle audio-rate modulation cleanly (parameter interpolation? per-sample coefficient update?)
 - [ ] Bench CPU cost on hardware; NEON vectorize if needed
 
-## Filterbank
+## Filterbank (FFB)
+
+Spreadsheet-style fixed filter bank with per-band control.
 
 - [ ] Based on disting ex filterbank
-- [ ] Controls for filter type, band gain, band res, band freq, band spread/arrangement
+- [ ] Per-band params: freq, gain (-24/+24dB), Q (0.1-20), type (LP/HP/BP/peak/notch), solo/mute
+- [ ] instead of per-band freq we can use a macro based on the 4ms SMR. User just moves one fader to adjust frequency of all bands which are locked (with octave compensation to account for the whole spectrum (we will likely need to distribute across several octaves to get an even spread (interesting problem, how do we do this exactly?)))
+- [ ] Classic FFB mode: fixed logarithmic spacing, gain-only per band
+- [ ] Parametric mode: full control over every band's freq and Q
+- [ ] Selectable band count: 8 / 12 / 16
 
 ## 4ms SMR
 
@@ -204,8 +233,8 @@ Refinements:
 - [x] TXo CV and TR units with passthrough
 - [x] Gain control and V/Oct mode
 - [x] Emulator monitor (txo-monitor.py)
-- [ ] Hardware testing on real ER-301 + TXo
-- [ ] Recompile core package for TXo firmware — core unit failed to load errors
+- [x] Hardware testing on real ER-301 + TXo
+- [x] Recompile core package for TXo firmware — core unit failed to load errors
 
 ## Release / Compatibility
 
@@ -225,6 +254,87 @@ Refinements:
 ## NEON Optimization Audit
 
 - [ ] Repo-wide NEON check — identify hot DSP paths without SIMD and assess vectorization opportunities
+
+## Multitap Delay
+
+Spreadsheet paradigm flagship. 1-16 taps with per-tap filtering.
+
+- [ ] Per-tap params: level, pan, filter freq, filter type
+	- how will we accomplish this with the current spreadsheet UI (3 param limit in sub-display)
+	- we may need to macro some stuff elsewhere, the question is what would a user want to have at hand on a per-step basis vs macro'd on a fader?
+- [ ] We should take a cue from rainmaker and use a clock input and tap positioning to determine timing
+- [ ] Global: input send, master feedback, mix (dry/wet), tempo sync
+- [ ] Cross-feedback matrix (stretch goal: tap N feeds tap M)
+- [ ] Budget: 16 taps ~16% CPU, 24 taps ~24%, ~6MB DDR for 16x2s delay lines
+- [ ] Reference: stmlib/dsp/delay_line.h (linear/hermite interp), stmlib/dsp/filter.h (SVF)
+- [ ] FrozenWasteland multitap concepts (GPLv3, algorithm reference only, clean-room)
+
+## Fade Mixer
+
+N-input crossfader with single CV position control.
+
+- [ ] Per-input (4 inputs on top level, we can refer to warps here for inserting mono branches as controls): position on fade axis, curve (linear/equal-power), level trim - these will be sub-display params, with typical gate control on shift
+- [ ] Global: fade position (CV-controllable), fade width (overlap)
+
+## Etcher (Transfer Function Designer, inspired by MI Frames)
+
+CV-addressed piecewise transfer function. Input voltage maps to output voltage
+through user-defined segments. Not a sequencer -- a voltage-to-voltage mapper.
+Waveshaper, LFO sculpting, response curves, quantizer-like steps.
+
+Input: GainBias branch (no inlet). Output: 10Vpp (-5V to +5V).
+
+### Implemented
+
+- [x] Segment list (spreadsheet): offset, curve (step/linear/cubic), weight (0.1-4.0)
+- [x] Weight-normalized boundaries with skew (power curve warping)
+- [x] Catmull-Rom cubic interpolation
+- [x] 2-ply overview: transfer function polyline, segment boundaries, active highlight, playhead + dot
+- [x] Deviation: snapshots on segment transition, scope (offset/curve/weight/all)
+- [x] Presets: linear ramp, S-curve, staircase, random
+- [x] Serialization for all segment data + global params
+- [x] 16 default, 32 max segments
+
+### Remaining
+
+- [ ] Change input and output ranges to +/-1V. Most 301 controls are scaled for -1/1 or 0/1, so this ensures broader compatibility within the system. Users can scale externally if needed.
+- [ ] Verify deviation behavior on hardware across all scopes
+- [ ] Consider: audio-rate input option (inlet mode) for true waveshaping
+- [ ] Transforms: adapt Excel transform pattern for segment data (rotate, reverse, random, etc.)
+- [ ] Additional presets: sine wave, triangle, custom user presets via save/restore
+
+## Traffic-like (Priority Gate Router)
+
+Multiple gate inputs compete to set output voltage. Highest-priority active gate wins.
+
+- [ ] just 3 gate inputs, each with a bipolar fader representing its assigned output value. priority going from left to right
+
+## Spectrogram
+
+FFT-based visual display unit, audio passthrough.
+
+- [ ] FFT size: 256 / 512 / 1024
+- [ ] Display: scrolling waterfall or static spectrum
+- [ ] Diagnostic insert anywhere in a chain
+
+## Port Candidates
+
+### MIT-compatible (direct port)
+
+- [ ] Stages LFO -- Mutable Instruments Stages (pichenettes/eurorack, MIT)
+- [ ] Loom -- sequencer/pattern generator (ianjhoffman/RigatoniModular, MIT)
+- [ ] Airwindows -- large library of effects (Chris Johnson, MIT)
+
+### Algorithm reference only (GPLv3, clean-room reimplementation)
+
+- [ ] Noise Plethora (Befaco, CC-BY-NC-SA)
+- [ ] FrozenWasteland (almostEric, GPLv3)
+- [ ] Plateau / Amalgam (ValleyAudio, GPLv3)
+- [ ] Geodesics (MarcBoule, GPLv3)
+
+### Other
+
+- [ ] ProCo Rat emulation -- distortion circuit modeling
 
 ## Video
 
