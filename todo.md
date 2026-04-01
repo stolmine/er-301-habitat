@@ -324,24 +324,44 @@ Spreadsheet-style parallel fixed filter bank. Input on inlets (mono and stereo).
 
 ## Multitap Delay
 
-Spreadsheet paradigm flagship. 1-16 taps with per-tap filtering.
+Rainmaker-inspired multitap delay. 16 taps with per-tap SVF filtering, based on builtin granular delay (gives pitch shifting for free). Two independent spreadsheets (taps + filters) keep UI clean within 3-params-per-row constraint.
 
-- [ ] Per-tap params: level, pan, filter freq, filter type
-	- how will we accomplish this with the current spreadsheet UI (3 param limit in sub-display)
-	- we may need to macro some stuff elsewhere, the question is what would a user want to have at hand on a per-step basis vs macro'd on a fader?
-- [ ] We should take a cue from rainmaker and use a clock input and tap positioning to determine timing
-- [ ] Global: input send, master feedback, mix (dry/wet), tempo sync
-- [ ] Cross-feedback matrix (stretch goal: tap N feeds tap M)
-- [ ] Budget: 16 taps ~16% CPU, 24 taps ~24%, ~6MB DDR for 16x2s delay lines
-- [ ] Reference: stmlib/dsp/delay_line.h (linear/hermite interp), stmlib/dsp/filter.h (SVF)
-- [ ] FrozenWasteland multitap concepts (GPLv3, algorithm reference only, clean-room)
+### Tap distribution
+
+Taps distributed across master time window without requiring clock:
+- Base: `tap_time[i] = master_time * pow((i+1) / N, skew_exp)`
+- Skew=0: even spacing. Skew>0: bunch early. Skew<0: bunch late.
+- Stack groups coincident taps (1/2/4/8/16 per position). Stacked taps share timing but keep individual level/pan/filter.
+
+### UI layout (7 plies)
+
+1. V/Oct pitch
+2. Tap list (time/level/pan per tap)
+3. Filter list (cutoff/Q/type per tap, reuses FFB SVF code)
+4. Overview/viz (submenu: tap count, skew, stack)
+5. Master time (submenu: time max 2s, feedback, feedback tone tilt EQ)
+6. Xform gate (submenu: target 1, target 2, overloaded factor)
+7. Mix (submenu: input level, output level, tanh saturation)
+
+### Remaining
+
+- [ ] Tap list: time (0-1 within window), level, pan
+- [ ] Filter list: cutoff, Q, type (LP/HP/BP/notch) -- reuse FFB SVF code
+- [ ] Tap distribution: skew + stack parameters
+- [ ] Master time with feedback and feedback tone (tilt EQ on feedback path)
+- [ ] Xform gate with dual targets and overloaded factor
+- [ ] Overview viz: tap positions on timeline (gradient, particles, or bright spots)
+- [ ] V/Oct pitch shifting via builtin granular delay
+- [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
+- [ ] Budget: 16 taps ~16% CPU, ~6MB DDR for 16x2s delay lines
+- [ ] Reference: stmlib delay_line.h, stmlib filter.h, FrozenWasteland (GPLv3, algorithm ref only)
 
 ## Fade Mixer
 
 N-input crossfader with single CV position control.
 
-- [ ] Per-input (4 inputs on top level, we can refer to warps here for inserting mono branches as controls): position on fade axis, curve (linear/equal-power), level trim - these will be sub-display params, with typical gate control on shift
-- [ ] Global: fade position (CV-controllable), fade width (overlap)
+- [ ] Per-input (4 inputs on top level, refer to warps for inserting mono branches): position on fade axis, curve (linear/equal-power), level trim -- sub-display params with gate control on shift
+- [ ] Global: fade position (CV-controllable), fade width (overlap), output level
 
 ## Etcher (Transfer Function Designer, inspired by MI Frames)
 
@@ -384,6 +404,111 @@ FFT-based visual display unit, audio passthrough.
 - [ ] Display: scrolling waterfall or static spectrum
 - [ ] Diagnostic insert anywhere in a chain
 
+## Spectral Envelope Follower
+
+Inlet > BPF > envelope follower. Tracks energy in a tunable frequency band.
+
+- [ ] Cutoff (20Hz-20kHz), bandwidth (0.1-4 octaves), attack (0.1-500ms), decay (0.1-5000ms)
+- [ ] Under 1% CPU (one biquad + one-pole envelope)
+- [ ] Use cases: kick detection, sibilance tracking, spectral-driven modulation
+
+## Tone Cluster / Drone Machine
+
+N oscillators (8-16) in spreadsheet. Reuses FFB's scale-aware distribution for placing oscillators on scale degrees.
+
+- [ ] Per-voice: pitch (V/Oct or ratio), level, detune/drift (0-50 cents)
+- [ ] Global: root pitch (V/Oct), scale select, spread/arrangement (from FFB), waveform, master drift rate
+- [ ] Could share oscillator code from Plaits or use simple wavetable/saw/sine per voice
+
+## Comb Bank
+
+N comb filters (8-16) in parallel, Karplus-Strong / resonator territory. Reuses FFB scale distribution.
+
+- [ ] Per-comb: pitch/delay (20Hz-20kHz), feedback (-100% to +100%), level
+- [ ] Global: input level, damping, master pitch (V/Oct), scale select, spread (from FFB)
+- [ ] Very cheap per voice (one delay line read + multiply + add)
+
+## Harmonic Series Manipulator
+
+N BPFs locked to harmonic ratios of a fundamental. Reshapes harmonic content -- FFB but harmonically locked.
+
+- [ ] Per-harmonic: harmonic (1-32 integer ratio), level (-inf to +12dB), Q (0.1-20)
+- [ ] Global: fundamental (V/Oct), input gain, mix
+- [ ] Uses FFB filter code with freq = fundamental * harmonic number
+
+## Crossover Engine Family (shared infrastructure)
+
+Multiband comp, multiband distortion, spectral gate all share crossover/band-splitting frontend. Build once, swap per-band processing.
+
+### Multiband Compressor
+- [ ] N bands (4-8), per-band: threshold, ratio, attack/decay
+- [ ] Global: crossover freqs (auto or manual), makeup gain, mix
+
+### Multiband Distortion
+- [ ] Same crossover, per-band: drive, type (tanh/fold/clip/asymmetric), level
+- [ ] Global: crossover freqs, input gain, mix
+
+### Spectral Gate
+- [ ] Same crossover, per-band: threshold, attack/release, level
+- [ ] Global: crossover freqs, input gain, mix
+
+## Grain Cloud
+
+N grains (8-16) reading from a single sample buffer. Extends builtin manual grains x N.
+
+- [ ] Per-grain: position (0-1 in buffer), pitch (-2 to +2 octaves), level
+- [ ] Global: sample select, spray/jitter, grain size, master pitch (V/Oct), pan spread
+
+## Phaser / Flanger Designer
+
+N allpass stages with per-stage control. Build custom modulation effects from first principles.
+
+- [ ] Per-stage: depth, rate (0.01-20Hz), feedback (-100% to +100%)
+- [ ] Global: master rate, master depth, wet/dry. Stages in series.
+
+## Utilities
+
+### Gated Slew
+- [ ] One-pole slew that only acts when gate is high. Raw signal passes when gate low.
+- [ ] Controls: rise time, fall time, gate input
+
+### Goniometer / Lissajous
+- [ ] XY scope display: goniometer (L+R vs L-R stereo field) or Lissajous (arbitrary XY)
+- [ ] Correlation readout (+1 mono to -1 out of phase)
+- [ ] Pure visualization, negligible DSP
+
+### Integrator / Location Tracker
+- [ ] Running accumulator with configurable leak/decay
+- [ ] Shape: linear, exponential (Cold Mac location), logarithmic
+- [ ] Controls: rate, decay/leak, shape, gate reset
+
+### Pingable Scaled Random
+- [ ] C++ rewrite of SuperNiCd's pingable scaled random for performance
+- [ ] Clock input triggers new random values, scaled/quantized to range
+
+### Varishape Oscillator
+- [ ] Continuously variable waveshape: sine > triangle > saw > square > pulse
+- [ ] Single shape parameter + PWM, V/Oct, sync input
+
+### Control Forge-alike
+- [ ] Multistage envelope generator, spreadsheet paradigm (each row = stage)
+- [ ] Per-stage: mode (rise/fall/sustain/random/discontinuous), time, level, curve shape
+- [ ] Loop points, per-stage submenu
+
+### Waveguide
+- [ ] Physical modeling: delay line + filter in feedback loop
+- [ ] Exciter input, tuned to V/Oct. Pair with comb bank for extended body modeling.
+
+### Parametric Noise
+- [ ] Continuously variable spectral tilt and bandpass (not just white/pink/brown)
+
+### Z-Plane Filter (research)
+- [ ] Rossum Morpheus-style: morph between pole/zero configurations in z-plane
+
+### TZFM Complex Oscillator
+- [ ] Carrier + modulator with through-zero FM, wavefolding, sync
+- [ ] Buchla-inspired territory
+
 ## Port Candidates
 
 ### MIT-compatible (direct port)
@@ -398,10 +523,14 @@ FFT-based visual display unit, audio passthrough.
 - [ ] FrozenWasteland (almostEric, GPLv3)
 - [ ] Plateau / Amalgam (ValleyAudio, GPLv3)
 - [ ] Geodesics (MarcBoule, GPLv3)
+- [ ] CellaVCV (victorkashirin, GPLv3)
+- [ ] NOI-VCVRACK (LeNomDesFleurs, GPLv3)
+- [ ] Reformation / Venom (DaveBenham, GPLv3)
 
 ### Other
 
 - [ ] ProCo Rat emulation -- distortion circuit modeling
+- [ ] Polyphonic sample playback -- manual grains based
 
 ## Video
 
