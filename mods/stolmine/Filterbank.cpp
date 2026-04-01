@@ -416,6 +416,9 @@ namespace stolmine
       // Q increases slightly with frequency for even-sounding resonance
       float bandQ = q * (0.5f + freq * 2.0f);
       if (bandQ < 0.5f) bandQ = 0.5f;
+      // Resonator mode: hard Q floor so bands always ring
+      if (s.filterType[i] == FTYPE_RESON && bandQ < 20.0f)
+        bandQ = 20.0f;
       s.filters[i].set_f_q<stmlib::FREQUENCY_FAST>(freq, bandQ);
 
       q *= q_loss;
@@ -487,6 +490,9 @@ namespace stolmine
 
     updateFilterCoefficients();
 
+    // Normalize parallel sum by 1/sqrt(bandCount)
+    float sumNorm = 1.0f / sqrtf((float)bandCount);
+
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float x = in[i] * inputLevel;
@@ -498,15 +504,11 @@ namespace stolmine
         switch (s.filterType[b])
         {
         case FTYPE_BPF:
+          bandOut = s.filters[b].Process<stmlib::FILTER_MODE_BAND_PASS_NORMALIZED>(x);
+          break;
+        case FTYPE_RESON:
           bandOut = s.filters[b].Process<stmlib::FILTER_MODE_BAND_PASS>(x);
           break;
-        case FTYPE_NOTCH:
-        {
-          float lp, hp;
-          s.filters[b].Process<stmlib::FILTER_MODE_LOW_PASS, stmlib::FILTER_MODE_HIGH_PASS>(x, &lp, &hp);
-          bandOut = lp + hp;
-          break;
-        }
         case FTYPE_PEAK:
         default:
           bandOut = s.filters[b].Process<stmlib::FILTER_MODE_BAND_PASS>(x);
@@ -514,6 +516,7 @@ namespace stolmine
         }
         wet += bandOut * s.gain[b];
       }
+      wet *= sumNorm;
 
       float mixed = x * (1.0f - mix) + wet * mix;
 

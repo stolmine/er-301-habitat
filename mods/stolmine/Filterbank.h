@@ -15,7 +15,7 @@ namespace stolmine
   {
     FTYPE_PEAK = 0,
     FTYPE_BPF,
-    FTYPE_NOTCH,
+    FTYPE_RESON,
     FTYPE_COUNT
   };
 

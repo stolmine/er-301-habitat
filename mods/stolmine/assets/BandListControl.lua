@@ -31,7 +31,7 @@ local typeMap = (function()
   return m
 end)()
 
-local typeNames = { [0] = "peak", "bpf", "notch" }
+local typeNames = { [0] = "peak", "bpf", "res" }
 
 local BandListControl = Class {
   type = "BandListControl",

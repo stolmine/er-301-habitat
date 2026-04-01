@@ -4,6 +4,7 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local ModeSelector = require "stolmine.ModeSelector"
+local MixControl = require "stolmine.MixControl"
 local BandListControl = require "stolmine.BandListControl"
 local FilterResponseControl = require "stolmine.FilterResponseControl"
 local Encoder = require "Encoder"
@@ -68,7 +69,7 @@ function Filterbank:onLoadGraph(channelCount)
 
   -- Mix
   local mix = self:addObject("mix", app.ParameterAdapter())
-  mix:hardSet("Bias", 1.0)
+  mix:hardSet("Bias", 0.5)
   tieParam("Mix", mix)
   self:addMonoBranch("mix", mix, "In", mix, "Out")
 
@@ -234,8 +235,8 @@ function Filterbank:onShowMenu(objects, branches)
     description = "All BPF",
     task = function() self:setAllType(1) end
   }
-  controls.allNotch = Task {
-    description = "All notch",
+  controls.allReson = Task {
+    description = "All resonator",
     task = function() self:setAllType(2) end
   }
 
@@ -243,7 +244,7 @@ function Filterbank:onShowMenu(objects, branches)
     "bandHeader",
     "initBands", "randomize", "loadScala",
     "typeHeader",
-    "allPeak", "allBPF", "allNotch"
+    "allPeak", "allBPF", "allReson"
   }
 end
 
@@ -295,7 +296,7 @@ function Filterbank:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.5
     },
-    mix = GainBias {
+    mix = MixControl {
       button = "mix",
       description = "Mix",
       branch = self.branches.mix,
@@ -304,7 +305,10 @@ function Filterbank:onLoadViews()
       biasMap = mixMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 1.0
+      initialBias = 0.5,
+      inputLevel = self.objects.inputLevel:getParameter("Bias"),
+      outputLevel = self.objects.outputLevel:getParameter("Bias"),
+      tanhAmt = self.objects.tanhAmt:getParameter("Bias")
     },
     -- Expansion views
     bandCount = GainBias {
@@ -341,8 +345,8 @@ function Filterbank:onLoadViews()
       initialBias = 0.0
     },
     inputLevel = GainBias {
-      button = "drive",
-      description = "Input Drive",
+      button = "input",
+      description = "Input Level",
       branch = self.branches.inputLevel,
       gainbias = self.objects.inputLevel,
       range = self.objects.inputLevel,

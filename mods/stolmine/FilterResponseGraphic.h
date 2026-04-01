@@ -25,9 +25,11 @@ namespace stolmine
         return;
 
       int bandCount = mpFB->getBandCount();
+      int w = mWidth - 2;
+      int h = mHeight;
 
       // Right boundary
-      fb.vline(GRAY5, mWorldLeft + mWidth - 1, mWorldBottom, mWorldBottom + mHeight - 1, 0);
+      fb.vline(GRAY5, mWorldLeft + w + 1, mWorldBottom, mWorldBottom + h - 1, 0);
 
       // Draw horizontal lines at each band's frequency position
       for (int i = 0; i < bandCount; i++)
@@ -35,34 +37,41 @@ namespace stolmine
         float hz = mpFB->getBandFreq(i);
         int y = freqToY(hz);
         if (i == mSelectedBand)
-          fb.hline(GRAY7, mWorldLeft, mWorldLeft + mWidth - 2, y, 0);
+          fb.hline(GRAY7, mWorldLeft, mWorldLeft + w, y, 0);
         else
-          fb.hline(GRAY3, mWorldLeft, mWorldLeft + mWidth - 2, y, 0);
+          fb.hline(GRAY3, mWorldLeft, mWorldLeft + w, y, 0);
       }
 
-      // Two-pass response rendering: find max, then draw normalized
-      float responses[64];
+      // Supersample response at 2x resolution, then draw line
+      static const int kMaxSamples = 128;
+      int sampleCount = MIN(h * 2, kMaxSamples);
+      float responses[kMaxSamples];
       float maxResponse = 0.0001f;
-      int h = MIN(mHeight, 64);
-      for (int py = 0; py < h; py++)
+
+      for (int i = 0; i < sampleCount; i++)
       {
-        float normalizedFreq = (float)py / (float)(h - 1);
-        responses[py] = mpFB->evaluateResponse(normalizedFreq);
-        if (responses[py] > maxResponse)
-          maxResponse = responses[py];
+        float normalizedFreq = (float)i / (float)(sampleCount - 1);
+        responses[i] = mpFB->evaluateResponse(normalizedFreq);
+        if (responses[i] > maxResponse)
+          maxResponse = responses[i];
       }
 
-      for (int py = 0; py < h; py++)
+      // Draw as connected line with sqrt scaling for dynamic range
+      float invMax = 1.0f / maxResponse;
+      int prevX = -1, prevY = -1;
+      for (int i = 0; i < sampleCount; i++)
       {
-        float normalized = responses[py] / maxResponse;
-        int barWidth = (int)(normalized * (float)(mWidth - 2));
-        barWidth = CLAMP(0, mWidth - 2, barWidth);
+        float t = (float)i / (float)(sampleCount - 1);
+        float normalized = sqrtf(responses[i] * invMax);
+        int x = mWorldLeft + (int)(normalized * (float)w);
+        int y = mWorldBottom + (int)(t * (float)(h - 1));
+        x = CLAMP(mWorldLeft, mWorldLeft + w, x);
 
-        int y = mWorldBottom + py;
-        if (barWidth > 0)
-        {
-          fb.hline(WHITE, mWorldLeft, mWorldLeft + barWidth - 1, y, 0);
-        }
+        if (prevX >= 0)
+          fb.line(WHITE, prevX, prevY, x, y);
+
+        prevX = x;
+        prevY = y;
       }
 
       // Highlight selected band with brighter marker
@@ -70,11 +79,10 @@ namespace stolmine
       {
         float hz = mpFB->getBandFreq(mSelectedBand);
         int y = freqToY(hz);
-        // Small marker triangle on the right edge
-        fb.line(WHITE, mWorldLeft + mWidth - 4, y - 2,
-                mWorldLeft + mWidth - 2, y);
-        fb.line(WHITE, mWorldLeft + mWidth - 2, y,
-                mWorldLeft + mWidth - 4, y + 2);
+        fb.line(WHITE, mWorldLeft + w - 2, y - 2,
+                mWorldLeft + w, y);
+        fb.line(WHITE, mWorldLeft + w, y,
+                mWorldLeft + w - 2, y + 2);
       }
     }
 
