@@ -10,6 +10,7 @@ namespace stolmine
 
   static const int kMaxBands = 16;
   static const int kMaxScaleDegrees = 24;
+  static const int kMaxCustomScales = 16;
 
   enum FilterType
   {
@@ -83,9 +84,11 @@ namespace stolmine
     int getScaleCount() { return (int)SCALE_COUNT; }
 
     // Custom scale loading (called from Lua for Scala files)
-    void beginCustomScale();
+    // slot 0-15: index into custom scale storage
+    void beginCustomScale(int slot);
     void addCustomDegree(float cents);
-    void endCustomScale(); // sets scale to custom and redistributes
+    void endCustomScale(int slot);
+    int getCustomScaleCount();
 
     // For overview graphic
     float evaluateResponse(float normalizedFreq);

@@ -73,9 +73,10 @@ namespace stolmine
     float rotated[kMaxBands];
     int candidateCount;
 
-    // Custom scale degrees (cents)
-    float customDegrees[kMaxScaleDegrees];
-    int customDegreeCount;
+    // Custom scale slots (cents per degree)
+    float customDegrees[kMaxCustomScales][kMaxScaleDegrees];
+    int customDegreeCounts[kMaxCustomScales];
+    int numCustomScales;
     int customBuildCount; // accumulator during beginCustomScale/addCustomDegree
 
     void Init()
@@ -94,8 +95,9 @@ namespace stolmine
         filters[i].Init();
       }
       candidateCount = 0;
-      customDegreeCount = 0;
+      numCustomScales = 0;
       customBuildCount = 0;
+      memset(customDegreeCounts, 0, sizeof(customDegreeCounts));
     }
   };
 
@@ -191,7 +193,7 @@ namespace stolmine
 
   // --- Custom scale loading ---
 
-  void Filterbank::beginCustomScale()
+  void Filterbank::beginCustomScale(int slot)
   {
     mpInternal->customBuildCount = 0;
   }
@@ -201,17 +203,26 @@ namespace stolmine
     Internal &s = *mpInternal;
     if (s.customBuildCount < kMaxScaleDegrees)
     {
-      s.customDegrees[s.customBuildCount++] = cents;
+      // Write into temporary accumulator; endCustomScale copies to slot
+      s.customDegrees[0][s.customBuildCount++] = cents;
     }
   }
 
-  void Filterbank::endCustomScale()
+  void Filterbank::endCustomScale(int slot)
   {
     Internal &s = *mpInternal;
-    s.customDegreeCount = s.customBuildCount;
-    // Set scale param to SCALE_CUSTOM and force redistribution
-    mScale.hardSet((float)SCALE_CUSTOM);
+    slot = CLAMP(0, kMaxCustomScales - 1, slot);
+    s.customDegreeCounts[slot] = s.customBuildCount;
+    for (int i = 0; i < s.customBuildCount; i++)
+      s.customDegrees[slot][i] = s.customDegrees[0][i];
+    if (slot >= s.numCustomScales)
+      s.numCustomScales = slot + 1;
     mLastScale = -1; // force dirty
+  }
+
+  int Filterbank::getCustomScaleCount()
+  {
+    return mpInternal->numCustomScales;
   }
 
   // --- Scale distribution ---
@@ -219,18 +230,26 @@ namespace stolmine
   void Filterbank::distributeFrequencies()
   {
     Internal &s = *mpInternal;
-    int scaleIdx = CLAMP(0, (int)SCALE_COUNT, (int)(mScale.value() + 0.5f));
+    int scaleIdx = CLAMP(0, (int)SCALE_CUSTOM + kMaxCustomScales - 1, (int)(mScale.value() + 0.5f));
     int bandCount = mCachedBandCount;
     int rotate = (int)(mRotate.value() + 0.5f);
     float skew = CLAMP(0.0f, 1.0f, mSkew.value());
 
-    // Get scale degrees (built-in or custom)
+    // Get scale degrees (built-in or custom slot)
     const float *degrees;
     int degreeCount;
-    if (scaleIdx == SCALE_CUSTOM && s.customDegreeCount > 0)
+    if (scaleIdx >= (int)SCALE_CUSTOM)
     {
-      degrees = s.customDegrees;
-      degreeCount = s.customDegreeCount;
+      int slot = scaleIdx - (int)SCALE_CUSTOM;
+      if (slot < s.numCustomScales && s.customDegreeCounts[slot] > 0)
+      {
+        degrees = s.customDegrees[slot];
+        degreeCount = s.customDegreeCounts[slot];
+      }
+      else
+      {
+        return; // no valid custom scale in this slot
+      }
     }
     else if (scaleIdx < (int)SCALE_CUSTOM)
     {
@@ -364,7 +383,7 @@ namespace stolmine
 
   void Filterbank::checkDistributionDirty()
   {
-    int scaleIdx = CLAMP(0, (int)SCALE_COUNT, (int)(mScale.value() + 0.5f));
+    int scaleIdx = CLAMP(0, (int)SCALE_CUSTOM + kMaxCustomScales - 1, (int)(mScale.value() + 0.5f));
     int rotate = (int)(mRotate.value() + 0.5f);
     int bandCount = mCachedBandCount;
     float skew = CLAMP(0.0f, 1.0f, mSkew.value());

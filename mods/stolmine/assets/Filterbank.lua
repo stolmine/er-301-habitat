@@ -35,12 +35,11 @@ local inputLevelMap = floatMap(0, 4)
 local outputLevelMap = floatMap(0, 4)
 local tanhMap = floatMap(0, 1)
 
-local scaleNames = {
+local builtinScaleNames = {
   [0] = "chr", "maj", "min", "h.min",
   "M.pnt", "m.pnt", "whole", "dor",
-  "phry", "lyd", "mixo", "loc", "scl"
+  "phry", "lyd", "mixo", "loc"
 }
-local scaleMap = intMap(0, 12)
 
 local Filterbank = Class {}
 Filterbank:include(Unit)
@@ -91,6 +90,9 @@ function Filterbank:onLoadGraph(channelCount)
   tieParam("Scale", scale)
   self:addMonoBranch("scale", scale, "In", scale, "Out")
 
+  -- Load user .scl files into custom scale slots
+  self:loadUserScales(op)
+
   -- Rotate
   local rotate = self:addObject("rotate", app.ParameterAdapter())
   rotate:hardSet("Bias", 0)
@@ -126,6 +128,55 @@ function Filterbank:onLoadGraph(channelCount)
   tanhAmt:hardSet("Bias", 0.0)
   tieParam("TanhAmt", tanhAmt)
   self:addMonoBranch("tanhAmt", tanhAmt, "In", tanhAmt, "Out")
+end
+
+function Filterbank:loadUserScales(op)
+  self.scaleNames = {}
+  for i, name in pairs(builtinScaleNames) do
+    self.scaleNames[i] = name
+  end
+
+  local ok, Scala = pcall(require, "core.Quantizer.Scala")
+  if not ok then return end
+  local Path = require "Path"
+  local FileSystem = require "Card.FileSystem"
+  local root = Path.join(FileSystem.getRoot("front"), "scales")
+
+  local slot = 0
+  local files = {}
+  for filename in dir(root) do
+    if FileSystem.isType("scala", filename) then
+      files[#files + 1] = filename
+    end
+  end
+  table.sort(files)
+
+  for _, filename in ipairs(files) do
+    if slot >= 16 then break end
+    local fullPath = Path.join(root, filename)
+    local data = Scala.load(fullPath)
+    if data and data.tunings and #data.tunings > 0 then
+      local function loadInto(target)
+        target:beginCustomScale(slot)
+        for _, cents in ipairs(data.tunings) do
+          if cents > 0 and cents <= 1200 then
+            target:addCustomDegree(cents)
+          end
+        end
+        target:endCustomScale(slot)
+      end
+      loadInto(op)
+      if self.objects.opR then loadInto(self.objects.opR) end
+
+      -- Truncate filename for fader label (strip .scl, take first 4 chars)
+      local label = filename:match("(.+)%.scl$") or filename
+      label = label:sub(1, 4):lower()
+      self.scaleNames[12 + slot] = label
+      slot = slot + 1
+    end
+  end
+
+  self.scaleCount = 12 + slot
 end
 
 function Filterbank:initBands()
@@ -194,35 +245,9 @@ function Filterbank:onShowMenu(objects, branches)
     task = function() self:randomizeBands() end
   }
   controls.loadScala = Task {
-    description = "Load .scl file",
+    description = "Rescan .scl files",
     task = function()
-      local ok, Scala = pcall(require, "core.Quantizer.Scala")
-      if not ok then return end
-      local Path = require "Path"
-      local FileSystem = require "Card.FileSystem"
-      local root = Path.join(FileSystem.getRoot("front"), "scales")
-      local files = {}
-      for filename in dir(root) do
-        if FileSystem.isType("scala", filename) then
-          files[#files + 1] = filename
-        end
-      end
-      if #files == 0 then return end
-      -- Load first found .scl file for now (TODO: file chooser)
-      local fullPath = Path.join(root, files[1])
-      local data = Scala.load(fullPath)
-      if not data then return end
-      local function loadInto(op)
-        op:beginCustomScale()
-        for _, cents in ipairs(data.tunings) do
-          if cents > 0 and cents <= 1200 then
-            op:addCustomDegree(cents)
-          end
-        end
-        op:endCustomScale()
-      end
-      loadInto(self.objects.op)
-      if self.objects.opR then loadInto(self.objects.opR) end
+      self:loadUserScales(self.objects.op)
     end
   }
 
@@ -272,11 +297,11 @@ function Filterbank:onLoadViews()
       branch = self.branches.scale,
       gainbias = self.objects.scale,
       range = self.objects.scale,
-      biasMap = scaleMap,
+      biasMap = intMap(0, self.scaleCount - 1),
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = scaleNames
+      modeNames = self.scaleNames
     },
     rotate = GainBias {
       button = "rot",
