@@ -152,7 +152,7 @@ function Filterbank:loadUserScales(op)
   table.sort(files)
 
   for _, filename in ipairs(files) do
-    if slot >= 16 then break end
+    if slot >= 64 then break end
     local fullPath = Path.join(root, filename)
     local data = Scala.load(fullPath)
     if data and data.tunings and #data.tunings > 0 then

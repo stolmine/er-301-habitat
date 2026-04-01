@@ -77,7 +77,8 @@ namespace stolmine
     float customDegrees[kMaxCustomScales][kMaxScaleDegrees];
     int customDegreeCounts[kMaxCustomScales];
     int numCustomScales;
-    int customBuildCount; // accumulator during beginCustomScale/addCustomDegree
+    float customBuildBuf[kMaxScaleDegrees]; // temp buffer for loading
+    int customBuildCount;
 
     void Init()
     {
@@ -195,6 +196,7 @@ namespace stolmine
 
   void Filterbank::beginCustomScale(int slot)
   {
+    if (slot < 0 || slot >= kMaxCustomScales) return;
     mpInternal->customBuildCount = 0;
   }
 
@@ -203,18 +205,17 @@ namespace stolmine
     Internal &s = *mpInternal;
     if (s.customBuildCount < kMaxScaleDegrees)
     {
-      // Write into temporary accumulator; endCustomScale copies to slot
-      s.customDegrees[0][s.customBuildCount++] = cents;
+      s.customBuildBuf[s.customBuildCount++] = cents;
     }
   }
 
   void Filterbank::endCustomScale(int slot)
   {
     Internal &s = *mpInternal;
-    slot = CLAMP(0, kMaxCustomScales - 1, slot);
+    if (slot < 0 || slot >= kMaxCustomScales) return;
     s.customDegreeCounts[slot] = s.customBuildCount;
     for (int i = 0; i < s.customBuildCount; i++)
-      s.customDegrees[slot][i] = s.customDegrees[0][i];
+      s.customDegrees[slot][i] = s.customBuildBuf[i];
     if (slot >= s.numCustomScales)
       s.numCustomScales = slot + 1;
     mLastScale = -1; // force dirty

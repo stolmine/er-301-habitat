@@ -9,8 +9,8 @@ namespace stolmine
 {
 
   static const int kMaxBands = 16;
-  static const int kMaxScaleDegrees = 24;
-  static const int kMaxCustomScales = 16;
+  static const int kMaxScaleDegrees = 128;
+  static const int kMaxCustomScales = 64;
 
   enum FilterType
   {

@@ -286,7 +286,7 @@ Spreadsheet-style parallel fixed filter bank. Input on inlets (mono and stereo).
 - [ ] Default mix/gain settings: unit should be transparent on load so user can immediately hear filtering. Review initial mix, input level, output level, band gain, macro Q defaults.
 - [ ] Overview graphic: line curve is lopsided -- certain bands get disproportionate visual weight. Investigate evaluateResponse weighting and Q scaling across bands. May need per-band normalization or log-amplitude display.
 - [ ] BPF volume: normalized bandpass is extremely quiet compared to peak/LP/resonator. Needs gain compensation or wider bandwidth to be usable at similar levels.
-- [ ] Custom scales on scale ModeSelector: add Scala file loading and user scale support to the scale fader (currently built-in scales only).
+- [x] Custom scales: .scl files from /scales/ auto-loaded at init, appear on scale fader alongside builtins (up to 64 custom, 128 degrees each)
 
 ## 4ms SMR
 
