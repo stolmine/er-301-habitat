@@ -287,6 +287,8 @@ Spreadsheet-style parallel fixed filter bank. Input on inlets (mono and stereo).
 - [ ] Overview graphic: line curve is lopsided -- certain bands get disproportionate visual weight. Investigate evaluateResponse weighting and Q scaling across bands. May need per-band normalization or log-amplitude display.
 - [ ] BPF volume: normalized bandpass is extremely quiet compared to peak/LP/resonator. Needs gain compensation or wider bandwidth to be usable at similar levels.
 - [x] Custom scales: .scl files from /scales/ auto-loaded at init, appear on scale fader alongside builtins (up to 64 custom, 128 degrees each)
+- [ ] Replace skew with V/Oct offset: shift all band frequencies by a CV-modulatable pitch offset instead of warping the distribution. More musically useful and patchable.
+- [ ] Radial graphic: shapes too uniform across scale/rotate changes. Investigate better data source for polygon radius (per-band Q, filter state energy, or raw spectral magnitude).
 
 ## 4ms SMR
 
