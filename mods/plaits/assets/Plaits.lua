@@ -235,13 +235,15 @@ function Plaits:onShowMenu(objects, branches)
     controls.output = OptionControl {
       description = "Output",
       option = objects.voice:getOption("Output Mode"),
-      choices = { "main", "aux" }
+      choices = { "main", "aux" },
+      boolean = true
     }
   else
     controls.output = OptionControl {
       description = "Output",
       option = objects.voice:getOption("Output Mode"),
-      choices = { "main+aux", "aux+aux", "main+main", "aux+main" }
+      choices = { "main+aux", "aux+aux", "main+main" },
+      boolean = true
     }
   end
 

@@ -214,7 +214,8 @@ function GestureSeq:onShowMenu(objects, branches)
     sensitivity = OptionControl {
       description = "Sens.",
       option = objects.op:getOption("Sensitivity"),
-      choices = {"Low", "Medium", "High"}
+      choices = {"Low", "Medium", "High"},
+      boolean = true
     }
   }, {"bufferHeader", "buf5", "buf10", "buf20", "clearBuffer", "sensHeader", "sensitivity"}
 end

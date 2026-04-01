@@ -161,21 +161,17 @@ namespace mi
 
         switch (mode)
         {
-        case 0: // main only (mono) or main+aux (stereo)
+        case 0: // main+aux (default)
           outBuf[pos + i] = main;
           auxBuf[pos + i] = aux;
           break;
-        case 1: // aux only
+        case 1: // aux+aux
           outBuf[pos + i] = aux;
           auxBuf[pos + i] = aux;
           break;
-        case 2: // main to both
+        case 2: // main+main
           outBuf[pos + i] = main;
           auxBuf[pos + i] = main;
-          break;
-        case 3: // aux to both
-          outBuf[pos + i] = aux;
-          auxBuf[pos + i] = aux;
           break;
         default:
           outBuf[pos + i] = main;

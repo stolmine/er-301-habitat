@@ -36,7 +36,7 @@ namespace mi
     od::Parameter mFreq{"Freq", 0.0f};
     od::Parameter mDecay{"Decay", 0.5f};
     od::Parameter mLPGColour{"LPG Colour", 0.5f};
-    od::Option mOutputMode{"Output Mode", 0}; // 0=main, 1=aux, 2=main+main, 3=aux+main
+    od::Option mOutputMode{"Output Mode", 0}; // 0=main+aux, 1=aux+aux, 2=main+main
     od::Option mTrigMode{"Trig Mode", 1};    // 0=trig (enveloped), 1=osc (free-running)
 #endif
 

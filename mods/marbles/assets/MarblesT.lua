@@ -80,7 +80,8 @@ function MarblesT:onShowMenu(objects, branches)
     model = OptionControl {
       description = "Model",
       option = objects.op:getOption("Model"),
-      choices = {"Bernoulli", "Clusters", "Drums", "Independent", "Divider", "Three States", "Markov"}
+      choices = {"Bernoulli", "Clusters", "Drums", "Independent", "Divider", "Three States", "Markov"},
+      boolean = true
     }
   }, {"modelHeader", "model"}
 end

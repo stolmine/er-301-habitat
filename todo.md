@@ -101,6 +101,13 @@ Refinements:
   - [x] Stratos defaults matched to Clouds reverb (hardSet in Lua)
   - [x] Excel overview: spinner, right-justified text, title bar consistency
 
+### Uncommitted changes needing hardware test
+  - [ ] Clouds (Clouds.lua)
+  - [ ] Marbles T (MarblesT.lua)
+  - [ ] Marbles X (MarblesX.lua)
+  - [ ] Plaits (PlaitsVoice.cpp, PlaitsVoice.h, Plaits.lua)
+  - [ ] Gesture (GestureSeq.lua)
+
 ### Excel/Ballot Improvements
   - [ ] Xform gate control: enter-menu context view with GainBias faders (and CV input) for transform function and params
   - [ ] Pretty up Excel:
@@ -214,14 +221,70 @@ Spreadsheet paradigm: N voices with per-voice params.
 
 ## Filterbank (FFB)
 
-Spreadsheet-style fixed filter bank with per-band control.
+Spreadsheet-style parallel fixed filter bank. Input on inlets (mono and stereo).
 
-- [ ] Based on disting ex filterbank
-- [ ] Per-band params: freq, gain (-24/+24dB), Q (0.1-20), type (LP/HP/BP/peak/notch), solo/mute
-- [ ] instead of per-band freq we can use a macro based on the 4ms SMR. User just moves one fader to adjust frequency of all bands which are locked (with octave compensation to account for the whole spectrum (we will likely need to distribute across several octaves to get an even spread (interesting problem, how do we do this exactly?)))
-- [ ] Classic FFB mode: fixed logarithmic spacing, gain-only per band
-- [ ] Parametric mode: full control over every band's freq and Q
-- [ ] Selectable band count: 8 / 12 / 16
+### Architecture
+
+- Parallel topology: each band processes input independently, outputs summed
+- 2-16 bands (integer fader, default 8). Fixed-size internal arrays (16 max) -- reducing band count hides bands, increasing reveals them with previous settings intact. Only scale snap overwrites frequencies.
+- Pre-filter drive on input, tanh saturation/limiting on output
+
+### Expanded view (6 plies, left to right)
+
+1. **Band list** (spreadsheet, 1 ply) -- 3-char freq label per row (120, 440, 1k2, 4k0, 12k)
+2. **Overview** (custom graphic, 1 ply) -- vertical orientation (freq Y-axis low-to-high, amplitude X-axis), spectral contour of composite filter response, active band highlight synced with list
+3. **Scale** (ModeSelector fader) -- uses Scala files and built-in scales from firmware (Scales.lua registry + user .scl files from /scales/). Re-snaps all band freqs on change, user can manually override individual freqs after
+4. **Rotate** (GainBias int fader) -- remaps band-to-frequency assignment by N positions. CV-modulatable for expressive patching
+5. **Macro Q** (GainBias fader) -- global Q applied to all bands
+6. **Mix** (GainBias fader) -- dry/wet balance
+
+### Band sub-display (3 buttons)
+
+- col1: freq (log-scaled readout, 20Hz-20kHz)
+- col2: gain (-24 to +24dB)
+- col3: filter type (peak/bpf/allpass, integer)
+
+### Overview sub-display + expansion
+
+- col1: band count (int fader, 2-16)
+- col2: skew (pushes band resolution toward low or high frequencies)
+- col3: slew (transition time when bands move on scale change or freq edit)
+
+### Mix sub-display + expansion
+
+- col1: input level (pre-filter drive)
+- col2: output level
+- col3: tanh amount (saturation + implicit limiting)
+
+### Scale-to-band distribution (Lua-side, reuses firmware scale infrastructure)
+
+- Source: er-301/mods/core/assets/Quantizer/Scales.lua (16 built-in scales as cents tables) + Scala.lua (.scl file loader for user scales in /scales/)
+- Algorithm:
+  1. Get cents table from scale
+  2. Generate all degree frequencies across 60Hz-16kHz: freq = baseFreq * 2^(cents/1200)
+  3. Greedy selection: pick N bands maximizing min log-distance
+  4. Skew warps distance metric (favors low or high freqs)
+  5. Sort ascending, apply rotate (circular shift)
+  6. Call op:setTargetFreq(i, hz) for each band (slew in C++ handles transition)
+
+### Filter core: stmlib::Svf with Rings-style Q scaling
+
+- Base Q from macro Q fader (0-1 maps to 0-500)
+- Q increases with frequency: 1.0 + normalizedFreq * q (from Rings resonator.cc)
+- Progressive Q decay across bands: q *= q_loss (brightness-dependent, woody character)
+- stmlib::Svf in BAND_PASS mode with FREQUENCY_FAST
+
+### Menu
+
+- Bands: init bands (reset all to defaults), randomize bands
+- Macro filter type: one option per type to set all bands (all peak, all bpf, all allpass)
+- Scale: load from file (opens browser for .scl files)
+
+### Remaining
+
+- [ ] Band list expansion: gate controls for randomize freq, gain, type across all bands
+- [ ] Default mix/gain settings: unit should be transparent on load so user can immediately hear filtering. Review initial mix, input level, output level, band gain, macro Q defaults.
+- [ ] Overview graphic: response scaling is off -- bottom 2/3 renders as solid fill, variance only visible at top. Normalize the response so peaks fill the display range without escaping upper bounds. Likely need to find the max response value across all Y pixels and scale relative to that.
 
 ## 4ms SMR
 

@@ -82,7 +82,8 @@ function MarblesX:onShowMenu(objects, branches)
     controlMode = OptionControl {
       description = "Control Mode",
       option = objects.op:getOption("Control Mode"),
-      choices = {"Identical", "Bump", "Tilt"}
+      choices = {"Identical", "Bump", "Tilt"},
+      boolean = true
     }
   }, {"modeHeader", "controlMode"}
 end

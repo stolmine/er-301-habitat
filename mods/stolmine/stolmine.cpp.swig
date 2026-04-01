@@ -20,6 +20,9 @@
 #include "Etcher.h"
 #include "SegmentListGraphic.h"
 #include "TransferCurveGraphic.h"
+#include "Filterbank.h"
+#include "BandListGraphic.h"
+#include "FilterResponseGraphic.h"
 #define SWIGLUA
 %}
 
@@ -40,3 +43,6 @@
 %include "Etcher.h"
 %include "SegmentListGraphic.h"
 %include "TransferCurveGraphic.h"
+%include "Filterbank.h"
+%include "BandListGraphic.h"
+%include "FilterResponseGraphic.h"

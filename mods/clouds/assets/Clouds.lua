@@ -117,7 +117,7 @@ function Clouds:onShowMenu(objects)
     quality = OptionControl {
       description = "Quality",
       option      = objects.op:getOption("Quality"),
-      choices     = { "stereo", "mono" },
+      choices     = { "normal", "hifi" },
       boolean     = true
     },
     preamp = OptionControl {
