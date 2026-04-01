@@ -25,13 +25,13 @@ local gainMap = (function()
 end)()
 
 local typeMap = (function()
-  local m = app.LinearDialMap(0, 2)
+  local m = app.LinearDialMap(0, 3)
   m:setSteps(1, 1, 1, 1)
   m:setRounding(1)
   return m
 end)()
 
-local typeNames = { [0] = "peak", "bpf", "res" }
+local typeNames = { [0] = "peak", "bpf", "lp", "res" }
 
 local BandListControl = Class {
   type = "BandListControl",

@@ -416,6 +416,9 @@ namespace stolmine
       // Q increases slightly with frequency for even-sounding resonance
       float bandQ = q * (0.5f + freq * 2.0f);
       if (bandQ < 0.5f) bandQ = 0.5f;
+      // LP mode: moderate Q floor for audible resonance peak
+      if (s.filterType[i] == FTYPE_LP && bandQ < 5.0f)
+        bandQ = 5.0f;
       // Resonator mode: hard Q floor so bands always ring
       if (s.filterType[i] == FTYPE_RESON && bandQ < 20.0f)
         bandQ = 20.0f;
@@ -505,6 +508,9 @@ namespace stolmine
         {
         case FTYPE_BPF:
           bandOut = s.filters[b].Process<stmlib::FILTER_MODE_BAND_PASS_NORMALIZED>(x);
+          break;
+        case FTYPE_LP:
+          bandOut = s.filters[b].Process<stmlib::FILTER_MODE_LOW_PASS>(x);
           break;
         case FTYPE_RESON:
           bandOut = s.filters[b].Process<stmlib::FILTER_MODE_BAND_PASS>(x);

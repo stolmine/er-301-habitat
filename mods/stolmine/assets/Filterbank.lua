@@ -38,9 +38,9 @@ local tanhMap = floatMap(0, 1)
 local scaleNames = {
   [0] = "chr", "maj", "min", "h.min",
   "M.pnt", "m.pnt", "whole", "dor",
-  "phry", "lyd", "mixo", "loc"
+  "phry", "lyd", "mixo", "loc", "scl"
 }
-local scaleMap = intMap(0, 11)
+local scaleMap = intMap(0, 12)
 
 local Filterbank = Class {}
 Filterbank:include(Unit)
@@ -235,16 +235,20 @@ function Filterbank:onShowMenu(objects, branches)
     description = "All BPF",
     task = function() self:setAllType(1) end
   }
+  controls.allLP = Task {
+    description = "All lowpass",
+    task = function() self:setAllType(2) end
+  }
   controls.allReson = Task {
     description = "All resonator",
-    task = function() self:setAllType(2) end
+    task = function() self:setAllType(3) end
   }
 
   return controls, {
     "bandHeader",
     "initBands", "randomize", "loadScala",
     "typeHeader",
-    "allPeak", "allBPF", "allReson"
+    "allPeak", "allBPF", "allLP", "allReson"
   }
 end
 

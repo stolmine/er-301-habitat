@@ -284,7 +284,9 @@ Spreadsheet-style parallel fixed filter bank. Input on inlets (mono and stereo).
 
 - [ ] Band list expansion: gate controls for randomize freq, gain, type across all bands
 - [ ] Default mix/gain settings: unit should be transparent on load so user can immediately hear filtering. Review initial mix, input level, output level, band gain, macro Q defaults.
-- [ ] Overview graphic: response scaling is off -- bottom 2/3 renders as solid fill, variance only visible at top. Normalize the response so peaks fill the display range without escaping upper bounds. Likely need to find the max response value across all Y pixels and scale relative to that.
+- [ ] Overview graphic: line curve is lopsided -- certain bands get disproportionate visual weight. Investigate evaluateResponse weighting and Q scaling across bands. May need per-band normalization or log-amplitude display.
+- [ ] BPF volume: normalized bandpass is extremely quiet compared to peak/LP/resonator. Needs gain compensation or wider bandwidth to be usable at similar levels.
+- [ ] Custom scales on scale ModeSelector: add Scala file loading and user scale support to the scale fader (currently built-in scales only).
 
 ## 4ms SMR
 
