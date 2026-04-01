@@ -60,6 +60,7 @@ namespace stolmine
     int filterType[kMaxBands];
 
     stmlib::Svf filters[kMaxBands];
+    float bandQValues[kMaxBands]; // stored for BPF gain compensation
 
     float targetFreq[kMaxBands]; // normalized (Hz / sampleRate)
     float currentFreq[kMaxBands];
@@ -442,6 +443,7 @@ namespace stolmine
       // Resonator mode: hard Q floor so bands always ring
       if (s.filterType[i] == FTYPE_RESON && bandQ < 20.0f)
         bandQ = 20.0f;
+      s.bandQValues[i] = bandQ;
       s.filters[i].set_f_q<stmlib::FREQUENCY_FAST>(freq, bandQ);
 
       q *= q_loss;
@@ -491,6 +493,49 @@ namespace stolmine
     return totalResponse;
   }
 
+  float Filterbank::evaluateResponseAtBand(int band)
+  {
+    Internal &s = *mpInternal;
+    int bandCount = mCachedBandCount;
+    band = CLAMP(0, bandCount - 1, band);
+
+    float fc = s.currentFreq[band];
+    if (fc < 0.0001f)
+      return 0.0f;
+
+    float w = fc; // already normalized (Hz/sampleRate)
+
+    float macroQ = CLAMP(0.0f, 1.0f, mMacroQ.value());
+    float baseQ = 1.0f + 99.0f * macroQ * macroQ;
+    float q_loss = macroQ * (2.0f - macroQ) * 0.85f + 0.15f;
+
+    float totalResponse = 0.0f;
+    float q = baseQ;
+    for (int i = 0; i < bandCount; i++)
+    {
+      float fci = s.currentFreq[i];
+      if (fci < 0.0001f)
+      {
+        q *= q_loss;
+        continue;
+      }
+
+      float bandQ = q * (0.5f + fci * 2.0f);
+      if (bandQ < 0.5f) bandQ = 0.5f;
+      float wSq = w * w;
+      float fcSq = fci * fci;
+      float diff = wSq - fcSq;
+      float bw = w * fci / bandQ;
+      float denom = diff * diff + bw * bw;
+      float mag = (denom > 0.000001f) ? bw / sqrtf(denom) : 1.0f;
+
+      totalResponse += mag * s.gain[i];
+      q *= q_loss;
+    }
+
+    return totalResponse;
+  }
+
   // --- Process ---
 
   void Filterbank::process()
@@ -528,6 +573,7 @@ namespace stolmine
         {
         case FTYPE_BPF:
           bandOut = s.filters[b].Process<stmlib::FILTER_MODE_BAND_PASS_NORMALIZED>(x);
+          bandOut *= sqrtf(s.bandQValues[b]); // compensate 1/Q normalization
           break;
         case FTYPE_LP:
           bandOut = s.filters[b].Process<stmlib::FILTER_MODE_LOW_PASS>(x);

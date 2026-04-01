@@ -286,7 +286,7 @@ function Filterbank:onLoadViews()
     },
     overview = FilterResponseControl {
       filterbank = self.objects.op,
-      width = app.SECTION_PLY,
+      width = 2 * app.SECTION_PLY,
       bandCount = self.objects.bandCount:getParameter("Bias"),
       skew = self.objects.skew:getParameter("Bias"),
       slew = self.objects.slew:getParameter("Bias")

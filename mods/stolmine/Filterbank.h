@@ -92,6 +92,7 @@ namespace stolmine
 
     // For overview graphic
     float evaluateResponse(float normalizedFreq);
+    float evaluateResponseAtBand(int band);
 
 #ifndef SWIGLUA
   private:

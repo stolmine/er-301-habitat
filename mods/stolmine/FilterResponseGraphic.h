@@ -4,6 +4,10 @@
 #include <Filterbank.h>
 #include <math.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846f
+#endif
+
 namespace stolmine
 {
   class FilterResponseGraphic : public od::Graphic
@@ -25,75 +29,73 @@ namespace stolmine
         return;
 
       int bandCount = mpFB->getBandCount();
-      int w = mWidth - 2;
-      int h = mHeight;
+      if (bandCount < 2)
+        return;
 
-      // Right boundary
-      fb.vline(GRAY5, mWorldLeft + w + 1, mWorldBottom, mWorldBottom + h - 1, 0);
+      int cx = mWorldLeft + mWidth / 2;
+      int cy = mWorldBottom + mHeight / 2;
+      int maxR = MIN(mWidth, mHeight) / 2 - 3;
 
-      // Draw horizontal lines at each band's frequency position
+      // Reference circle
+      fb.circle(GRAY3, cx, cy, maxR);
+
+      // Per-band: blend gain with spectral response for visual variety
+      float values[16];
+      float maxVal = 0.0001f;
+      for (int i = 0; i < bandCount; i++)
+      {
+        float gain = mpFB->getBandGain(i);
+        float resp = mpFB->evaluateResponseAtBand(i);
+        values[i] = gain * (0.5f + 0.5f * resp); // gain modulated by response
+        if (values[i] > maxVal)
+          maxVal = values[i];
+      }
+
+      // Compute polygon vertices: angle from frequency, radius from gain
+      int px[16], py[16];
+      float angles[16];
+      float logMin = 2.9957f;  // log(20)
+      float logMax = 9.9035f;  // log(20000)
+      float logRange = logMax - logMin;
+      float minR = 0.4f * (float)maxR;
+      float rangeR = (float)maxR - minR;
+      float invMax = 1.0f / maxVal;
       for (int i = 0; i < bandCount; i++)
       {
         float hz = mpFB->getBandFreq(i);
-        int y = freqToY(hz);
+        float logHz = logf(CLAMP(20.0f, 20000.0f, hz));
+        float freqNorm = (logHz - logMin) / logRange; // 0-1 around circle
+        float angle = 2.0f * M_PI * freqNorm - M_PI * 0.5f;
+        angles[i] = angle;
+        float normalized = values[i] * invMax;
+        float r = minR + normalized * rangeR;
+        px[i] = cx + (int)(cosf(angle) * r);
+        py[i] = cy + (int)(sinf(angle) * r);
+      }
+
+      // Draw response polygon (closed)
+      for (int i = 0; i < bandCount; i++)
+      {
+        int next = (i + 1) % bandCount;
+        fb.line(WHITE, px[i], py[i], px[next], py[next]);
+      }
+
+      // Band spokes at frequency-mapped angles
+      for (int i = 0; i < bandCount; i++)
+      {
+        int edgeX = cx + (int)(cosf(angles[i]) * (float)maxR);
+        int edgeY = cy + (int)(sinf(angles[i]) * (float)maxR);
         if (i == mSelectedBand)
-          fb.hline(GRAY7, mWorldLeft, mWorldLeft + w, y, 0);
+        {
+          fb.line(GRAY7, cx, cy, edgeX, edgeY);
+          // Dot at response point
+          fb.fillCircle(WHITE, px[i], py[i], 2);
+        }
         else
-          fb.hline(GRAY3, mWorldLeft, mWorldLeft + w, y, 0);
+        {
+          fb.line(GRAY3, cx, cy, edgeX, edgeY);
+        }
       }
-
-      // Supersample response at 2x resolution, then draw line
-      static const int kMaxSamples = 128;
-      int sampleCount = MIN(h * 2, kMaxSamples);
-      float responses[kMaxSamples];
-      float maxResponse = 0.0001f;
-
-      for (int i = 0; i < sampleCount; i++)
-      {
-        float normalizedFreq = (float)i / (float)(sampleCount - 1);
-        responses[i] = mpFB->evaluateResponse(normalizedFreq);
-        if (responses[i] > maxResponse)
-          maxResponse = responses[i];
-      }
-
-      // Draw as connected line with sqrt scaling for dynamic range
-      float invMax = 1.0f / maxResponse;
-      int prevX = -1, prevY = -1;
-      for (int i = 0; i < sampleCount; i++)
-      {
-        float t = (float)i / (float)(sampleCount - 1);
-        float normalized = sqrtf(responses[i] * invMax);
-        int x = mWorldLeft + (int)(normalized * (float)w);
-        int y = mWorldBottom + (int)(t * (float)(h - 1));
-        x = CLAMP(mWorldLeft, mWorldLeft + w, x);
-
-        if (prevX >= 0)
-          fb.line(WHITE, prevX, prevY, x, y);
-
-        prevX = x;
-        prevY = y;
-      }
-
-      // Highlight selected band with brighter marker
-      if (mSelectedBand >= 0 && mSelectedBand < bandCount)
-      {
-        float hz = mpFB->getBandFreq(mSelectedBand);
-        int y = freqToY(hz);
-        fb.line(WHITE, mWorldLeft + w - 2, y - 2,
-                mWorldLeft + w, y);
-        fb.line(WHITE, mWorldLeft + w, y,
-                mWorldLeft + w - 2, y + 2);
-      }
-    }
-
-    int freqToY(float hz)
-    {
-      // Log map: 20Hz -> bottom, 20kHz -> top
-      float logMin = 2.9957f; // log(20)
-      float logMax = 9.9035f; // log(20000)
-      float logHz = logf(CLAMP(20.0f, 20000.0f, hz));
-      float normalized = (logHz - logMin) / (logMax - logMin);
-      return mWorldBottom + (int)(normalized * (float)(mHeight - 1));
     }
 #endif
 
