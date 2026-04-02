@@ -172,8 +172,8 @@ function TransformGateControl:init(args)
     local g = app.Readout(0, 0, ply, 10)
     local param = args.factorParam
     if param then g:setParameter(param) end
-    g:setAttributes(app.unitNone, factorMap)
-    g:setPrecision(0)
+    g:setAttributes(app.unitNone, args.factorMap or factorMap)
+    g:setPrecision(args.factorPrecision or 0)
     g:setCenter(col2, center4)
     return g
   end)()
@@ -198,7 +198,7 @@ function TransformGateControl:init(args)
       local g = app.Readout(0, 0, ply, 10)
       g:setParameter(args.paramBParam)
       g:setAttributes(app.unitNone, args.paramBMap or factorMap)
-      g:setPrecision(0)
+      g:setPrecision(args.paramBPrecision or 0)
       g:setCenter(col3, center4)
       return g
     end)()

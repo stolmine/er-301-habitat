@@ -10,6 +10,7 @@ local FeedbackControl = require "stolmine.FeedbackControl"
 local TapListControl = require "stolmine.TapListControl"
 local FilterListControl = require "stolmine.FilterListControl"
 local MacroControl = require "stolmine.MacroControl"
+local TransformGateControl = require "stolmine.TransformGateControl"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max)
@@ -43,6 +44,13 @@ local typeMacroNames = {
 
 local qMacroNames = {
   [0] = "off", "20%", "40%", "60%", "80%", "full", "asc", "desc", "even", "odd", "sine"
+}
+
+local xformTargetNames = {
+  [0] = "all", "taps", "delay", "filt",
+  "level", "pan", "pitch", "cut", "Q", "type",
+  "time", "fdbk", "tone", "skew", "grain", "count",
+  "reset"
 }
 
 local mixMap = floatMap(0, 1)
@@ -142,6 +150,23 @@ function MultitapDelay:onLoadGraph(channelCount)
   local typeMacro = self:addObject("typeMacro", app.ParameterAdapter())
   typeMacro:hardSet("Bias", 0)
   self:addMonoBranch("typeMacro", typeMacro, "In", typeMacro, "Out")
+
+  -- Xform gate
+  local xformGate = self:addObject("xformGate", app.Comparator())
+  xformGate:setTriggerMode()
+  self:addMonoBranch("xformGate", xformGate, "In", xformGate, "Out")
+
+  local xformTarget = self:addObject("xformTarget", app.ParameterAdapter())
+  xformTarget:hardSet("Bias", 0)
+  self:addMonoBranch("xformTarget", xformTarget, "In", xformTarget, "Out")
+
+  local xformDepth = self:addObject("xformDepth", app.ParameterAdapter())
+  xformDepth:hardSet("Bias", 0.5)
+  self:addMonoBranch("xformDepth", xformDepth, "In", xformDepth, "Out")
+
+  local xformSpread = self:addObject("xformSpread", app.ParameterAdapter())
+  xformSpread:hardSet("Bias", 0.5)
+  self:addMonoBranch("xformSpread", xformSpread, "In", xformSpread, "Out")
 
   -- Grain size
   local grainSize = self:addObject("grainSize", app.ParameterAdapter())
@@ -280,6 +305,103 @@ function MultitapDelay:applyTypeMacro(value)
       op:setFilterType(i, (i < 8) and 1 or 3)
     end
   end
+  op:loadFilter(self.controls and self.controls.filters and self.controls.filters.currentTap or 0)
+end
+
+-- Xform: randomization helper
+local function randomizeValue(cur, min, max, depth, spread)
+  local range = max - min
+  local center = spread * (min + max) * 0.5 + (1 - spread) * cur
+  local dev = depth * range * 0.5
+  local r = math.random() * 2 - 1
+  local v = center + r * dev
+  return math.max(min, math.min(max, v))
+end
+
+local function randomizeInt(cur, min, max, depth, spread)
+  return math.floor(randomizeValue(cur, min, max, depth, spread) + 0.5)
+end
+
+function MultitapDelay:fireTransform()
+  local target = math.floor(self.objects.xformTarget:getParameter("Bias"):target() + 0.5)
+  local depth = math.max(0, math.min(1, self.objects.xformDepth:getParameter("Bias"):target()))
+  local spread = math.max(0, math.min(1, self.objects.xformSpread:getParameter("Bias"):target()))
+  app.logInfo("Petrichor:fireTransform target=%d depth=%.2f spread=%.2f", target, depth, spread)
+  self:applyRandomize(target, depth, spread)
+end
+
+function MultitapDelay:applyRandomize(target, depth, spread)
+  local op = self.objects.op
+  local n = op:getTapCount()
+
+  local function rndTapLevels()
+    for i = 0, n - 1 do op:setTapLevel(i, randomizeValue(op:getTapLevel(i), 0, 1, depth, spread)) end
+  end
+  local function rndTapPans()
+    for i = 0, n - 1 do op:setTapPan(i, randomizeValue(op:getTapPan(i), -1, 1, depth, spread)) end
+  end
+  local function rndTapPitch()
+    for i = 0, n - 1 do op:setTapPitch(i, randomizeInt(op:getTapPitch(i), -24, 24, depth, spread)) end
+  end
+  local function rndCutoff()
+    for i = 0, n - 1 do op:setFilterCutoff(i, randomizeValue(op:getFilterCutoff(i), 20, 10000, depth, spread)) end
+  end
+  local function rndQ()
+    for i = 0, n - 1 do op:setFilterQ(i, randomizeValue(op:getFilterQ(i), 0, 1, depth, spread)) end
+  end
+  local function rndType()
+    for i = 0, n - 1 do op:setFilterType(i, randomizeInt(op:getFilterType(i), 0, 4, depth, spread)) end
+  end
+  local function rndParam(obj, name, min, max)
+    local cur = obj:getParameter("Bias"):target()
+    obj:hardSet("Bias", randomizeValue(cur, min, max, depth, spread))
+  end
+
+  if target == 0 then -- all
+    rndTapLevels(); rndTapPans(); rndTapPitch()
+    rndCutoff(); rndQ(); rndType()
+    rndParam(self.objects.masterTime, "Bias", 0.01, 2.0)
+    rndParam(self.objects.feedback, "Bias", 0, 0.95)
+    rndParam(self.objects.feedbackTone, "Bias", -1, 1)
+    rndParam(self.objects.skew, "Bias", -2, 2)
+    rndParam(self.objects.grainSize, "Bias", 0, 1)
+    rndParam(self.objects.tapCount, "Bias", 1, 16)
+  elseif target == 1 then rndTapLevels(); rndTapPans(); rndTapPitch()  -- taps
+  elseif target == 2 then -- delay
+    rndParam(self.objects.masterTime, "Bias", 0.01, 2.0)
+    rndParam(self.objects.feedback, "Bias", 0, 0.95)
+    rndParam(self.objects.feedbackTone, "Bias", -1, 1)
+    rndParam(self.objects.skew, "Bias", -2, 2)
+    rndParam(self.objects.grainSize, "Bias", 0, 1)
+    rndParam(self.objects.tapCount, "Bias", 1, 16)
+  elseif target == 3 then rndCutoff(); rndQ(); rndType()                -- filters
+  elseif target == 4 then rndTapLevels()                                -- level
+  elseif target == 5 then rndTapPans()                                  -- pan
+  elseif target == 6 then rndTapPitch()                                 -- pitch
+  elseif target == 7 then rndCutoff()                                   -- cutoff
+  elseif target == 8 then rndQ()                                        -- Q
+  elseif target == 9 then rndType()                                     -- type
+  elseif target == 10 then rndParam(self.objects.masterTime, "Bias", 0.01, 2.0) -- time
+  elseif target == 11 then rndParam(self.objects.feedback, "Bias", 0, 0.95)     -- fdbk
+  elseif target == 12 then rndParam(self.objects.feedbackTone, "Bias", -1, 1)   -- tone
+  elseif target == 13 then rndParam(self.objects.skew, "Bias", -2, 2)           -- skew
+  elseif target == 14 then rndParam(self.objects.grainSize, "Bias", 0, 1)       -- grain
+  elseif target == 15 then rndParam(self.objects.tapCount, "Bias", 1, 16)       -- count
+  elseif target == 16 then -- reset
+    for i = 0, 15 do
+      op:setTapLevel(i, 1.0); op:setTapPan(i, 0.0); op:setTapPitch(i, 0)
+      op:setFilterCutoff(i, 10000); op:setFilterQ(i, 0.0); op:setFilterType(i, 0)
+    end
+    self.objects.masterTime:hardSet("Bias", 0.5)
+    self.objects.feedback:hardSet("Bias", 0.3)
+    self.objects.feedbackTone:hardSet("Bias", 0.0)
+    self.objects.skew:hardSet("Bias", 0.0)
+    self.objects.grainSize:hardSet("Bias", 0.5)
+    self.objects.tapCount:hardSet("Bias", 4)
+  end
+
+  -- Refresh edit buffers
+  op:loadTap(self.controls and self.controls.taps and self.controls.taps.currentTap or 0)
   op:loadFilter(self.controls and self.controls.filters and self.controls.filters.currentTap or 0)
 end
 
@@ -483,9 +605,28 @@ function MultitapDelay:onLoadViews()
       initialBias = 0,
       modeNames = typeMacroNames,
       applyPreset = function(v) self:applyTypeMacro(v) end
+    },
+    xform = TransformGateControl {
+      seq = self,
+      button = "xform",
+      description = "Randomize",
+      branch = self.branches.xformGate,
+      comparator = self.objects.xformGate,
+      funcNames = xformTargetNames,
+      funcMap = intMap(0, 16),
+      funcParam = self.objects.xformTarget:getParameter("Bias"),
+      paramALabel = "depth",
+      factorParam = self.objects.xformDepth:getParameter("Bias"),
+      factorMap = floatMap(0, 1),
+      factorPrecision = 2,
+      -- paramBParam deferred: enables fire button on sub3 instead of spread readout
+      -- paramBParam = self.objects.xformSpread:getParameter("Bias"),
+      -- paramBLabel = "sprd",
+      -- paramBMap = floatMap(0, 1),
+      -- paramBPrecision = 2
     }
   }, {
-    expanded = { "tune", "taps", "masterTime", "feedback", "mix" },
+    expanded = { "tune", "taps", "masterTime", "feedback", "xform", "mix" },
     collapsed = {},
     taps = { "taps", "filters", "tapCount", "volMacro", "panMacro", "cutoffMacro", "qMacro", "typeMacro" },
     masterTime = { "masterTime", "grainSize", "skew", "tapCount" },
