@@ -122,28 +122,46 @@ function GateSeqUnit:onShowMenu(objects, branches)
   controls.stepLen1 = Task { description = "1 tick", task = function()
     local op = self.objects.op
     for i = 0, 63 do op:setStepLength(i, 1) end
+    if self.controls and self.controls.steps then
+      op:loadStep(self.controls.steps.currentStep or 0)
+    end
   end }
   controls.stepLen2 = Task { description = "2 ticks", task = function()
     local op = self.objects.op
     for i = 0, 63 do op:setStepLength(i, 2) end
+    if self.controls and self.controls.steps then
+      op:loadStep(self.controls.steps.currentStep or 0)
+    end
   end }
   controls.stepLen4 = Task { description = "4 ticks", task = function()
     local op = self.objects.op
     for i = 0, 63 do op:setStepLength(i, 4) end
+    if self.controls and self.controls.steps then
+      op:loadStep(self.controls.steps.currentStep or 0)
+    end
   end }
 
   controls.velHeader = MenuHeader { description = "Set All Velocities" }
   controls.vel25 = Task { description = "25%", task = function()
     local op = self.objects.op
     for i = 0, 63 do op:setStepVelocity(i, 0.25) end
+    if self.controls and self.controls.steps then
+      op:loadStep(self.controls.steps.currentStep or 0)
+    end
   end }
   controls.vel50 = Task { description = "50%", task = function()
     local op = self.objects.op
     for i = 0, 63 do op:setStepVelocity(i, 0.5) end
+    if self.controls and self.controls.steps then
+      op:loadStep(self.controls.steps.currentStep or 0)
+    end
   end }
   controls.vel100 = Task { description = "100%", task = function()
     local op = self.objects.op
     for i = 0, 63 do op:setStepVelocity(i, 1.0) end
+    if self.controls and self.controls.steps then
+      op:loadStep(self.controls.steps.currentStep or 0)
+    end
   end }
 
   controls.randomHeader = MenuHeader { description = "Randomize" }

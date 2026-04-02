@@ -104,6 +104,9 @@ function TrackerSeq:setAllStepLengths(len)
   for i = 0, 63 do
     op:setStepLength(i, len)
   end
+  if self.controls and self.controls.steps then
+    op:loadStep(self.controls.steps.currentStep or 0)
+  end
 end
 
 function TrackerSeq:randomizeOffsets()

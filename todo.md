@@ -109,10 +109,9 @@ Refinements:
   - [x] Filterbank: full unit verified on hardware
 
 ### Excel/Ballot/Etcher Edit Buffer Sync
-  - [ ] Excel: reload edit buffer after xform operations (selected step readout goes stale on transform)
-  - [ ] Ballot: same issue -- reload after ratchet/transform changes
-  - [ ] Etcher: reload after segment transforms (rotate, reverse, random)
-  - Pattern: track mLastLoadedStep, call loadStep(mLastLoadedStep) after any bulk data change (same fix as Filterbank)
+  - [x] Excel: added reload after setAllStepLengths (C++ transforms already had it)
+  - [x] Ballot: added reload after 6 "Set All" tasks (lengths + velocities). C++ transforms and randomize/clear already had it.
+  - [x] Etcher: already clean -- all presets and clears call reloadEditBuffer()
 
 ### Excel/Ballot Improvements
   - [ ] Xform gate control: enter-menu context view with GainBias faders (and CV input) for transform function and params
