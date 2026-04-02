@@ -318,8 +318,8 @@ Rainmaker-inspired multitap delay. 16 taps, 2s max (~384KB shared buffer). Per-t
 - [x] Feedback stabilization: one-pole tone damping, tap-count normalization, tanhf limiter on feedback + output
 - [x] Feedback tone: bipolar (-1 dark to +1 bright) variable one-pole on feedback path
 - [x] Serialization for all tap and filter data
+- [x] V/Oct pitch (10x ConstantGain, delay-time scaling for now)
 - [ ] Pitch shift: integrate grain engine for true granular pitch shift (not just delay time scaling). Apply to V/Oct master pitch and optionally per-tap
-- [ ] V/Oct pitch (10x ConstantGain)
 - [ ] Xform gate: adapt from Excel's TransformGateControl
 - [ ] Raindrop overview graphic (particle system, energy-driven brightness)
 - [ ] Stack parameter (groups coincident taps)
