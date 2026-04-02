@@ -68,6 +68,7 @@ namespace stolmine
     addParameter(mFeedbackTone);
     addParameter(mMix);
     addParameter(mTapCount);
+    addParameter(mVOctPitch);
     addParameter(mSkew);
     addParameter(mInputLevel);
     addParameter(mOutputLevel);
@@ -256,6 +257,10 @@ namespace stolmine
     int maxDelay = mMaxDelayInSamples;
     float sr = globalConfig.sampleRate;
 
+    // V/Oct pitch: shifts all delay times (pitch up = shorter delay)
+    float voctPitch = CLAMP(-2.0f, 2.0f, mVOctPitch.value());
+    float pitchMul = powf(2.0f, -voctPitch);
+
     // Recompute tap distribution only when params change
     bool distDirty = (tapCount != mLastTapCount || skew != mLastSkew || masterTime != mLastMasterTime);
     if (distDirty)
@@ -328,7 +333,7 @@ namespace stolmine
         if (s.tapLevel[t] < 0.001f)
           continue;
 
-        float delaySamples = mCachedDelaySamples[t];
+        float delaySamples = mCachedDelaySamples[t] * pitchMul;
         int delayInt = (int)delaySamples;
         float delayFrac = delaySamples - (float)delayInt;
 

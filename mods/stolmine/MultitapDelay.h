@@ -38,6 +38,7 @@ namespace stolmine
     od::Parameter mFeedbackTone{"FeedbackTone", 0.0f};
     od::Parameter mMix{"Mix", 0.5f};
     od::Parameter mTapCount{"TapCount", 4.0f};
+    od::Parameter mVOctPitch{"VOctPitch", 0.0f};
     od::Parameter mSkew{"Skew", 0.0f};
     od::Parameter mInputLevel{"InputLevel", 1.0f};
     od::Parameter mOutputLevel{"OutputLevel", 1.0f};

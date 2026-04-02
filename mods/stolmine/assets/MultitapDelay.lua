@@ -27,6 +27,7 @@ local timeMap = floatMap(0.01, 2.0)
 local feedbackMap = floatMap(0, 0.95)
 local feedbackToneMap = floatMap(-1, 1)
 local tapCountMap = intMap(1, 16)
+local vOctMap = floatMap(-2, 2)
 local skewMap = floatMap(-2, 2)
 local inputLevelMap = floatMap(0, 4)
 local outputLevelMap = floatMap(0, 4)
@@ -88,6 +89,15 @@ function MultitapDelay:onLoadGraph(channelCount)
   tieParam("FeedbackTone", feedbackTone)
   self:addMonoBranch("feedbackTone", feedbackTone, "In", feedbackTone, "Out")
 
+  -- V/Oct pitch (10x gain so 1V = 1 octave)
+  local vOctPitch = self:addObject("vOctPitch", app.ParameterAdapter())
+  local vOctGain = self:addObject("vOctGain", app.ConstantGain())
+  vOctGain:hardSet("Gain", 10.0)
+  vOctPitch:hardSet("Bias", 0.0)
+  connect(vOctGain, "Out", vOctPitch, "In")
+  tieParam("VOctPitch", vOctPitch)
+  self:addMonoBranch("vOctPitch", vOctGain, "In", vOctPitch, "Out")
+
   -- Skew
   local skew = self:addObject("skew", app.ParameterAdapter())
   skew:hardSet("Bias", 0.0)
@@ -115,6 +125,17 @@ end
 
 function MultitapDelay:onLoadViews()
   return {
+    vOctPitch = GainBias {
+      button = "V/Oct",
+      description = "V/Oct Pitch",
+      branch = self.branches.vOctPitch,
+      gainbias = self.objects.vOctPitch,
+      range = self.objects.vOctPitch,
+      biasMap = vOctMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
+    },
     taps = TapListControl {
       description = "Taps",
       width = app.SECTION_PLY,
@@ -230,7 +251,7 @@ function MultitapDelay:onLoadViews()
       initialBias = 0.0
     }
   }, {
-    expanded = { "taps", "masterTime", "feedback", "mix", "tapCount", "skew" },
+    expanded = { "vOctPitch", "taps", "masterTime", "feedback", "mix", "tapCount", "skew" },
     collapsed = {},
     taps = { "taps", "filters", "tapCount", "skew" },
     masterTime = { "masterTime", "feedback", "feedbackTone" },
