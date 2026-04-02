@@ -180,9 +180,10 @@ Produces a burst of gates from a single trigger input.
 
 ## Kryos (spectral freeze)
 
-- [ ] Debug hang on load — test in emulator first to isolate hardware vs code issue
+- [ ] Debug hang on load -- test in emulator first to isolate hardware vs code issue
 - [ ] If emulator works: hardware-specific issue (alignment, memory, toolchain)
 - [ ] If emulator hangs: DSP bug in process() or constructor
+- [ ] High priority: blocks multiband spectral freeze unit (per-band freeze gates on crossover engine)
 
 ## stolmine (original units)
 
@@ -486,6 +487,25 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [ ] C++ rewrite of SuperNiCd's pingable scaled random for performance
 - [ ] Clock input triggers new random values, scaled/quantized to range
 
+### Codescan Oscillator
+Reads the ER-301's own firmware binary as a wavetable. Inspired by the Buchla 259e and IME Kermit MkIII codescan modes.
+
+- [ ] Phase accumulator indexes into firmware .text region, treating raw machine code bytes as sample values
+- [ ] Scan position (GainBias): offset into firmware address space, CV-modulatable at audio rate
+- [ ] Pitch (V/Oct)
+- [ ] Byte-to-sample mapping: signed 8-bit normalized to -1/+1, with interpolation between samples
+- [ ] Sweeping scan produces timbral animation -- tight loops sound buzzy/tonal, varied data regions sound noisy/chaotic
+- [ ] Timbres unique to each firmware build
+
+### Codescan Filter
+Reads firmware binary as FIR tap weights, applied as convolution on the input signal. Companion to Codescan Oscillator.
+
+- [ ] Read N consecutive firmware bytes as FIR kernel (16-64 taps), normalized to -1/+1
+- [ ] Scan position (GainBias): offset into firmware address space, CV-modulatable
+- [ ] Kernel length control (fewer taps = comb/resonance, more taps = complex spectral shaping)
+- [ ] Mix (dry/wet)
+- [ ] Different firmware regions produce wildly different impulse responses -- sweeping scan reshapes the filter in real time
+
 ### Varishape Oscillator
 - [ ] Continuously variable waveshape: sine > triangle > saw > square > pulse
 - [ ] Single shape parameter + PWM, V/Oct, sync input
@@ -509,13 +529,53 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [ ] Carrier + modulator with through-zero FM, wavefolding, sync
 - [ ] Buchla-inspired territory
 
+## Buffer Shuffler / Groovebox
+
+Beat-slicing / buffer manipulation unit. BBCut-style stutter, shuffle, reverse, repeat on audio buffers.
+
+- [ ] Record or assign buffer, slice by transients or fixed grid
+- [ ] Per-slice: reverse, repeat count, pitch, level
+- [ ] Algorithmic shuffle modes (BBCut-style probability-driven rearrangement)
+- [ ] Clock-synced playback with gate-triggered stutter/glitch
+- [ ] Could evolve into a groovebox framework: seq + slices + effects
+
+## Automata Sequencer (Chess)
+
+Grid-based sequencer where placement rules from board games drive step generation. Users place pieces (chess-inspired) with idiosyncratic movement patterns; highlighted cells become active steps. Intersections produce emergent parameter combinations.
+
+- [ ] Grid display (8x8 or similar), pieces placed with movement patterns (rook=row/col, bishop=diagonal, knight=L-shape)
+- [ ] Piece count limited (as in chess) to force creative placement
+- [ ] Voices (3-6) with per-voice level, triggered by grid intersections
+- [ ] Horizontal/vertical line placement as simplified input mode
+- [ ] Signal input feedback: use CV to influence step placement or piece movement
+- [ ] Framework: generator (seq+voice), processor (seq-driven param changes), sequencer (complex stepwise CV)
+- [ ] Inspiration: Folktek Matter, Plumbutter -- freaky sequencing paradigm with generative character
+- [ ] Research: other grid games / cellular automata as step generators
+
+## I2C / External Communication
+
+- [ ] I2C output to Crow (complement existing TXo support)
+- [ ] Clock sync to audio (derive clock from audio transients or zero crossings)
+- [ ] Input already exists via sc.cv etc for Crow > ER-301
+
+## Compass (Norns port)
+
+- [ ] Port of Compass for ER-301 -- generative sequencer with interesting visual display
+- [ ] Research feasibility within ER-301 UI constraints
+
+## Artsy Visualizers / Sound Generators
+
+- [ ] Norns-inspired generative visual + audio units
+- [ ] Glitchy eye candy: generative visuals driven by audio/CV (ref: Paratek modules)
+- [ ] Pseudo-3D waveform viz: wavetable frames stacked serially for 3D view
+
 ## Port Candidates
 
 ### MIT-compatible (direct port)
 
 - [ ] Stages LFO -- Mutable Instruments Stages (pichenettes/eurorack, MIT)
 - [ ] Loom -- sequencer/pattern generator (ianjhoffman/RigatoniModular, MIT)
-- [ ] Airwindows -- large library of effects (Chris Johnson, MIT)
+- [ ] Airwindows -- large library of effects (Chris Johnson, MIT). Focus on timbral/spatial/lo-fi effects, reverbs, distortion over mixing utilities
 
 ### Algorithm reference only (GPLv3, clean-room reimplementation)
 
