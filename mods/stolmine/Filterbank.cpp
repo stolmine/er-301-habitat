@@ -61,6 +61,7 @@ namespace stolmine
 
     stmlib::Svf filters[kMaxBands];
     float bandQValues[kMaxBands]; // stored for BPF gain compensation
+    float bandEnergy[kMaxBands];  // per-band RMS energy follower
 
     float targetFreq[kMaxBands]; // normalized (Hz / sampleRate)
     float currentFreq[kMaxBands];
@@ -96,6 +97,7 @@ namespace stolmine
         filterType[i] = FTYPE_PEAK;
         filters[i].Init();
       }
+      memset(bandEnergy, 0, sizeof(bandEnergy));
       candidateCount = 0;
       numCustomScales = 0;
       customBuildCount = 0;
@@ -189,6 +191,16 @@ namespace stolmine
   {
     mCachedBandCount = CLAMP(2, kMaxBands, (int)(mBandCount.value() + 0.5f));
     return mCachedBandCount;
+  }
+
+  float Filterbank::getBandEnergy(int i)
+  {
+    return sqrtf(mpInternal->bandEnergy[CLAMP(0, kMaxBands - 1, i)]);
+  }
+
+  float Filterbank::getBandCurrentFreq(int i)
+  {
+    return mpInternal->currentFreq[CLAMP(0, kMaxBands - 1, i)] * globalConfig.sampleRate;
   }
 
   // --- Scale distribution ---
@@ -587,6 +599,9 @@ namespace stolmine
           break;
         }
         wet += bandOut * s.gain[b];
+        // Per-band energy follower (~20ms time constant at 48kHz)
+        float e = bandOut * bandOut;
+        s.bandEnergy[b] += (e - s.bandEnergy[b]) * 0.001f;
       }
       wet *= sumNorm;
 

@@ -46,7 +46,7 @@ LFLAGS = -nostdlib -nodefaultlibs -r
 endif
 
 ifeq ($(ARCH),linux)
-CFLAGS.linux = -Wno-deprecated-declarations -msse4 -fPIC
+CFLAGS.linux = -Wno-deprecated-declarations -msse4 -fPIC -fno-tree-loop-vectorize
 LFLAGS = -shared
 endif
 

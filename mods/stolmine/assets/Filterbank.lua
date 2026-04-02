@@ -135,6 +135,7 @@ function Filterbank:loadUserScales(op)
   for i, name in pairs(builtinScaleNames) do
     self.scaleNames[i] = name
   end
+  self.scaleCount = 12
 
   local ok, Scala = pcall(require, "core.Quantizer.Scala")
   if not ok then return end
@@ -144,7 +145,9 @@ function Filterbank:loadUserScales(op)
 
   local slot = 0
   local files = {}
-  for filename in dir(root) do
+  local dirOk, iter = pcall(dir, root)
+  if not dirOk then return end
+  for filename in iter do
     if FileSystem.isType("scala", filename) then
       files[#files + 1] = filename
     end
