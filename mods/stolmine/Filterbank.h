@@ -56,7 +56,7 @@ namespace stolmine
     od::Parameter mBandCount{"BandCount", 8.0f};
     od::Parameter mScale{"Scale", 0.0f};
     od::Parameter mRotate{"Rotate", 0.0f};
-    od::Parameter mSkew{"Skew", 0.5f};
+    od::Parameter mVOctOffset{"VOctOffset", 0.0f};
     od::Parameter mSlew{"Slew", 0.0f};
     od::Parameter mInputLevel{"InputLevel", 1.0f};
     od::Parameter mOutputLevel{"OutputLevel", 1.0f};
@@ -110,7 +110,7 @@ namespace stolmine
     int mLastScale = -1;
     int mLastRotate = 0;
     int mLastBandCount = 8;
-    float mLastSkew = 0.5f;
+    float mLastVOctOffset = 0.0f;
 
     void updateFilterCoefficients();
     void distributeFrequencies();

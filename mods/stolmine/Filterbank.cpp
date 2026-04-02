@@ -114,7 +114,7 @@ namespace stolmine
     addParameter(mBandCount);
     addParameter(mScale);
     addParameter(mRotate);
-    addParameter(mSkew);
+    addParameter(mVOctOffset);
     addParameter(mSlew);
     addParameter(mInputLevel);
     addParameter(mOutputLevel);
@@ -258,7 +258,6 @@ namespace stolmine
     int scaleIdx = CLAMP(0, (int)SCALE_CUSTOM + kMaxCustomScales - 1, (int)(mScale.value() + 0.5f));
     int bandCount = mCachedBandCount;
     int rotate = (int)(mRotate.value() + 0.5f);
-    float skew = CLAMP(0.0f, 1.0f, mSkew.value());
 
     // Get scale degrees (built-in or custom slot)
     const float *degrees;
@@ -317,10 +316,10 @@ namespace stolmine
     // Greedy selection: maximize minimum log-distance
     memset(s.used, 0, sizeof(s.used));
 
-    // Start near geometric center, skewed
+    // Start near geometric center
     float logMin = logf(minHz);
     float logMax = logf(maxHz);
-    float logCenter = logMin + (logMax - logMin) * skew;
+    float logCenter = (logMin + logMax) * 0.5f;
 
     int bestIdx = 0;
     float bestDist = 1e10f;
@@ -414,15 +413,13 @@ namespace stolmine
     int scaleIdx = CLAMP(0, (int)SCALE_CUSTOM + kMaxCustomScales - 1, (int)(mScale.value() + 0.5f));
     int rotate = (int)(mRotate.value() + 0.5f);
     int bandCount = mCachedBandCount;
-    float skew = CLAMP(0.0f, 1.0f, mSkew.value());
 
     if (scaleIdx != mLastScale || rotate != mLastRotate ||
-        bandCount != mLastBandCount || skew != mLastSkew)
+        bandCount != mLastBandCount)
     {
       mLastScale = scaleIdx;
       mLastRotate = rotate;
       mLastBandCount = bandCount;
-      mLastSkew = skew;
       distributeFrequencies();
     }
   }
@@ -451,13 +448,18 @@ namespace stolmine
         slewCoeff = 0.0f;
     }
 
+    // V/Oct offset: shift all band frequencies by the same musical interval
+    float voctOffset = CLAMP(-2.0f, 2.0f, mVOctOffset.value());
+    float freqMul = powf(2.0f, voctOffset);
+
     float q = baseQ;
     for (int i = 0; i < bandCount; i++)
     {
+      float shiftedTarget = CLAMP(0.0001f, 0.49f, s.targetFreq[i] * freqMul);
       if (slewCoeff > 0.0f)
-        s.currentFreq[i] += (s.targetFreq[i] - s.currentFreq[i]) * (1.0f - slewCoeff);
+        s.currentFreq[i] += (shiftedTarget - s.currentFreq[i]) * (1.0f - slewCoeff);
       else
-        s.currentFreq[i] = s.targetFreq[i];
+        s.currentFreq[i] = shiftedTarget;
 
       float freq = CLAMP(0.0001f, 0.49f, s.currentFreq[i]);
       // Q increases slightly with frequency for even-sounding resonance

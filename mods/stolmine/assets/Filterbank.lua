@@ -29,7 +29,7 @@ local mixMap = floatMap(0, 1)
 local macroQMap = floatMap(0, 1)
 local bandCountMap = intMap(2, 16)
 local rotateMap = intMap(-16, 16)
-local skewMap = floatMap(0, 1)
+local vOctMap = floatMap(-2, 2)
 local slewMap = floatMap(0, 5)
 local inputLevelMap = floatMap(0, 4)
 local outputLevelMap = floatMap(0, 4)
@@ -99,11 +99,14 @@ function Filterbank:onLoadGraph(channelCount)
   tieParam("Rotate", rotate)
   self:addMonoBranch("rotate", rotate, "In", rotate, "Out")
 
-  -- Skew
-  local skew = self:addObject("skew", app.ParameterAdapter())
-  skew:hardSet("Bias", 0.5)
-  tieParam("Skew", skew)
-  self:addMonoBranch("skew", skew, "In", skew, "Out")
+  -- V/Oct Offset (10x gain so 1V = 1 octave)
+  local vOctOffset = self:addObject("vOctOffset", app.ParameterAdapter())
+  local vOctGain = self:addObject("vOctGain", app.ConstantGain())
+  vOctGain:hardSet("Gain", 10.0)
+  vOctOffset:hardSet("Bias", 0.0)
+  connect(vOctGain, "Out", vOctOffset, "In")
+  tieParam("VOctOffset", vOctOffset)
+  self:addMonoBranch("vOctOffset", vOctGain, "In", vOctOffset, "Out")
 
   -- Slew
   local slew = self:addObject("slew", app.ParameterAdapter())
@@ -291,7 +294,7 @@ function Filterbank:onLoadViews()
       filterbank = self.objects.op,
       width = 2 * app.SECTION_PLY,
       bandCount = self.objects.bandCount:getParameter("Bias"),
-      skew = self.objects.skew:getParameter("Bias"),
+      vOctOffset = self.objects.vOctOffset:getParameter("Bias"),
       slew = self.objects.slew:getParameter("Bias")
     },
     scale = ModeSelector {
@@ -354,16 +357,16 @@ function Filterbank:onLoadViews()
       biasPrecision = 0,
       initialBias = 8
     },
-    skew = GainBias {
-      button = "skew",
-      description = "Skew",
-      branch = self.branches.skew,
-      gainbias = self.objects.skew,
-      range = self.objects.skew,
-      biasMap = skewMap,
+    vOctOffset = GainBias {
+      button = "V/Oct",
+      description = "V/Oct Offset",
+      branch = self.branches.vOctOffset,
+      gainbias = self.objects.vOctOffset,
+      range = self.objects.vOctOffset,
+      biasMap = vOctMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.5
+      initialBias = 0.0
     },
     slew = GainBias {
       button = "slew",
@@ -412,7 +415,7 @@ function Filterbank:onLoadViews()
   }, {
     expanded = { "bands", "overview", "scale", "rotate", "macroQ", "mix" },
     collapsed = {},
-    overview = { "overview", "bandCount", "skew", "slew" },
+    overview = { "overview", "bandCount", "vOctOffset", "slew" },
     mix = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
   }
 end
@@ -433,7 +436,7 @@ function Filterbank:serialize()
   t.macroQ = self.objects.macroQ:getParameter("Bias"):target()
   t.bandCount = self.objects.bandCount:getParameter("Bias"):target()
   t.rotate = self.objects.rotate:getParameter("Bias"):target()
-  t.skew = self.objects.skew:getParameter("Bias"):target()
+  t.vOctOffset = self.objects.vOctOffset:getParameter("Bias"):target()
   t.slew = self.objects.slew:getParameter("Bias"):target()
   t.inputLevel = self.objects.inputLevel:getParameter("Bias"):target()
   t.outputLevel = self.objects.outputLevel:getParameter("Bias"):target()
@@ -466,7 +469,7 @@ function Filterbank:deserialize(t)
   restoreParam("macroQ", "macroQ")
   restoreParam("bandCount", "bandCount")
   restoreParam("rotate", "rotate")
-  restoreParam("skew", "skew")
+  restoreParam("vOctOffset", "vOctOffset")
   restoreParam("slew", "slew")
   restoreParam("inputLevel", "inputLevel")
   restoreParam("outputLevel", "outputLevel")

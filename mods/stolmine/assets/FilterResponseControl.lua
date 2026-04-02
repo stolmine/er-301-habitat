@@ -26,8 +26,8 @@ local function intMap(min, max)
 end
 
 local bandCountMap = intMap(2, 16)
-local skewMap = floatMap(0, 1)
-local slewMap = floatMap(0, 1)
+local vOctMap = floatMap(-2, 2)
+local slewMap = floatMap(0, 5)
 
 local FilterResponseControl = Class {
   type = "FilterResponseControl",
@@ -65,14 +65,14 @@ function FilterResponseControl:init(args)
     return g
   end)()
 
-  self.skewReadout = (function()
+  self.vOctReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
-    local param = args.skew
+    local param = args.vOctOffset
     if param then
       param:enableSerialization()
       g:setParameter(param)
     end
-    g:setAttributes(app.unitNone, skewMap)
+    g:setAttributes(app.unitNone, vOctMap)
     g:setPrecision(2)
     g:setCenter(col2, center4)
     return g
@@ -103,11 +103,11 @@ function FilterResponseControl:init(args)
 
   self.subGraphic = app.Graphic(0, 0, 128, 64)
   self.subGraphic:addChild(self.bandCountReadout)
-  self.subGraphic:addChild(self.skewReadout)
+  self.subGraphic:addChild(self.vOctReadout)
   self.subGraphic:addChild(self.slewReadout)
   self.subGraphic:addChild(self.description)
   self.subGraphic:addChild(app.SubButton("bands", 1))
-  self.subGraphic:addChild(app.SubButton("skew", 2))
+  self.subGraphic:addChild(app.SubButton("V/Oct", 2))
   self.subGraphic:addChild(app.SubButton("slew", 3))
 
   self.pDisplay:follow(fb)
@@ -136,7 +136,7 @@ end
 function FilterResponseControl:subReleased(i, shifted)
   if shifted then return false end
   local readout = i == 1 and self.bandCountReadout
-      or i == 2 and self.skewReadout
+      or i == 2 and self.vOctReadout
       or i == 3 and self.slewReadout or nil
   if readout then
     if self:hasFocus("encoder") then
