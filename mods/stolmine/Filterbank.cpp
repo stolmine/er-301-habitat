@@ -203,6 +203,16 @@ namespace stolmine
     return mpInternal->currentFreq[CLAMP(0, kMaxBands - 1, i)] * globalConfig.sampleRate;
   }
 
+  float Filterbank::getRotate()
+  {
+    return mRotate.value();
+  }
+
+  float Filterbank::getMacroQ()
+  {
+    return CLAMP(0.0f, 1.0f, mMacroQ.value());
+  }
+
   // --- Scale distribution ---
 
   // --- Custom scale loading ---

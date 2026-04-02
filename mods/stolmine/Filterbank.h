@@ -95,6 +95,8 @@ namespace stolmine
     float evaluateResponseAtBand(int band);
     float getBandEnergy(int i);
     float getBandCurrentFreq(int i);
+    float getRotate();
+    float getMacroQ();
 
 #ifndef SWIGLUA
   private:
