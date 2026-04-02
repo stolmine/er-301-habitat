@@ -298,33 +298,38 @@ Rainmaker-inspired multitap delay. 16 taps, 2s max (~384KB shared buffer). Per-t
 - Granular delay engine (MonoGrainDelay) for pitch shifting
 - Tap distribution: time * pow((i+1)/N, skew_exp), stack groups
 
-### UI layout (6 plies)
-1. V/Oct pitch (GainBias, 10x ConstantGain)
-2. Tap list (TapListControl, enter expands to filter list + tapCount/skew)
-3. Overview (raindrop particle system, sub-display: tap count, skew, stack)
-4. Master time (GainBias, sub-display: feedback, feedback tone)
-5. Xform gate (TransformGateControl, gate trigger for rot/rnd/rev/etc)
-6. Mix (MixControl, shift sub-display: input/output/tanh)
+### UI layout (7 plies)
+1. V/Oct pitch (Pitch control, ConstantOffset)
+2. Tap list (TapListControl: level/pan/pitch, expand: filters + stack + macros + tapCount)
+3. Overview (raindrop particle system)
+4. Master time (TimeControl, shift SD: grain/skew/tapCount, expand: time + grainSize + skew + tapCount)
+5. Feedback (FeedbackControl, shift SD: tone, expand: feedback + feedbackTone)
+6. Xform gate (TransformGateControl, gate trigger for rot/rnd/rev/etc)
+7. Mix (MixControl, shift SD: input/output/tanh, expand: mix + inputLevel + outputLevel + tanhAmt)
 
-### Build order
+### Implemented
 - [x] C++ skeleton: MultitapDelay class, Internal struct, buffer alloc, basic process loop
-- [x] Tap list: TapListControl + TapListGraphic (level/pan/filterType sub-display)
-- [x] Lua wiring: onLoadGraph with master time, feedback, mix, tap count, skew
+- [x] Tap list: TapListControl + TapListGraphic (level/pan/pitch sub-display)
+- [x] Filter list: FilterListControl in tap expansion view (cutoff Hz/Q/type with formatFreq)
 - [x] Auto-distribution: tap times from pow((i+1)/N, 2^skew), dirty-check optimization
 - [x] Per-tap filtering: SVF with Q 1-30, Q-compensated feedback path, 5 types (off/lp/bp/hp/notch)
-- [x] Filter list: FilterListControl in tap expansion view (cutoff Hz/Q/type)
-- [x] MixControl with shift sub-display (input/output/tanh)
-- [x] TimeControl with shift sub-display (feedback/tone)
-- [x] Feedback stabilization: one-pole tone damping, tap-count normalization, tanhf limiter on feedback + output
+- [x] Granular pitch shift: 3 grains per tap, sine LUT envelope, per-tap semitone pitch (-24 to +24) + master V/Oct
+- [x] V/Oct pitch: builtin Pitch control (ConstantOffset) with ParameterAdapter bridge
+- [x] Grain size param (5-100ms) on TimeControl shift SD and expansion
+- [x] TimeControl: shift SD grain/skew/tapCount, expansion view
+- [x] FeedbackControl: shift SD tone, expansion view
+- [x] MixControl: shift SD input/output/tanh, expansion view
+- [x] Feedback stabilization: one-pole tone damping, tap-count normalization, tanhf limiter
 - [x] Feedback tone: bipolar (-1 dark to +1 bright) variable one-pole on feedback path
 - [x] Serialization for all tap and filter data
-- [x] V/Oct pitch (10x ConstantGain)
-- [x] Granular pitch shift: 3 grains per tap, sine LUT envelope, per-tap pitch + master V/Oct, grain size param
-- [ ] Move skew off top level into master time sub-display/expansion view
-- [ ] Xform gate: adapt from Excel's TransformGateControl
+- [x] Shift tap vs hold on all shift-toggle controls (fine/coarse preserved)
+
+### Remaining
+- [ ] Tap macros: volume, pan, filter cutoff, filter type (integer ModeSelector faders with Rainmaker-style preset distributions)
+- [ ] Stack parameter (groups coincident taps, in taps expansion after filters)
 - [ ] Xform gate: adapt from Excel's TransformGateControl
 - [ ] Raindrop overview graphic (particle system, energy-driven brightness)
-- [ ] Stack parameter (groups coincident taps)
+- [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
 
 ## Fade Mixer

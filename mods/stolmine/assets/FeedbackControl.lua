@@ -7,69 +7,48 @@ local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
 local center4 = app.GRID5_CENTER4
 local col1 = app.BUTTON1_CENTER
-local col2 = app.BUTTON2_CENTER
-local col3 = app.BUTTON3_CENTER
 
-local TimeControl = Class {}
-TimeControl:include(GainBias)
+local FeedbackControl = Class {}
+FeedbackControl:include(GainBias)
 
-function TimeControl:init(args)
+function FeedbackControl:init(args)
   GainBias.init(self, args)
 
   self.paramMode = false
+  self.shiftHeld = false
+  self.shiftUsed = false
   self.normalSubGraphic = self.subGraphic
 
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  local function makeReadout(param, map, precision, units, x)
-    local g = app.Readout(0, 0, ply, 10)
-    g:setParameter(param)
-    g:setAttributes(units, map)
-    g:setPrecision(precision)
-    g:setCenter(x, center4)
-    return g
-  end
-
-  local grainMap = (function()
-    local m = app.LinearDialMap(0, 1)
+  local toneMap = (function()
+    local m = app.LinearDialMap(-1, 1)
     m:setSteps(0.1, 0.01, 0.001, 0.001)
     return m
   end)()
 
-  local skewMap = (function()
-    local m = app.LinearDialMap(-2, 2)
-    m:setSteps(0.5, 0.1, 0.01, 0.001)
-    return m
+  self.toneReadout = (function()
+    local g = app.Readout(0, 0, ply, 10)
+    g:setParameter(args.feedbackTone)
+    g:setAttributes(app.unitNone, toneMap)
+    g:setPrecision(2)
+    g:setCenter(col1, center4)
+    return g
   end)()
 
-  local tapCountMap = (function()
-    local m = app.LinearDialMap(1, 16)
-    m:setSteps(4, 1, 0.25, 0.25)
-    m:setRounding(1)
-    return m
-  end)()
-
-  self.grainReadout = makeReadout(args.grainSize, grainMap, 2, app.unitNone, col1)
-  self.skewReadout = makeReadout(args.skew, skewMap, 2, app.unitNone, col2)
-  self.tapCountReadout = makeReadout(args.tapCount, tapCountMap, 0, app.unitNone, col3)
-
-  local desc = app.Label("Grain / Skew / Taps", 10)
+  local desc = app.Label("Tone", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
   desc:setCornerRadius(3, 0, 0, 3)
-  desc:setCenter(col2, center1 + 1)
+  desc:setCenter(col1, center1 + 1)
 
-  self.paramSubGraphic:addChild(self.grainReadout)
-  self.paramSubGraphic:addChild(self.skewReadout)
-  self.paramSubGraphic:addChild(self.tapCountReadout)
+  self.paramSubGraphic:addChild(self.toneReadout)
   self.paramSubGraphic:addChild(desc)
-  self.paramSubGraphic:addChild(app.SubButton("grain", 1))
-  self.paramSubGraphic:addChild(app.SubButton("skew", 2))
-  self.paramSubGraphic:addChild(app.SubButton("taps", 3))
+  self.paramSubGraphic:addChild(app.SubButton("tone", 1))
 end
 
-function TimeControl:setParamMode(enabled)
+function FeedbackControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
   self.paramFocusedReadout = nil
@@ -84,12 +63,12 @@ function TimeControl:setParamMode(enabled)
   self:addSubGraphic(self.subGraphic)
 end
 
-function TimeControl:onCursorEnter(spot)
+function FeedbackControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
 end
 
-function TimeControl:onCursorLeave(spot)
+function FeedbackControl:onCursorLeave(spot)
   if self.paramMode then
     self:removeSubGraphic(self.subGraphic)
     self.paramMode = false
@@ -99,13 +78,13 @@ function TimeControl:onCursorLeave(spot)
   GainBias.onCursorLeave(self, spot)
 end
 
-function TimeControl:shiftPressed()
+function FeedbackControl:shiftPressed()
   self.shiftHeld = true
   self.shiftUsed = false
   return true
 end
 
-function TimeControl:shiftReleased()
+function FeedbackControl:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
     self:setParamMode(not self.paramMode)
   end
@@ -113,7 +92,7 @@ function TimeControl:shiftReleased()
   return true
 end
 
-function TimeControl:spotReleased(spot, shifted)
+function FeedbackControl:spotReleased(spot, shifted)
   if self.paramMode then
     self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
@@ -122,16 +101,13 @@ function TimeControl:spotReleased(spot, shifted)
   return GainBias.spotReleased(self, spot, shifted)
 end
 
-function TimeControl:subReleased(i, shifted)
+function FeedbackControl:subReleased(i, shifted)
   if shifted then return false end
   if self.paramMode then
-    local readout = i == 1 and self.grainReadout
-        or i == 2 and self.skewReadout
-        or i == 3 and self.tapCountReadout or nil
-    if readout then
-      readout:save()
-      self.paramFocusedReadout = readout
-      self:setSubCursorController(readout)
+    if i == 1 then
+      self.toneReadout:save()
+      self.paramFocusedReadout = self.toneReadout
+      self:setSubCursorController(self.toneReadout)
       if not self:hasFocus("encoder") then self:focus() end
     end
     return true
@@ -139,7 +115,7 @@ function TimeControl:subReleased(i, shifted)
   return GainBias.subReleased(self, i, shifted)
 end
 
-function TimeControl:encoder(change, shifted)
+function FeedbackControl:encoder(change, shifted)
   if shifted and self.shiftHeld then
     self.shiftUsed = true
   end
@@ -150,7 +126,7 @@ function TimeControl:encoder(change, shifted)
   return GainBias.encoder(self, change, shifted)
 end
 
-function TimeControl:zeroPressed()
+function FeedbackControl:zeroPressed()
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:zero()
     return true
@@ -158,7 +134,7 @@ function TimeControl:zeroPressed()
   return GainBias.zeroPressed(self)
 end
 
-function TimeControl:cancelReleased(shifted)
+function FeedbackControl:cancelReleased(shifted)
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:restore()
     return true
@@ -166,4 +142,4 @@ function TimeControl:cancelReleased(shifted)
   return GainBias.cancelReleased(self, shifted)
 end
 
-return TimeControl
+return FeedbackControl

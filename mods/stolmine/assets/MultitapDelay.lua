@@ -6,6 +6,7 @@ local GainBias = require "Unit.ViewControl.GainBias"
 local Pitch = require "Unit.ViewControl.Pitch"
 local MixControl = require "stolmine.MixControl"
 local TimeControl = require "stolmine.TimeControl"
+local FeedbackControl = require "stolmine.FeedbackControl"
 local TapListControl = require "stolmine.TapListControl"
 local FilterListControl = require "stolmine.FilterListControl"
 local Encoder = require "Encoder"
@@ -160,11 +161,11 @@ function MultitapDelay:onLoadViews()
       biasUnits = app.unitSecs,
       biasPrecision = 2,
       initialBias = 0.5,
-      feedback = self.objects.feedback:getParameter("Bias"),
-      feedbackTone = self.objects.feedbackTone:getParameter("Bias"),
-      skew = self.objects.skew:getParameter("Bias")
+      grainSize = self.objects.grainSize:getParameter("Bias"),
+      skew = self.objects.skew:getParameter("Bias"),
+      tapCount = self.objects.tapCount:getParameter("Bias")
     },
-    feedback = GainBias {
+    feedback = FeedbackControl {
       button = "fdbk",
       description = "Feedback",
       branch = self.branches.feedback,
@@ -173,7 +174,8 @@ function MultitapDelay:onLoadViews()
       biasMap = feedbackMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.3
+      initialBias = 0.3,
+      feedbackTone = self.objects.feedbackTone:getParameter("Bias")
     },
     feedbackTone = GainBias {
       button = "tone",
@@ -267,11 +269,11 @@ function MultitapDelay:onLoadViews()
       initialBias = 0.5
     }
   }, {
-    expanded = { "tune", "taps", "masterTime", "feedback", "mix", "tapCount" },
+    expanded = { "tune", "taps", "masterTime", "feedback", "mix" },
     collapsed = {},
-    tune = { "tune", "grainSize" },
-    taps = { "taps", "filters", "tapCount", "skew" },
-    masterTime = { "masterTime", "feedback", "feedbackTone", "skew" },
+    taps = { "taps", "filters", "tapCount" },
+    masterTime = { "masterTime", "grainSize", "skew", "tapCount" },
+    feedback = { "feedback", "feedbackTone" },
     mix = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
   }
 end
