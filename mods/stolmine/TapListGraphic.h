@@ -56,19 +56,29 @@ namespace stolmine
         snprintf(buf, sizeof(buf), "%02d", tap + 1);
         fb.text(GRAY7, mWorldLeft + 2, y + 1, buf, 10);
 
-        // Level label: show edit param for selected, stored for others
-        float level = (tap == mSelectedTap && mpEditLevel)
-                          ? mpEditLevel->value()
-                          : mpDelay->getTapLevel(tap);
-
-        if (level < 0.001f)
+        // Per-row value label
+        if (mShowCutoff)
         {
-          fb.text(GRAY5, mWorldLeft + 18, y + 1, "off", 10);
+          float hz = (tap == mSelectedTap && mpEditLevel)
+                         ? mpEditLevel->value()
+                         : mpDelay->getFilterCutoff(tap);
+          formatFreq(buf, sizeof(buf), hz);
+          fb.text(WHITE, mWorldLeft + 18, y + 1, buf, 10);
         }
         else
         {
-          snprintf(buf, sizeof(buf), "%3d", (int)(level * 100.0f));
-          fb.text(WHITE, mWorldLeft + 18, y + 1, buf, 10);
+          float level = (tap == mSelectedTap && mpEditLevel)
+                            ? mpEditLevel->value()
+                            : mpDelay->getTapLevel(tap);
+          if (level < 0.001f)
+          {
+            fb.text(GRAY5, mWorldLeft + 18, y + 1, "off", 10);
+          }
+          else
+          {
+            snprintf(buf, sizeof(buf), "%3d", (int)(level * 100.0f));
+            fb.text(WHITE, mWorldLeft + 18, y + 1, buf, 10);
+          }
         }
       }
 
@@ -107,12 +117,28 @@ namespace stolmine
     void setSelectedTap(int tap) { mSelectedTap = tap; }
     int getSelectedTap() { return mSelectedTap; }
     void setEditParam(od::Parameter *editLevel) { mpEditLevel = editLevel; }
+    void setShowCutoff(bool show) { mShowCutoff = show; }
+
+    static void formatFreq(char *buf, int bufSize, float hz)
+    {
+      if (hz < 1000.0f)
+        snprintf(buf, bufSize, "%3.0f", hz);
+      else if (hz < 10000.0f)
+      {
+        int k = (int)(hz / 1000.0f);
+        int frac = ((int)(hz / 100.0f)) % 10;
+        snprintf(buf, bufSize, "%dk%d", k, frac);
+      }
+      else
+        snprintf(buf, bufSize, "%dk", (int)(hz / 1000.0f));
+    }
 
   private:
     MultitapDelay *mpDelay = 0;
     od::Parameter *mpEditLevel = 0;
     int mSelectedTap = 0;
     int mScrollOffset = 0;
+    bool mShowCutoff = false;
   };
 
 } // namespace stolmine

@@ -3,6 +3,7 @@ local libstolmine = require "stolmine.libstolmine"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Pitch = require "Unit.ViewControl.Pitch"
 local MixControl = require "stolmine.MixControl"
 local TimeControl = require "stolmine.TimeControl"
 local TapListControl = require "stolmine.TapListControl"
@@ -27,7 +28,6 @@ local timeMap = floatMap(0.01, 2.0)
 local feedbackMap = floatMap(0, 0.95)
 local feedbackToneMap = floatMap(-1, 1)
 local tapCountMap = intMap(1, 16)
-local vOctMap = floatMap(-2, 2)
 local skewMap = floatMap(-2, 2)
 local grainSizeMap = floatMap(0, 1)
 local inputLevelMap = floatMap(0, 4)
@@ -90,14 +90,12 @@ function MultitapDelay:onLoadGraph(channelCount)
   tieParam("FeedbackTone", feedbackTone)
   self:addMonoBranch("feedbackTone", feedbackTone, "In", feedbackTone, "Out")
 
-  -- V/Oct pitch (10x gain so 1V = 1 octave)
-  local vOctPitch = self:addObject("vOctPitch", app.ParameterAdapter())
-  local vOctGain = self:addObject("vOctGain", app.ConstantGain())
-  vOctGain:hardSet("Gain", 10.0)
-  vOctPitch:hardSet("Bias", 0.0)
-  connect(vOctGain, "Out", vOctPitch, "In")
-  tieParam("VOctPitch", vOctPitch)
-  self:addMonoBranch("vOctPitch", vOctGain, "In", vOctPitch, "Out")
+  -- V/Oct pitch (ConstantOffset, same pattern as builtin oscillators)
+  local tune = self:addObject("tune", app.ConstantOffset())
+  local tuneRange = self:addObject("tuneRange", app.MinMax())
+  connect(tune, "Out", tuneRange, "In")
+  tie(op, "VOctPitch", tune, "Out")
+  self:addMonoBranch("tune", tune, "In", tune, "Out")
 
   -- Grain size
   local grainSize = self:addObject("grainSize", app.ParameterAdapter())
@@ -132,16 +130,12 @@ end
 
 function MultitapDelay:onLoadViews()
   return {
-    vOctPitch = GainBias {
-      button = "V/Oct",
-      description = "V/Oct Pitch",
-      branch = self.branches.vOctPitch,
-      gainbias = self.objects.vOctPitch,
-      range = self.objects.vOctPitch,
-      biasMap = vOctMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.0
+    tune = Pitch {
+      button = "V/oct",
+      branch = self.branches.tune,
+      description = "V/oct",
+      offset = self.objects.tune,
+      range = self.objects.tuneRange
     },
     taps = TapListControl {
       description = "Taps",
@@ -269,9 +263,9 @@ function MultitapDelay:onLoadViews()
       initialBias = 0.5
     }
   }, {
-    expanded = { "vOctPitch", "taps", "masterTime", "feedback", "mix", "tapCount", "skew" },
+    expanded = { "tune", "taps", "masterTime", "feedback", "mix", "tapCount", "skew" },
     collapsed = {},
-    vOctPitch = { "vOctPitch", "grainSize" },
+    tune = { "tune", "grainSize" },
     taps = { "taps", "filters", "tapCount", "skew" },
     masterTime = { "masterTime", "feedback", "feedbackTone" },
     mix = { "mix", "inputLevel", "outputLevel", "tanhAmt" }

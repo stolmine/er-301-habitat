@@ -196,7 +196,7 @@ namespace stolmine
   float MultitapDelay::getTapPan(int i) { return mpInternal->tapPan[CLAMP(0, kMaxTaps - 1, i)]; }
   void MultitapDelay::setTapPan(int i, float v) { mpInternal->tapPan[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(-1.0f, 1.0f, v); }
   float MultitapDelay::getTapPitch(int i) { return mpInternal->tapPitch[CLAMP(0, kMaxTaps - 1, i)]; }
-  void MultitapDelay::setTapPitch(int i, float v) { mpInternal->tapPitch[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(-2.0f, 2.0f, v); }
+  void MultitapDelay::setTapPitch(int i, float v) { mpInternal->tapPitch[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(-24.0f, 24.0f, v); }
 
   // --- Filter accessors ---
 
@@ -230,7 +230,7 @@ namespace stolmine
     float a = (pan + 1.0f) * 0.25f * 3.14159f;
     mCachedPanL[i] = cosf(a);
     mCachedPanR[i] = sinf(a);
-    mpInternal->tapPitch[i] = CLAMP(-2.0f, 2.0f, mEditTapPitch.value());
+    mpInternal->tapPitch[i] = CLAMP(-24.0f, 24.0f, floorf(mEditTapPitch.value() + 0.5f));
   }
 
   void MultitapDelay::loadFilter(int i)
@@ -301,8 +301,8 @@ namespace stolmine
     int maxDelay = mMaxDelayInSamples;
     float sr = globalConfig.sampleRate;
 
-    // V/Oct master pitch
-    float voctPitch = CLAMP(-2.0f, 2.0f, mVOctPitch.value());
+    // V/Oct master pitch (ConstantOffset outputs 0.1 per octave in 10Vpp range)
+    float voctPitch = mVOctPitch.value() * 10.0f; // scale to octaves
 
     // Grain size: 0=5ms, 0.5=30ms, 1.0=100ms
     int grainDuration = (int)(sr * (0.005f + grainSizeParam * 0.095f));
@@ -355,7 +355,7 @@ namespace stolmine
     // Pre-compute per-tap grain speeds (avoid powf in inner loop)
     float tapSpeeds[kMaxTaps];
     for (int t = 0; t < tapCount; t++)
-      tapSpeeds[t] = powf(2.0f, voctPitch + s.tapPitch[t]);
+      tapSpeeds[t] = powf(2.0f, voctPitch + s.tapPitch[t] / 12.0f);
 
     // Feedback tone: -1 = dark (LP), 0 = flat, +1 = bright (HP)
     float tone = CLAMP(-1.0f, 1.0f, mFeedbackTone.value());
