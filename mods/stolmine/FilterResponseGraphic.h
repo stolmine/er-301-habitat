@@ -56,22 +56,37 @@ namespace stolmine
       float baseR = 0.35f * (float)maxR;
       float bumpRange = (float)maxR - baseR;
       float invMax = 1.0f / maxVal;
-      float logMin = 2.9957f;  // log(20)
-      float logMax = 9.9035f;  // log(20000)
-      float logRange = logMax - logMin;
 
       // Rotate offset: whole graphic spins with rotate parameter
       float rotateVal = mpFB->getRotate();
       float rotateOffset = 2.0f * M_PI * rotateVal / (float)bandCount;
 
-      // Band angles from current (slewed) frequency + rotation
+      // Find actual frequency range of active bands for full-circle mapping
+      float freqLog[16];
+      float logLo = 1e10f, logHi = -1e10f;
+      for (int i = 0; i < bandCount; i++)
+      {
+        float hz = mpFB->getBandCurrentFreq(i);
+        freqLog[i] = logf(CLAMP(20.0f, 20000.0f, hz));
+        if (freqLog[i] < logLo) logLo = freqLog[i];
+        if (freqLog[i] > logHi) logHi = freqLog[i];
+      }
+      // Expand range so wrap gap equals average inter-band spacing
+      float logRange = logHi - logLo;
+      if (logRange < 0.1f) logRange = 0.1f;
+      float avgSpacing = (bandCount > 1) ? logRange / (float)(bandCount - 1) : logRange;
+      // Add one extra spacing for the wrap-around gap
+      float totalRange = logRange + avgSpacing;
+      float logPad = avgSpacing * 0.5f;
+      logLo -= logPad;
+      logRange = totalRange;
+
+      // Band angles from current (slewed) frequency, filling full circle
       float bandAngles[16];
       float bandBump[16];
       for (int i = 0; i < bandCount; i++)
       {
-        float hz = mpFB->getBandCurrentFreq(i);
-        float logHz = logf(CLAMP(20.0f, 20000.0f, hz));
-        bandAngles[i] = 2.0f * M_PI * (logHz - logMin) / logRange - M_PI * 0.5f + rotateOffset;
+        bandAngles[i] = 2.0f * M_PI * (freqLog[i] - logLo) / logRange - M_PI * 0.5f + rotateOffset;
         bandBump[i] = values[i] * invMax * bumpRange;
       }
 
@@ -153,8 +168,7 @@ namespace stolmine
         int edgeY = cy + (int)(sa * (float)maxR);
         if (i == mSelectedBand)
         {
-          fb.line(WHITE, cx, cy, edgeX, edgeY);
-          // Dot on the curve at this band's angle
+          fb.line(GRAY3, cx, cy, edgeX, edgeY);
           int dotX = cx + (int)(ca * (baseR + bandBump[i]));
           int dotY = cy + (int)(sa * (baseR + bandBump[i]));
           fb.fillCircle(WHITE, dotX, dotY, 2);

@@ -171,6 +171,7 @@ namespace stolmine
   void Filterbank::loadBand(int i)
   {
     i = CLAMP(0, kMaxBands - 1, i);
+    mLastLoadedBand = i;
     mEditFreq.hardSet(mpInternal->freqHz[i]);
     mEditGain.hardSet(mpInternal->gain[i]);
     mEditType.hardSet((float)mpInternal->filterType[i]);
@@ -403,6 +404,9 @@ namespace stolmine
       s.freqHz[i] = s.selected[i];
       s.targetFreq[i] = s.selected[i] / sr;
     }
+
+    // Reload edit buffer so readouts stay in sync
+    loadBand(mLastLoadedBand);
   }
 
   void Filterbank::checkDistributionDirty()

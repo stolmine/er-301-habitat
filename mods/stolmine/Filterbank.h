@@ -104,6 +104,7 @@ namespace stolmine
     Internal *mpInternal;
 
     int mCachedBandCount = 8;
+    int mLastLoadedBand = 0;
 
     // Change detection for auto-redistribution
     int mLastScale = -1;

@@ -108,6 +108,12 @@ Refinements:
   - [ ] Plaits (PlaitsVoice.cpp, PlaitsVoice.h, Plaits.lua)
   - [ ] Gesture (GestureSeq.lua)
 
+### Excel/Ballot/Etcher Edit Buffer Sync
+  - [ ] Excel: reload edit buffer after xform operations (selected step readout goes stale on transform)
+  - [ ] Ballot: same issue -- reload after ratchet/transform changes
+  - [ ] Etcher: reload after segment transforms (rotate, reverse, random)
+  - Pattern: track mLastLoadedStep, call loadStep(mLastLoadedStep) after any bulk data change (same fix as Filterbank)
+
 ### Excel/Ballot Improvements
   - [ ] Xform gate control: enter-menu context view with GainBias faders (and CV input) for transform function and params
   - [ ] Pretty up Excel:
