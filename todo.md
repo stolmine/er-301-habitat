@@ -37,6 +37,8 @@ Refinements:
 - [x] Bipolar parameter correctness — fixed Peaks/DMC bipolar faders and defaults
 - [x] Warps algorithm range clamped to match Lua fader
 - [x] Modulation gain scaling — verified default gainMap [-10,10] is correct for both polarities
+- [ ] Shift-toggle sub-display audit: apply deferred toggle pattern (shift tap = toggle, shift hold + encoder = fine/coarse) to all shift-toggle controls across the package. Currently applied to MixControl and TimeControl. Review: Filterbank MixControl, TransformGateControl, any future shift-toggle controls.
+- [ ] Sub-display readout audit: ensure all expansion-only controls have matching readouts on parent control's shift sub-display (per feedback_expansion_subdisplay convention).
 
 ## Clouds Improvements
 

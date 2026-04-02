@@ -32,12 +32,14 @@ namespace stolmine
     float filterQ[kMaxTaps];      // 0-1
     int filterType[kMaxTaps];
     stmlib::Svf filters[kMaxTaps];
+    float cachedBandQ[kMaxTaps]; // for feedback compensation
 
     // Per-tap energy (for visualization)
     float tapEnergy[kMaxTaps];
 
-    // Feedback damping (one-pole lowpass on feedback path)
+    // Feedback damping (one-pole filters on feedback path)
     float fbFilterState = 0.0f;
+    float fbHpState = 0.0f;
 
     void Init()
     {
@@ -47,9 +49,9 @@ namespace stolmine
         tapTime[i] = (float)(i + 1) / (float)kMaxTaps;
         tapLevel[i] = 1.0f;
         tapPan[i] = 0.0f;
-        filterCutoff[i] = 16000.0f; // Hz
+        filterCutoff[i] = 10000.0f; // Hz
         filterQ[i] = 0.0f;
-        filterType[i] = TAP_FILTER_LP;
+        filterType[i] = TAP_FILTER_OFF;
         filters[i].Init();
         tapEnergy[i] = 0.0f;
       }
@@ -63,6 +65,7 @@ namespace stolmine
     addOutput(mOutR);
     addParameter(mMasterTime);
     addParameter(mFeedback);
+    addParameter(mFeedbackTone);
     addParameter(mMix);
     addParameter(mTapCount);
     addParameter(mSkew);
@@ -156,7 +159,7 @@ namespace stolmine
   // --- Filter accessors ---
 
   float MultitapDelay::getFilterCutoff(int i) { return mpInternal->filterCutoff[CLAMP(0, kMaxTaps - 1, i)]; }
-  void MultitapDelay::setFilterCutoff(int i, float v) { mpInternal->filterCutoff[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(20.0f, 20000.0f, v); }
+  void MultitapDelay::setFilterCutoff(int i, float v) { mpInternal->filterCutoff[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(20.0f, 10000.0f, v); }
   float MultitapDelay::getFilterQ(int i) { return mpInternal->filterQ[CLAMP(0, kMaxTaps - 1, i)]; }
   void MultitapDelay::setFilterQ(int i, float v) { mpInternal->filterQ[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(0.0f, 1.0f, v); }
   int MultitapDelay::getFilterType(int i) { return mpInternal->filterType[CLAMP(0, kMaxTaps - 1, i)]; }
@@ -198,7 +201,7 @@ namespace stolmine
   void MultitapDelay::storeFilter(int i)
   {
     i = CLAMP(0, kMaxTaps - 1, i);
-    mpInternal->filterCutoff[i] = CLAMP(20.0f, 20000.0f, mEditFilterCutoff.value());
+    mpInternal->filterCutoff[i] = CLAMP(20.0f, 10000.0f, mEditFilterCutoff.value());
     mpInternal->filterQ[i] = CLAMP(0.0f, 1.0f, mEditFilterQ.value());
     mpInternal->filterType[i] = CLAMP(0, TAP_FILTER_COUNT - 1, (int)(mEditFilterType.value() + 0.5f));
   }
@@ -282,19 +285,31 @@ namespace stolmine
     for (int t = 0; t < tapCount; t++)
     {
       // filterCutoff stored as Hz (20-20000), convert to normalized
-      float cutoffHz = CLAMP(20.0f, 20000.0f, s.filterCutoff[t]);
+      float cutoffHz = CLAMP(20.0f, 10000.0f, s.filterCutoff[t]);
       float freq = cutoffHz / sr;
       freq = CLAMP(0.0001f, 0.49f, freq);
-      float q = 1.0f + 69.0f * s.filterQ[t] * s.filterQ[t]; // capped at ~70% of FFB
+      float q = 1.0f + 29.0f * s.filterQ[t] * s.filterQ[t]; // 1 to 30, moderate resonance
       float bandQ = q * (0.5f + freq * 2.0f);
       if (bandQ < 0.5f) bandQ = 0.5f;
-      // LP mode: moderate Q floor
-      if (s.filterType[t] == TAP_FILTER_LP && bandQ < 5.0f)
-        bandQ = 5.0f;
+      s.cachedBandQ[t] = bandQ;
       s.filters[t].set_f_q<stmlib::FREQUENCY_FAST>(freq, bandQ);
     }
 
     float fbNorm = feedback / (1.0f + sqrtf((float)tapCount));
+
+    // Feedback tone: -1 = dark (LP), 0 = flat, +1 = bright (HP)
+    float tone = CLAMP(-1.0f, 1.0f, mFeedbackTone.value());
+    float fbFilterCoeff;
+    if (tone <= 0.0f)
+    {
+      // LP: coefficient from 0.05 (very dark, ~400Hz) to 1.0 (flat)
+      fbFilterCoeff = 0.05f + 0.95f * (1.0f + tone);
+    }
+    else
+    {
+      // HP: coefficient = tone controls how much low end is removed
+      fbFilterCoeff = 1.0f; // LP stays open, HP applied separately
+    }
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -328,6 +343,8 @@ namespace stolmine
         // Apply per-tap filter
         switch (s.filterType[t])
         {
+        case TAP_FILTER_OFF:
+          break; // bypass
         case TAP_FILTER_LP:
           tapOut = s.filters[t].Process<stmlib::FILTER_MODE_LOW_PASS>(tapOut);
           break;
@@ -348,23 +365,32 @@ namespace stolmine
           break;
         }
 
-        tapOut *= s.tapLevel[t];
+        float filteredOut = tapOut * s.tapLevel[t];
 
         // Energy follower for visualization
-        float e = tapOut * tapOut;
+        float e = filteredOut * filteredOut;
         s.tapEnergy[t] += (e - s.tapEnergy[t]) * 0.001f;
 
-        // Pan: pre-cached equal power
-        wetL += tapOut * mCachedPanL[t];
-        wetR += tapOut * mCachedPanR[t];
+        // Pan: pre-cached equal power (full resonant signal to output)
+        wetL += filteredOut * mCachedPanL[t];
+        wetR += filteredOut * mCachedPanR[t];
 
-        lastTapOut = tapOut;
+        // Feedback gets Q-compensated signal (resonance audible but doesn't accumulate)
+        lastTapOut = filteredOut / (1.0f + s.cachedBandQ[t] * 0.1f);
       }
 
-      // Feedback: one-pole damping + soft limiter + tap normalization
+      // Feedback: tone-controlled damping + soft limiter
       float fb = lastTapOut * fbNorm;
-      s.fbFilterState += (fb - s.fbFilterState) * 0.3f; // ~2kHz LP at 48kHz
-      buf[s.writeIndex] += tanhf(s.fbFilterState);
+      s.fbFilterState += (fb - s.fbFilterState) * fbFilterCoeff;
+      float fbOut = s.fbFilterState;
+      if (tone > 0.0f)
+      {
+        // HP: subtract lowpassed version (more tone = more bass removed)
+        float lpCoeff = 1.0f - tone * 0.95f; // 1.0 (flat) down to 0.05 (heavy HP)
+        s.fbHpState += (fb - s.fbHpState) * lpCoeff;
+        fbOut = fb - s.fbHpState * tone;
+      }
+      buf[s.writeIndex] += tanhf(fbOut);
 
       // Advance write index
       s.writeIndex = (s.writeIndex + 1) % maxDelay;

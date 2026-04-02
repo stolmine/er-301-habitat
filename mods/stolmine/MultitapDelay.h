@@ -12,7 +12,8 @@ namespace stolmine
 
   enum TapFilterType
   {
-    TAP_FILTER_LP = 0,
+    TAP_FILTER_OFF = 0,
+    TAP_FILTER_LP,
     TAP_FILTER_BP,
     TAP_FILTER_HP,
     TAP_FILTER_NOTCH,
@@ -34,6 +35,7 @@ namespace stolmine
 
     od::Parameter mMasterTime{"MasterTime", 0.5f};
     od::Parameter mFeedback{"Feedback", 0.3f};
+    od::Parameter mFeedbackTone{"FeedbackTone", 0.0f};
     od::Parameter mMix{"Mix", 0.5f};
     od::Parameter mTapCount{"TapCount", 4.0f};
     od::Parameter mSkew{"Skew", 0.0f};
@@ -47,7 +49,7 @@ namespace stolmine
     od::Parameter mEditTapPan{"EditTapPan", 0.0f};
 
     // Edit buffers for filter list
-    od::Parameter mEditFilterCutoff{"EditFilterCutoff", 16000.0f};
+    od::Parameter mEditFilterCutoff{"EditFilterCutoff", 10000.0f};
     od::Parameter mEditFilterQ{"EditFilterQ", 0.5f};
     od::Parameter mEditFilterType{"EditFilterType", 0.0f};
 #endif

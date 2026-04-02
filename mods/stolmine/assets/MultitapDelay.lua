@@ -4,6 +4,7 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local MixControl = require "stolmine.MixControl"
+local TimeControl = require "stolmine.TimeControl"
 local TapListControl = require "stolmine.TapListControl"
 local FilterListControl = require "stolmine.FilterListControl"
 local Encoder = require "Encoder"
@@ -24,6 +25,7 @@ end
 local mixMap = floatMap(0, 1)
 local timeMap = floatMap(0.01, 2.0)
 local feedbackMap = floatMap(0, 0.95)
+local feedbackToneMap = floatMap(-1, 1)
 local tapCountMap = intMap(1, 16)
 local skewMap = floatMap(-2, 2)
 local inputLevelMap = floatMap(0, 4)
@@ -80,6 +82,12 @@ function MultitapDelay:onLoadGraph(channelCount)
   tieParam("TapCount", tapCount)
   self:addMonoBranch("tapCount", tapCount, "In", tapCount, "Out")
 
+  -- Feedback tone
+  local feedbackTone = self:addObject("feedbackTone", app.ParameterAdapter())
+  feedbackTone:hardSet("Bias", 0.0)
+  tieParam("FeedbackTone", feedbackTone)
+  self:addMonoBranch("feedbackTone", feedbackTone, "In", feedbackTone, "Out")
+
   -- Skew
   local skew = self:addObject("skew", app.ParameterAdapter())
   skew:hardSet("Bias", 0.0)
@@ -117,7 +125,7 @@ function MultitapDelay:onLoadViews()
       width = app.SECTION_PLY,
       delay = self.objects.op
     },
-    masterTime = GainBias {
+    masterTime = TimeControl {
       button = "time",
       description = "Master Time",
       branch = self.branches.masterTime,
@@ -126,7 +134,9 @@ function MultitapDelay:onLoadViews()
       biasMap = timeMap,
       biasUnits = app.unitSecs,
       biasPrecision = 2,
-      initialBias = 0.5
+      initialBias = 0.5,
+      feedback = self.objects.feedback:getParameter("Bias"),
+      feedbackTone = self.objects.feedbackTone:getParameter("Bias")
     },
     feedback = GainBias {
       button = "fdbk",
@@ -138,6 +148,17 @@ function MultitapDelay:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.3
+    },
+    feedbackTone = GainBias {
+      button = "tone",
+      description = "Feedback Tone",
+      branch = self.branches.feedbackTone,
+      gainbias = self.objects.feedbackTone,
+      range = self.objects.feedbackTone,
+      biasMap = feedbackToneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
     },
     mix = MixControl {
       button = "mix",
@@ -212,6 +233,7 @@ function MultitapDelay:onLoadViews()
     expanded = { "taps", "masterTime", "feedback", "mix", "tapCount", "skew" },
     collapsed = {},
     taps = { "taps", "filters", "tapCount", "skew" },
+    masterTime = { "masterTime", "feedback", "feedbackTone" },
     mix = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
   }
 end

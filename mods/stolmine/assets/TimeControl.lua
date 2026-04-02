@@ -8,64 +8,57 @@ local center1 = app.GRID5_CENTER1
 local center4 = app.GRID5_CENTER4
 local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
-local col3 = app.BUTTON3_CENTER
 
-local MixControl = Class {}
-MixControl:include(GainBias)
+local TimeControl = Class {}
+TimeControl:include(GainBias)
 
-function MixControl:init(args)
+function TimeControl:init(args)
   GainBias.init(self, args)
 
   self.paramMode = false
-
-  -- Keep the GainBias subGraphic as the normal-mode graphic
   self.normalSubGraphic = self.subGraphic
 
-  -- Build a separate param-mode subGraphic
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  local function makeReadout(param, map, precision, x)
+  local function makeReadout(param, map, precision, units, x)
     local g = app.Readout(0, 0, ply, 10)
     g:setParameter(param)
-    g:setAttributes(app.unitNone, map)
+    g:setAttributes(units, map)
     g:setPrecision(precision)
     g:setCenter(x, center4)
     return g
   end
 
-  local levelMap = (function()
-    local m = app.LinearDialMap(0, 4)
-    m:setSteps(0.5, 0.1, 0.01, 0.001)
-    return m
-  end)()
-
-  local tanhMap = (function()
-    local m = app.LinearDialMap(0, 1)
+  local feedbackMap = (function()
+    local m = app.LinearDialMap(0, 0.95)
     m:setSteps(0.1, 0.01, 0.001, 0.001)
     return m
   end)()
 
-  self.inputReadout = makeReadout(args.inputLevel, levelMap, 2, col1)
-  self.outputReadout = makeReadout(args.outputLevel, levelMap, 2, col2)
-  self.tanhReadout = makeReadout(args.tanhAmt, tanhMap, 2, col3)
+  local toneMap = (function()
+    local m = app.LinearDialMap(-1, 1)
+    m:setSteps(0.1, 0.01, 0.001, 0.001)
+    return m
+  end)()
 
-  local desc = app.Label("Input / Output / Sat", 10)
+  self.feedbackReadout = makeReadout(args.feedback, feedbackMap, 2, app.unitNone, col1)
+  self.toneReadout = makeReadout(args.feedbackTone, toneMap, 2, app.unitNone, col2)
+
+  local desc = app.Label("Feedback / Tone", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
   desc:setCornerRadius(3, 0, 0, 3)
-  desc:setCenter(col2, center1 + 1)
+  desc:setCenter(col1 + ply * 0.5, center1 + 1)
 
-  self.paramSubGraphic:addChild(self.inputReadout)
-  self.paramSubGraphic:addChild(self.outputReadout)
-  self.paramSubGraphic:addChild(self.tanhReadout)
+  self.paramSubGraphic:addChild(self.feedbackReadout)
+  self.paramSubGraphic:addChild(self.toneReadout)
   self.paramSubGraphic:addChild(desc)
-  self.paramSubGraphic:addChild(app.SubButton("input", 1))
-  self.paramSubGraphic:addChild(app.SubButton("out", 2))
-  self.paramSubGraphic:addChild(app.SubButton("tanh", 3))
+  self.paramSubGraphic:addChild(app.SubButton("fdbk", 1))
+  self.paramSubGraphic:addChild(app.SubButton("tone", 2))
 end
 
-function MixControl:setParamMode(enabled)
+function TimeControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
   self.paramFocusedReadout = nil
@@ -80,12 +73,12 @@ function MixControl:setParamMode(enabled)
   self:addSubGraphic(self.subGraphic)
 end
 
-function MixControl:onCursorEnter(spot)
+function TimeControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
 end
 
-function MixControl:onCursorLeave(spot)
+function TimeControl:onCursorLeave(spot)
   if self.paramMode then
     self:removeSubGraphic(self.subGraphic)
     self.paramMode = false
@@ -95,13 +88,13 @@ function MixControl:onCursorLeave(spot)
   GainBias.onCursorLeave(self, spot)
 end
 
-function MixControl:shiftPressed()
+function TimeControl:shiftPressed()
   self.shiftHeld = true
   self.shiftUsed = false
   return true
 end
 
-function MixControl:shiftReleased()
+function TimeControl:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
     self:setParamMode(not self.paramMode)
   end
@@ -109,7 +102,7 @@ function MixControl:shiftReleased()
   return true
 end
 
-function MixControl:spotReleased(spot, shifted)
+function TimeControl:spotReleased(spot, shifted)
   if self.paramMode then
     self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
@@ -118,12 +111,11 @@ function MixControl:spotReleased(spot, shifted)
   return GainBias.spotReleased(self, spot, shifted)
 end
 
-function MixControl:subReleased(i, shifted)
+function TimeControl:subReleased(i, shifted)
   if shifted then return false end
   if self.paramMode then
-    local readout = i == 1 and self.inputReadout
-        or i == 2 and self.outputReadout
-        or i == 3 and self.tanhReadout or nil
+    local readout = i == 1 and self.feedbackReadout
+        or i == 2 and self.toneReadout or nil
     if readout then
       readout:save()
       self.paramFocusedReadout = readout
@@ -135,7 +127,7 @@ function MixControl:subReleased(i, shifted)
   return GainBias.subReleased(self, i, shifted)
 end
 
-function MixControl:encoder(change, shifted)
+function TimeControl:encoder(change, shifted)
   if shifted and self.shiftHeld then
     self.shiftUsed = true
   end
@@ -146,7 +138,7 @@ function MixControl:encoder(change, shifted)
   return GainBias.encoder(self, change, shifted)
 end
 
-function MixControl:zeroPressed()
+function TimeControl:zeroPressed()
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:zero()
     return true
@@ -154,7 +146,7 @@ function MixControl:zeroPressed()
   return GainBias.zeroPressed(self)
 end
 
-function MixControl:cancelReleased(shifted)
+function TimeControl:cancelReleased(shifted)
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:restore()
     return true
@@ -162,4 +154,4 @@ function MixControl:cancelReleased(shifted)
   return GainBias.cancelReleased(self, shifted)
 end
 
-return MixControl
+return TimeControl

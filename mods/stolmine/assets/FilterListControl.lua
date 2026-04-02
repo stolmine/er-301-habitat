@@ -13,7 +13,7 @@ local col2 = app.BUTTON2_CENTER
 local col3 = app.BUTTON3_CENTER
 
 local cutoffMap = (function()
-  local map = app.LinearDialMap(20, 16000)
+  local map = app.LinearDialMap(20, 10000)
   map:setSteps(1000, 100, 10, 1)
   return map
 end)()
@@ -25,13 +25,13 @@ local qMap = (function()
 end)()
 
 local typeMap = (function()
-  local m = app.LinearDialMap(0, 3)
+  local m = app.LinearDialMap(0, 4)
   m:setSteps(1, 1, 1, 1)
   m:setRounding(1)
   return m
 end)()
 
-local typeNames = { [0] = "lp", "bp", "hp", "ntch" }
+local typeNames = { [0] = "off", "lp", "bp", "hp", "ntch" }
 
 local FilterListControl = Class {
   type = "FilterListControl",
