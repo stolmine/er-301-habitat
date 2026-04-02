@@ -101,12 +101,12 @@ Refinements:
   - [x] Stratos defaults matched to Clouds reverb (hardSet in Lua)
   - [x] Excel overview: spinner, right-justified text, title bar consistency
 
-### Uncommitted changes needing hardware test
-  - [ ] Clouds (Clouds.lua)
-  - [ ] Marbles T (MarblesT.lua)
-  - [ ] Marbles X (MarblesX.lua)
-  - [ ] Plaits (PlaitsVoice.cpp, PlaitsVoice.h, Plaits.lua)
-  - [ ] Gesture (GestureSeq.lua)
+### Verified on hardware (2026-04-01)
+  - [x] Clouds quality labels (normal/hifi), OptionControl boolean fix
+  - [x] Marbles T/X: OptionControl boolean fix
+  - [x] Plaits: output mode cleanup (3 modes), OptionControl boolean fix
+  - [x] Gesture: sensitivity OptionControl boolean fix
+  - [x] Filterbank: full unit verified on hardware
 
 ### Excel/Ballot/Etcher Edit Buffer Sync
   - [ ] Excel: reload edit buffer after xform operations (selected step readout goes stale on transform)
@@ -228,75 +228,31 @@ Spreadsheet paradigm: N voices with per-voice params.
 
 ## Filterbank (FFB)
 
-Spreadsheet-style parallel fixed filter bank. Input on inlets (mono and stereo).
+Spreadsheet-style parallel fixed filter bank. Mono and stereo.
 
-### Architecture
+### Implemented
 
-- Parallel topology: each band processes input independently, outputs summed
-- 2-16 bands (integer fader, default 8). Fixed-size internal arrays (16 max) -- reducing band count hides bands, increasing reveals them with previous settings intact. Only scale snap overwrites frequencies.
-- Pre-filter drive on input, tanh saturation/limiting on output
-
-### Expanded view (6 plies, left to right)
-
-1. **Band list** (spreadsheet, 1 ply) -- 3-char freq label per row (120, 440, 1k2, 4k0, 12k)
-2. **Overview** (custom graphic, 1 ply) -- vertical orientation (freq Y-axis low-to-high, amplitude X-axis), spectral contour of composite filter response, active band highlight synced with list
-3. **Scale** (ModeSelector fader) -- uses Scala files and built-in scales from firmware (Scales.lua registry + user .scl files from /scales/). Re-snaps all band freqs on change, user can manually override individual freqs after
-4. **Rotate** (GainBias int fader) -- remaps band-to-frequency assignment by N positions. CV-modulatable for expressive patching
-5. **Macro Q** (GainBias fader) -- global Q applied to all bands
-6. **Mix** (GainBias fader) -- dry/wet balance
-
-### Band sub-display (3 buttons)
-
-- col1: freq (log-scaled readout, 20Hz-20kHz)
-- col2: gain (-24 to +24dB)
-- col3: filter type (peak/bpf/allpass, integer)
-
-### Overview sub-display + expansion
-
-- col1: band count (int fader, 2-16)
-- col2: skew (pushes band resolution toward low or high frequencies)
-- col3: slew (transition time when bands move on scale change or freq edit)
-
-### Mix sub-display + expansion
-
-- col1: input level (pre-filter drive)
-- col2: output level
-- col3: tanh amount (saturation + implicit limiting)
-
-### Scale-to-band distribution (Lua-side, reuses firmware scale infrastructure)
-
-- Source: er-301/mods/core/assets/Quantizer/Scales.lua (16 built-in scales as cents tables) + Scala.lua (.scl file loader for user scales in /scales/)
-- Algorithm:
-  1. Get cents table from scale
-  2. Generate all degree frequencies across 60Hz-16kHz: freq = baseFreq * 2^(cents/1200)
-  3. Greedy selection: pick N bands maximizing min log-distance
-  4. Skew warps distance metric (favors low or high freqs)
-  5. Sort ascending, apply rotate (circular shift)
-  6. Call op:setTargetFreq(i, hz) for each band (slew in C++ handles transition)
-
-### Filter core: stmlib::Svf with Rings-style Q scaling
-
-- Base Q from macro Q fader (0-1 maps to 0-500)
-- Q increases with frequency: 1.0 + normalizedFreq * q (from Rings resonator.cc)
-- Progressive Q decay across bands: q *= q_loss (brightness-dependent, woody character)
-- stmlib::Svf in BAND_PASS mode with FREQUENCY_FAST
-
-### Menu
-
-- Bands: init bands (reset all to defaults), randomize bands
-- Macro filter type: one option per type to set all bands (all peak, all bpf, all allpass)
-- Scale: load from file (opens browser for .scl files)
+- [x] Parallel SVF topology: 2-16 bands, input summed through all bands with sqrt(bandCount) normalization
+- [x] 3 filter types: peak (BP), LP (resonant, Q floor 5), resonator (BP, Q floor 20)
+- [x] Q scaling: 1-100 range with frequency-dependent boost and progressive decay across bands
+- [x] Scale-based frequency distribution: 12 built-in scales + up to 64 Scala files auto-loaded from /scales/
+- [x] Greedy selection algorithm: picks N bands maximizing min log-distance from scale degrees
+- [x] Rotate: circular shift of band-to-frequency assignment, CV-modulatable
+- [x] V/Oct offset: post-distribution pitch shift, 10x ConstantGain for 1V/Oct tracking
+- [x] Slew: per-frame exponential smoothing, 0-5 seconds direct
+- [x] Mix (default 0.5), input level, output level, tanh saturation
+- [x] Radial overview graphic (2 ply): Gaussian bump display with frequency-mapped angles, live energy modulation, rotation animation, 16-level Q-driven gradient fill
+- [x] Band list spreadsheet: per-band freq/gain/type editing with sub-display readouts
+- [x] MixControl: shift-toggle sub-display (input/output/tanh) via removeSubGraphic/addSubGraphic swap
+- [x] Edit buffer auto-reload after distributeFrequencies (readouts stay in sync)
+- [x] Custom scales: ModeSelector fader with builtins + .scl files, rescan from menu
+- [x] Serialization for all band data and global params
 
 ### Remaining
 
 - [ ] Band list expansion: gate controls for randomize freq, gain, type across all bands
-- [ ] Default mix/gain settings: unit should be transparent on load so user can immediately hear filtering. Review initial mix, input level, output level, band gain, macro Q defaults.
-- [ ] Overview graphic: line curve is lopsided -- certain bands get disproportionate visual weight. Investigate evaluateResponse weighting and Q scaling across bands. May need per-band normalization or log-amplitude display.
-- [x] BPF removed: 3 filter types remain (peak/LP/resonator)
 - [ ] Fine/coarse reversed on sub-display readouts (slew and likely others). Audit encoder sensitivity across all spreadsheet unit sub-display controls (Filterbank, Excel, Ballot, Etcher).
-- [x] Custom scales: .scl files from /scales/ auto-loaded at init, appear on scale fader alongside builtins (up to 64 custom, 128 degrees each)
-- [ ] Replace skew with V/Oct offset: shift all band frequencies by a CV-modulatable pitch offset instead of warping the distribution. More musically useful and patchable.
-- [ ] Radial graphic: shapes too uniform across scale/rotate changes. Investigate better data source for polygon radius (per-band Q, filter state energy, or raw spectral magnitude).
+- [ ] Default gain/Q review: unit could use better defaults for immediate audibility on load
 
 ## 4ms SMR
 
