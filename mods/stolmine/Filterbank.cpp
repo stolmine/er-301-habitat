@@ -599,10 +599,6 @@ namespace stolmine
         float bandOut;
         switch (s.filterType[b])
         {
-        case FTYPE_BPF:
-          bandOut = s.filters[b].Process<stmlib::FILTER_MODE_BAND_PASS_NORMALIZED>(x);
-          bandOut *= sqrtf(s.bandQValues[b]); // compensate 1/Q normalization
-          break;
         case FTYPE_LP:
           bandOut = s.filters[b].Process<stmlib::FILTER_MODE_LOW_PASS>(x);
           break;

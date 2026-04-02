@@ -262,24 +262,20 @@ function Filterbank:onShowMenu(objects, branches)
     description = "All peaking",
     task = function() self:setAllType(0) end
   }
-  controls.allBPF = Task {
-    description = "All BPF",
-    task = function() self:setAllType(1) end
-  }
   controls.allLP = Task {
     description = "All lowpass",
-    task = function() self:setAllType(2) end
+    task = function() self:setAllType(1) end
   }
   controls.allReson = Task {
     description = "All resonator",
-    task = function() self:setAllType(3) end
+    task = function() self:setAllType(2) end
   }
 
   return controls, {
     "bandHeader",
     "initBands", "randomize", "loadScala",
     "typeHeader",
-    "allPeak", "allBPF", "allLP", "allReson"
+    "allPeak", "allLP", "allReson"
   }
 end
 

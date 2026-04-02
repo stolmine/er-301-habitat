@@ -15,7 +15,6 @@ namespace stolmine
   enum FilterType
   {
     FTYPE_PEAK = 0,
-    FTYPE_BPF,
     FTYPE_LP,
     FTYPE_RESON,
     FTYPE_COUNT
