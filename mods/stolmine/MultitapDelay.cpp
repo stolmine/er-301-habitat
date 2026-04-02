@@ -6,6 +6,7 @@
 #include <hal/ops.h>
 #include <string.h>
 #include <math.h>
+#include <new>
 
 #ifndef TEST
 #define TEST
@@ -41,7 +42,7 @@ namespace stolmine
       for (int i = 0; i < kMaxTaps; i++)
       {
         tapTime[i] = (float)(i + 1) / (float)kMaxTaps;
-        tapLevel[i] = (i < 4) ? 1.0f : 0.0f; // first 4 taps active
+        tapLevel[i] = 1.0f;
         tapPan[i] = 0.0f;
         filterCutoff[i] = 0.8f; // ~16kHz
         filterQ[i] = 0.0f;
@@ -74,6 +75,13 @@ namespace stolmine
 
     mpInternal = new Internal();
     mpInternal->Init();
+    memset(mCachedDelaySamples, 0, sizeof(mCachedDelaySamples));
+    // Init pan cache to center
+    for (int i = 0; i < kMaxTaps; i++)
+    {
+      mCachedPanL[i] = 0.707f;
+      mCachedPanR[i] = 0.707f;
+    }
   }
 
   MultitapDelay::~MultitapDelay()
@@ -88,7 +96,9 @@ namespace stolmine
   {
     deallocate();
     int nbytes = Ns * sizeof(float);
-    mpInternal->buffer = od::BigHeap::allocateZeroed(nbytes);
+    mpInternal->buffer = new (std::nothrow) char[nbytes];
+    if (mpInternal->buffer)
+      memset(mpInternal->buffer, 0, nbytes);
     return mpInternal->buffer != 0;
   }
 
@@ -96,7 +106,7 @@ namespace stolmine
   {
     if (mpInternal->buffer)
     {
-      od::BigHeap::free(mpInternal->buffer);
+      delete[] mpInternal->buffer;
       mpInternal->buffer = 0;
     }
   }
@@ -165,7 +175,12 @@ namespace stolmine
     i = CLAMP(0, kMaxTaps - 1, i);
     mpInternal->tapTime[i] = CLAMP(0.0f, 1.0f, mEditTapTime.value());
     mpInternal->tapLevel[i] = CLAMP(0.0f, 1.0f, mEditTapLevel.value());
-    mpInternal->tapPan[i] = CLAMP(-1.0f, 1.0f, mEditTapPan.value());
+    float pan = CLAMP(-1.0f, 1.0f, mEditTapPan.value());
+    mpInternal->tapPan[i] = pan;
+    // Update cached pan
+    float a = (pan + 1.0f) * 0.25f * 3.14159f;
+    mCachedPanL[i] = cosf(a);
+    mCachedPanR[i] = sinf(a);
   }
 
   void MultitapDelay::loadFilter(int i)
@@ -224,7 +239,7 @@ namespace stolmine
     int tapCount = CLAMP(1, kMaxTaps, (int)(mTapCount.value() + 0.5f));
     mCachedTapCount = tapCount;
 
-    float masterTime = CLAMP(0.001f, 1.0f, mMasterTime.value());
+    float masterTime = CLAMP(0.001f, 2.0f, mMasterTime.value());
     float feedback = CLAMP(0.0f, 0.95f, mFeedback.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
@@ -235,7 +250,32 @@ namespace stolmine
     int maxDelay = mMaxDelayInSamples;
     float sr = globalConfig.sampleRate;
 
-    // Update filter coefficients
+    // Recompute tap distribution only when params change
+    bool distDirty = (tapCount != mLastTapCount || skew != mLastSkew || masterTime != mLastMasterTime);
+    if (distDirty)
+    {
+      float skewExp = powf(2.0f, skew);
+      for (int t = 0; t < tapCount; t++)
+      {
+        float pos = powf((float)(t + 1) / (float)tapCount, skewExp);
+        s.tapTime[t] = pos;
+        mCachedDelaySamples[t] = pos * masterTime * sr;
+      }
+      // Pre-cache pan coefficients (equal power)
+      for (int t = 0; t < tapCount; t++)
+      {
+        float pan = s.tapPan[t];
+        float a = (pan + 1.0f) * 0.25f * 3.14159f;
+        mCachedPanL[t] = cosf(a);
+        mCachedPanR[t] = sinf(a);
+      }
+      mLastTapCount = tapCount;
+      mLastSkew = skew;
+      mLastMasterTime = masterTime;
+      loadTap(mLastLoadedTap);
+    }
+
+    // Update filter coefficients (cheap, no transcendentals)
     for (int t = 0; t < tapCount; t++)
     {
       float cutoff = CLAMP(0.0001f, 0.49f, s.filterCutoff[t]);
@@ -250,6 +290,7 @@ namespace stolmine
       float x = in[i] * inputLevel;
 
       // Write input + feedback to buffer
+      if (s.writeIndex >= maxDelay) s.writeIndex = 0;
       buf[s.writeIndex] = x;
 
       float wetL = 0.0f;
@@ -261,12 +302,7 @@ namespace stolmine
         if (s.tapLevel[t] < 0.001f)
           continue;
 
-        // Compute delay in samples from tap time + skew
-        float tapPos = s.tapTime[t];
-        if (skew != 0.0f)
-          tapPos = powf(tapPos, powf(2.0f, skew));
-        float delaySec = tapPos * masterTime;
-        float delaySamples = delaySec * sr;
+        float delaySamples = mCachedDelaySamples[t];
         int delayInt = (int)delaySamples;
         float delayFrac = delaySamples - (float)delayInt;
 
@@ -307,12 +343,9 @@ namespace stolmine
         float e = tapOut * tapOut;
         s.tapEnergy[t] += (e - s.tapEnergy[t]) * 0.001f;
 
-        // Pan: equal power
-        float pan = s.tapPan[t]; // -1 to +1
-        float panL = cosf((pan + 1.0f) * 0.25f * 3.14159f);
-        float panR = sinf((pan + 1.0f) * 0.25f * 3.14159f);
-        wetL += tapOut * panL;
-        wetR += tapOut * panR;
+        // Pan: pre-cached equal power
+        wetL += tapOut * mCachedPanL[t];
+        wetR += tapOut * mCachedPanR[t];
 
         lastTapOut = tapOut;
       }

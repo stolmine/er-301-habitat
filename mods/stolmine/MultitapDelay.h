@@ -81,7 +81,6 @@ namespace stolmine
     float allocateTimeUpTo(float seconds);
     float maximumDelayTime();
 
-#ifndef SWIGLUA
   private:
     struct Internal;
     Internal *mpInternal;
@@ -91,6 +90,15 @@ namespace stolmine
     int mLastLoadedFilter = 0;
     int mMaxDelayInSamples = 0;
 
+    // Dirty check for tap distribution
+    int mLastTapCount = -1;
+    float mLastSkew = -999.0f;
+    float mLastMasterTime = -1.0f;
+    float mCachedDelaySamples[kMaxTaps];
+    float mCachedPanL[kMaxTaps];
+    float mCachedPanR[kMaxTaps];
+
+#ifndef SWIGLUA
     bool allocate(int samples);
     void deallocate();
 #endif

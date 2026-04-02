@@ -3,6 +3,7 @@ local libstolmine = require "stolmine.libstolmine"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local TapListControl = require "stolmine.TapListControl"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max)
@@ -22,6 +23,7 @@ local mixMap = floatMap(0, 1)
 local timeMap = floatMap(0.01, 2.0)
 local feedbackMap = floatMap(0, 0.95)
 local tapCountMap = intMap(1, 16)
+local skewMap = floatMap(-2, 2)
 
 local MultitapDelay = Class {}
 MultitapDelay:include(Unit)
@@ -72,10 +74,21 @@ function MultitapDelay:onLoadGraph(channelCount)
   tapCount:hardSet("Bias", 4)
   tieParam("TapCount", tapCount)
   self:addMonoBranch("tapCount", tapCount, "In", tapCount, "Out")
+
+  -- Skew
+  local skew = self:addObject("skew", app.ParameterAdapter())
+  skew:hardSet("Bias", 0.0)
+  tieParam("Skew", skew)
+  self:addMonoBranch("skew", skew, "In", skew, "Out")
 end
 
 function MultitapDelay:onLoadViews()
   return {
+    taps = TapListControl {
+      description = "Taps",
+      width = app.SECTION_PLY,
+      delay = self.objects.op
+    },
     masterTime = GainBias {
       button = "time",
       description = "Master Time",
@@ -119,9 +132,20 @@ function MultitapDelay:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 4
+    },
+    skew = GainBias {
+      button = "skew",
+      description = "Skew",
+      branch = self.branches.skew,
+      gainbias = self.objects.skew,
+      range = self.objects.skew,
+      biasMap = skewMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
     }
   }, {
-    expanded = { "masterTime", "feedback", "mix", "tapCount" },
+    expanded = { "taps", "masterTime", "feedback", "mix", "tapCount", "skew" },
     collapsed = {}
   }
 end
