@@ -167,6 +167,7 @@ end
 
 function FilterListControl:subReleased(i, shifted)
   if shifted then return false end
+  self:updateTypeLabel()
   local readout = i == 1 and self.cutoffReadout
       or i == 2 and self.qReadout
       or i == 3 and self.typeReadout or nil
@@ -201,12 +202,11 @@ function FilterListControl:encoder(change, shifted)
   elseif self.focusedReadout then
     self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Coarse)
     self.delay:storeFilter(self.currentTap)
-    if self.focusedReadout == self.typeReadout then
-      self:updateTypeLabel()
-    end
+    self:updateTypeLabel()
     return true
   else
     self:scrollTap(change)
+    self:updateTypeLabel()
     return true
   end
 end
