@@ -23,6 +23,7 @@
 #include "Filterbank.h"
 #include "BandListGraphic.h"
 #include "FilterResponseGraphic.h"
+#include "MultitapDelay.h"
 #define SWIGLUA
 %}
 
@@ -46,3 +47,4 @@
 %include "Filterbank.h"
 %include "BandListGraphic.h"
 %include "FilterResponseGraphic.h"
+%include "MultitapDelay.h"

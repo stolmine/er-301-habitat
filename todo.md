@@ -287,37 +287,33 @@ Spreadsheet-style parallel fixed filter bank. Mono and stereo.
 
 ## Multitap Delay
 
-Rainmaker-inspired multitap delay. 16 taps with per-tap SVF filtering, based on builtin granular delay (gives pitch shifting for free). Two independent spreadsheets (taps + filters) keep UI clean within 3-params-per-row constraint.
+Rainmaker-inspired multitap delay. 16 taps, 2s max (~384KB shared buffer). Per-tap SVF filtering (FFB Q parametrization), pitch shifting via granular delay. Raindrop particle visualization.
 
-### Tap distribution
+### Architecture
+- Single shared circular buffer, all taps read at different positions
+- Per-tap SVF: LP/BP/HP/notch, FFB's Q scaling (baseQ, freq boost, q_loss)
+- Granular delay engine (MonoGrainDelay) for pitch shifting
+- Tap distribution: time * pow((i+1)/N, skew_exp), stack groups
 
-Taps distributed across master time window without requiring clock:
-- Base: `tap_time[i] = master_time * pow((i+1) / N, skew_exp)`
-- Skew=0: even spacing. Skew>0: bunch early. Skew<0: bunch late.
-- Stack groups coincident taps (1/2/4/8/16 per position). Stacked taps share timing but keep individual level/pan/filter.
+### UI layout (6 plies)
+1. V/Oct pitch (GainBias, 10x ConstantGain)
+2. Tap list (TapListControl, enter expands to filter list + tapCount/skew)
+3. Overview (raindrop particle system, sub-display: tap count, skew, stack)
+4. Master time (GainBias, sub-display: feedback, feedback tone)
+5. Xform gate (TransformGateControl, gate trigger for rot/rnd/rev/etc)
+6. Mix (MixControl, shift sub-display: input/output/tanh)
 
-### UI layout (7 plies)
-
-1. V/Oct pitch
-2. Tap list (time/level/pan per tap)
-3. Filter list (cutoff/Q/type per tap, reuses FFB SVF code)
-4. Overview/viz (submenu: tap count, skew, stack)
-5. Master time (submenu: time max 2s, feedback, feedback tone tilt EQ)
-6. Xform gate (submenu: target 1, target 2, overloaded factor)
-7. Mix (submenu: input level, output level, tanh saturation)
-
-### Remaining
-
-- [ ] Tap list: time (0-1 within window), level, pan
-- [ ] Filter list: cutoff, Q, type (LP/HP/BP/notch) -- reuse FFB SVF code
-- [ ] Tap distribution: skew + stack parameters
-- [ ] Master time with feedback and feedback tone (tilt EQ on feedback path)
-- [ ] Xform gate with dual targets and overloaded factor
-- [ ] Overview viz: tap positions on timeline (gradient, particles, or bright spots)
-- [ ] V/Oct pitch shifting via builtin granular delay
+### Build order
+- [ ] C++ skeleton: MultitapDelay class, Internal struct, buffer alloc, basic process loop
+- [ ] Tap list: TapListControl + TapListGraphic
+- [ ] Lua wiring: onLoadGraph with master time, mix, tap count adapters
+- [ ] Per-tap filtering: SVF with FFB Q parametrization
+- [ ] Pitch shift: integrate grain engine
+- [ ] Filter list: FilterListControl in tap expansion view
+- [ ] Xform gate: adapt from Excel's TransformGateControl
+- [ ] Raindrop overview graphic (particle system, energy-driven brightness)
+- [ ] Serialization
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
-- [ ] Budget: 16 taps ~16% CPU, ~6MB DDR for 16x2s delay lines
-- [ ] Reference: stmlib delay_line.h, stmlib filter.h, FrozenWasteland (GPLv3, algorithm ref only)
 
 ## Fade Mixer
 
