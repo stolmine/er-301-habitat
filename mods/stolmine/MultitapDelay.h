@@ -47,7 +47,7 @@ namespace stolmine
     od::Parameter mEditTapPan{"EditTapPan", 0.0f};
 
     // Edit buffers for filter list
-    od::Parameter mEditFilterCutoff{"EditFilterCutoff", 0.5f};
+    od::Parameter mEditFilterCutoff{"EditFilterCutoff", 16000.0f};
     od::Parameter mEditFilterQ{"EditFilterQ", 0.5f};
     od::Parameter mEditFilterType{"EditFilterType", 0.0f};
 #endif

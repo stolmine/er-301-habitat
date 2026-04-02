@@ -36,6 +36,9 @@ namespace stolmine
     // Per-tap energy (for visualization)
     float tapEnergy[kMaxTaps];
 
+    // Feedback damping (one-pole lowpass on feedback path)
+    float fbFilterState = 0.0f;
+
     void Init()
     {
       writeIndex = 0;
@@ -44,7 +47,7 @@ namespace stolmine
         tapTime[i] = (float)(i + 1) / (float)kMaxTaps;
         tapLevel[i] = 1.0f;
         tapPan[i] = 0.0f;
-        filterCutoff[i] = 0.8f; // ~16kHz
+        filterCutoff[i] = 16000.0f; // Hz
         filterQ[i] = 0.0f;
         filterType[i] = TAP_FILTER_LP;
         filters[i].Init();
@@ -153,7 +156,7 @@ namespace stolmine
   // --- Filter accessors ---
 
   float MultitapDelay::getFilterCutoff(int i) { return mpInternal->filterCutoff[CLAMP(0, kMaxTaps - 1, i)]; }
-  void MultitapDelay::setFilterCutoff(int i, float v) { mpInternal->filterCutoff[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(0.0f, 1.0f, v); }
+  void MultitapDelay::setFilterCutoff(int i, float v) { mpInternal->filterCutoff[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(20.0f, 20000.0f, v); }
   float MultitapDelay::getFilterQ(int i) { return mpInternal->filterQ[CLAMP(0, kMaxTaps - 1, i)]; }
   void MultitapDelay::setFilterQ(int i, float v) { mpInternal->filterQ[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(0.0f, 1.0f, v); }
   int MultitapDelay::getFilterType(int i) { return mpInternal->filterType[CLAMP(0, kMaxTaps - 1, i)]; }
@@ -195,7 +198,7 @@ namespace stolmine
   void MultitapDelay::storeFilter(int i)
   {
     i = CLAMP(0, kMaxTaps - 1, i);
-    mpInternal->filterCutoff[i] = CLAMP(0.0f, 1.0f, mEditFilterCutoff.value());
+    mpInternal->filterCutoff[i] = CLAMP(20.0f, 20000.0f, mEditFilterCutoff.value());
     mpInternal->filterQ[i] = CLAMP(0.0f, 1.0f, mEditFilterQ.value());
     mpInternal->filterType[i] = CLAMP(0, TAP_FILTER_COUNT - 1, (int)(mEditFilterType.value() + 0.5f));
   }
@@ -275,15 +278,23 @@ namespace stolmine
       loadTap(mLastLoadedTap);
     }
 
-    // Update filter coefficients (cheap, no transcendentals)
+    // Update filter coefficients -- FFB parametrization
     for (int t = 0; t < tapCount; t++)
     {
-      float cutoff = CLAMP(0.0001f, 0.49f, s.filterCutoff[t]);
-      float q = 1.0f + 99.0f * s.filterQ[t] * s.filterQ[t];
-      float bandQ = q * (0.5f + cutoff * 2.0f);
+      // filterCutoff stored as Hz (20-20000), convert to normalized
+      float cutoffHz = CLAMP(20.0f, 20000.0f, s.filterCutoff[t]);
+      float freq = cutoffHz / sr;
+      freq = CLAMP(0.0001f, 0.49f, freq);
+      float q = 1.0f + 69.0f * s.filterQ[t] * s.filterQ[t]; // capped at ~70% of FFB
+      float bandQ = q * (0.5f + freq * 2.0f);
       if (bandQ < 0.5f) bandQ = 0.5f;
-      s.filters[t].set_f_q<stmlib::FREQUENCY_FAST>(cutoff, bandQ);
+      // LP mode: moderate Q floor
+      if (s.filterType[t] == TAP_FILTER_LP && bandQ < 5.0f)
+        bandQ = 5.0f;
+      s.filters[t].set_f_q<stmlib::FREQUENCY_FAST>(freq, bandQ);
     }
+
+    float fbNorm = feedback / (1.0f + sqrtf((float)tapCount));
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -350,8 +361,10 @@ namespace stolmine
         lastTapOut = tapOut;
       }
 
-      // Feedback from last active tap
-      buf[s.writeIndex] += lastTapOut * feedback;
+      // Feedback: one-pole damping + soft limiter + tap normalization
+      float fb = lastTapOut * fbNorm;
+      s.fbFilterState += (fb - s.fbFilterState) * 0.3f; // ~2kHz LP at 48kHz
+      buf[s.writeIndex] += tanhf(s.fbFilterState);
 
       // Advance write index
       s.writeIndex = (s.writeIndex + 1) % maxDelay;
@@ -360,7 +373,7 @@ namespace stolmine
       float mixedL = x * (1.0f - mix) + wetL * mix;
       float mixedR = x * (1.0f - mix) + wetR * mix;
 
-      // Saturation
+      // User saturation
       if (tanhAmt > 0.001f)
       {
         float drive = 1.0f + tanhAmt * 3.0f;
@@ -368,8 +381,9 @@ namespace stolmine
         mixedR = mixedR * (1.0f - tanhAmt) + tanhf(mixedR * drive) * tanhAmt;
       }
 
-      out[i] = mixedL * outputLevel;
-      outR[i] = mixedR * outputLevel;
+      // Output limiter (invisible, always on)
+      out[i] = tanhf(mixedL * outputLevel);
+      outR[i] = tanhf(mixedR * outputLevel);
     }
   }
 

@@ -3,7 +3,9 @@ local libstolmine = require "stolmine.libstolmine"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local MixControl = require "stolmine.MixControl"
 local TapListControl = require "stolmine.TapListControl"
+local FilterListControl = require "stolmine.FilterListControl"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max)
@@ -24,6 +26,9 @@ local timeMap = floatMap(0.01, 2.0)
 local feedbackMap = floatMap(0, 0.95)
 local tapCountMap = intMap(1, 16)
 local skewMap = floatMap(-2, 2)
+local inputLevelMap = floatMap(0, 4)
+local outputLevelMap = floatMap(0, 4)
+local tanhMap = floatMap(0, 1)
 
 local MultitapDelay = Class {}
 MultitapDelay:include(Unit)
@@ -80,12 +85,35 @@ function MultitapDelay:onLoadGraph(channelCount)
   skew:hardSet("Bias", 0.0)
   tieParam("Skew", skew)
   self:addMonoBranch("skew", skew, "In", skew, "Out")
+
+  -- Input level
+  local inputLevel = self:addObject("inputLevel", app.ParameterAdapter())
+  inputLevel:hardSet("Bias", 1.0)
+  tieParam("InputLevel", inputLevel)
+  self:addMonoBranch("inputLevel", inputLevel, "In", inputLevel, "Out")
+
+  -- Output level
+  local outputLevel = self:addObject("outputLevel", app.ParameterAdapter())
+  outputLevel:hardSet("Bias", 1.0)
+  tieParam("OutputLevel", outputLevel)
+  self:addMonoBranch("outputLevel", outputLevel, "In", outputLevel, "Out")
+
+  -- Tanh
+  local tanhAmt = self:addObject("tanhAmt", app.ParameterAdapter())
+  tanhAmt:hardSet("Bias", 0.0)
+  tieParam("TanhAmt", tanhAmt)
+  self:addMonoBranch("tanhAmt", tanhAmt, "In", tanhAmt, "Out")
 end
 
 function MultitapDelay:onLoadViews()
   return {
     taps = TapListControl {
       description = "Taps",
+      width = app.SECTION_PLY,
+      delay = self.objects.op
+    },
+    filters = FilterListControl {
+      description = "Filters",
       width = app.SECTION_PLY,
       delay = self.objects.op
     },
@@ -111,7 +139,7 @@ function MultitapDelay:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.3
     },
-    mix = GainBias {
+    mix = MixControl {
       button = "mix",
       description = "Mix",
       branch = self.branches.mix,
@@ -120,7 +148,43 @@ function MultitapDelay:onLoadViews()
       biasMap = mixMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.5
+      initialBias = 0.5,
+      inputLevel = self.objects.inputLevel:getParameter("Bias"),
+      outputLevel = self.objects.outputLevel:getParameter("Bias"),
+      tanhAmt = self.objects.tanhAmt:getParameter("Bias")
+    },
+    inputLevel = GainBias {
+      button = "input",
+      description = "Input Level",
+      branch = self.branches.inputLevel,
+      gainbias = self.objects.inputLevel,
+      range = self.objects.inputLevel,
+      biasMap = inputLevelMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 1.0
+    },
+    outputLevel = GainBias {
+      button = "out",
+      description = "Output Level",
+      branch = self.branches.outputLevel,
+      gainbias = self.objects.outputLevel,
+      range = self.objects.outputLevel,
+      biasMap = outputLevelMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 1.0
+    },
+    tanhAmt = GainBias {
+      button = "tanh",
+      description = "Saturation",
+      branch = self.branches.tanhAmt,
+      gainbias = self.objects.tanhAmt,
+      range = self.objects.tanhAmt,
+      biasMap = tanhMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
     },
     tapCount = GainBias {
       button = "taps",
@@ -146,7 +210,9 @@ function MultitapDelay:onLoadViews()
     }
   }, {
     expanded = { "taps", "masterTime", "feedback", "mix", "tapCount", "skew" },
-    collapsed = {}
+    collapsed = {},
+    taps = { "taps", "filters", "tapCount", "skew" },
+    mix = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
   }
 end
 
