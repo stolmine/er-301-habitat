@@ -293,6 +293,7 @@ Spreadsheet-style parallel fixed filter bank. Input on inlets (mono and stereo).
 - [ ] Default mix/gain settings: unit should be transparent on load so user can immediately hear filtering. Review initial mix, input level, output level, band gain, macro Q defaults.
 - [ ] Overview graphic: line curve is lopsided -- certain bands get disproportionate visual weight. Investigate evaluateResponse weighting and Q scaling across bands. May need per-band normalization or log-amplitude display.
 - [x] BPF removed: 3 filter types remain (peak/LP/resonator)
+- [ ] Fine/coarse reversed on sub-display readouts (slew and likely others). Audit encoder sensitivity across all spreadsheet unit sub-display controls (Filterbank, Excel, Ballot, Etcher).
 - [x] Custom scales: .scl files from /scales/ auto-loaded at init, appear on scale fader alongside builtins (up to 64 custom, 128 degrees each)
 - [ ] Replace skew with V/Oct offset: shift all band frequencies by a CV-modulatable pitch offset instead of warping the distribution. More musically useful and patchable.
 - [ ] Radial graphic: shapes too uniform across scale/rotate changes. Investigate better data source for polygon radius (per-band Q, filter state energy, or raw spectral magnitude).
