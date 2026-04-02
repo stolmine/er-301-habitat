@@ -311,16 +311,18 @@ Rainmaker-inspired multitap delay. 16 taps, 2s max (~384KB shared buffer). Per-t
 - [x] Tap list: TapListControl + TapListGraphic (level/pan/filterType sub-display)
 - [x] Lua wiring: onLoadGraph with master time, feedback, mix, tap count, skew
 - [x] Auto-distribution: tap times from pow((i+1)/N, 2^skew), dirty-check optimization
-- [x] Per-tap filtering: SVF with FFB Q parametrization (LP/BP/HP/notch)
+- [x] Per-tap filtering: SVF with Q 1-30, Q-compensated feedback path, 5 types (off/lp/bp/hp/notch)
+- [x] Filter list: FilterListControl in tap expansion view (cutoff Hz/Q/type)
+- [x] MixControl with shift sub-display (input/output/tanh)
+- [x] TimeControl with shift sub-display (feedback/tone)
+- [x] Feedback stabilization: one-pole tone damping, tap-count normalization, tanhf limiter on feedback + output
+- [x] Feedback tone: bipolar (-1 dark to +1 bright) variable one-pole on feedback path
 - [x] Serialization for all tap and filter data
-- [ ] Filter list: FilterListControl in tap expansion view
 - [ ] Pitch shift: integrate grain engine
+- [ ] V/Oct pitch (10x ConstantGain)
 - [ ] Xform gate: adapt from Excel's TransformGateControl
 - [ ] Raindrop overview graphic (particle system, energy-driven brightness)
-- [ ] V/Oct pitch (10x ConstantGain)
-- [ ] Master time sub-display: feedback tone (tilt EQ on feedback path)
 - [ ] Stack parameter (groups coincident taps)
-- [ ] MixControl with shift sub-display (input/output/tanh)
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
 
 ## Fade Mixer
