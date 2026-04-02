@@ -9,6 +9,8 @@ namespace stolmine
 {
 
   static const int kMaxTaps = 16;
+  static const int kGrainsPerTap = 3;
+  static const int kSineLUTSize = 256;
 
   enum TapFilterType
   {
@@ -40,6 +42,7 @@ namespace stolmine
     od::Parameter mTapCount{"TapCount", 4.0f};
     od::Parameter mVOctPitch{"VOctPitch", 0.0f};
     od::Parameter mSkew{"Skew", 0.0f};
+    od::Parameter mGrainSize{"GrainSize", 0.5f};
     od::Parameter mInputLevel{"InputLevel", 1.0f};
     od::Parameter mOutputLevel{"OutputLevel", 1.0f};
     od::Parameter mTanhAmt{"TanhAmt", 0.0f};
@@ -48,6 +51,7 @@ namespace stolmine
     od::Parameter mEditTapTime{"EditTapTime", 0.5f};
     od::Parameter mEditTapLevel{"EditTapLevel", 1.0f};
     od::Parameter mEditTapPan{"EditTapPan", 0.0f};
+    od::Parameter mEditTapPitch{"EditTapPitch", 0.0f};
 
     // Edit buffers for filter list
     od::Parameter mEditFilterCutoff{"EditFilterCutoff", 10000.0f};
@@ -62,6 +66,9 @@ namespace stolmine
     void setTapLevel(int i, float v);
     float getTapPan(int i);
     void setTapPan(int i, float v);
+
+    float getTapPitch(int i);
+    void setTapPitch(int i, float v);
 
     // SWIG-visible: filter accessors
     float getFilterCutoff(int i);

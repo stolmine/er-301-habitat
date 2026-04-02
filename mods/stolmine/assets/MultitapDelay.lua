@@ -29,6 +29,7 @@ local feedbackToneMap = floatMap(-1, 1)
 local tapCountMap = intMap(1, 16)
 local vOctMap = floatMap(-2, 2)
 local skewMap = floatMap(-2, 2)
+local grainSizeMap = floatMap(0, 1)
 local inputLevelMap = floatMap(0, 4)
 local outputLevelMap = floatMap(0, 4)
 local tanhMap = floatMap(0, 1)
@@ -97,6 +98,12 @@ function MultitapDelay:onLoadGraph(channelCount)
   connect(vOctGain, "Out", vOctPitch, "In")
   tieParam("VOctPitch", vOctPitch)
   self:addMonoBranch("vOctPitch", vOctGain, "In", vOctPitch, "Out")
+
+  -- Grain size
+  local grainSize = self:addObject("grainSize", app.ParameterAdapter())
+  grainSize:hardSet("Bias", 0.5)
+  tieParam("GrainSize", grainSize)
+  self:addMonoBranch("grainSize", grainSize, "In", grainSize, "Out")
 
   -- Skew
   local skew = self:addObject("skew", app.ParameterAdapter())
@@ -249,10 +256,22 @@ function MultitapDelay:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
+    },
+    grainSize = GainBias {
+      button = "grain",
+      description = "Grain Size",
+      branch = self.branches.grainSize,
+      gainbias = self.objects.grainSize,
+      range = self.objects.grainSize,
+      biasMap = grainSizeMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.5
     }
   }, {
     expanded = { "vOctPitch", "taps", "masterTime", "feedback", "mix", "tapCount", "skew" },
     collapsed = {},
+    vOctPitch = { "vOctPitch", "grainSize" },
     taps = { "taps", "filters", "tapCount", "skew" },
     masterTime = { "masterTime", "feedback", "feedbackTone" },
     mix = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
@@ -268,6 +287,7 @@ function MultitapDelay:serialize()
       time = op:getTapTime(i),
       level = op:getTapLevel(i),
       pan = op:getTapPan(i),
+      pitch = op:getTapPitch(i),
       filterCutoff = op:getFilterCutoff(i),
       filterQ = op:getFilterQ(i),
       filterType = op:getFilterType(i)
@@ -287,7 +307,8 @@ function MultitapDelay:deserialize(t)
         op:setTapTime(i, tap.time or 0.5)
         op:setTapLevel(i, tap.level or 0.0)
         op:setTapPan(i, tap.pan or 0.0)
-        op:setFilterCutoff(i, tap.filterCutoff or 0.8)
+        op:setTapPitch(i, tap.pitch or 0.0)
+        op:setFilterCutoff(i, tap.filterCutoff or 10000.0)
         op:setFilterQ(i, tap.filterQ or 0.0)
         op:setFilterType(i, tap.filterType or 0)
       end

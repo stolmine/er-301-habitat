@@ -34,12 +34,39 @@ namespace stolmine
     stmlib::Svf filters[kMaxTaps];
     float cachedBandQ[kMaxTaps]; // for feedback compensation
 
+    // Per-tap pitch (octaves, -2 to +2)
+    float tapPitch[kMaxTaps];
+
     // Per-tap energy (for visualization)
     float tapEnergy[kMaxTaps];
+
+    // Granular pitch shift state
+    struct TapGrain
+    {
+      float phase;    // 0-1 through envelope
+      float readPos;  // fractional sample position in buffer
+      float phaseDelta;
+      float speed;
+      bool active;
+    };
+    TapGrain grains[kMaxTaps][kGrainsPerTap];
+    int grainSpawnCounter[kMaxTaps];
+
+    // Sine LUT for grain envelope (avoid sinf in inner loop)
+    float sineLUT[kSineLUTSize];
 
     // Feedback damping (one-pole filters on feedback path)
     float fbFilterState = 0.0f;
     float fbHpState = 0.0f;
+
+    float lookupSine(float phase)
+    {
+      float idx = phase * (float)(kSineLUTSize - 1);
+      int i0 = (int)idx;
+      if (i0 >= kSineLUTSize - 1) return sineLUT[kSineLUTSize - 1];
+      float frac = idx - (float)i0;
+      return sineLUT[i0] + (sineLUT[i0 + 1] - sineLUT[i0]) * frac;
+    }
 
     void Init()
     {
@@ -49,11 +76,21 @@ namespace stolmine
         tapTime[i] = (float)(i + 1) / (float)kMaxTaps;
         tapLevel[i] = 1.0f;
         tapPan[i] = 0.0f;
+        tapPitch[i] = 0.0f;
         filterCutoff[i] = 10000.0f; // Hz
         filterQ[i] = 0.0f;
         filterType[i] = TAP_FILTER_OFF;
         filters[i].Init();
         tapEnergy[i] = 0.0f;
+        grainSpawnCounter[i] = 0;
+        for (int g = 0; g < kGrainsPerTap; g++)
+          grains[i][g].active = false;
+      }
+      // Pre-compute sine LUT (half sine = grain envelope)
+      for (int i = 0; i < kSineLUTSize; i++)
+      {
+        float t = (float)i / (float)(kSineLUTSize - 1);
+        sineLUT[i] = sinf(t * 3.14159265f);
       }
     }
   };
@@ -70,6 +107,8 @@ namespace stolmine
     addParameter(mTapCount);
     addParameter(mVOctPitch);
     addParameter(mSkew);
+    addParameter(mGrainSize);
+    addParameter(mEditTapPitch);
     addParameter(mInputLevel);
     addParameter(mOutputLevel);
     addParameter(mTanhAmt);
@@ -156,6 +195,8 @@ namespace stolmine
   void MultitapDelay::setTapLevel(int i, float v) { mpInternal->tapLevel[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(0.0f, 1.0f, v); }
   float MultitapDelay::getTapPan(int i) { return mpInternal->tapPan[CLAMP(0, kMaxTaps - 1, i)]; }
   void MultitapDelay::setTapPan(int i, float v) { mpInternal->tapPan[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(-1.0f, 1.0f, v); }
+  float MultitapDelay::getTapPitch(int i) { return mpInternal->tapPitch[CLAMP(0, kMaxTaps - 1, i)]; }
+  void MultitapDelay::setTapPitch(int i, float v) { mpInternal->tapPitch[CLAMP(0, kMaxTaps - 1, i)] = CLAMP(-2.0f, 2.0f, v); }
 
   // --- Filter accessors ---
 
@@ -175,6 +216,7 @@ namespace stolmine
     mEditTapTime.hardSet(mpInternal->tapTime[i]);
     mEditTapLevel.hardSet(mpInternal->tapLevel[i]);
     mEditTapPan.hardSet(mpInternal->tapPan[i]);
+    mEditTapPitch.hardSet(mpInternal->tapPitch[i]);
   }
 
   void MultitapDelay::storeTap(int i)
@@ -188,6 +230,7 @@ namespace stolmine
     float a = (pan + 1.0f) * 0.25f * 3.14159f;
     mCachedPanL[i] = cosf(a);
     mCachedPanR[i] = sinf(a);
+    mpInternal->tapPitch[i] = CLAMP(-2.0f, 2.0f, mEditTapPitch.value());
   }
 
   void MultitapDelay::loadFilter(int i)
@@ -253,13 +296,20 @@ namespace stolmine
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
     float tanhAmt = CLAMP(0.0f, 1.0f, mTanhAmt.value());
     float skew = mSkew.value();
+    float grainSizeParam = CLAMP(0.0f, 1.0f, mGrainSize.value());
 
     int maxDelay = mMaxDelayInSamples;
     float sr = globalConfig.sampleRate;
 
-    // V/Oct pitch: shifts all delay times (pitch up = shorter delay)
+    // V/Oct master pitch
     float voctPitch = CLAMP(-2.0f, 2.0f, mVOctPitch.value());
-    float pitchMul = powf(2.0f, -voctPitch);
+
+    // Grain size: 0=5ms, 0.5=30ms, 1.0=100ms
+    int grainDuration = (int)(sr * (0.005f + grainSizeParam * 0.095f));
+    if (grainDuration < 64) grainDuration = 64;
+    int grainPeriod = (int)(grainDuration * 0.75f);
+    if (grainPeriod < 32) grainPeriod = 32;
+    float grainPhaseDelta = 1.0f / (float)grainDuration;
 
     // Recompute tap distribution only when params change
     bool distDirty = (tapCount != mLastTapCount || skew != mLastSkew || masterTime != mLastMasterTime);
@@ -302,6 +352,11 @@ namespace stolmine
 
     float fbNorm = feedback / (1.0f + sqrtf((float)tapCount));
 
+    // Pre-compute per-tap grain speeds (avoid powf in inner loop)
+    float tapSpeeds[kMaxTaps];
+    for (int t = 0; t < tapCount; t++)
+      tapSpeeds[t] = powf(2.0f, voctPitch + s.tapPitch[t]);
+
     // Feedback tone: -1 = dark (LP), 0 = flat, +1 = bright (HP)
     float tone = CLAMP(-1.0f, 1.0f, mFeedbackTone.value());
     float fbFilterCoeff;
@@ -333,17 +388,52 @@ namespace stolmine
         if (s.tapLevel[t] < 0.001f)
           continue;
 
-        float delaySamples = mCachedDelaySamples[t] * pitchMul;
-        int delayInt = (int)delaySamples;
-        float delayFrac = delaySamples - (float)delayInt;
+        float delaySamples = mCachedDelaySamples[t];
+        float tapSpeed = tapSpeeds[t];
 
-        if (delayInt < 1) delayInt = 1;
-        if (delayInt >= maxDelay - 1) delayInt = maxDelay - 2;
+        // Spawn new grain if counter expired
+        s.grainSpawnCounter[t]--;
+        if (s.grainSpawnCounter[t] <= 0)
+        {
+          // Find an inactive grain slot
+          for (int g = 0; g < kGrainsPerTap; g++)
+          {
+            if (!s.grains[t][g].active)
+            {
+              s.grains[t][g].active = true;
+              s.grains[t][g].phase = 0.0f;
+              s.grains[t][g].phaseDelta = grainPhaseDelta;
+              s.grains[t][g].speed = tapSpeed;
+              // Start reading from the tap's delay position
+              float startPos = (float)s.writeIndex - delaySamples;
+              while (startPos < 0.0f) startPos += (float)maxDelay;
+              s.grains[t][g].readPos = startPos;
+              break;
+            }
+          }
+          s.grainSpawnCounter[t] = grainPeriod;
+        }
 
-        // Read with linear interpolation
-        int idx0 = (s.writeIndex - delayInt + maxDelay) % maxDelay;
-        int idx1 = (idx0 - 1 + maxDelay) % maxDelay;
-        float tapOut = buf[idx0] + (buf[idx1] - buf[idx0]) * delayFrac;
+        // Sum active grains for this tap
+        float tapOut = 0.0f;
+        for (int g = 0; g < kGrainsPerTap; g++)
+        {
+          Internal::TapGrain &gr = s.grains[t][g];
+          if (!gr.active) continue;
+          // Sine envelope from LUT
+          float env = s.lookupSine(gr.phase);
+          // Read from buffer with linear interpolation
+          int idx = ((int)gr.readPos) % maxDelay;
+          if (idx < 0) idx += maxDelay;
+          float frac = gr.readPos - floorf(gr.readPos);
+          int idx2 = (idx + 1) % maxDelay;
+          float sample = buf[idx] + (buf[idx2] - buf[idx]) * frac;
+          tapOut += sample * env;
+          // Advance grain
+          gr.readPos += gr.speed;
+          gr.phase += gr.phaseDelta;
+          if (gr.phase >= 1.0f) gr.active = false;
+        }
 
         // Apply per-tap filter
         switch (s.filterType[t])

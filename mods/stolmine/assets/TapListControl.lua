@@ -78,15 +78,14 @@ function TapListControl:init(args)
     return g
   end)()
 
-  self.filterTypeReadout = (function()
+  self.pitchReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
-    local param = delay:getParameter("EditFilterType")
+    local param = delay:getParameter("EditTapPitch")
     g:setParameter(param)
-    local m = app.LinearDialMap(0, 4)
-    m:setSteps(1, 1, 1, 1)
-    m:setRounding(1)
+    local m = app.LinearDialMap(-2, 2)
+    m:setSteps(1, 0.1, 0.01, 0.001)
     g:setAttributes(app.unitNone, m)
-    g:setPrecision(0)
+    g:setPrecision(2)
     g:setCenter(col3, center4)
     return g
   end)()
@@ -104,11 +103,11 @@ function TapListControl:init(args)
   self.subGraphic = app.Graphic(0, 0, 128, 64)
   self.subGraphic:addChild(self.levelReadout)
   self.subGraphic:addChild(self.panReadout)
-  self.subGraphic:addChild(self.filterTypeReadout)
+  self.subGraphic:addChild(self.pitchReadout)
   self.subGraphic:addChild(self.description)
   self.subGraphic:addChild(app.SubButton("level", 1))
   self.subGraphic:addChild(app.SubButton("pan", 2))
-  self.subGraphic:addChild(app.SubButton("filt", 3))
+  self.subGraphic:addChild(app.SubButton("pitch", 3))
 
   self.pDisplay:follow(delay)
   self.pDisplay:setEditParam(delay:getParameter("EditTapLevel"))
@@ -178,7 +177,7 @@ function TapListControl:subReleased(i, shifted)
   elseif i == 2 then
     args = { selected = self.panReadout, message = "Tap pan (-1 to 1).", commit = "Updated pan." }
   elseif i == 3 then
-    args = { selected = self.filterTypeReadout, message = "Filter type (0=LP, 1=BP, 2=HP, 3=notch).", commit = "Updated filter." }
+    args = { selected = self.pitchReadout, message = "Tap pitch (-2 to +2 octaves).", commit = "Updated pitch." }
   end
 
   if args then
