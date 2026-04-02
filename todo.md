@@ -327,7 +327,11 @@ Rainmaker-inspired multitap delay. 16 taps, 2s max (~384KB shared buffer). Per-t
 ### Remaining
 - [ ] Tap macros: volume, pan, filter cutoff, filter type (integer ModeSelector faders with Rainmaker-style preset distributions)
 - [ ] Stack parameter (groups coincident taps, in taps expansion after filters)
-- [ ] Xform gate: adapt from Excel's TransformGateControl
+- [ ] Xform gate: single target selector (17 positions) + depth + spread. Gate fires randomization.
+  - Targets: rnd all, rnd taps, rnd delay, rnd filters, rnd level, rnd pan, rnd pitch, rnd cutoff, rnd Q, rnd type, rnd time, rnd fdbk, rnd tone, rnd skew, rnd grain, rnd count, reset
+  - Depth (0-1): max deviation amount
+  - Spread (0-1): 0 = perturb around current values, 1 = full param range
+  - Sub-display: target / depth / spread. Gate input on comparator. Fire button on sub3.
 - [ ] Raindrop overview graphic (particle system, energy-driven brightness)
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
