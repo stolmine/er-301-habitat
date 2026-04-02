@@ -325,7 +325,7 @@ Rainmaker-inspired multitap delay. 16 taps, 2s max (~384KB shared buffer). Per-t
 - [x] Shift tap vs hold on all shift-toggle controls (fine/coarse preserved)
 
 ### Remaining
-- [x] Tap macros: volume, pan, filter cutoff, filter type (MacroControl faders with preset distributions)
+- [x] Tap macros: volume (11: full/off/20-80%/asc/desc/even/odd/sine), pan (11: center/L/R/L>R/R>L/evens/odds/cluster), cutoff (6), Q (11: off/20-80%/full/asc/desc/even/odd/sine), type (16: all/evens/odds/cyclical/cluster)
 - [ ] FilterListControl type label doesn't update when macros change filter type externally (readout is correct, label text stale)
 - [ ] Stack parameter (groups coincident taps, in taps expansion after filters)
 - [ ] Xform gate: single target selector (17 positions) + depth + spread. Gate fires randomization.

@@ -27,7 +27,7 @@ end
 
 -- Macro preset names
 local volMacroNames = {
-  [0] = "full", "off", "asc", "desc", "even", "odd", "sine"
+  [0] = "full", "off", "20%", "40%", "60%", "80%", "asc", "desc", "even", "odd", "sine"
 }
 local panMacroNames = {
   [0] = "cntr", "left", "rght", "L>R", "R>L", "e.L", "o.L", "c.1", "c.2", "c.4", "c.8"
@@ -39,6 +39,10 @@ local typeMacroNames = {
   [0] = "off", "LP", "BP", "HP", "ntch",
   "e.LP", "e.BP", "e.HP", "o.LP", "o.BP", "o.HP",
   "cycl", "c2LB", "c2LH", "c4", "c8"
+}
+
+local qMacroNames = {
+  [0] = "off", "20%", "40%", "60%", "80%", "full", "asc", "desc", "even", "odd", "sine"
 }
 
 local mixMap = floatMap(0, 1)
@@ -131,6 +135,10 @@ function MultitapDelay:onLoadGraph(channelCount)
   cutoffMacro:hardSet("Bias", 0)
   self:addMonoBranch("cutoffMacro", cutoffMacro, "In", cutoffMacro, "Out")
 
+  local qMacro = self:addObject("qMacro", app.ParameterAdapter())
+  qMacro:hardSet("Bias", 0)
+  self:addMonoBranch("qMacro", qMacro, "In", qMacro, "Out")
+
   local typeMacro = self:addObject("typeMacro", app.ParameterAdapter())
   typeMacro:hardSet("Bias", 0)
   self:addMonoBranch("typeMacro", typeMacro, "In", typeMacro, "Out")
@@ -173,11 +181,15 @@ function MultitapDelay:applyVolumeMacro(value)
     local t = (n > 1) and (i / (n - 1)) or 0
     if value == 0 then op:setTapLevel(i, 1.0)                              -- full
     elseif value == 1 then op:setTapLevel(i, 0.0)                          -- off
-    elseif value == 2 then op:setTapLevel(i, (i + 1) / n)                  -- ascending
-    elseif value == 3 then op:setTapLevel(i, 1.0 - i / n)                  -- descending
-    elseif value == 4 then op:setTapLevel(i, (i % 2 == 0) and 1.0 or 0.0) -- evens
-    elseif value == 5 then op:setTapLevel(i, (i % 2 == 1) and 1.0 or 0.0) -- odds
-    elseif value == 6 then op:setTapLevel(i, math.sin(t * math.pi))        -- sine
+    elseif value == 2 then op:setTapLevel(i, 0.2)                          -- 20%
+    elseif value == 3 then op:setTapLevel(i, 0.4)                          -- 40%
+    elseif value == 4 then op:setTapLevel(i, 0.6)                          -- 60%
+    elseif value == 5 then op:setTapLevel(i, 0.8)                          -- 80%
+    elseif value == 6 then op:setTapLevel(i, (i + 1) / n)                  -- ascending
+    elseif value == 7 then op:setTapLevel(i, 1.0 - i / n)                  -- descending
+    elseif value == 8 then op:setTapLevel(i, (i % 2 == 0) and 1.0 or 0.0) -- evens
+    elseif value == 9 then op:setTapLevel(i, (i % 2 == 1) and 1.0 or 0.0) -- odds
+    elseif value == 10 then op:setTapLevel(i, math.sin(t * math.pi))       -- sine
     end
   end
   op:loadTap(self.controls and self.controls.taps and self.controls.taps.currentTap or 0)
@@ -215,6 +227,27 @@ function MultitapDelay:applyCutoffMacro(value)
     elseif value == 3 then op:setFilterCutoff(i, (i % 2 == 0) and 10000 or 200)    -- evens
     elseif value == 4 then op:setFilterCutoff(i, (i % 2 == 1) and 10000 or 200)    -- odds
     elseif value == 5 then op:setFilterCutoff(i, 200 + math.sin(t * math.pi) * 9800) -- sine
+    end
+  end
+  op:loadFilter(self.controls and self.controls.filters and self.controls.filters.currentTap or 0)
+end
+
+function MultitapDelay:applyQMacro(value)
+  local op = self.objects.op
+  local n = op:getTapCount()
+  for i = 0, n - 1 do
+    local t = (n > 1) and (i / (n - 1)) or 0
+    if value == 0 then op:setFilterQ(i, 0.0)                              -- off
+    elseif value == 1 then op:setFilterQ(i, 0.2)                          -- 20%
+    elseif value == 2 then op:setFilterQ(i, 0.4)                          -- 40%
+    elseif value == 3 then op:setFilterQ(i, 0.6)                          -- 60%
+    elseif value == 4 then op:setFilterQ(i, 0.8)                          -- 80%
+    elseif value == 5 then op:setFilterQ(i, 1.0)                          -- full
+    elseif value == 6 then op:setFilterQ(i, t)                            -- ascending
+    elseif value == 7 then op:setFilterQ(i, 1.0 - t)                     -- descending
+    elseif value == 8 then op:setFilterQ(i, (i % 2 == 0) and 1.0 or 0.0) -- evens
+    elseif value == 9 then op:setFilterQ(i, (i % 2 == 1) and 1.0 or 0.0) -- odds
+    elseif value == 10 then op:setFilterQ(i, math.sin(t * math.pi))       -- sine
     end
   end
   op:loadFilter(self.controls and self.controls.filters and self.controls.filters.currentTap or 0)
@@ -392,7 +425,7 @@ function MultitapDelay:onLoadViews()
       branch = self.branches.volMacro,
       gainbias = self.objects.volMacro,
       range = self.objects.volMacro,
-      biasMap = intMap(0, 6),
+      biasMap = intMap(0, 10),
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
@@ -425,6 +458,19 @@ function MultitapDelay:onLoadViews()
       modeNames = cutoffMacroNames,
       applyPreset = function(v) self:applyCutoffMacro(v) end
     },
+    qMacro = MacroControl {
+      button = "Q",
+      description = "Q Macro",
+      branch = self.branches.qMacro,
+      gainbias = self.objects.qMacro,
+      range = self.objects.qMacro,
+      biasMap = intMap(0, 10),
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 0,
+      modeNames = qMacroNames,
+      applyPreset = function(v) self:applyQMacro(v) end
+    },
     typeMacro = MacroControl {
       button = "type",
       description = "Type Macro",
@@ -441,7 +487,7 @@ function MultitapDelay:onLoadViews()
   }, {
     expanded = { "tune", "taps", "masterTime", "feedback", "mix" },
     collapsed = {},
-    taps = { "taps", "filters", "tapCount", "volMacro", "panMacro", "cutoffMacro", "typeMacro" },
+    taps = { "taps", "filters", "tapCount", "volMacro", "panMacro", "cutoffMacro", "qMacro", "typeMacro" },
     masterTime = { "masterTime", "grainSize", "skew", "tapCount" },
     feedback = { "feedback", "feedbackTone" },
     mix = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
