@@ -8,6 +8,7 @@ local center1 = app.GRID5_CENTER1
 local center4 = app.GRID5_CENTER4
 local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
+local col3 = app.BUTTON3_CENTER
 
 local TimeControl = Class {}
 TimeControl:include(GainBias)
@@ -41,21 +42,30 @@ function TimeControl:init(args)
     return m
   end)()
 
+  local skewMap = (function()
+    local m = app.LinearDialMap(-2, 2)
+    m:setSteps(0.5, 0.1, 0.01, 0.001)
+    return m
+  end)()
+
   self.feedbackReadout = makeReadout(args.feedback, feedbackMap, 2, app.unitNone, col1)
   self.toneReadout = makeReadout(args.feedbackTone, toneMap, 2, app.unitNone, col2)
+  self.skewReadout = makeReadout(args.skew, skewMap, 2, app.unitNone, col3)
 
-  local desc = app.Label("Feedback / Tone", 10)
+  local desc = app.Label("Fdbk / Tone / Skew", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
   desc:setCornerRadius(3, 0, 0, 3)
-  desc:setCenter(col1 + ply * 0.5, center1 + 1)
+  desc:setCenter(col2, center1 + 1)
 
   self.paramSubGraphic:addChild(self.feedbackReadout)
   self.paramSubGraphic:addChild(self.toneReadout)
+  self.paramSubGraphic:addChild(self.skewReadout)
   self.paramSubGraphic:addChild(desc)
   self.paramSubGraphic:addChild(app.SubButton("fdbk", 1))
   self.paramSubGraphic:addChild(app.SubButton("tone", 2))
+  self.paramSubGraphic:addChild(app.SubButton("skew", 3))
 end
 
 function TimeControl:setParamMode(enabled)
@@ -115,7 +125,8 @@ function TimeControl:subReleased(i, shifted)
   if shifted then return false end
   if self.paramMode then
     local readout = i == 1 and self.feedbackReadout
-        or i == 2 and self.toneReadout or nil
+        or i == 2 and self.toneReadout
+        or i == 3 and self.skewReadout or nil
     if readout then
       readout:save()
       self.paramFocusedReadout = readout

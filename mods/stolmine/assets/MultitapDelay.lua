@@ -90,11 +90,14 @@ function MultitapDelay:onLoadGraph(channelCount)
   tieParam("FeedbackTone", feedbackTone)
   self:addMonoBranch("feedbackTone", feedbackTone, "In", feedbackTone, "Out")
 
-  -- V/Oct pitch (ConstantOffset, same pattern as builtin oscillators)
+  -- V/Oct pitch (ConstantOffset -> ParameterAdapter for tie compatibility)
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
+  local vOctAdapter = self:addObject("vOctAdapter", app.ParameterAdapter())
+  vOctAdapter:hardSet("Gain", 1.0)
   connect(tune, "Out", tuneRange, "In")
-  tie(op, "VOctPitch", tune, "Out")
+  connect(tune, "Out", vOctAdapter, "In")
+  tieParam("VOctPitch", vOctAdapter)
   self:addMonoBranch("tune", tune, "In", tune, "Out")
 
   -- Grain size
@@ -158,7 +161,8 @@ function MultitapDelay:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.5,
       feedback = self.objects.feedback:getParameter("Bias"),
-      feedbackTone = self.objects.feedbackTone:getParameter("Bias")
+      feedbackTone = self.objects.feedbackTone:getParameter("Bias"),
+      skew = self.objects.skew:getParameter("Bias")
     },
     feedback = GainBias {
       button = "fdbk",
@@ -263,11 +267,11 @@ function MultitapDelay:onLoadViews()
       initialBias = 0.5
     }
   }, {
-    expanded = { "tune", "taps", "masterTime", "feedback", "mix", "tapCount", "skew" },
+    expanded = { "tune", "taps", "masterTime", "feedback", "mix", "tapCount" },
     collapsed = {},
     tune = { "tune", "grainSize" },
     taps = { "taps", "filters", "tapCount", "skew" },
-    masterTime = { "masterTime", "feedback", "feedbackTone" },
+    masterTime = { "masterTime", "feedback", "feedbackTone", "skew" },
     mix = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
   }
 end
