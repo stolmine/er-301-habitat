@@ -12,7 +12,7 @@ return {
     { title = "Ballot",         moduleName = "GateSeq",     category = "stolmine", keywords = "sequencer, gate, trigger, rhythm, euclidean, ratchet" },
     { title = "Gesture",        moduleName = "GestureSeq",  category = "stolmine", keywords = "sequencer, gesture, recorder, looper, CV" },
     { title = "Etcher",         moduleName = "Etcher",      category = "stolmine", keywords = "transfer, curve, waveshaper, mapper, CV, modulation" },
-    { title = "Filterbank",    moduleName = "Filterbank",  category = "stolmine", keywords = "filter, bank, resonator, EQ, spectral, effect" },
-    { title = "Raindrops",    moduleName = "MultitapDelay", category = "stolmine", keywords = "delay, multitap, echo, feedback, filter, pitch" }
+    { title = "Tomograph",    moduleName = "Filterbank",  category = "stolmine", keywords = "filter, bank, resonator, EQ, spectral, effect, tomograph" },
+    { title = "Petrichor",    moduleName = "MultitapDelay", category = "stolmine", keywords = "delay, multitap, echo, feedback, filter, pitch, petrichor" }
   }
 }

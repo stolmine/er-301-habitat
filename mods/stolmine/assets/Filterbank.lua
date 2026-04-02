@@ -45,8 +45,8 @@ local Filterbank = Class {}
 Filterbank:include(Unit)
 
 function Filterbank:init(args)
-  args.title = "Filterbank"
-  args.mnemonic = "FB"
+  args.title = "Tomograph"
+  args.mnemonic = "Tm"
   Unit.init(self, args)
 end
 

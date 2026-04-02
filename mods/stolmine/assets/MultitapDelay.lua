@@ -37,8 +37,8 @@ local MultitapDelay = Class {}
 MultitapDelay:include(Unit)
 
 function MultitapDelay:init(args)
-  args.title = "Raindrops"
-  args.mnemonic = "RD"
+  args.title = "Petrichor"
+  args.mnemonic = "Pt"
   Unit.init(self, args)
 end
 
