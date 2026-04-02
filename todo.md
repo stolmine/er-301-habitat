@@ -333,7 +333,7 @@ Rainmaker-inspired multitap delay. 16 taps, 2s max (~384KB shared buffer). Per-t
   - Spread (0-1): 0 = perturb around current values, 1 = full param range
   - Sub-display: target / depth / spread. Gate input on comparator. Fire button on sub3.
 - [ ] Raindrop overview graphic (particle system, energy-driven brightness)
-- [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
+- [ ] Macro filter cutoff offset: CV-modulatable continuous shift of all per-tap cutoffs. On feedback shift SD + expansion (feedback + tone + filterOffset).
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
 
 ## Fade Mixer
