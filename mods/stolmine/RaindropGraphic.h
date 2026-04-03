@@ -238,14 +238,17 @@ namespace stolmine
       int contourRange = fieldMax - fieldThresh;
       if (contourRange < 1) contourRange = 1;
 
-      // Fill with contour drain: lines suck brightness from surrounding fill
-      // contourDrain: 0 = flat fill, 1 = all brightness pulled into contour lines
-      float contourDrain = mAggEnergy * 0.9f;
-      // Spacing between contour levels in field-value units
-      float drainSpacing = (maxContour > 1)
+      // Energy crossfade: fill vs topo
+      // topoMix: 0 = pure flat fill, 1 = pure topo lines
+      float topoMix = mAggEnergy;
+      if (topoMix > 1.0f) topoMix = 1.0f;
+
+      // Topo line spacing in field-value units
+      float topoSpacing = (maxContour > 1)
           ? (float)contourRange / (float)maxContour
           : (float)contourRange;
-      if (drainSpacing < 1.0f) drainSpacing = 1.0f;
+      if (topoSpacing < 1.0f) topoSpacing = 1.0f;
+      float halfSpacing = topoSpacing * 0.5f;
 
       for (int gy = 0; gy < gh; gy++)
       {
@@ -255,36 +258,33 @@ namespace stolmine
           bool inside = val >= fieldThresh;
 
           float norm = (float)(val - fieldMin) / fieldRange;
-          float baseBright;
-          if (inside)
-            baseBright = norm * 10.0f * brightnessScale;
-          else
-            baseBright = (1.0f - norm) * 10.0f * brightnessScale;
 
-          // Distance to nearest contour level (in field-value space)
+          // --- Flat fill brightness ---
+          float fillBright;
+          if (inside)
+            fillBright = norm * 10.0f * brightnessScale;
+          else
+            fillBright = (1.0f - norm) * 10.0f * brightnessScale;
+
+          // --- Topo brightness: bright on contour lines, dark between ---
           float fval = (float)(val - fieldThresh);
-          float nearest = drainSpacing;
+          float nearest = topoSpacing;
           for (int ci = 0; ci < maxContour; ci++)
           {
             float contourVal = (float)(ci * contourRange) / (float)maxContour;
             float d = fabsf(fval - contourVal);
             if (d < nearest) nearest = d;
           }
-
-          // Drain: pixels near contour lines lose brightness
-          // proximity 1.0 = on a contour line, 0.0 = far from any
-          float halfSpacing = drainSpacing * 0.5f;
+          // Proximity: 1.0 on a line, 0.0 halfway between lines
           float proximity = 1.0f - nearest / halfSpacing;
           if (proximity < 0.0f) proximity = 0.0f;
+          // Topo brightness peaks at contour lines
+          float topoBright = proximity * 10.0f * brightnessScale;
 
-          // Drain factor: energy controls how much brightness the lines absorb
-          // At drain=0: fillMul=1 (flat fill). At drain=1: fillMul near 0 close to lines
-          float fillMul = 1.0f - proximity * contourDrain;
-          if (fillMul < 0.05f) fillMul = 0.05f;
+          // --- Blend fill and topo: energy crossfades ---
+          float bright = fillBright * (1.0f - topoMix) + topoBright * topoMix;
 
-          float bright = baseBright * fillMul;
-
-          // Crossfade figure/ground
+          // Figure/ground crossfade
           float figBright = inside ? bright : 0.0f;
           float gndBright = inside ? 0.0f : bright;
           int color = (int)(figBright * (1.0f - mix) + gndBright * mix);
