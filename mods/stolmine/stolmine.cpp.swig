@@ -25,6 +25,7 @@
 #include "FilterResponseGraphic.h"
 #include "MultitapDelay.h"
 #include "TapListGraphic.h"
+#include "RaindropGraphic.h"
 #define SWIGLUA
 %}
 
@@ -50,3 +51,4 @@
 %include "FilterResponseGraphic.h"
 %include "MultitapDelay.h"
 %include "TapListGraphic.h"
+%include "RaindropGraphic.h"

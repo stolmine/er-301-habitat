@@ -11,6 +11,7 @@ local TapListControl = require "stolmine.TapListControl"
 local FilterListControl = require "stolmine.FilterListControl"
 local MacroControl = require "stolmine.MacroControl"
 local TransformGateControl = require "stolmine.TransformGateControl"
+local RaindropControl = require "stolmine.RaindropControl"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max)
@@ -433,6 +434,10 @@ function MultitapDelay:onLoadViews()
       width = app.SECTION_PLY,
       delay = self.objects.op
     },
+    overview = RaindropControl {
+      delay = self.objects.op,
+      width = app.SECTION_PLY * 2
+    },
     masterTime = TimeControl {
       button = "time",
       description = "Master Time",
@@ -634,7 +639,7 @@ function MultitapDelay:onLoadViews()
       paramBPrecision = 2
     }
   }, {
-    expanded = { "tune", "taps", "masterTime", "feedback", "xform", "mix" },
+    expanded = { "tune", "taps", "overview", "masterTime", "feedback", "xform", "mix" },
     collapsed = {},
     taps = { "taps", "filters", "tapCount", "volMacro", "panMacro", "cutoffMacro", "qMacro", "typeMacro" },
     masterTime = { "masterTime", "grainSize", "skew", "tapCount" },

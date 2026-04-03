@@ -328,12 +328,12 @@ Rainmaker-inspired multitap delay. 16 taps, 2s max (~384KB shared buffer). Per-t
 - [x] Tap macros: volume (11: full/off/20-80%/asc/desc/even/odd/sine), pan (11: center/L/R/L>R/R>L/evens/odds/cluster), cutoff (6), Q (11: off/20-80%/full/asc/desc/even/odd/sine), type (16: all/evens/odds/cyclical/cluster)
 - [ ] FilterListControl type label doesn't update when macros change filter type externally (readout is correct, label text stale)
 - [ ] Stack parameter (groups coincident taps, in taps expansion after filters)
-- [ ] Xform gate: single target selector (17 positions) + depth + spread. Gate fires randomization.
+- [x] Xform gate: single target selector (17 positions) + depth + fire. Gate fires randomization via Bias ref pattern.
   - Targets: rnd all, rnd taps, rnd delay, rnd filters, rnd level, rnd pan, rnd pitch, rnd cutoff, rnd Q, rnd type, rnd time, rnd fdbk, rnd tone, rnd skew, rnd grain, rnd count, reset
   - Depth (0-1): max deviation amount
-  - Spread (0-1): 0 = perturb around current values, 1 = full param range
-  - Sub-display: target / depth / spread. Gate input on comparator. Fire button on sub3.
-- [ ] Raindrop overview graphic (particle system, energy-driven brightness)
+  - Sub-display: target / depth / fire. Gate input on comparator.
+- [ ] Xform spread parameter (0-1): 0 = perturb around current values, 1 = full param range (deferred)
+- [x] Raindrop overview graphic (particle system, energy-driven brightness)
 - [ ] Macro filter cutoff offset: CV-modulatable continuous shift of all per-tap cutoffs. On feedback shift SD + expansion (feedback + tone + filterOffset).
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
 
