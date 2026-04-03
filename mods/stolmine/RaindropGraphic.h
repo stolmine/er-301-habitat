@@ -175,9 +175,9 @@ namespace stolmine
             if (boost > 0.0f) val += boost;
           }
 
-          // Store as fixed-point 0-255
+          // Store as fixed-point 0-255 (full range)
           float normalized = (val + 0.5f);
-          int ival = (int)(normalized * 200.0f);
+          int ival = (int)(normalized * 255.0f);
           if (ival < 0) ival = 0;
           if (ival > 255) ival = 255;
 
@@ -192,7 +192,7 @@ namespace stolmine
       }
 
       // Convert threshold to field-space
-      int fieldThresh = (int)((threshold + 0.5f) * 200.0f);
+      int fieldThresh = (int)((threshold + 0.5f) * 255.0f);
       if (fieldThresh < 1) fieldThresh = 1;
       if (fieldThresh > 250) fieldThresh = 250;
 
@@ -214,8 +214,8 @@ namespace stolmine
       mMixSlewed += (mix - mMixSlewed) * mixSlewCoeff;
       mix = mMixSlewed;
 
-      // Brightness: energy-modulated (quiet = dim, loud = bright)
-      float brightnessScale = 0.3f + mAggEnergy * 0.7f;
+      // Brightness: energy-modulated (quiet = moderate, loud = full)
+      float brightnessScale = 0.5f + mAggEnergy * 0.5f;
 
       // Find actual field range for proper normalization
       int fieldMin = 255, fieldMax = 0;
@@ -227,6 +227,26 @@ namespace stolmine
       float fieldRange = (float)(fieldMax - fieldMin);
       if (fieldRange < 1.0f) fieldRange = 1.0f;
 
+      // Contour count (slewed, used by both fill drain and marching squares)
+      float targetContours = 1.0f + mAggEnergy * 5.0f;
+      if (targetContours > 6.0f) targetContours = 6.0f;
+      mContourCount += (targetContours - mContourCount) * slewCoeff;
+      int maxContour = (int)(mContourCount + 0.5f);
+      if (maxContour < 1) maxContour = 1;
+      if (maxContour > 6) maxContour = 6;
+      float fractional = mContourCount - floorf(mContourCount);
+      int contourRange = fieldMax - fieldThresh;
+      if (contourRange < 1) contourRange = 1;
+
+      // Fill with contour drain: lines suck brightness from surrounding fill
+      // contourDrain: 0 = flat fill, 1 = all brightness pulled into contour lines
+      float contourDrain = mAggEnergy * 0.9f;
+      // Spacing between contour levels in field-value units
+      float drainSpacing = (maxContour > 1)
+          ? (float)contourRange / (float)maxContour
+          : (float)contourRange;
+      if (drainSpacing < 1.0f) drainSpacing = 1.0f;
+
       for (int gy = 0; gy < gh; gy++)
       {
         for (int gx = 0; gx < gw; gx++)
@@ -234,14 +254,39 @@ namespace stolmine
           int val = mField[gy * gw + gx];
           bool inside = val >= fieldThresh;
 
-          // Normalize to actual field range -> 0-1
           float norm = (float)(val - fieldMin) / fieldRange;
-          // Figure brightness: scales with elevation (brighter = higher)
-          // Ground brightness: inverted (brighter = lower elevation)
-          float figBright = inside ? norm * 10.0f * brightnessScale : 0.0f;
-          float gndBright = inside ? 0.0f : (1.0f - norm) * 10.0f * brightnessScale;
+          float baseBright;
+          if (inside)
+            baseBright = norm * 10.0f * brightnessScale;
+          else
+            baseBright = (1.0f - norm) * 10.0f * brightnessScale;
 
-          // Crossfade: mix=0 figure, mix=1 ground
+          // Distance to nearest contour level (in field-value space)
+          float fval = (float)(val - fieldThresh);
+          float nearest = drainSpacing;
+          for (int ci = 0; ci < maxContour; ci++)
+          {
+            float contourVal = (float)(ci * contourRange) / (float)maxContour;
+            float d = fabsf(fval - contourVal);
+            if (d < nearest) nearest = d;
+          }
+
+          // Drain: pixels near contour lines lose brightness
+          // proximity 1.0 = on a contour line, 0.0 = far from any
+          float halfSpacing = drainSpacing * 0.5f;
+          float proximity = 1.0f - nearest / halfSpacing;
+          if (proximity < 0.0f) proximity = 0.0f;
+
+          // Drain factor: energy controls how much brightness the lines absorb
+          // At drain=0: fillMul=1 (flat fill). At drain=1: fillMul near 0 close to lines
+          float fillMul = 1.0f - proximity * contourDrain;
+          if (fillMul < 0.05f) fillMul = 0.05f;
+
+          float bright = baseBright * fillMul;
+
+          // Crossfade figure/ground
+          float figBright = inside ? bright : 0.0f;
+          float gndBright = inside ? 0.0f : bright;
           int color = (int)(figBright * (1.0f - mix) + gndBright * mix);
           if (color > 12) color = 12;
           if (color > 0)
@@ -250,16 +295,24 @@ namespace stolmine
       }
 
       // --- Phase 3: Multi-threshold marching squares ---
-      // 3 contour levels: primary (outer, bright), secondary, tertiary (inner, dim)
-      static const int kNumContours = 3;
-      int thresholds[kNumContours];
-      int colors[kNumContours];
-      thresholds[0] = fieldThresh;
-      thresholds[1] = fieldThresh + 25;
-      thresholds[2] = fieldThresh + 50;
-      colors[0] = WHITE;
-      colors[1] = GRAY10;
-      colors[2] = GRAY6;
+      static const int kMaxContours = 6;
+      int thresholds[kMaxContours];
+      int colors[kMaxContours];
+      for (int ci = 0; ci < maxContour; ci++)
+      {
+        thresholds[ci] = fieldThresh + (ci * contourRange) / maxContour;
+        // Base brightness: outer bright, inner dimmer
+        int bright = 15 - (ci * 10) / maxContour;
+        if (bright < 4) bright = 4;
+        // Fade the outermost active contour in/out smoothly
+        if (ci == maxContour - 1 && maxContour > 1)
+        {
+          bright = (int)((float)bright * fractional);
+          if (bright < 1) bright = 1;
+        }
+        colors[ci] = bright;
+      }
+      int activeContours = maxContour;
 
       // Segment lookup table
       static const int kSegTable[16][4] = {
@@ -281,10 +334,10 @@ namespace stolmine
         {-1,-1,-1,-1}, // 15
       };
 
-      for (int ci = kNumContours - 1; ci >= 0; ci--)
+      for (int ci = activeContours - 1; ci >= 0; ci--)
       {
         int thresh = thresholds[ci];
-        if (thresh > 254) continue;
+        if (thresh > 254 || thresh < 1) continue;
         int baseColor = colors[ci];
 
         for (int cy = 0; cy < gh - 1; cy++)
@@ -397,6 +450,7 @@ namespace stolmine
     float mTime;
     float mAggEnergy = 0.0f;
     float mMixSlewed = 0.5f;
+    float mContourCount = 1.0f;
     int mPerm[512]; // Perlin permutation table
     uint8_t mField[kRainGridW * kRainGridH];
   };
