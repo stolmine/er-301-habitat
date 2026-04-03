@@ -119,10 +119,25 @@ namespace stolmine
       // Advance time (scrolls field downward)
       mTime += 0.02f * timeMul;
 
+      // Feedback -> slew rate: 50ms (feedback=0) to 350ms (feedback=1)
+      float slewMs = 50.0f + feedback * 300.0f;
+      float slewFrames = slewMs * 0.055f;
+      float slewCoeff = 1.0f / (1.0f + slewFrames);
+
       // Noise scale: lower = larger blobs
       float noiseScale = 0.06f;
       // Threshold for contour extraction
-      float threshold = 0.12f - feedback * 0.1f; // higher base, feedback lowers it
+      float threshold = 0.12f - feedback * 0.1f;
+
+      // Aggregate energy: sum of all tap energies, drives topo fill opacity
+      float aggEnergy = 0.0f;
+      for (int t = 0; t < tapCount; t++)
+        aggEnergy += mpDelay->getTapEnergy(t);
+      if (tapCount > 0)
+        aggEnergy /= (float)tapCount;
+      if (aggEnergy > 1.0f) aggEnergy = 1.0f;
+      // Slew aggregate energy for smooth transitions
+      mAggEnergy += (aggEnergy - mAggEnergy) * slewCoeff;
 
       // --- Phase 1: Evaluate noise field with tap modulation ---
       for (int gy = 0; gy < gh; gy++)
@@ -165,10 +180,10 @@ namespace stolmine
           if (ival < 0) ival = 0;
           if (ival > 255) ival = 255;
 
-          // Slew: ~200ms at 55fps = ~11 frames, coeff ~0.09
+          // Slew: feedback-controlled (50-350ms)
           int idx = gy * gw + gx;
           int prev = (int)mField[idx];
-          int slewed = prev + (int)((float)(ival - prev) * 0.09f);
+          int slewed = prev + (int)((float)(ival - prev) * slewCoeff);
           if (slewed < 0) slewed = 0;
           if (slewed > 255) slewed = 255;
           mField[idx] = (uint8_t)slewed;
@@ -180,111 +195,154 @@ namespace stolmine
       if (fieldThresh < 1) fieldThresh = 1;
       if (fieldThresh > 250) fieldThresh = 250;
 
-      // --- Phase 2: Marching squares contour extraction ---
-      int edgeBand = 15; // pixels within this range of threshold get contour lines
-      for (int cy = 0; cy < gh - 1; cy++)
+      // Pre-cache tap x positions for contour brightness
+      float tapXPos[kMaxTaps];
+      float tapEn[kMaxTaps];
+      for (int t = 0; t < tapCount; t++)
       {
-        for (int cx = 0; cx < gw - 1; cx++)
+        tapXPos[t] = 2.0f + mpDelay->getTapTime(t) * (float)(gw - 4);
+        tapEn[t] = mpDelay->getTapEnergy(t);
+      }
+
+      // --- Phase 2: Topographic fill (energy-modulated) ---
+      if (mAggEnergy > 0.005f)
+      {
+        for (int gy = 0; gy < gh; gy++)
         {
-          // Four corners of this cell
-          int v00 = mField[cy * gw + cx];
-          int v10 = mField[cy * gw + cx + 1];
-          int v01 = mField[(cy + 1) * gw + cx];
-          int v11 = mField[(cy + 1) * gw + cx + 1];
-
-          // Classify corners (inside = 1, outside = 0)
-          int config = 0;
-          if (v00 >= fieldThresh) config |= 1;
-          if (v10 >= fieldThresh) config |= 2;
-          if (v01 >= fieldThresh) config |= 4;
-          if (v11 >= fieldThresh) config |= 8;
-
-          // Skip fully inside (15) or fully outside (0)
-          if (config == 0 || config == 15) continue;
-
-          // Linear interpolation along edges to find contour crossing points
-          // Edge 0: bottom (v00 -> v10), y = cy
-          // Edge 1: right  (v10 -> v11), x = cx+1
-          // Edge 2: top    (v01 -> v11), y = cy+1
-          // Edge 3: left   (v00 -> v01), x = cx
-
-          float ex[4], ey[4];
-          bool eActive[4] = {false, false, false, false};
-
-          // Bottom edge
-          if ((v00 >= fieldThresh) != (v10 >= fieldThresh))
+          for (int gx = 0; gx < gw; gx++)
           {
-            float t = (float)(fieldThresh - v00) / (float)(v10 - v00);
-            ex[0] = (float)cx + t;
-            ey[0] = (float)cy;
-            eActive[0] = true;
+            int val = mField[gy * gw + gx];
+            int fillColor = (val * 8) >> 8; // 0-8 range
+            fillColor = (int)((float)fillColor * mAggEnergy);
+            if (fillColor > 0)
+              fb.pixel(fillColor, left + gx, bot + gy);
           }
-          // Right edge
-          if ((v10 >= fieldThresh) != (v11 >= fieldThresh))
-          {
-            float t = (float)(fieldThresh - v10) / (float)(v11 - v10);
-            ex[1] = (float)(cx + 1);
-            ey[1] = (float)cy + t;
-            eActive[1] = true;
-          }
-          // Top edge
-          if ((v01 >= fieldThresh) != (v11 >= fieldThresh))
-          {
-            float t = (float)(fieldThresh - v01) / (float)(v11 - v01);
-            ex[2] = (float)cx + t;
-            ey[2] = (float)(cy + 1);
-            eActive[2] = true;
-          }
-          // Left edge
-          if ((v00 >= fieldThresh) != (v01 >= fieldThresh))
-          {
-            float t = (float)(fieldThresh - v00) / (float)(v01 - v00);
-            ex[3] = (float)cx;
-            ey[3] = (float)cy + t;
-            eActive[3] = true;
-          }
+        }
+      }
 
-          // Draw contour segments based on marching squares lookup
-          // Each boundary cell produces 1 or 2 line segments
-          static const int kSegTable[16][4] = {
-            {-1,-1,-1,-1}, // 0: no edges
-            { 0, 3,-1,-1}, // 1
-            { 0, 1,-1,-1}, // 2
-            { 1, 3,-1,-1}, // 3
-            { 2, 3,-1,-1}, // 4
-            { 0, 1, 2, 3}, // 5: ambiguous -- two segments
-            { 0, 2,-1,-1}, // 6
-            { 1, 2,-1,-1}, // 7
-            { 1, 2,-1,-1}, // 8
-            { 0, 2,-1,-1}, // 9
-            { 0, 3, 1, 2}, // 10: ambiguous -- two segments
-            { 1, 2,-1,-1}, // 11 (duplicate of 7 intentional for symmetry)
-            { 1, 3,-1,-1}, // 12
-            { 0, 1,-1,-1}, // 13
-            { 0, 3,-1,-1}, // 14
-            {-1,-1,-1,-1}, // 15: no edges
-          };
+      // --- Phase 3: Multi-threshold marching squares ---
+      // 3 contour levels: primary (outer, bright), secondary, tertiary (inner, dim)
+      static const int kNumContours = 3;
+      int thresholds[kNumContours];
+      int colors[kNumContours];
+      thresholds[0] = fieldThresh;
+      thresholds[1] = fieldThresh + 25;
+      thresholds[2] = fieldThresh + 50;
+      colors[0] = WHITE;
+      colors[1] = GRAY10;
+      colors[2] = GRAY6;
 
-          // Corrected segment table
-          const int *segs = kSegTable[config];
+      // Segment lookup table
+      static const int kSegTable[16][4] = {
+        {-1,-1,-1,-1}, // 0
+        { 0, 3,-1,-1}, // 1
+        { 0, 1,-1,-1}, // 2
+        { 1, 3,-1,-1}, // 3
+        { 2, 3,-1,-1}, // 4
+        { 0, 1, 2, 3}, // 5: ambiguous
+        { 0, 2,-1,-1}, // 6
+        { 1, 2,-1,-1}, // 7
+        { 1, 2,-1,-1}, // 8
+        { 0, 2,-1,-1}, // 9
+        { 0, 3, 1, 2}, // 10: ambiguous
+        { 1, 2,-1,-1}, // 11
+        { 1, 3,-1,-1}, // 12
+        { 0, 1,-1,-1}, // 13
+        { 0, 3,-1,-1}, // 14
+        {-1,-1,-1,-1}, // 15
+      };
 
-          // Draw first segment
-          if (segs[0] >= 0 && segs[1] >= 0 && eActive[segs[0]] && eActive[segs[1]])
+      for (int ci = kNumContours - 1; ci >= 0; ci--)
+      {
+        int thresh = thresholds[ci];
+        if (thresh > 254) continue;
+        int baseColor = colors[ci];
+
+        for (int cy = 0; cy < gh - 1; cy++)
+        {
+          for (int cx = 0; cx < gw - 1; cx++)
           {
-            int x0 = left + (int)(ex[segs[0]] + 0.5f);
-            int y0 = bot + (int)(ey[segs[0]] + 0.5f);
-            int x1 = left + (int)(ex[segs[1]] + 0.5f);
-            int y1 = bot + (int)(ey[segs[1]] + 0.5f);
-            fb.line(WHITE, x0, y0, x1, y1);
-          }
-          // Draw second segment (ambiguous cases 5 and 10)
-          if (segs[2] >= 0 && segs[3] >= 0 && eActive[segs[2]] && eActive[segs[3]])
-          {
-            int x0 = left + (int)(ex[segs[2]] + 0.5f);
-            int y0 = bot + (int)(ey[segs[2]] + 0.5f);
-            int x1 = left + (int)(ex[segs[3]] + 0.5f);
-            int y1 = bot + (int)(ey[segs[3]] + 0.5f);
-            fb.line(WHITE, x0, y0, x1, y1);
+            int v00 = mField[cy * gw + cx];
+            int v10 = mField[cy * gw + cx + 1];
+            int v01 = mField[(cy + 1) * gw + cx];
+            int v11 = mField[(cy + 1) * gw + cx + 1];
+
+            int config = 0;
+            if (v00 >= thresh) config |= 1;
+            if (v10 >= thresh) config |= 2;
+            if (v01 >= thresh) config |= 4;
+            if (v11 >= thresh) config |= 8;
+
+            if (config == 0 || config == 15) continue;
+
+            float ex[4], ey[4];
+            bool eActive[4] = {false, false, false, false};
+
+            if ((v00 >= thresh) != (v10 >= thresh))
+            {
+              float t = (float)(thresh - v00) / (float)(v10 - v00);
+              ex[0] = (float)cx + t;
+              ey[0] = (float)cy;
+              eActive[0] = true;
+            }
+            if ((v10 >= thresh) != (v11 >= thresh))
+            {
+              float t = (float)(thresh - v10) / (float)(v11 - v10);
+              ex[1] = (float)(cx + 1);
+              ey[1] = (float)cy + t;
+              eActive[1] = true;
+            }
+            if ((v01 >= thresh) != (v11 >= thresh))
+            {
+              float t = (float)(thresh - v01) / (float)(v11 - v01);
+              ex[2] = (float)cx + t;
+              ey[2] = (float)(cy + 1);
+              eActive[2] = true;
+            }
+            if ((v00 >= thresh) != (v01 >= thresh))
+            {
+              float t = (float)(thresh - v00) / (float)(v01 - v00);
+              ex[3] = (float)cx;
+              ey[3] = (float)cy + t;
+              eActive[3] = true;
+            }
+
+            const int *segs = kSegTable[config];
+
+            // Compute tap-proximity brightness for this cell
+            float midX = (float)cx + 0.5f;
+            int lineColor = baseColor;
+            if (tapCount > 0)
+            {
+              float bestEnergy = 0.0f;
+              for (int t = 0; t < tapCount; t++)
+              {
+                float d = fabsf(midX - tapXPos[t]);
+                float influence = tapEn[t] / (1.0f + d * 0.3f);
+                if (influence > bestEnergy) bestEnergy = influence;
+              }
+              // Boost brightness near active taps
+              int boost = (int)(bestEnergy * 6.0f);
+              lineColor = baseColor + boost;
+              if (lineColor > 15) lineColor = 15;
+            }
+
+            if (segs[0] >= 0 && segs[1] >= 0 && eActive[segs[0]] && eActive[segs[1]])
+            {
+              int x0 = left + (int)(ex[segs[0]] + 0.5f);
+              int y0 = bot + (int)(ey[segs[0]] + 0.5f);
+              int x1 = left + (int)(ex[segs[1]] + 0.5f);
+              int y1 = bot + (int)(ey[segs[1]] + 0.5f);
+              fb.line(lineColor, x0, y0, x1, y1);
+            }
+            if (segs[2] >= 0 && segs[3] >= 0 && eActive[segs[2]] && eActive[segs[3]])
+            {
+              int x0 = left + (int)(ex[segs[2]] + 0.5f);
+              int y0 = bot + (int)(ey[segs[2]] + 0.5f);
+              int x1 = left + (int)(ex[segs[3]] + 0.5f);
+              int y1 = bot + (int)(ey[segs[3]] + 0.5f);
+              fb.line(lineColor, x0, y0, x1, y1);
+            }
           }
         }
       }
@@ -306,6 +364,7 @@ namespace stolmine
     MultitapDelay *mpDelay = 0;
     int mSelectedTap = -1;
     float mTime;
+    float mAggEnergy = 0.0f;
     int mPerm[512]; // Perlin permutation table
     uint8_t mField[kRainGridW * kRainGridH];
   };
