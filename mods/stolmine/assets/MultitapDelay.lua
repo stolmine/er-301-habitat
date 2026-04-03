@@ -154,18 +154,22 @@ function MultitapDelay:onLoadGraph(channelCount)
   -- Xform gate
   local xformGate = self:addObject("xformGate", app.Comparator())
   xformGate:setTriggerMode()
+  connect(xformGate, "Out", op, "XformGate")
   self:addMonoBranch("xformGate", xformGate, "In", xformGate, "Out")
 
   local xformTarget = self:addObject("xformTarget", app.ParameterAdapter())
   xformTarget:hardSet("Bias", 0)
+  tieParam("XformTarget", xformTarget)
   self:addMonoBranch("xformTarget", xformTarget, "In", xformTarget, "Out")
 
   local xformDepth = self:addObject("xformDepth", app.ParameterAdapter())
   xformDepth:hardSet("Bias", 0.5)
+  tieParam("XformDepth", xformDepth)
   self:addMonoBranch("xformDepth", xformDepth, "In", xformDepth, "Out")
 
   local xformSpread = self:addObject("xformSpread", app.ParameterAdapter())
   xformSpread:hardSet("Bias", 0.5)
+  tieParam("XformSpread", xformSpread)
   self:addMonoBranch("xformSpread", xformSpread, "In", xformSpread, "Out")
 
   -- Grain size
@@ -197,6 +201,14 @@ function MultitapDelay:onLoadGraph(channelCount)
   tanhAmt:hardSet("Bias", 0.0)
   tieParam("TanhAmt", tanhAmt)
   self:addMonoBranch("tanhAmt", tanhAmt, "In", tanhAmt, "Out")
+
+  -- Pass top-level Bias refs to C++ for gate-triggered randomization
+  op:setTopLevelBias(0, masterTime:getParameter("Bias"))
+  op:setTopLevelBias(1, feedback:getParameter("Bias"))
+  op:setTopLevelBias(2, feedbackTone:getParameter("Bias"))
+  op:setTopLevelBias(3, skew:getParameter("Bias"))
+  op:setTopLevelBias(4, grainSize:getParameter("Bias"))
+  op:setTopLevelBias(5, tapCount:getParameter("Bias"))
 end
 
 function MultitapDelay:applyVolumeMacro(value)
@@ -323,11 +335,8 @@ local function randomizeInt(cur, min, max, depth, spread)
 end
 
 function MultitapDelay:fireTransform()
-  local target = math.floor(self.objects.xformTarget:getParameter("Bias"):target() + 0.5)
-  local depth = math.max(0, math.min(1, self.objects.xformDepth:getParameter("Bias"):target()))
-  local spread = math.max(0, math.min(1, self.objects.xformSpread:getParameter("Bias"):target()))
-  app.logInfo("Petrichor:fireTransform target=%d depth=%.2f spread=%.2f", target, depth, spread)
-  self:applyRandomize(target, depth, spread)
+  -- All randomization handled in C++ via stored Bias refs
+  self.objects.op:fireRandomize()
 end
 
 function MultitapDelay:applyRandomize(target, depth, spread)
@@ -619,11 +628,10 @@ function MultitapDelay:onLoadViews()
       factorParam = self.objects.xformDepth:getParameter("Bias"),
       factorMap = floatMap(0, 1),
       factorPrecision = 2,
-      -- paramBParam deferred: enables fire button on sub3 instead of spread readout
-      -- paramBParam = self.objects.xformSpread:getParameter("Bias"),
-      -- paramBLabel = "sprd",
-      -- paramBMap = floatMap(0, 1),
-      -- paramBPrecision = 2
+      paramBParam = self.objects.xformSpread:getParameter("Bias"),
+      paramBLabel = "sprd",
+      paramBMap = floatMap(0, 1),
+      paramBPrecision = 2
     }
   }, {
     expanded = { "tune", "taps", "masterTime", "feedback", "xform", "mix" },

@@ -32,6 +32,7 @@ namespace stolmine
     virtual void process();
 
     od::Inlet mIn{"In"};
+    od::Inlet mXformGate{"XformGate"};
     od::Outlet mOut{"Out"};
     od::Outlet mOutR{"OutR"};
 
@@ -46,6 +47,10 @@ namespace stolmine
     od::Parameter mInputLevel{"InputLevel", 1.0f};
     od::Parameter mOutputLevel{"OutputLevel", 1.0f};
     od::Parameter mTanhAmt{"TanhAmt", 0.0f};
+
+    od::Parameter mXformTarget{"XformTarget", 0.0f};
+    od::Parameter mXformDepth{"XformDepth", 0.5f};
+    od::Parameter mXformSpread{"XformSpread", 0.5f};
 
     // Edit buffers for tap list
     od::Parameter mEditTapTime{"EditTapTime", 0.5f};
@@ -87,6 +92,10 @@ namespace stolmine
     int getTapCount();
     float getTapEnergy(int i);
 
+    // Xform
+    void fireRandomize();
+    void setTopLevelBias(int which, od::Parameter *param);
+
     // Buffer allocation
     float allocateTimeUpTo(float seconds);
     float maximumDelayTime();
@@ -107,6 +116,20 @@ namespace stolmine
     float mCachedDelaySamples[kMaxTaps];
     float mCachedPanL[kMaxTaps];
     float mCachedPanR[kMaxTaps];
+
+    // Xform gate state
+    bool mXformGateWasHigh = false;
+    bool mManualFire = false;
+
+    // Bias parameter refs for top-level randomization from gate trigger
+    od::Parameter *mBiasMasterTime = 0;
+    od::Parameter *mBiasFeedback = 0;
+    od::Parameter *mBiasFeedbackTone = 0;
+    od::Parameter *mBiasSkew = 0;
+    od::Parameter *mBiasGrainSize = 0;
+    od::Parameter *mBiasTapCount = 0;
+
+    void applyRandomize();
 
 #ifndef SWIGLUA
     bool allocate(int samples);

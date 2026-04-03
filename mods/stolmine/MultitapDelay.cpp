@@ -98,6 +98,7 @@ namespace stolmine
   MultitapDelay::MultitapDelay()
   {
     addInput(mIn);
+    addInput(mXformGate);
     addOutput(mOut);
     addOutput(mOutR);
     addParameter(mMasterTime);
@@ -108,6 +109,9 @@ namespace stolmine
     addParameter(mVOctPitch);
     addParameter(mSkew);
     addParameter(mGrainSize);
+    addParameter(mXformTarget);
+    addParameter(mXformDepth);
+    addParameter(mXformSpread);
     addParameter(mEditTapPitch);
     addParameter(mInputLevel);
     addParameter(mOutputLevel);
@@ -261,6 +265,109 @@ namespace stolmine
     return sqrtf(mpInternal->tapEnergy[CLAMP(0, kMaxTaps - 1, i)]);
   }
 
+  void MultitapDelay::fireRandomize()
+  {
+    mManualFire = true;
+  }
+
+  void MultitapDelay::setTopLevelBias(int which, od::Parameter *param)
+  {
+    switch (which)
+    {
+    case 0: mBiasMasterTime = param; break;
+    case 1: mBiasFeedback = param; break;
+    case 2: mBiasFeedbackTone = param; break;
+    case 3: mBiasSkew = param; break;
+    case 4: mBiasGrainSize = param; break;
+    case 5: mBiasTapCount = param; break;
+    }
+  }
+
+  static float randomizeValue(float cur, float mn, float mx, float depth, float spread)
+  {
+    float range = mx - mn;
+    float center = spread * (mn + mx) * 0.5f + (1.0f - spread) * cur;
+    float dev = depth * range * 0.5f;
+    float r = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f;
+    float v = center + r * dev;
+    return CLAMP(mn, mx, v);
+  }
+
+  void MultitapDelay::applyRandomize()
+  {
+    Internal &s = *mpInternal;
+    int target = CLAMP(0, 16, (int)(mXformTarget.value() + 0.5f));
+    float depth = CLAMP(0.0f, 1.0f, mXformDepth.value());
+    float spread = CLAMP(0.0f, 1.0f, mXformSpread.value());
+    int n = mCachedTapCount;
+
+    // Helper lambdas
+    auto rndLevels = [&]() { for (int i = 0; i < n; i++) s.tapLevel[i] = randomizeValue(s.tapLevel[i], 0, 1, depth, spread); };
+    auto rndPans = [&]() { for (int i = 0; i < n; i++) s.tapPan[i] = randomizeValue(s.tapPan[i], -1, 1, depth, spread); };
+    auto rndPitch = [&]() { for (int i = 0; i < n; i++) s.tapPitch[i] = floorf(randomizeValue(s.tapPitch[i], -24, 24, depth, spread) + 0.5f); };
+    auto rndCutoff = [&]() { for (int i = 0; i < n; i++) s.filterCutoff[i] = randomizeValue(s.filterCutoff[i], 20, 10000, depth, spread); };
+    auto rndQ = [&]() { for (int i = 0; i < n; i++) s.filterQ[i] = randomizeValue(s.filterQ[i], 0, 1, depth, spread); };
+    auto rndType = [&]() { for (int i = 0; i < n; i++) s.filterType[i] = CLAMP(0, (int)TAP_FILTER_COUNT - 1, (int)(randomizeValue((float)s.filterType[i], 0, TAP_FILTER_COUNT - 1, depth, spread) + 0.5f)); };
+
+    // Helpers for top-level param randomization via stored Bias refs
+    auto rndBias = [&](od::Parameter *p, float mn, float mx) {
+      if (p) p->hardSet(randomizeValue(p->value(), mn, mx, depth, spread));
+    };
+    auto rndBiasInt = [&](od::Parameter *p, float mn, float mx) {
+      if (p) p->hardSet(floorf(randomizeValue(p->value(), mn, mx, depth, spread) + 0.5f));
+    };
+    auto rndAllTopLevel = [&]() {
+      rndBias(mBiasMasterTime, 0.01f, 2.0f);
+      rndBias(mBiasFeedback, 0.0f, 0.95f);
+      rndBias(mBiasFeedbackTone, -1.0f, 1.0f);
+      rndBias(mBiasSkew, -2.0f, 2.0f);
+      rndBias(mBiasGrainSize, 0.0f, 1.0f);
+      rndBiasInt(mBiasTapCount, 1.0f, 16.0f);
+    };
+    auto resetAllTopLevel = [&]() {
+      if (mBiasMasterTime) mBiasMasterTime->hardSet(0.5f);
+      if (mBiasFeedback) mBiasFeedback->hardSet(0.3f);
+      if (mBiasFeedbackTone) mBiasFeedbackTone->hardSet(0.0f);
+      if (mBiasSkew) mBiasSkew->hardSet(0.0f);
+      if (mBiasGrainSize) mBiasGrainSize->hardSet(0.5f);
+      if (mBiasTapCount) mBiasTapCount->hardSet(4.0f);
+    };
+
+    switch (target)
+    {
+    case 0: // all
+      rndLevels(); rndPans(); rndPitch(); rndCutoff(); rndQ(); rndType();
+      rndAllTopLevel();
+      break;
+    case 1: rndLevels(); rndPans(); rndPitch(); break;  // taps
+    case 2: rndAllTopLevel(); break;                      // delay
+    case 3: rndCutoff(); rndQ(); rndType(); break;       // filters
+    case 4: rndLevels(); break;
+    case 5: rndPans(); break;
+    case 6: rndPitch(); break;
+    case 7: rndCutoff(); break;
+    case 8: rndQ(); break;
+    case 9: rndType(); break;
+    case 10: rndBias(mBiasMasterTime, 0.01f, 2.0f); break;
+    case 11: rndBias(mBiasFeedback, 0.0f, 0.95f); break;
+    case 12: rndBias(mBiasFeedbackTone, -1.0f, 1.0f); break;
+    case 13: rndBias(mBiasSkew, -2.0f, 2.0f); break;
+    case 14: rndBias(mBiasGrainSize, 0.0f, 1.0f); break;
+    case 15: rndBiasInt(mBiasTapCount, 1.0f, 16.0f); break;
+    case 16: // reset
+      for (int i = 0; i < kMaxTaps; i++)
+      {
+        s.tapLevel[i] = 1.0f; s.tapPan[i] = 0.0f; s.tapPitch[i] = 0.0f;
+        s.filterCutoff[i] = 10000.0f; s.filterQ[i] = 0.0f; s.filterType[i] = TAP_FILTER_OFF;
+      }
+      resetAllTopLevel();
+      break;
+    }
+
+    loadTap(mLastLoadedTap);
+    loadFilter(mLastLoadedFilter);
+  }
+
   // --- Process ---
 
   void MultitapDelay::process()
@@ -351,6 +458,25 @@ namespace stolmine
     }
 
     float fbNorm = feedback / (1.0f + sqrtf((float)tapCount));
+
+    // Xform gate edge detection
+    {
+      float *xgate = mXformGate.buffer();
+      for (int i = 0; i < FRAMELENGTH; i++)
+      {
+        bool high = xgate[i] > 0.5f;
+        if (high && !mXformGateWasHigh)
+        {
+          applyRandomize();
+        }
+        mXformGateWasHigh = high;
+      }
+      if (mManualFire)
+      {
+        applyRandomize();
+        mManualFire = false;
+      }
+    }
 
     // Pre-compute per-tap grain speeds (avoid powf in inner loop)
     float tapSpeeds[kMaxTaps];
