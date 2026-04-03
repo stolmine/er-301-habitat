@@ -214,8 +214,8 @@ namespace stolmine
       mMixSlewed += (mix - mMixSlewed) * mixSlewCoeff;
       mix = mMixSlewed;
 
-      // Brightness: energy-modulated (quiet = moderate, loud = full)
-      float brightnessScale = 0.5f + mAggEnergy * 0.5f;
+      // Constant brightness -- energy redistributes via topoMix, not overall level
+      float brightnessScale = 0.7f;
 
       // Find actual field range for proper normalization
       int fieldMin = 255, fieldMax = 0;
@@ -298,18 +298,24 @@ namespace stolmine
       static const int kMaxContours = 6;
       int thresholds[kMaxContours];
       int colors[kMaxContours];
+      // Contour line brightness fades as fill topo takes over
+      float lineFade = 1.0f - mAggEnergy * 0.7f; // full bright at silence, 30% at max energy
+      if (lineFade < 0.2f) lineFade = 0.2f;
+
       for (int ci = 0; ci < maxContour; ci++)
       {
         thresholds[ci] = fieldThresh + (ci * contourRange) / maxContour;
         // Base brightness: outer bright, inner dimmer
         int bright = 15 - (ci * 10) / maxContour;
         if (bright < 4) bright = 4;
+        // Apply energy fade
+        bright = (int)((float)bright * lineFade);
         // Fade the outermost active contour in/out smoothly
         if (ci == maxContour - 1 && maxContour > 1)
         {
           bright = (int)((float)bright * fractional);
-          if (bright < 1) bright = 1;
         }
+        if (bright < 1) bright = 1;
         colors[ci] = bright;
       }
       int activeContours = maxContour;
