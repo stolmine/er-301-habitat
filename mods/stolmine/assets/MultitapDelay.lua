@@ -435,8 +435,7 @@ function MultitapDelay:onLoadViews()
       delay = self.objects.op
     },
     overview = RaindropControl {
-      delay = self.objects.op,
-      width = app.SECTION_PLY * 2
+      delay = self.objects.op
     },
     masterTime = TimeControl {
       button = "time",

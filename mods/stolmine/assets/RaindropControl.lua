@@ -19,7 +19,7 @@ function RaindropControl:init(args)
   Base.init(self, "overview")
   self:setClassName("RaindropControl")
 
-  local width = args.width or (ply * 2)
+  local width = args.width or ply
 
   local graphic = app.Graphic(0, 0, width, 64)
   self.pDisplay = libstolmine.RaindropGraphic(0, 0, width, 64)
