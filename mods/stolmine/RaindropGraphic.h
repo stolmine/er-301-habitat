@@ -157,17 +157,18 @@ namespace stolmine
             float energy = mpDelay->getTapEnergy(t);
             float level = mpDelay->getTapLevel(t);
 
-            if (energy < 0.001f && level < 0.01f) continue;
-
             // Tap x position in grid space
             float tapX = 2.0f + tapTime * (float)(gw - 4);
             float dx = (float)gx - tapX;
 
-            // Random jitter: per-tap noise contribution that varies over time
+            // Energy boost (skip if no signal)
+            if (energy < 0.001f && level < 0.01f) continue;
+
+            // Random jitter
             float tapNoise = perlin((float)t * 7.3f + mTime * 0.5f,
                                     (float)gy * 0.08f + mTime * 0.3f) * 0.15f;
 
-            // Gaussian boost centered on tap x, full height
+            // Gaussian boost centered on tap x
             float sigma = 3.0f + energy * 4.0f;
             float boost = (energy * 0.6f + level * 0.15f + tapNoise)
                         * expf(-dx * dx / (2.0f * sigma * sigma));
@@ -204,19 +205,43 @@ namespace stolmine
         tapEn[t] = mpDelay->getTapEnergy(t);
       }
 
-      // --- Phase 2: Topographic fill (energy-modulated) ---
-      if (mAggEnergy > 0.005f)
+      // --- Phase 2: Figure/ground crossfade (mix-controlled) ---
+      // Mix 0 = figure (topo inside contours, black outside)
+      // Mix 0.5 = uniform mid-brightness topo across entire field
+      // Mix 1 = ground (topo outside contours, black inside = inverted)
+      float mix = mpDelay->mMix.value();
+      if (mix < 0.0f) mix = 0.0f;
+      if (mix > 1.0f) mix = 1.0f;
+
+      // Find actual field range for proper normalization
+      int fieldMin = 255, fieldMax = 0;
+      for (int i = 0; i < gw * gh; i++)
       {
-        for (int gy = 0; gy < gh; gy++)
+        if (mField[i] < fieldMin) fieldMin = mField[i];
+        if (mField[i] > fieldMax) fieldMax = mField[i];
+      }
+      float fieldRange = (float)(fieldMax - fieldMin);
+      if (fieldRange < 1.0f) fieldRange = 1.0f;
+
+      for (int gy = 0; gy < gh; gy++)
+      {
+        for (int gx = 0; gx < gw; gx++)
         {
-          for (int gx = 0; gx < gw; gx++)
-          {
-            int val = mField[gy * gw + gx];
-            int fillColor = (val * 8) >> 8; // 0-8 range
-            fillColor = (int)((float)fillColor * mAggEnergy);
-            if (fillColor > 0)
-              fb.pixel(fillColor, left + gx, bot + gy);
-          }
+          int val = mField[gy * gw + gx];
+          bool inside = val >= fieldThresh;
+
+          // Normalize to actual field range -> 0-1
+          float norm = (float)(val - fieldMin) / fieldRange;
+          // Figure brightness: scales with elevation (brighter = higher)
+          // Ground brightness: inverted (brighter = lower elevation)
+          float figBright = inside ? norm * 10.0f : 0.0f;
+          float gndBright = inside ? 0.0f : (1.0f - norm) * 10.0f;
+
+          // Crossfade: mix=0 figure, mix=1 ground
+          int color = (int)(figBright * (1.0f - mix) + gndBright * mix);
+          if (color > 12) color = 12;
+          if (color > 0)
+            fb.pixel(color, left + gx, bot + gy);
         }
       }
 
@@ -326,6 +351,8 @@ namespace stolmine
               lineColor = baseColor + boost;
               if (lineColor > 15) lineColor = 15;
             }
+
+            // Contour lines always bright -- structural skeleton visible at any mix
 
             if (segs[0] >= 0 && segs[1] >= 0 && eActive[segs[0]] && eActive[segs[1]])
             {
