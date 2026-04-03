@@ -205,13 +205,17 @@ namespace stolmine
         tapEn[t] = mpDelay->getTapEnergy(t);
       }
 
-      // --- Phase 2: Figure/ground crossfade (mix-controlled) ---
-      // Mix 0 = figure (topo inside contours, black outside)
-      // Mix 0.5 = uniform mid-brightness topo across entire field
-      // Mix 1 = ground (topo outside contours, black inside = inverted)
+      // --- Phase 2: Figure/ground crossfade (mix-controlled, slewed) ---
       float mix = mpDelay->mMix.value();
       if (mix < 0.0f) mix = 0.0f;
       if (mix > 1.0f) mix = 1.0f;
+      // Slew mix at half the feedback rate
+      float mixSlewCoeff = 1.0f / (1.0f + slewMs * 0.5f * 0.055f);
+      mMixSlewed += (mix - mMixSlewed) * mixSlewCoeff;
+      mix = mMixSlewed;
+
+      // Brightness: energy-modulated (quiet = dim, loud = bright)
+      float brightnessScale = 0.3f + mAggEnergy * 0.7f;
 
       // Find actual field range for proper normalization
       int fieldMin = 255, fieldMax = 0;
@@ -234,8 +238,8 @@ namespace stolmine
           float norm = (float)(val - fieldMin) / fieldRange;
           // Figure brightness: scales with elevation (brighter = higher)
           // Ground brightness: inverted (brighter = lower elevation)
-          float figBright = inside ? norm * 10.0f : 0.0f;
-          float gndBright = inside ? 0.0f : (1.0f - norm) * 10.0f;
+          float figBright = inside ? norm * 10.0f * brightnessScale : 0.0f;
+          float gndBright = inside ? 0.0f : (1.0f - norm) * 10.0f * brightnessScale;
 
           // Crossfade: mix=0 figure, mix=1 ground
           int color = (int)(figBright * (1.0f - mix) + gndBright * mix);
@@ -392,6 +396,7 @@ namespace stolmine
     int mSelectedTap = -1;
     float mTime;
     float mAggEnergy = 0.0f;
+    float mMixSlewed = 0.5f;
     int mPerm[512]; // Perlin permutation table
     uint8_t mField[kRainGridW * kRainGridH];
   };
