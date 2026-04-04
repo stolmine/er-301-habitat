@@ -29,6 +29,7 @@
 #include "GatedSlewLimiter.h"
 #include "TiltEQ.h"
 #include "DJFilter.h"
+#include "Gridlock.h"
 #define SWIGLUA
 %}
 
@@ -58,3 +59,4 @@
 %include "GatedSlewLimiter.h"
 %include "TiltEQ.h"
 %include "DJFilter.h"
+%include "Gridlock.h"
