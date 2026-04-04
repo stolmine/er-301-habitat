@@ -39,7 +39,7 @@ Refinements:
 - [x] Modulation gain scaling — verified default gainMap [-10,10] is correct for both polarities
 - [x] Shift-toggle sub-display audit: value-snapshot pattern for shift+home zeroing applied to all 5 Petrichor controls (FeedbackControl, TimeControl, MixControl, TransformGateControl, RatchetControl). Review: Filterbank MixControl and any future shift-toggle controls.
 - [ ] Sub-display readout audit: ensure all expansion-only controls have matching readouts on parent control's shift sub-display (per feedback_expansion_subdisplay convention).
-- [ ] Spreadsheet list focus indication: dim the selected step/band rectangle when control is unfocused, bright when focused. Currently always WHITE, hard to tell focused from unfocused. Apply to BandListGraphic, TapListGraphic, StepListGraphic, SegmentListGraphic.
+- [x] Spreadsheet list focus indication: WHITE when focused, GRAY5 when unfocused. Applied to all 4 list graphics + 5 Lua controls.
 
 ## Clouds Improvements
 
@@ -253,7 +253,7 @@ Spreadsheet-style parallel fixed filter bank. Mono and stereo.
 ### Remaining
 
 - [ ] Band list expansion: gate controls for randomize freq, gain, type across all bands
-- [ ] Fine/coarse reversed on sub-display readouts (slew and likely others). Audit encoder sensitivity across all spreadsheet unit sub-display controls (Filterbank, Excel, Ballot, Etcher).
+- [x] Fine/coarse reversed on sub-display readouts. Fixed `Encoder.Coarse` -> `Encoder.Fine` across all 15 controls package-wide.
 - [ ] Default gain/Q review: unit could use better defaults for immediate audibility on load
 
 ## 4ms SMR

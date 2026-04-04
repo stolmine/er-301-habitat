@@ -221,7 +221,7 @@ function BandListControl:encoder(change, shifted)
     self:scrollBand(change)
     return true
   elseif self.focusedReadout then
-    self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Coarse)
+    self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Fine)
     self.fb:storeBand(self.currentBand)
     if self.focusedReadout == self.typeReadout then
       self:updateTypeLabel()

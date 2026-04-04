@@ -212,7 +212,7 @@ function StepListControl:encoder(change, shifted)
     return true
   elseif self.focusedReadout then
     -- Normal: edit focused param, store immediately for live update
-    self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Coarse)
+    self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Fine)
     self.seq:storeStep(self.currentStep)
     return true
   else

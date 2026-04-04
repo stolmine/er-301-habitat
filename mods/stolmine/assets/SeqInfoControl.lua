@@ -154,7 +154,7 @@ end
 
 function SeqInfoControl:encoder(change, shifted)
   if self.focusedReadout then
-    self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Coarse)
+    self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
     if self.focusedReadout == self.scopeReadout then
       local val = math.floor(self.scopeReadout:getValueInUnits() + 0.5)
       local name = scopeNames[val]

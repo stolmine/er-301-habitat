@@ -221,7 +221,7 @@ function SegmentListControl:encoder(change, shifted)
     return true
   elseif self.focusedReadout then
     -- Normal: edit focused param, store immediately for live update
-    self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Coarse)
+    self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Fine)
     self.etcher:storeSegment(self.currentSegment)
     if self.focusedReadout == self.curveReadout then
       self:updateCurveLabel()

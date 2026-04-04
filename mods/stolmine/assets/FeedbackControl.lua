@@ -135,7 +135,7 @@ function FeedbackControl:encoder(change, shifted)
     self.shiftUsed = true
   end
   if self.paramMode and self.paramFocusedReadout then
-    self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Coarse)
+    self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
     return true
   end
   return GainBias.encoder(self, change, shifted)

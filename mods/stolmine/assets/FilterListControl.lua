@@ -200,7 +200,7 @@ function FilterListControl:encoder(change, shifted)
     self:scrollTap(change)
     return true
   elseif self.focusedReadout then
-    self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Coarse)
+    self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Fine)
     self.delay:storeFilter(self.currentTap)
     self:updateTypeLabel()
     return true

@@ -151,7 +151,7 @@ end
 
 function FilterResponseControl:encoder(change, shifted)
   if self.focusedReadout then
-    self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Coarse)
+    self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
   end
   return true
 end

@@ -123,7 +123,7 @@ end
 
 function RaindropControl:encoder(change, shifted)
   if self.focusedReadout then
-    self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Coarse)
+    self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
     return true
   end
   return true
