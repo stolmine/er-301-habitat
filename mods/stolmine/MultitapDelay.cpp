@@ -119,6 +119,7 @@ namespace stolmine
     addParameter(mGrainSize);
     addParameter(mDrift);
     addParameter(mReverse);
+    addParameter(mStack);
     addParameter(mXformTarget);
     addParameter(mXformDepth);
     addParameter(mXformSpread);
@@ -291,7 +292,8 @@ namespace stolmine
     case 4: mBiasGrainSize = param; break;
     case 5: mBiasDrift = param; break;
     case 6: mBiasReverse = param; break;
-    case 7: mBiasTapCount = param; break;
+    case 7: mBiasStack = param; break;
+    case 8: mBiasTapCount = param; break;
     }
   }
 
@@ -336,6 +338,7 @@ namespace stolmine
       rndBias(mBiasGrainSize, 0.0f, 1.0f);
       rndBias(mBiasDrift, 0.0f, 1.0f);
       rndBias(mBiasReverse, 0.0f, 1.0f);
+      rndBiasInt(mBiasStack, 0.0f, 4.0f);
       rndBiasInt(mBiasTapCount, 1.0f, 16.0f);
     };
     auto resetAllTopLevel = [&]() {
@@ -346,6 +349,7 @@ namespace stolmine
       if (mBiasGrainSize) mBiasGrainSize->hardSet(0.5f);
       if (mBiasDrift) mBiasDrift->hardSet(0.0f);
       if (mBiasReverse) mBiasReverse->hardSet(0.0f);
+      if (mBiasStack) mBiasStack->hardSet(0.0f);
       if (mBiasTapCount) mBiasTapCount->hardSet(4.0f);
     };
 
@@ -371,8 +375,9 @@ namespace stolmine
     case 14: rndBias(mBiasGrainSize, 0.0f, 1.0f); break;
     case 15: rndBias(mBiasDrift, 0.0f, 1.0f); break;
     case 16: rndBias(mBiasReverse, 0.0f, 1.0f); break;
-    case 17: rndBiasInt(mBiasTapCount, 1.0f, 16.0f); break;
-    case 18: // reset
+    case 17: rndBiasInt(mBiasStack, 0.0f, 4.0f); break;
+    case 18: rndBiasInt(mBiasTapCount, 1.0f, 16.0f); break;
+    case 19: // reset
       for (int i = 0; i < kMaxTaps; i++)
       {
         s.tapLevel[i] = 1.0f; s.tapPan[i] = 0.0f; s.tapPitch[i] = 0.0f;
@@ -423,6 +428,9 @@ namespace stolmine
     float skew = mSkew.value();
     float drift = CLAMP(0.0f, 1.0f, mDrift.value());
     float reverse = CLAMP(0.0f, 1.0f, mReverse.value());
+    int stackExp = CLAMP(0, 4, (int)(mStack.value() + 0.5f));
+    int stack = 1 << stackExp; // 1, 2, 4, 8, 16
+    if (stack > tapCount) stack = tapCount;
     float grainSizeParam = CLAMP(0.0f, 1.0f, mGrainSize.value());
 
     int maxDelay = mMaxDelayInSamples;
@@ -441,13 +449,15 @@ namespace stolmine
     // Recompute tap distribution when params change, or every frame if drift active
     bool distDirty = (tapCount != mLastTapCount || skew != mLastSkew
                       || masterTime != mLastMasterTime || drift != mLastDrift
-                      || drift > 0.0f);
+                      || stack != mLastStack || drift > 0.0f);
     if (distDirty)
     {
       float skewExp = powf(2.0f, skew);
+      int numGroups = (tapCount + stack - 1) / stack;
       for (int t = 0; t < tapCount; t++)
       {
-        float pos = powf((float)(t + 1) / (float)tapCount, skewExp);
+        int groupIndex = t / stack;
+        float pos = powf((float)(groupIndex + 1) / (float)numGroups, skewExp);
         // Drift: per-tap slow sinusoidal offset, max +/-10% of master time
         if (drift > 0.001f)
         {
@@ -467,11 +477,12 @@ namespace stolmine
         mCachedPanR[t] = sinf(a);
       }
       // Only reload edit buffer when discrete params change, not on drift frames
-      bool paramsChanged = (tapCount != mLastTapCount || skew != mLastSkew || masterTime != mLastMasterTime);
+      bool paramsChanged = (tapCount != mLastTapCount || skew != mLastSkew || masterTime != mLastMasterTime || stack != mLastStack);
       mLastTapCount = tapCount;
       mLastSkew = skew;
       mLastMasterTime = masterTime;
       mLastDrift = drift;
+      mLastStack = stack;
       if (paramsChanged)
         loadTap(mLastLoadedTap);
     }
@@ -490,7 +501,7 @@ namespace stolmine
       s.filters[t].set_f_q<stmlib::FREQUENCY_FAST>(freq, bandQ);
     }
 
-    float fbNorm = feedback / (1.0f + sqrtf((float)tapCount));
+    float fbNorm = feedback / (1.0f + 0.3f * sqrtf((float)tapCount));
 
     // Xform gate edge detection
     {

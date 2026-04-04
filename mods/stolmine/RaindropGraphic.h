@@ -240,7 +240,7 @@ namespace stolmine
       mTime += 0.02f * timeMul;
 
       // --- 2. Feedback-controlled slew ---
-      float slewMs = 150.0f + feedback * 300.0f;
+      float slewMs = 150.0f + feedback * 850.0f;
       float slewCoeff = 1.0f / (1.0f + slewMs * 0.055f);
 
       // --- 3. Update tap spots ---

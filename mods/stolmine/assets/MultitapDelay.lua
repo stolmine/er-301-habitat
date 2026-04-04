@@ -12,6 +12,7 @@ local FilterListControl = require "stolmine.FilterListControl"
 local MacroControl = require "stolmine.MacroControl"
 local TransformGateControl = require "stolmine.TransformGateControl"
 local RaindropControl = require "stolmine.RaindropControl"
+local ModeSelector = require "stolmine.ModeSelector"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max)
@@ -50,7 +51,7 @@ local qMacroNames = {
 local xformTargetNames = {
   [0] = "all", "taps", "delay", "filt",
   "level", "pan", "pitch", "cut", "Q", "type",
-  "time", "fdbk", "tone", "skew", "grain", "drift", "rev", "count",
+  "time", "fdbk", "tone", "skew", "grain", "drift", "rev", "stack", "count",
   "reset"
 }
 
@@ -197,6 +198,12 @@ function MultitapDelay:onLoadGraph(channelCount)
   tieParam("Reverse", reverse)
   self:addMonoBranch("reverse", reverse, "In", reverse, "Out")
 
+  -- Stack
+  local stack = self:addObject("stack", app.ParameterAdapter())
+  stack:hardSet("Bias", 0)
+  tieParam("Stack", stack)
+  self:addMonoBranch("stack", stack, "In", stack, "Out")
+
   -- Input level
   local inputLevel = self:addObject("inputLevel", app.ParameterAdapter())
   inputLevel:hardSet("Bias", 1.0)
@@ -223,7 +230,8 @@ function MultitapDelay:onLoadGraph(channelCount)
   op:setTopLevelBias(4, grainSize:getParameter("Bias"))
   op:setTopLevelBias(5, drift:getParameter("Bias"))
   op:setTopLevelBias(6, reverse:getParameter("Bias"))
-  op:setTopLevelBias(7, tapCount:getParameter("Bias"))
+  op:setTopLevelBias(7, stack:getParameter("Bias"))
+  op:setTopLevelBias(8, tapCount:getParameter("Bias"))
 end
 
 function MultitapDelay:applyVolumeMacro(value)
@@ -391,6 +399,7 @@ function MultitapDelay:applyRandomize(target, depth, spread)
     rndParam(self.objects.grainSize, "Bias", 0, 1)
     rndParam(self.objects.drift, "Bias", 0, 1)
     rndParam(self.objects.reverse, "Bias", 0, 1)
+    rndParam(self.objects.stack, "Bias", 0, 4)
     rndParam(self.objects.tapCount, "Bias", 1, 16)
   elseif target == 1 then rndTapLevels(); rndTapPans(); rndTapPitch()  -- taps
   elseif target == 2 then -- delay
@@ -401,6 +410,7 @@ function MultitapDelay:applyRandomize(target, depth, spread)
     rndParam(self.objects.grainSize, "Bias", 0, 1)
     rndParam(self.objects.drift, "Bias", 0, 1)
     rndParam(self.objects.reverse, "Bias", 0, 1)
+    rndParam(self.objects.stack, "Bias", 0, 4)
     rndParam(self.objects.tapCount, "Bias", 1, 16)
   elseif target == 3 then rndCutoff(); rndQ(); rndType()                -- filters
   elseif target == 4 then rndTapLevels()                                -- level
@@ -416,8 +426,9 @@ function MultitapDelay:applyRandomize(target, depth, spread)
   elseif target == 14 then rndParam(self.objects.grainSize, "Bias", 0, 1)       -- grain
   elseif target == 15 then rndParam(self.objects.drift, "Bias", 0, 1)           -- drift
   elseif target == 16 then rndParam(self.objects.reverse, "Bias", 0, 1)         -- reverse
-  elseif target == 17 then rndParam(self.objects.tapCount, "Bias", 1, 16)       -- count
-  elseif target == 18 then -- reset
+  elseif target == 17 then rndParam(self.objects.stack, "Bias", 0, 4)           -- stack
+  elseif target == 18 then rndParam(self.objects.tapCount, "Bias", 1, 16)       -- count
+  elseif target == 19 then -- reset
     for i = 0, 15 do
       op:setTapLevel(i, 1.0); op:setTapPan(i, 0.0); op:setTapPitch(i, 0)
       op:setFilterCutoff(i, 10000); op:setFilterQ(i, 0.0); op:setFilterType(i, 0)
@@ -429,6 +440,7 @@ function MultitapDelay:applyRandomize(target, depth, spread)
     self.objects.grainSize:hardSet("Bias", 0.5)
     self.objects.drift:hardSet("Bias", 0.0)
     self.objects.reverse:hardSet("Bias", 0.0)
+    self.objects.stack:hardSet("Bias", 0)
     self.objects.tapCount:hardSet("Bias", 4)
   end
 
@@ -457,7 +469,10 @@ function MultitapDelay:onLoadViews()
       delay = self.objects.op
     },
     overview = RaindropControl {
-      delay = self.objects.op
+      delay = self.objects.op,
+      grainSize = self.objects.grainSize:getParameter("Bias"),
+      tapCount = self.objects.tapCount:getParameter("Bias"),
+      stack = self.objects.stack:getParameter("Bias")
     },
     masterTime = TimeControl {
       button = "time",
@@ -577,6 +592,18 @@ function MultitapDelay:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.5
     },
+    stack = ModeSelector {
+      button = "stack",
+      description = "Stack",
+      branch = self.branches.stack,
+      gainbias = self.objects.stack,
+      range = self.objects.stack,
+      biasMap = intMap(0, 4),
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 0,
+      modeNames = { [0] = "1", "2", "4", "8", "16" }
+    },
     drift = GainBias {
       button = "drift",
       description = "Drift",
@@ -671,7 +698,7 @@ function MultitapDelay:onLoadViews()
       branch = self.branches.xformGate,
       comparator = self.objects.xformGate,
       funcNames = xformTargetNames,
-      funcMap = intMap(0, 18),
+      funcMap = intMap(0, 19),
       funcParam = self.objects.xformTarget:getParameter("Bias"),
       paramALabel = "depth",
       factorParam = self.objects.xformDepth:getParameter("Bias"),
@@ -686,7 +713,7 @@ function MultitapDelay:onLoadViews()
     expanded = { "tune", "taps", "overview", "masterTime", "feedback", "xform", "mix" },
     collapsed = {},
     taps = { "taps", "filters", "tapCount", "volMacro", "panMacro", "cutoffMacro", "qMacro", "typeMacro" },
-    overview = { "overview", "grainSize", "tapCount" },
+    overview = { "overview", "grainSize", "tapCount", "stack" },
     masterTime = { "masterTime", "drift", "reverse", "skew" },
     feedback = { "feedback", "feedbackTone" },
     mix = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
