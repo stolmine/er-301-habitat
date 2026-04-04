@@ -11,7 +11,7 @@ local TapListControl = require "spreadsheet.TapListControl"
 local FilterListControl = require "spreadsheet.FilterListControl"
 local MacroControl = require "spreadsheet.MacroControl"
 local TransformGateControl = require "spreadsheet.TransformGateControl"
-local RaindropControl = require "spreadsheet.RaindropControl"
+local DelayInfoControl = require "spreadsheet.DelayInfoControl"
 local ModeSelector = require "spreadsheet.ModeSelector"
 local Encoder = require "Encoder"
 
@@ -481,7 +481,7 @@ function MultitapDelay:onLoadViews()
       width = app.SECTION_PLY,
       delay = self.objects.op
     },
-    overview = RaindropControl {
+    overview = DelayInfoControl {
       delay = self.objects.op,
       grainSize = self.objects.grainSize:getParameter("Bias"),
       tapCount = self.objects.tapCount:getParameter("Bias"),

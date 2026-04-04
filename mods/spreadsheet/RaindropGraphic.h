@@ -9,10 +9,11 @@
 namespace stolmine
 {
 
-  static const int kRainGridW = 36;
-  static const int kRainGridH = 54;
-  static const int kNumThresholds = 5;
-  static const int kPerlinInterval = 1;
+  static const int kRainGridW = 42;
+  static const int kRainGridH = 64;
+  static const int kNumThresholds = 3;
+  static const int kNoiseLUTSize = 64;
+  static const float kNoiseLUTInv = 1.0f / (float)kNoiseLUTSize;
 
   struct TapSpot
   {
@@ -27,13 +28,11 @@ namespace stolmine
     RaindropGraphic(int left, int bottom, int width, int height)
         : od::Graphic(left, bottom, width, height)
     {
-      memset(mBaseField, 0, sizeof(mBaseField));
       memset(mField, 0, sizeof(mField));
       memset(mSlewedField, 0, sizeof(mSlewedField));
       mTime = 0.0f;
       mAggEnergy = 0.0f;
       mLastTapCount = 0;
-      mFrameCounter = 0;
 
       for (int i = 0; i < kMaxTaps; i++)
       {
@@ -43,18 +42,22 @@ namespace stolmine
         mSpots[i].assigned = false;
       }
 
-      // Initialize permutation table
+      // Initialize permutation table (used only for LUT bake)
+      int perm[512];
       for (int i = 0; i < 256; i++)
-        mPerm[i] = i;
+        perm[i] = i;
       for (int i = 255; i > 0; i--)
       {
         int j = od::Random::generateInteger(0, i);
-        int tmp = mPerm[i];
-        mPerm[i] = mPerm[j];
-        mPerm[j] = tmp;
+        int tmp = perm[i];
+        perm[i] = perm[j];
+        perm[j] = tmp;
       }
       for (int i = 0; i < 256; i++)
-        mPerm[i + 256] = mPerm[i];
+        perm[i + 256] = perm[i];
+
+      // Bake tileable noise LUT using Perlin
+      bakeNoiseLUT(perm);
     }
 
     virtual ~RaindropGraphic()
@@ -64,6 +67,8 @@ namespace stolmine
     }
 
 #ifndef SWIGLUA
+
+    // --- Perlin helpers (used only at init for LUT bake) ---
 
     static float fade(float t)
     {
@@ -83,7 +88,7 @@ namespace stolmine
       return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
     }
 
-    float perlin(float x, float y)
+    static float perlinEval(const int *perm, float x, float y)
     {
       int xi = (int)floorf(x) & 255;
       int yi = (int)floorf(y) & 255;
@@ -92,10 +97,10 @@ namespace stolmine
       float u = fade(xf);
       float v = fade(yf);
 
-      int aa = mPerm[mPerm[xi] + yi];
-      int ab = mPerm[mPerm[xi] + yi + 1];
-      int ba = mPerm[mPerm[xi + 1] + yi];
-      int bb = mPerm[mPerm[xi + 1] + yi + 1];
+      int aa = perm[perm[xi] + yi];
+      int ab = perm[perm[xi] + yi + 1];
+      int ba = perm[perm[xi + 1] + yi];
+      int bb = perm[perm[xi + 1] + yi + 1];
 
       return lerp(
           lerp(grad(aa, xf, yf), grad(ba, xf - 1.0f, yf), u),
@@ -103,13 +108,55 @@ namespace stolmine
           v);
     }
 
-    float fbm(float x, float y)
+    void bakeNoiseLUT(const int *perm)
     {
-      float val = perlin(x, y) * 0.5f;
-      val += perlin(x * 2.0f, y * 2.0f) * 0.25f;
-      val += perlin(x * 4.0f, y * 4.0f) * 0.125f;
+      // Fill LUT with Perlin noise, 4 periods across so it tiles at LUT boundaries
+      for (int y = 0; y < kNoiseLUTSize; y++)
+      {
+        float ny = (float)y * (4.0f * kNoiseLUTInv);
+        for (int x = 0; x < kNoiseLUTSize; x++)
+        {
+          float nx = (float)x * (4.0f * kNoiseLUTInv);
+          mNoiseLUT[y * kNoiseLUTSize + x] = perlinEval(perm, nx, ny);
+        }
+      }
+    }
+
+    // --- Runtime LUT sampling (replaces per-frame Perlin) ---
+
+    float sampleNoise(float u, float v) const
+    {
+      // Wrap to [0,1) and scale to LUT coords
+      u = u - floorf(u);
+      v = v - floorf(v);
+      float fx = u * (float)kNoiseLUTSize;
+      float fy = v * (float)kNoiseLUTSize;
+      int x0 = (int)fx;
+      int y0 = (int)fy;
+      float sx = fx - (float)x0;
+      float sy = fy - (float)y0;
+      x0 &= (kNoiseLUTSize - 1);
+      y0 &= (kNoiseLUTSize - 1);
+      int x1 = (x0 + 1) & (kNoiseLUTSize - 1);
+      int y1 = (y0 + 1) & (kNoiseLUTSize - 1);
+
+      float v00 = mNoiseLUT[y0 * kNoiseLUTSize + x0];
+      float v10 = mNoiseLUT[y0 * kNoiseLUTSize + x1];
+      float v01 = mNoiseLUT[y1 * kNoiseLUTSize + x0];
+      float v11 = mNoiseLUT[y1 * kNoiseLUTSize + x1];
+
+      return lerp(lerp(v00, v10, sx), lerp(v01, v11, sx), sy);
+    }
+
+    float fbmLUT(float u, float v) const
+    {
+      float val = sampleNoise(u, v) * 0.5f;
+      val += sampleNoise(u * 2.0f, v * 2.0f) * 0.25f;
+      val += sampleNoise(u * 4.0f, v * 4.0f) * 0.125f;
       return val;
     }
+
+    // --- Tap spot management ---
 
     void assignSpotPosition(int i, int gw, int gh)
     {
@@ -119,9 +166,12 @@ namespace stolmine
       mSpots[i].assigned = true;
     }
 
-    void drawContourPass(od::FrameBuffer &fb, int left, int bot,
-                         int gw, int gh, float scaleX, float scaleY,
-                         int fieldThresh, int color)
+    // --- Marching squares contour drawing ---
+
+    // Single-pass multi-threshold marching squares: reads each cell once
+    void drawContoursMulti(od::FrameBuffer &fb, int left, int bot,
+                           int gw, int gh, float scaleX, float scaleY,
+                           const int *thresholds, const int *colors, int numLevels)
     {
       static const int kSegTable[16][4] = {
           {-1, -1, -1, -1},
@@ -144,79 +194,98 @@ namespace stolmine
 
       for (int cy = 0; cy < gh - 1; cy++)
       {
+        int rowOff = cy * gw;
+        int rowOff1 = rowOff + gw;
         for (int cx = 0; cx < gw - 1; cx++)
         {
-          int v00 = mSlewedField[cy * gw + cx];
-          int v10 = mSlewedField[cy * gw + cx + 1];
-          int v01 = mSlewedField[(cy + 1) * gw + cx];
-          int v11 = mSlewedField[(cy + 1) * gw + cx + 1];
+          // Read 4 corners once
+          int v00 = mSlewedField[rowOff + cx];
+          int v10 = mSlewedField[rowOff + cx + 1];
+          int v01 = mSlewedField[rowOff1 + cx];
+          int v11 = mSlewedField[rowOff1 + cx + 1];
 
-          int config = 0;
-          if (v00 >= fieldThresh)
-            config |= 1;
-          if (v10 >= fieldThresh)
-            config |= 2;
-          if (v01 >= fieldThresh)
-            config |= 4;
-          if (v11 >= fieldThresh)
-            config |= 8;
+          // Quick reject: find cell min/max to skip cells with no crossings
+          int cmin = v00, cmax = v00;
+          if (v10 < cmin) cmin = v10; if (v10 > cmax) cmax = v10;
+          if (v01 < cmin) cmin = v01; if (v01 > cmax) cmax = v01;
+          if (v11 < cmin) cmin = v11; if (v11 > cmax) cmax = v11;
 
-          if (config == 0 || config == 15)
-            continue;
+          // Check each threshold level
+          for (int lvl = 0; lvl < numLevels; lvl++)
+          {
+            int thresh = thresholds[lvl];
 
-          float ex[4], ey[4];
-          bool eActive[4] = {false, false, false, false};
+            // Skip if all corners on same side of this threshold
+            if (cmin >= thresh || cmax < thresh)
+              continue;
 
-          if ((v00 >= fieldThresh) != (v10 >= fieldThresh))
-          {
-            float t = (float)(fieldThresh - v00) / (float)(v10 - v00);
-            ex[0] = (float)cx + t;
-            ey[0] = (float)cy;
-            eActive[0] = true;
-          }
-          if ((v10 >= fieldThresh) != (v11 >= fieldThresh))
-          {
-            float t = (float)(fieldThresh - v10) / (float)(v11 - v10);
-            ex[1] = (float)(cx + 1);
-            ey[1] = (float)cy + t;
-            eActive[1] = true;
-          }
-          if ((v01 >= fieldThresh) != (v11 >= fieldThresh))
-          {
-            float t = (float)(fieldThresh - v01) / (float)(v11 - v01);
-            ex[2] = (float)cx + t;
-            ey[2] = (float)(cy + 1);
-            eActive[2] = true;
-          }
-          if ((v00 >= fieldThresh) != (v01 >= fieldThresh))
-          {
-            float t = (float)(fieldThresh - v00) / (float)(v01 - v00);
-            ex[3] = (float)cx;
-            ey[3] = (float)cy + t;
-            eActive[3] = true;
-          }
+            int config = 0;
+            if (v00 >= thresh) config |= 1;
+            if (v10 >= thresh) config |= 2;
+            if (v01 >= thresh) config |= 4;
+            if (v11 >= thresh) config |= 8;
 
-          const int *segs = kSegTable[config];
+            if (config == 0 || config == 15)
+              continue;
 
-          if (segs[0] >= 0 && segs[1] >= 0 && eActive[segs[0]] && eActive[segs[1]])
-          {
-            fb.line(color,
-                    left + (int)(ex[segs[0]] * scaleX + 0.5f),
-                    bot + (int)(ey[segs[0]] * scaleY + 0.5f),
-                    left + (int)(ex[segs[1]] * scaleX + 0.5f),
-                    bot + (int)(ey[segs[1]] * scaleY + 0.5f));
-          }
-          if (segs[2] >= 0 && segs[3] >= 0 && eActive[segs[2]] && eActive[segs[3]])
-          {
-            fb.line(color,
-                    left + (int)(ex[segs[2]] * scaleX + 0.5f),
-                    bot + (int)(ey[segs[2]] * scaleY + 0.5f),
-                    left + (int)(ex[segs[3]] * scaleX + 0.5f),
-                    bot + (int)(ey[segs[3]] * scaleY + 0.5f));
+            const int *segs = kSegTable[config];
+
+            // Compute edge interpolation points
+            float ex[4], ey[4];
+
+            // Edge 0: top (v00-v10)
+            if (segs[0] == 0 || segs[1] == 0 || segs[2] == 0 || segs[3] == 0)
+            {
+              float t = (float)(thresh - v00) / (float)(v10 - v00);
+              ex[0] = (float)cx + t;
+              ey[0] = (float)cy;
+            }
+            // Edge 1: right (v10-v11)
+            if (segs[0] == 1 || segs[1] == 1 || segs[2] == 1 || segs[3] == 1)
+            {
+              float t = (float)(thresh - v10) / (float)(v11 - v10);
+              ex[1] = (float)(cx + 1);
+              ey[1] = (float)cy + t;
+            }
+            // Edge 2: bottom (v01-v11)
+            if (segs[0] == 2 || segs[1] == 2 || segs[2] == 2 || segs[3] == 2)
+            {
+              float t = (float)(thresh - v01) / (float)(v11 - v01);
+              ex[2] = (float)cx + t;
+              ey[2] = (float)(cy + 1);
+            }
+            // Edge 3: left (v00-v01)
+            if (segs[0] == 3 || segs[1] == 3 || segs[2] == 3 || segs[3] == 3)
+            {
+              float t = (float)(thresh - v00) / (float)(v01 - v00);
+              ex[3] = (float)cx;
+              ey[3] = (float)cy + t;
+            }
+
+            int color = colors[lvl];
+
+            if (segs[0] >= 0 && segs[1] >= 0)
+            {
+              fb.line(color,
+                      left + (int)(ex[segs[0]] * scaleX + 0.5f),
+                      bot + (int)(ey[segs[0]] * scaleY + 0.5f),
+                      left + (int)(ex[segs[1]] * scaleX + 0.5f),
+                      bot + (int)(ey[segs[1]] * scaleY + 0.5f));
+            }
+            if (segs[2] >= 0 && segs[3] >= 0)
+            {
+              fb.line(color,
+                      left + (int)(ex[segs[2]] * scaleX + 0.5f),
+                      bot + (int)(ey[segs[2]] * scaleY + 0.5f),
+                      left + (int)(ex[segs[3]] * scaleX + 0.5f),
+                      bot + (int)(ey[segs[3]] * scaleY + 0.5f));
+            }
           }
         }
       }
     }
+
+    // --- Main draw ---
 
     virtual void draw(od::FrameBuffer &fb)
     {
@@ -229,7 +298,6 @@ namespace stolmine
       int h = mHeight;
       int gw = kRainGridW;
       int gh = kRainGridH;
-      // Scale factors to map grid coords to screen pixels
       float scaleX = (float)w / (float)(gw - 1);
       float scaleY = (float)h / (float)(gh - 1);
 
@@ -239,10 +307,8 @@ namespace stolmine
       float masterTime = mpDelay->mMasterTime.value();
       float voctPitch = mpDelay->mVOctPitch.value() * 10.0f;
       float timeMul = powf(2.0f, voctPitch);
-      if (timeMul < 0.1f)
-        timeMul = 0.1f;
-      if (timeMul > 8.0f)
-        timeMul = 8.0f;
+      if (timeMul < 0.1f) timeMul = 0.1f;
+      if (timeMul > 8.0f) timeMul = 8.0f;
 
       mTime += 0.02f * timeMul;
 
@@ -275,45 +341,36 @@ namespace stolmine
       }
       mAggEnergy += (rawAgg - mAggEnergy) * slewCoeff;
 
-      // --- 4. SLOW PATH: Perlin base field (every Nth frame) ---
-      mFrameCounter++;
-      if (mFrameCounter >= kPerlinInterval)
-      {
-        mFrameCounter = 0;
-
-        float timeNorm = (masterTime - 0.01f) / 19.99f;
-        if (timeNorm < 0.0f) timeNorm = 0.0f;
-        if (timeNorm > 1.0f) timeNorm = 1.0f;
-        float noiseScale = 0.04f + (1.0f - timeNorm) * 0.08f;
-        float warpStrength = 3.0f;
-
-        for (int gy = 0; gy < gh; gy++)
-        {
-          float baseY = (float)gy * noiseScale + mTime;
-          for (int gx = 0; gx < gw; gx++)
-          {
-            float baseX = (float)gx * noiseScale;
-
-            // Domain warp
-            float wx = baseX + mAggEnergy * perlin(baseX * 2.0f, baseY * 2.0f + 100.0f) * warpStrength;
-            float wy = baseY + mAggEnergy * perlin(baseX * 2.0f + 50.0f, baseY * 2.0f) * warpStrength;
-
-            mBaseField[gy * gw + gx] = fbm(wx, wy);
-          }
-        }
-      }
-
-      // --- 5. FAST PATH: composite base + tap bumps (every frame) ---
+      // --- 4. Noise field via LUT sampling ---
+      float timeNorm = (masterTime - 0.01f) / 19.99f;
+      if (timeNorm < 0.0f) timeNorm = 0.0f;
+      if (timeNorm > 1.0f) timeNorm = 1.0f;
+      // Noise spatial frequency: short delay = fine, long = broad
+      // Range 0.15..0.45 keeps the base octave well within one LUT tile
+      float noiseFreq = 0.15f + (1.0f - timeNorm) * 0.30f;
+      float warpStrength = 0.12f;
       float bumpRadius = 8.0f / sqrtf((float)tapCount);
       float r2 = bumpRadius * bumpRadius;
       float r2x4 = r2 * 4.0f;
+      float invGw = 1.0f / (float)gw;
+      float invGh = 1.0f / (float)gh;
 
       for (int gy = 0; gy < gh; gy++)
       {
+        // Normalize grid to [0, noiseFreq] + time scroll
+        float baseY = (float)gy * invGh * noiseFreq + mTime;
         for (int gx = 0; gx < gw; gx++)
         {
-          float val = mBaseField[gy * gw + gx];
+          float baseX = (float)gx * invGw * noiseFreq;
 
+          // Domain warp via LUT (decorrelated by UV offset)
+          float wx = baseX + mAggEnergy * sampleNoise(baseX * 2.0f, baseY * 2.0f + 3.7f) * warpStrength;
+          float wy = baseY + mAggEnergy * sampleNoise(baseX * 2.0f + 7.3f, baseY * 2.0f) * warpStrength;
+
+          // FBM via LUT (3 octaves)
+          float val = fbmLUT(wx, wy);
+
+          // Tap energy bumps
           for (int t = 0; t < tapCount; t++)
           {
             if (!mSpots[t].assigned || mSpots[t].energy < 0.001f)
@@ -336,7 +393,7 @@ namespace stolmine
         }
       }
 
-      // --- 6. Slew field ---
+      // --- 5. Slew field ---
       for (int i = 0; i < gw * gh; i++)
       {
         float current = (float)mSlewedField[i];
@@ -344,7 +401,7 @@ namespace stolmine
         mSlewedField[i] = (uint8_t)(current + 0.5f);
       }
 
-      // --- 7. Marching squares contours ---
+      // --- 6. Marching squares contours ---
       int fieldMin = 255, fieldMax = 0;
       for (int i = 0; i < gw * gh; i++)
       {
@@ -354,13 +411,19 @@ namespace stolmine
       int fieldRange = fieldMax - fieldMin;
       if (fieldRange < 10) fieldRange = 10;
 
+      // Pre-compute thresholds and draw all passes
+      int thresholds[kNumThresholds];
+      int colors[kNumThresholds];
       for (int lvl = 0; lvl < kNumThresholds; lvl++)
       {
-        int thresh = fieldMin + (fieldRange * (lvl + 1)) / (kNumThresholds + 1);
+        thresholds[lvl] = fieldMin + (fieldRange * (lvl + 1)) / (kNumThresholds + 1);
         int brightness = WHITE - lvl * 3;
-        if (brightness < 3) brightness = 3;
-        drawContourPass(fb, left, bot, gw, gh, scaleX, scaleY, thresh, brightness);
+        colors[lvl] = brightness < 3 ? 3 : brightness;
       }
+
+      // Single pass over grid, all thresholds at once
+      drawContoursMulti(fb, left, bot, gw, gh, scaleX, scaleY,
+                        thresholds, colors, kNumThresholds);
     }
 #endif
 
@@ -379,10 +442,8 @@ namespace stolmine
     MultitapDelay *mpDelay = 0;
     int mSelectedTap = -1;
     float mTime;
-    int mFrameCounter;
-    int mPerm[512];
-    float mBaseField[kRainGridW * kRainGridH]; // Perlin values (slow update)
-    uint8_t mField[kRainGridW * kRainGridH];   // composite (base + bumps)
+    float mNoiseLUT[kNoiseLUTSize * kNoiseLUTSize]; // 16KB tileable noise
+    uint8_t mField[kRainGridW * kRainGridH];
     uint8_t mSlewedField[kRainGridW * kRainGridH];
     TapSpot mSpots[kMaxTaps];
     float mAggEnergy;
