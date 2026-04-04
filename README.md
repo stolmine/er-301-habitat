@@ -75,14 +75,71 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 
 | Package | Unit(s) | Description |
 |---------|---------|-------------|
-| **stolmine** | NR | Gate sequencer inspired by the Noise Engineering Numeric Repetitor |
+| **biome** | NR | Gate sequencer inspired by the Noise Engineering Numeric Repetitor |
 | | 94 Discont | 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush) |
 | | Latch Filter | Switched-capacitor S&H into SVF with V/Oct tracking |
 | | Canals | Linked resonant filter inspired by Three Sisters -- crossover/formant modes |
 | | Gesture | Continuous gesture recorder/looper -- 5/10/20s buffer, movement-detected auto-write |
-| **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization — stereo-aware passthrough with waveform display |
+| | Gated Slew | Slew limiter with gate-controlled activation |
+| | Tilt EQ | One-knob spectral tilt filter |
+| | DJ Filter | Bipolar LP/HP sweep filter |
+| | Gridlock | Priority gate router with latching output |
+| | Integrator | Running accumulator with leak and reset |
+| | Spectral Follower | Adaptive threshold envelope follower with bandpass detector |
+| | Quantoffset | Quantizer with CV offset |
+| | PSR | Pingable scaled random |
+| | Bletchley Park | Codescan wavetable oscillator -- reads arbitrary binary files as waveforms |
+| | Station X | Codescan FIR filter -- reads binary files as filter kernels |
+| | Fade Mixer | 4-input crossfader with BranchMeter controls |
+| **spreadsheet** | Excel | 64-step CV tracker sequencer with math transforms |
+| | Ballot | 64-step gate sequencer with chaselight display and algorithmic transforms |
+| | Etcher | CV-addressed piecewise transfer function |
+| | Tomograph | Parallel resonant filter bank with scale distribution |
+| | Petrichor | Multitap delay -- 8 taps, per-tap SVF/pitch, granular reverse, macro presets |
+| **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization -- stereo-aware passthrough with waveform display |
 
 ## Changelog
+
+### v1.4.0
+
+**Package split: stolmine -> biome + spreadsheet**
+- biome: NR, 94 Discont, Latch Filter, Canals, Gesture, Gated Slew, Tilt EQ, DJ Filter, Gridlock, Integrator, Spectral Follower, Quantoffset, PSR, Bletchley Park, Station X, Fade Mixer
+- spreadsheet: Excel, Ballot, Etcher, Tomograph, Petrichor
+
+**New units: biome**
+- Gated Slew: slew limiter with gate-controlled activation
+- Tilt EQ: one-knob spectral tilt
+- DJ Filter: bipolar LP/HP sweep
+- Gridlock: priority gate router with latching output
+- Integrator: running accumulator with leak and reset
+- Spectral Follower: adaptive threshold envelope follower with bandpass detector
+- Quantoffset: quantizer with CV offset
+- PSR: pingable scaled random (C++ rewrite)
+- Bletchley Park: codescan wavetable oscillator, reads arbitrary binary files as waveforms, hex address scan label, DC blocker, file chooser menu
+- Station X: codescan FIR filter, reads binary files as filter kernels, DC blocker, file chooser menu
+- Fade Mixer: 4-input crossfader with BranchMeter controls
+
+**New unit: spreadsheet**
+- Petrichor: Rainmaker-inspired multitap delay, 8 taps, 20s int16 buffer, per-tap SVF filtering (LP/BP/HP/notch), granular pitch shift with reverse, grid/stack tap distribution, tap/filter/volume/pan/cutoff/Q/type macro presets, gate-triggered randomization with 21 targets, feedback tone damping, V/Oct pitch, info overview display
+
+**Petrichor**
+- fast_tanh Pade approximant replaces tanhf in audio path
+- Encoder fix: RaindropControl no longer swallows encoder events when no readout focused
+- Max taps capped to 8 for CPU stability
+- DelayInfoGraphic overview: taps, time, grid, stack, grain, xform target
+
+**Bletchley Park + Station X**
+- Hardware file loading via od::FileReader
+- ScanControl with adaptive hex address label
+- DC blocker (~20Hz one-pole highpass) on output
+- Level control with VCA, control layout matches SingleCycle
+- File path serialization, deferred load for boot stability
+- Fixed std::string ABI hang on ARM (replaced with char array)
+
+**Build**
+- Requires er-301-stolmine firmware with FrameBuffer::readPixel moved to end of class for vanilla compatibility
+- Install script supports dev, release, and third-party package sets
+- All packages rebuilt against txo.8.6 firmware
 
 ### v1.3.2
 
