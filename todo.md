@@ -291,7 +291,7 @@ Spreadsheet-style parallel fixed filter bank. Mono and stereo.
 
 ## Multitap Delay
 
-Rainmaker-inspired multitap delay. 16 taps, 20s max int16 buffer (~1.875MB). Per-tap SVF filtering, granular pitch shift with reverse. Perlin contour overview visualization.
+Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer (~1.875MB). Per-tap SVF filtering, granular pitch shift with reverse. Info display overview.
 
 ### Architecture
 - Single shared int16 circular buffer, all taps read at different positions
@@ -344,9 +344,11 @@ Rainmaker-inspired multitap delay. 16 taps, 20s max int16 buffer (~1.875MB). Per
 - [x] Mono mixdown (L+R sum on mono chains via setMono)
 - [x] Overview always-visible sub-display (grain/taps/stack) with addName readout formatting
 - [x] Shift+home zeroing fix across all 5 sub-display controls (value-snapshot comparison)
-- [ ] Macro filter cutoff offset: CV-modulatable continuous shift of all per-tap cutoffs. On feedback shift SD + expansion (feedback + tone + filterOffset).
+- [ ] Improve Petrichor engine: audio quality issues at higher tap counts, granular artifacts, investigate feedback path and grain overlap. Currently capped at 8 taps for CPU stability.
 - [ ] Grain bypass for unity pitch (sample-accurate read when tap pitch is 0)
+- [ ] Macro filter cutoff offset: CV-modulatable continuous shift of all per-tap cutoffs. On feedback shift SD + expansion (feedback + tone + filterOffset).
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
+- [ ] Perlin noise LUT: RaindropGraphic has a working tileable 64x64 LUT approach (bake Perlin at init, bilinear sample at runtime). The firmware repo has Voronoi and Perlin screensavers that could adopt this pattern for efficient noise generation. See RaindropGraphic.h for the implementation.
 
 ## Fade Mixer
 
