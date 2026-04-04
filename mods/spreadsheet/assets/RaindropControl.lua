@@ -46,7 +46,7 @@ function RaindropControl:init(args)
   end)()
 
   local tapCountMap = (function()
-    local m = app.LinearDialMap(1, 16)
+    local m = app.LinearDialMap(1, 8)
     m:setSteps(4, 1, 0.25, 0.25)
     m:setRounding(1)
     return m
@@ -126,7 +126,7 @@ function RaindropControl:encoder(change, shifted)
     self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
     return true
   end
-  return true
+  return false
 end
 
 function RaindropControl:zeroPressed()
@@ -134,7 +134,7 @@ function RaindropControl:zeroPressed()
     self.focusedReadout:zero()
     return true
   end
-  return true
+  return false
 end
 
 function RaindropControl:cancelReleased(shifted)
@@ -142,7 +142,7 @@ function RaindropControl:cancelReleased(shifted)
     self.focusedReadout:restore()
     return true
   end
-  return true
+  return false
 end
 
 return RaindropControl

@@ -2,8 +2,10 @@
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
+#ifndef __arm__
+#include <stdio.h>
+#endif
 
 namespace stolmine
 {
@@ -25,6 +27,7 @@ namespace stolmine
 
   void CodescanOsc::loadData(const char *path)
   {
+#ifndef __arm__
     if (mData)
     {
       free(mData);
@@ -52,6 +55,9 @@ namespace stolmine
       mDataSize = (int)fread(mData, 1, size, f);
     }
     fclose(f);
+#else
+    (void)path;
+#endif
   }
 
   void CodescanOsc::process()

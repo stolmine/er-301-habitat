@@ -2,9 +2,13 @@
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
-#include <stdlib.h>
-#ifndef __arm__
+#include <string.h>
+
+#ifdef __arm__
+#include <od/extras/FileReader.h>
+#else
 #include <stdio.h>
+#include <stdlib.h>
 #endif
 
 namespace stolmine
@@ -22,19 +26,42 @@ namespace stolmine
   CodescanOsc::~CodescanOsc()
   {
     if (mData)
-      free(mData);
+    {
+      delete[] mData;
+      mData = nullptr;
+    }
   }
 
   void CodescanOsc::loadData(const char *path)
   {
-#ifndef __arm__
     if (mData)
     {
-      free(mData);
+      delete[] mData;
       mData = nullptr;
       mDataSize = 0;
     }
 
+    mFilePath = path ? path : "";
+
+#ifdef __arm__
+    od::FileReader reader;
+    if (!reader.open(mFilePath))
+      return;
+
+    uint32_t size = reader.getSizeInBytes();
+    if (size == 0)
+    {
+      reader.close();
+      return;
+    }
+
+    mData = new (std::nothrow) unsigned char[size];
+    if (mData)
+    {
+      mDataSize = (int)reader.readBytes(mData, size);
+    }
+    reader.close();
+#else
     FILE *f = fopen(path, "rb");
     if (!f)
       return;
@@ -49,15 +76,23 @@ namespace stolmine
       return;
     }
 
-    mData = (unsigned char *)malloc(size);
+    mData = new (std::nothrow) unsigned char[size];
     if (mData)
     {
       mDataSize = (int)fread(mData, 1, size, f);
     }
     fclose(f);
-#else
-    (void)path;
 #endif
+  }
+
+  const char *CodescanOsc::getFilePath()
+  {
+    return mFilePath.c_str();
+  }
+
+  int CodescanOsc::getDataSize()
+  {
+    return mDataSize;
   }
 
   void CodescanOsc::process()
@@ -76,6 +111,9 @@ namespace stolmine
     float sr = globalConfig.sampleRate;
     float f0 = CLAMP(0.1f, sr * 0.49f, mFundamental.value());
     float scan = CLAMP(0.0f, 1.0f, mScan.value());
+
+    // DC blocker coefficient: ~20Hz highpass at any sample rate
+    float dcCoeff = 6.2832f * 20.0f / sr; // 2*pi*fc/sr
 
     // Scan position: where in the data to read the waveform cycle
     // Use a 256-byte window as one waveform cycle
@@ -111,7 +149,11 @@ namespace stolmine
       // Signed 8-bit: interpret byte as signed, normalize to -1/+1
       float s0 = (float)((signed char)mData[scanOffset + idx0]) / 127.0f;
       float s1 = (float)((signed char)mData[scanOffset + idx1]) / 127.0f;
-      out[i] = s0 + (s1 - s0) * frac;
+      float raw = s0 + (s1 - s0) * frac;
+
+      // DC blocker: subtract tracked DC offset
+      mDCState += (raw - mDCState) * dcCoeff;
+      out[i] = raw - mDCState;
     }
   }
 

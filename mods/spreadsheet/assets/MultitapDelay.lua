@@ -59,7 +59,7 @@ local mixMap = floatMap(0, 1)
 local timeMap = floatMap(0.01, 20.0)
 local feedbackMap = floatMap(0, 0.95)
 local feedbackToneMap = floatMap(-1, 1)
-local tapCountMap = intMap(1, 16)
+local tapCountMap = intMap(1, 8)
 local skewMap = floatMap(-2, 2)
 local grainSizeMap = floatMap(0, 1)
 local inputLevelMap = floatMap(0, 4)
@@ -410,7 +410,7 @@ function MultitapDelay:applyRandomize(target, depth, spread)
     rndParam(self.objects.reverse, "Bias", 0, 1)
     rndParam(self.objects.stack, "Bias", 0, 4)
     rndParam(self.objects.grid, "Bias", 0, 4)
-    rndParam(self.objects.tapCount, "Bias", 1, 16)
+    rndParam(self.objects.tapCount, "Bias", 1, 8)
   elseif target == 1 then rndTapLevels(); rndTapPans(); rndTapPitch()  -- taps
   elseif target == 2 then -- delay
     rndParam(self.objects.masterTime, "Bias", 0.01, 20.0)
@@ -422,7 +422,7 @@ function MultitapDelay:applyRandomize(target, depth, spread)
     rndParam(self.objects.reverse, "Bias", 0, 1)
     rndParam(self.objects.stack, "Bias", 0, 4)
     rndParam(self.objects.grid, "Bias", 0, 4)
-    rndParam(self.objects.tapCount, "Bias", 1, 16)
+    rndParam(self.objects.tapCount, "Bias", 1, 8)
   elseif target == 3 then rndCutoff(); rndQ(); rndType()                -- filters
   elseif target == 4 then rndTapLevels()                                -- level
   elseif target == 5 then rndTapPans()                                  -- pan
@@ -439,9 +439,9 @@ function MultitapDelay:applyRandomize(target, depth, spread)
   elseif target == 16 then rndParam(self.objects.reverse, "Bias", 0, 1)         -- reverse
   elseif target == 17 then rndParam(self.objects.stack, "Bias", 0, 4)           -- stack
   elseif target == 18 then rndParam(self.objects.grid, "Bias", 0, 4)            -- grid
-  elseif target == 19 then rndParam(self.objects.tapCount, "Bias", 1, 16)       -- count
+  elseif target == 19 then rndParam(self.objects.tapCount, "Bias", 1, 8)       -- count
   elseif target == 20 then -- reset
-    for i = 0, 15 do
+    for i = 0, 7 do
       op:setTapLevel(i, 1.0); op:setTapPan(i, 0.0); op:setTapPitch(i, 0)
       op:setFilterCutoff(i, 10000); op:setFilterQ(i, 0.0); op:setFilterType(i, 0)
     end
@@ -748,7 +748,7 @@ function MultitapDelay:serialize()
   local t = Unit.serialize(self)
   local op = self.objects.op
   local taps = {}
-  for i = 0, 15 do
+  for i = 0, 7 do
     taps[tostring(i)] = {
       time = op:getTapTime(i),
       level = op:getTapLevel(i),
@@ -767,7 +767,7 @@ function MultitapDelay:deserialize(t)
   Unit.deserialize(self, t)
   if t.taps then
     local op = self.objects.op
-    for i = 0, 15 do
+    for i = 0, 7 do
       local tap = t.taps[tostring(i)]
       if tap then
         op:setTapTime(i, tap.time or 0.5)

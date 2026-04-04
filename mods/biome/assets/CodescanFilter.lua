@@ -3,6 +3,8 @@ local libstolmine = require "biome.libbiome"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local ScanControl = require "biome.ScanControl"
+local Task = require "Unit.MenuControl.Task"
 local Encoder = require "Encoder"
 
 local CodescanFilter = Class {}
@@ -17,8 +19,8 @@ end
 function CodescanFilter:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.CodescanFilter())
 
-  -- Load our own .so as the FIR kernel data
-  local libPath = app.roots.rear .. "/v0.7/libs/stolmine/libstolmine.so"
+  -- Default: load our own .so as the FIR kernel data
+  local libPath = app.roots.rear .. "/v0.7/libs/biome/libbiome.so"
   op:loadData(libPath)
 
   local scan = self:addObject("scan", app.ParameterAdapter())
@@ -49,6 +51,72 @@ function CodescanFilter:onLoadGraph(channelCount)
   self:addMonoBranch("mix", mix, "In", mix, "Out")
 end
 
+function CodescanFilter:serialize()
+  local t = Unit.serialize(self)
+  local path = self.objects.op:getFilePath()
+  if path and #path > 0 then
+    t.dataFile = path
+  end
+  return t
+end
+
+function CodescanFilter:deserialize(t)
+  Unit.deserialize(self, t)
+  if t.dataFile then
+    self.objects.op:loadData(t.dataFile)
+    if self.objects.op2 then
+      self.objects.op2:loadData(t.dataFile)
+    end
+  end
+end
+
+function CodescanFilter:doLoadFile()
+  local task = function(result)
+    if result and result.fullpath then
+      self.objects.op:loadData(result.fullpath)
+      if self.objects.op2 then
+        self.objects.op2:loadData(result.fullpath)
+      end
+    end
+  end
+  local FileChooser = require "Card.FileChooser"
+  local chooser = FileChooser {
+    msg = "Choose Data File",
+    goal = "load file",
+    pattern = "*",
+    history = "codescanFilterLoadFile"
+  }
+  chooser:subscribe("done", task)
+  chooser:show()
+end
+
+local menu = {
+  "loadFile",
+  "dataInfo"
+}
+
+function CodescanFilter:onShowMenu(objects, branches)
+  local controls = {}
+
+  controls.loadFile = Task {
+    description = "Load File",
+    task = function()
+      self:doLoadFile()
+    end
+  }
+
+  local size = objects.op:getDataSize()
+  local path = objects.op:getFilePath()
+  local name = path:match("[^/]+$") or "none"
+  local info = name .. " (" .. size .. " bytes)"
+
+  controls.dataInfo = Task {
+    description = info
+  }
+
+  return controls, menu
+end
+
 local views = {
   expanded = { "scan", "taps", "mix" },
   collapsed = {}
@@ -76,7 +144,7 @@ end
 function CodescanFilter:onLoadViews(objects, branches)
   local controls = {}
 
-  controls.scan = GainBias {
+  controls.scan = ScanControl {
     button = "scan",
     branch = branches.scan,
     description = "Scan",
@@ -85,7 +153,9 @@ function CodescanFilter:onLoadViews(objects, branches)
     biasMap = scanMap(),
     biasUnits = app.unitNone,
     biasPrecision = 3,
-    initialBias = 0.0
+    initialBias = 0.0,
+    op = objects.op,
+    windowSize = 64
   }
 
   controls.taps = GainBias {

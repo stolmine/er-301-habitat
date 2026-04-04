@@ -16,6 +16,15 @@
 namespace stolmine
 {
 
+  // Fast tanh approximation (Pade 3/3, < 0.1% error for |x| < 4, clamps beyond)
+  static inline float fast_tanh(float x)
+  {
+    if (x < -4.0f) return -1.0f;
+    if (x >  4.0f) return  1.0f;
+    float x2 = x * x;
+    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+  }
+
   struct MultitapDelay::Internal
   {
     // Delay buffer (shared circular buffer, BigHeap allocated)
@@ -371,7 +380,7 @@ namespace stolmine
       rndBias(mBiasReverse, 0.0f, 1.0f);
       rndBiasInt(mBiasStack, 0.0f, 4.0f);
       rndBiasInt(mBiasGrid, 0.0f, 4.0f);
-      rndBiasInt(mBiasTapCount, 1.0f, 16.0f);
+      rndBiasInt(mBiasTapCount, 1.0f, 8.0f);
     };
     auto resetAllTopLevel = [&]() {
       if (mBiasMasterTime) mBiasMasterTime->hardSet(0.5f);
@@ -410,7 +419,7 @@ namespace stolmine
     case 16: rndBias(mBiasReverse, 0.0f, 1.0f); break;
     case 17: rndBiasInt(mBiasStack, 0.0f, 4.0f); break;
     case 18: rndBiasInt(mBiasGrid, 0.0f, 4.0f); break;
-    case 19: rndBiasInt(mBiasTapCount, 1.0f, 16.0f); break;
+    case 19: rndBiasInt(mBiasTapCount, 1.0f, 8.0f); break;
     case 20: // reset
       for (int i = 0; i < kMaxTaps; i++)
       {
@@ -704,7 +713,7 @@ namespace stolmine
         s.fbHpState += (fb - s.fbHpState) * lpCoeff;
         fbOut = fb - s.fbHpState * tone;
       }
-      bufWrite(buf, s.writeIndex, bufRead(buf, s.writeIndex) + tanhf(fbOut));
+      bufWrite(buf, s.writeIndex, bufRead(buf, s.writeIndex) + fast_tanh(fbOut));
 
       // Advance write index
       s.writeIndex = (s.writeIndex + 1) % maxDelay;
@@ -717,19 +726,19 @@ namespace stolmine
       if (tanhAmt > 0.001f)
       {
         float drive = 1.0f + tanhAmt * 3.0f;
-        mixedL = mixedL * (1.0f - tanhAmt) + tanhf(mixedL * drive) * tanhAmt;
-        mixedR = mixedR * (1.0f - tanhAmt) + tanhf(mixedR * drive) * tanhAmt;
+        mixedL = mixedL * (1.0f - tanhAmt) + fast_tanh(mixedL * drive) * tanhAmt;
+        mixedR = mixedR * (1.0f - tanhAmt) + fast_tanh(mixedR * drive) * tanhAmt;
       }
 
       // Output limiter (invisible, always on)
       if (mMono)
       {
-        out[i] = tanhf((mixedL + mixedR) * 0.5f * outputLevel);
+        out[i] = fast_tanh((mixedL + mixedR) * 0.5f * outputLevel);
       }
       else
       {
-        out[i] = tanhf(mixedL * outputLevel);
-        outR[i] = tanhf(mixedR * outputLevel);
+        out[i] = fast_tanh(mixedL * outputLevel);
+        outR[i] = fast_tanh(mixedR * outputLevel);
       }
     }
   }

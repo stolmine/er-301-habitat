@@ -9,9 +9,10 @@
 namespace stolmine
 {
 
-  static const int kRainGridW = 42;
-  static const int kRainGridH = 64;
+  static const int kRainGridW = 36;
+  static const int kRainGridH = 54;
   static const int kNumThresholds = 5;
+  static const int kPerlinInterval = 1;
 
   struct TapSpot
   {
@@ -26,11 +27,13 @@ namespace stolmine
     RaindropGraphic(int left, int bottom, int width, int height)
         : od::Graphic(left, bottom, width, height)
     {
+      memset(mBaseField, 0, sizeof(mBaseField));
       memset(mField, 0, sizeof(mField));
       memset(mSlewedField, 0, sizeof(mSlewedField));
       mTime = 0.0f;
       mAggEnergy = 0.0f;
       mLastTapCount = 0;
+      mFrameCounter = 0;
 
       for (int i = 0; i < kMaxTaps; i++)
       {
@@ -100,17 +103,11 @@ namespace stolmine
           v);
     }
 
-    float fbm(float x, float y, int octaves)
+    float fbm(float x, float y)
     {
-      float val = 0.0f;
-      float amp = 0.5f;
-      float freq = 1.0f;
-      for (int i = 0; i < octaves; i++)
-      {
-        val += perlin(x * freq, y * freq) * amp;
-        freq *= 2.0f;
-        amp *= 0.5f;
-      }
+      float val = perlin(x, y) * 0.5f;
+      val += perlin(x * 2.0f, y * 2.0f) * 0.25f;
+      val += perlin(x * 4.0f, y * 4.0f) * 0.125f;
       return val;
     }
 
@@ -123,7 +120,8 @@ namespace stolmine
     }
 
     void drawContourPass(od::FrameBuffer &fb, int left, int bot,
-                         int gw, int gh, int fieldThresh, int color)
+                         int gw, int gh, float scaleX, float scaleY,
+                         int fieldThresh, int color)
     {
       static const int kSegTable[16][4] = {
           {-1, -1, -1, -1},
@@ -202,13 +200,19 @@ namespace stolmine
 
           if (segs[0] >= 0 && segs[1] >= 0 && eActive[segs[0]] && eActive[segs[1]])
           {
-            fb.line(color, left + (int)(ex[segs[0]] + 0.5f), bot + (int)(ey[segs[0]] + 0.5f),
-                    left + (int)(ex[segs[1]] + 0.5f), bot + (int)(ey[segs[1]] + 0.5f));
+            fb.line(color,
+                    left + (int)(ex[segs[0]] * scaleX + 0.5f),
+                    bot + (int)(ey[segs[0]] * scaleY + 0.5f),
+                    left + (int)(ex[segs[1]] * scaleX + 0.5f),
+                    bot + (int)(ey[segs[1]] * scaleY + 0.5f));
           }
           if (segs[2] >= 0 && segs[3] >= 0 && eActive[segs[2]] && eActive[segs[3]])
           {
-            fb.line(color, left + (int)(ex[segs[2]] + 0.5f), bot + (int)(ey[segs[2]] + 0.5f),
-                    left + (int)(ex[segs[3]] + 0.5f), bot + (int)(ey[segs[3]] + 0.5f));
+            fb.line(color,
+                    left + (int)(ex[segs[2]] * scaleX + 0.5f),
+                    bot + (int)(ey[segs[2]] * scaleY + 0.5f),
+                    left + (int)(ex[segs[3]] * scaleX + 0.5f),
+                    bot + (int)(ey[segs[3]] * scaleY + 0.5f));
           }
         }
       }
@@ -223,8 +227,11 @@ namespace stolmine
       int bot = mWorldBottom;
       int w = mWidth;
       int h = mHeight;
-      int gw = (w < kRainGridW) ? w : kRainGridW;
-      int gh = (h < kRainGridH) ? h : kRainGridH;
+      int gw = kRainGridW;
+      int gh = kRainGridH;
+      // Scale factors to map grid coords to screen pixels
+      float scaleX = (float)w / (float)(gw - 1);
+      float scaleY = (float)h / (float)(gh - 1);
 
       // --- 1. Read DSP state ---
       int tapCount = mpDelay->getTapCount();
@@ -244,13 +251,11 @@ namespace stolmine
       float slewCoeff = 1.0f / (1.0f + slewMs * 0.055f);
 
       // --- 3. Update tap spots ---
-      // Deactivate removed taps
       for (int i = tapCount; i < kMaxTaps; i++)
       {
         if (mSpots[i].assigned && mSpots[i].energy < 0.001f)
           mSpots[i].assigned = false;
       }
-      // Activate new taps
       for (int i = mLastTapCount; i < tapCount; i++)
       {
         if (!mSpots[i].assigned)
@@ -264,71 +269,82 @@ namespace stolmine
       {
         if (!mSpots[i].assigned)
           continue;
-
         float target = (i < tapCount) ? mpDelay->getTapEnergy(i) : 0.0f;
         mSpots[i].energy += (target - mSpots[i].energy) * slewCoeff;
         rawAgg += mSpots[i].energy;
       }
-
-      // --- 4. Aggregate energy ---
       mAggEnergy += (rawAgg - mAggEnergy) * slewCoeff;
 
-      // --- 5 & 6. Generate base Perlin field with domain warp ---
-      // Master time controls noise spatial scale
-      // Normalize masterTime (0.01-4.0) to 0-1, invert: short delay = fine, long = broad
-      float timeNorm = (masterTime - 0.01f) / 3.99f;
-      if (timeNorm < 0.0f) timeNorm = 0.0f;
-      if (timeNorm > 1.0f) timeNorm = 1.0f;
-      float noiseScale = 0.04f + (1.0f - timeNorm) * 0.08f;
-      float warpStrength = 3.0f;
-      // Bump radius scales with tap count
+      // --- 4. SLOW PATH: Perlin base field (every Nth frame) ---
+      mFrameCounter++;
+      if (mFrameCounter >= kPerlinInterval)
+      {
+        mFrameCounter = 0;
+
+        float timeNorm = (masterTime - 0.01f) / 19.99f;
+        if (timeNorm < 0.0f) timeNorm = 0.0f;
+        if (timeNorm > 1.0f) timeNorm = 1.0f;
+        float noiseScale = 0.04f + (1.0f - timeNorm) * 0.08f;
+        float warpStrength = 3.0f;
+
+        for (int gy = 0; gy < gh; gy++)
+        {
+          float baseY = (float)gy * noiseScale + mTime;
+          for (int gx = 0; gx < gw; gx++)
+          {
+            float baseX = (float)gx * noiseScale;
+
+            // Domain warp
+            float wx = baseX + mAggEnergy * perlin(baseX * 2.0f, baseY * 2.0f + 100.0f) * warpStrength;
+            float wy = baseY + mAggEnergy * perlin(baseX * 2.0f + 50.0f, baseY * 2.0f) * warpStrength;
+
+            mBaseField[gy * gw + gx] = fbm(wx, wy);
+          }
+        }
+      }
+
+      // --- 5. FAST PATH: composite base + tap bumps (every frame) ---
       float bumpRadius = 8.0f / sqrtf((float)tapCount);
+      float r2 = bumpRadius * bumpRadius;
+      float r2x4 = r2 * 4.0f;
 
       for (int gy = 0; gy < gh; gy++)
       {
-        float baseY = (float)gy * noiseScale + mTime;
         for (int gx = 0; gx < gw; gx++)
         {
-          float baseX = (float)gx * noiseScale;
+          float val = mBaseField[gy * gw + gx];
 
-          // Domain warp: aggregate energy distorts coordinates
-          float wx = baseX + mAggEnergy * perlin(baseX * 2.0f, baseY * 2.0f + 100.0f) * warpStrength;
-          float wy = baseY + mAggEnergy * perlin(baseX * 2.0f + 50.0f, baseY * 2.0f) * warpStrength;
-
-          float val = fbm(wx, wy, 3);
-
-          // --- 7. Add Gaussian bumps from tap spots ---
-          for (int t = 0; t < kMaxTaps; t++)
+          for (int t = 0; t < tapCount; t++)
           {
             if (!mSpots[t].assigned || mSpots[t].energy < 0.001f)
               continue;
             float dx = (float)gx - mSpots[t].x;
             float dy = (float)gy - mSpots[t].y;
             float dist2 = dx * dx + dy * dy;
-            float r2 = bumpRadius * bumpRadius;
-            if (dist2 < r2 * 4.0f)
-              val += mSpots[t].energy * expf(-dist2 / r2);
+            if (dist2 < r2x4)
+            {
+              float u = dist2 / r2;
+              float g = 1.0f / (1.0f + u);
+              val += mSpots[t].energy * g * g;
+            }
           }
 
           int ival = (int)((val + 0.5f) * 255.0f);
-          if (ival < 0)
-            ival = 0;
-          if (ival > 255)
-            ival = 255;
+          if (ival < 0) ival = 0;
+          if (ival > 255) ival = 255;
           mField[gy * gw + gx] = (uint8_t)ival;
         }
       }
 
-      // --- 8. Slew field toward target ---
+      // --- 6. Slew field ---
       for (int i = 0; i < gw * gh; i++)
       {
-        float target = (float)mField[i];
         float current = (float)mSlewedField[i];
-        current += (target - current) * slewCoeff;
+        current += ((float)mField[i] - current) * slewCoeff;
         mSlewedField[i] = (uint8_t)(current + 0.5f);
       }
 
-      // --- 9. Adaptive multi-threshold marching squares ---
+      // --- 7. Marching squares contours ---
       int fieldMin = 255, fieldMax = 0;
       for (int i = 0; i < gw * gh; i++)
       {
@@ -340,14 +356,10 @@ namespace stolmine
 
       for (int lvl = 0; lvl < kNumThresholds; lvl++)
       {
-        // Space thresholds evenly across actual field range
         int thresh = fieldMin + (fieldRange * (lvl + 1)) / (kNumThresholds + 1);
-
         int brightness = WHITE - lvl * 3;
-        if (brightness < 3)
-          brightness = 3;
-
-        drawContourPass(fb, left, bot, gw, gh, thresh, brightness);
+        if (brightness < 3) brightness = 3;
+        drawContourPass(fb, left, bot, gw, gh, scaleX, scaleY, thresh, brightness);
       }
     }
 #endif
@@ -367,8 +379,10 @@ namespace stolmine
     MultitapDelay *mpDelay = 0;
     int mSelectedTap = -1;
     float mTime;
+    int mFrameCounter;
     int mPerm[512];
-    uint8_t mField[kRainGridW * kRainGridH];
+    float mBaseField[kRainGridW * kRainGridH]; // Perlin values (slow update)
+    uint8_t mField[kRainGridW * kRainGridH];   // composite (base + bumps)
     uint8_t mSlewedField[kRainGridW * kRainGridH];
     TapSpot mSpots[kMaxTaps];
     float mAggEnergy;

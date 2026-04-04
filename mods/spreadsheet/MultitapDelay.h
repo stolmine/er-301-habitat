@@ -8,7 +8,7 @@
 namespace stolmine
 {
 
-  static const int kMaxTaps = 16;
+  static const int kMaxTaps = 8;
   static const int kGrainsPerTap = 3;
   static const int kSineLUTSize = 256;
 

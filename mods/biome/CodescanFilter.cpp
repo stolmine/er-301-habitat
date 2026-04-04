@@ -3,9 +3,12 @@
 #include <hal/ops.h>
 #include <math.h>
 #include <string.h>
-#include <stdlib.h>
-#ifndef __arm__
+
+#ifdef __arm__
+#include <od/extras/FileReader.h>
+#else
 #include <stdio.h>
+#include <stdlib.h>
 #endif
 
 namespace stolmine
@@ -24,19 +27,42 @@ namespace stolmine
   CodescanFilter::~CodescanFilter()
   {
     if (mData)
-      free(mData);
+    {
+      delete[] mData;
+      mData = nullptr;
+    }
   }
 
   void CodescanFilter::loadData(const char *path)
   {
-#ifndef __arm__
     if (mData)
     {
-      free(mData);
+      delete[] mData;
       mData = nullptr;
       mDataSize = 0;
     }
 
+    mFilePath = path ? path : "";
+
+#ifdef __arm__
+    od::FileReader reader;
+    if (!reader.open(mFilePath))
+      return;
+
+    uint32_t size = reader.getSizeInBytes();
+    if (size == 0)
+    {
+      reader.close();
+      return;
+    }
+
+    mData = new (std::nothrow) unsigned char[size];
+    if (mData)
+    {
+      mDataSize = (int)reader.readBytes(mData, size);
+    }
+    reader.close();
+#else
     FILE *f = fopen(path, "rb");
     if (!f)
       return;
@@ -51,15 +77,23 @@ namespace stolmine
       return;
     }
 
-    mData = (unsigned char *)malloc(size);
+    mData = new (std::nothrow) unsigned char[size];
     if (mData)
     {
       mDataSize = (int)fread(mData, 1, size, f);
     }
     fclose(f);
-#else
-    (void)path;
 #endif
+  }
+
+  const char *CodescanFilter::getFilePath()
+  {
+    return mFilePath.c_str();
+  }
+
+  int CodescanFilter::getDataSize()
+  {
+    return mDataSize;
   }
 
   void CodescanFilter::process()
@@ -77,6 +111,10 @@ namespace stolmine
     float scan = CLAMP(0.0f, 1.0f, mScan.value());
     int numTaps = CLAMP(4, kMaxFIRTaps, (int)(mTaps.value() + 0.5f));
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
+
+    // DC blocker coefficient: ~20Hz highpass at any sample rate
+    float sr = globalConfig.sampleRate;
+    float dcCoeff = 6.2832f * 20.0f / sr;
 
     // Read FIR kernel from data at scan position
     int maxOffset = mDataSize - numTaps;
@@ -116,7 +154,11 @@ namespace stolmine
         wet += mDelayLine[readIdx] * kernel[t];
       }
 
-      out[i] = in[i] * (1.0f - mix) + wet * mix;
+      float mixed = in[i] * (1.0f - mix) + wet * mix;
+
+      // DC blocker on output
+      mDCState += (mixed - mDCState) * dcCoeff;
+      out[i] = mixed - mDCState;
     }
   }
 

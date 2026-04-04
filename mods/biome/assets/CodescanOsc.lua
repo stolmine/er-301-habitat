@@ -5,6 +5,8 @@ local Unit = require "Unit"
 local Pitch = require "Unit.ViewControl.Pitch"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
+local ScanControl = require "biome.ScanControl"
+local Task = require "Unit.MenuControl.Task"
 local Encoder = require "Encoder"
 
 local CodescanOsc = Class {}
@@ -19,8 +21,8 @@ end
 function CodescanOsc:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.CodescanOsc())
 
-  -- Load our own .so as the wavetable data
-  local libPath = app.roots.rear .. "/v0.7/libs/stolmine/libstolmine.so"
+  -- Default: load our own .so as the wavetable data
+  local libPath = app.roots.rear .. "/v0.7/libs/biome/libbiome.so"
   op:loadData(libPath)
 
   local tune = self:addObject("tune", app.ConstantOffset())
@@ -36,22 +38,90 @@ function CodescanOsc:onLoadGraph(channelCount)
   connect(tune, "Out", tuneRange, "In")
   connect(tune, "Out", op, "V/Oct")
   connect(sync, "Out", op, "Sync")
-  connect(op, "Out", self, "Out1")
+  local vca = self:addObject("vca", app.Multiply())
+  local level = self:addObject("level", app.GainBias())
+  local levelRange = self:addObject("levelRange", app.MinMax())
+
+  connect(level, "Out", levelRange, "In")
+  connect(level, "Out", vca, "Left")
+  connect(op, "Out", vca, "Right")
+  connect(vca, "Out", self, "Out1")
   if channelCount > 1 then
-    connect(op, "Out", self, "Out2")
+    connect(vca, "Out", self, "Out2")
   end
 
   tie(op, "Fundamental", f0, "Out")
   tie(op, "Scan", scan, "Out")
 
+  self:addMonoBranch("scan", scan, "In", scan, "Out")
   self:addMonoBranch("tune", tune, "In", tune, "Out")
   self:addMonoBranch("f0", f0, "In", f0, "Out")
-  self:addMonoBranch("scan", scan, "In", scan, "Out")
   self:addMonoBranch("sync", sync, "In", sync, "Out")
+  self:addMonoBranch("level", level, "In", level, "Out")
+end
+
+function CodescanOsc:serialize()
+  local t = Unit.serialize(self)
+  local path = self.objects.op:getFilePath()
+  if path and #path > 0 then
+    t.dataFile = path
+  end
+  return t
+end
+
+function CodescanOsc:deserialize(t)
+  Unit.deserialize(self, t)
+  if t.dataFile then
+    self.objects.op:loadData(t.dataFile)
+  end
+end
+
+function CodescanOsc:doLoadFile()
+  local task = function(result)
+    if result and result.fullpath then
+      self.objects.op:loadData(result.fullpath)
+    end
+  end
+  local FileChooser = require "Card.FileChooser"
+  local chooser = FileChooser {
+    msg = "Choose Data File",
+    goal = "load file",
+    pattern = "*",
+    history = "codescanOscLoadFile"
+  }
+  chooser:subscribe("done", task)
+  chooser:show()
+end
+
+local menu = {
+  "loadFile",
+  "dataInfo"
+}
+
+function CodescanOsc:onShowMenu(objects, branches)
+  local controls = {}
+
+  controls.loadFile = Task {
+    description = "Load File",
+    task = function()
+      self:doLoadFile()
+    end
+  }
+
+  local size = objects.op:getDataSize()
+  local path = objects.op:getFilePath()
+  local name = path:match("[^/]+$") or "none"
+  local info = name .. " (" .. size .. " bytes)"
+
+  controls.dataInfo = Task {
+    description = info
+  }
+
+  return controls, menu
 end
 
 local views = {
-  expanded = { "tune", "scan", "f0", "sync" },
+  expanded = { "scan", "tune", "f0", "sync", "level" },
   collapsed = {}
 }
 
@@ -70,15 +140,7 @@ end
 function CodescanOsc:onLoadViews(objects, branches)
   local controls = {}
 
-  controls.tune = Pitch {
-    button = "V/Oct",
-    branch = branches.tune,
-    description = "V/Oct",
-    offset = objects.tune,
-    range = objects.tuneRange
-  }
-
-  controls.scan = GainBias {
+  controls.scan = ScanControl {
     button = "scan",
     branch = branches.scan,
     description = "Scan",
@@ -87,7 +149,17 @@ function CodescanOsc:onLoadViews(objects, branches)
     biasMap = scanMap(),
     biasUnits = app.unitNone,
     biasPrecision = 3,
-    initialBias = 0.0
+    initialBias = 0.0,
+    op = objects.op,
+    windowSize = 256
+  }
+
+  controls.tune = Pitch {
+    button = "V/Oct",
+    branch = branches.tune,
+    description = "V/Oct",
+    offset = objects.tune,
+    range = objects.tuneRange
   }
 
   controls.f0 = GainBias {
@@ -107,6 +179,16 @@ function CodescanOsc:onLoadViews(objects, branches)
     branch = branches.sync,
     description = "Sync",
     comparator = objects.sync
+  }
+
+  controls.level = GainBias {
+    button = "level",
+    description = "Level",
+    branch = branches.level,
+    gainbias = objects.level,
+    range = objects.levelRange,
+    biasMap = Encoder.getMap("[-1,1]"),
+    initialBias = 0.5
   }
 
   return controls, views
