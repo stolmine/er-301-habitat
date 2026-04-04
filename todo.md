@@ -37,7 +37,7 @@ Refinements:
 - [x] Bipolar parameter correctness — fixed Peaks/DMC bipolar faders and defaults
 - [x] Warps algorithm range clamped to match Lua fader
 - [x] Modulation gain scaling — verified default gainMap [-10,10] is correct for both polarities
-- [ ] Shift-toggle sub-display audit: apply deferred toggle pattern (shift tap = toggle, shift hold + encoder = fine/coarse) to all shift-toggle controls across the package. Currently applied to MixControl and TimeControl. Review: Filterbank MixControl, TransformGateControl, any future shift-toggle controls.
+- [x] Shift-toggle sub-display audit: value-snapshot pattern for shift+home zeroing applied to all 5 Petrichor controls (FeedbackControl, TimeControl, MixControl, TransformGateControl, RatchetControl). Review: Filterbank MixControl and any future shift-toggle controls.
 - [ ] Sub-display readout audit: ensure all expansion-only controls have matching readouts on parent control's shift sub-display (per feedback_expansion_subdisplay convention).
 - [ ] Spreadsheet list focus indication: dim the selected step/band rectangle when control is unfocused, bright when focused. Currently always WHITE, hard to tell focused from unfocused. Apply to BandListGraphic, TapListGraphic, StepListGraphic, SegmentListGraphic.
 
@@ -290,21 +290,22 @@ Spreadsheet-style parallel fixed filter bank. Mono and stereo.
 
 ## Multitap Delay
 
-Rainmaker-inspired multitap delay. 16 taps, 2s max (~384KB shared buffer). Per-tap SVF filtering (FFB Q parametrization), pitch shifting via granular delay. Raindrop particle visualization.
+Rainmaker-inspired multitap delay. 16 taps, 20s max int16 buffer (~1.875MB). Per-tap SVF filtering, granular pitch shift with reverse. Perlin contour overview visualization.
 
 ### Architecture
-- Single shared circular buffer, all taps read at different positions
-- Per-tap SVF: LP/BP/HP/notch, FFB's Q scaling (baseQ, freq boost, q_loss)
-- Granular delay engine (MonoGrainDelay) for pitch shifting
-- Tap distribution: time * pow((i+1)/N, skew_exp), stack groups
+- Single shared int16 circular buffer, all taps read at different positions
+- Per-tap SVF: LP/BP/HP/notch, FFB's Q scaling
+- Granular delay engine for pitch shifting with per-grain reverse probability
+- Grid-based tap distribution (Rainmaker-style): time * (i+1)/grid with skew, stack grouping
+- Mono mixdown on mono chains (L+R sum)
 
 ### UI layout (7 plies)
 1. V/Oct pitch (Pitch control, ConstantOffset)
 2. Tap list (TapListControl: level/pan/pitch, expand: filters + stack + macros + tapCount)
-3. Overview (raindrop particle system)
-4. Master time (TimeControl, shift SD: grain/skew/tapCount, expand: time + grainSize + skew + tapCount)
+3. Overview (Perlin contour viz, always-visible SD: grain/taps/stack, expand: overview + grainSize + tapCount + stack)
+4. Master time (TimeControl, shift SD: grid/rev/skew, expand: time + grid + drift + reverse + skew)
 5. Feedback (FeedbackControl, shift SD: tone, expand: feedback + feedbackTone)
-6. Xform gate (TransformGateControl, gate trigger for rot/rnd/rev/etc)
+6. Xform gate (TransformGateControl, gate trigger for randomization)
 7. Mix (MixControl, shift SD: input/output/tanh, expand: mix + inputLevel + outputLevel + tanhAmt)
 
 ### Implemented
@@ -327,14 +328,23 @@ Rainmaker-inspired multitap delay. 16 taps, 2s max (~384KB shared buffer). Per-t
 ### Remaining
 - [x] Tap macros: volume (11: full/off/20-80%/asc/desc/even/odd/sine), pan (11: center/L/R/L>R/R>L/evens/odds/cluster), cutoff (6), Q (11: off/20-80%/full/asc/desc/even/odd/sine), type (16: all/evens/odds/cyclical/cluster)
 - [ ] FilterListControl type label doesn't update when macros change filter type externally (readout is correct, label text stale)
-- [ ] Stack parameter (groups coincident taps, in taps expansion after filters)
+- [x] Stack parameter (groups coincident taps, in overview expansion)
 - [x] Xform gate: single target selector (17 positions) + depth + fire. Gate fires randomization via Bias ref pattern.
   - Targets: rnd all, rnd taps, rnd delay, rnd filters, rnd level, rnd pan, rnd pitch, rnd cutoff, rnd Q, rnd type, rnd time, rnd fdbk, rnd tone, rnd skew, rnd grain, rnd count, reset
   - Depth (0-1): max deviation amount
   - Sub-display: target / depth / fire. Gate input on comparator.
 - [ ] Xform spread parameter (0-1): 0 = perturb around current values, 1 = full param range (deferred)
-- [x] Raindrop overview graphic (particle system, energy-driven brightness)
+- [x] Raindrop overview graphic: Perlin contour viz with tap-energy hotspots, domain warp, adaptive thresholds, feedback-controlled slew
+- [x] Drift parameter (per-tap sinusoidal time jitter)
+- [x] Reverse parameter (per-grain playback direction probability)
+- [x] Grid parameter (Rainmaker-style taps-per-beat spacing, 1/2/4/8/16)
+- [x] Stack parameter (groups coincident taps, 1/2/4/8/16)
+- [x] 20s delay buffer via int16 storage (2x memory efficiency)
+- [x] Mono mixdown (L+R sum on mono chains via setMono)
+- [x] Overview always-visible sub-display (grain/taps/stack) with addName readout formatting
+- [x] Shift+home zeroing fix across all 5 sub-display controls (value-snapshot comparison)
 - [ ] Macro filter cutoff offset: CV-modulatable continuous shift of all per-tap cutoffs. On feedback shift SD + expansion (feedback + tone + filterOffset).
+- [ ] Grain bypass for unity pitch (sample-accurate read when tap pitch is 0)
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
 
 ## Fade Mixer
