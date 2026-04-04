@@ -250,11 +250,29 @@ function RatchetControl:onCursorLeave(spot)
 end
 
 function RatchetControl:shiftPressed()
+  if self.focusedReadout then
+    self.shiftDeferred = true
+    self.shiftSnapshot = self.focusedReadout:getValueInUnits()
+    return true
+  end
+  self.shiftDeferred = false
   self:setRatchetMode(not self.ratchetMode)
   return true
 end
 
 function RatchetControl:shiftReleased()
+  if self.shiftDeferred then
+    self.shiftDeferred = false
+    if self.focusedReadout and self.shiftSnapshot then
+      local cur = self.focusedReadout:getValueInUnits()
+      if cur == self.shiftSnapshot then
+        self:setRatchetMode(not self.ratchetMode)
+      end
+    else
+      self:setRatchetMode(not self.ratchetMode)
+    end
+    self.shiftSnapshot = nil
+  end
   return true
 end
 

@@ -240,7 +240,7 @@ namespace stolmine
       mTime += 0.02f * timeMul;
 
       // --- 2. Feedback-controlled slew ---
-      float slewMs = 50.0f + feedback * 300.0f;
+      float slewMs = 150.0f + feedback * 300.0f;
       float slewCoeff = 1.0f / (1.0f + slewMs * 0.055f);
 
       // --- 3. Update tap spots ---
@@ -275,7 +275,11 @@ namespace stolmine
 
       // --- 5 & 6. Generate base Perlin field with domain warp ---
       // Master time controls noise spatial scale
-      float noiseScale = 0.04f + (1.0f - masterTime) * 0.08f;
+      // Normalize masterTime (0.01-4.0) to 0-1, invert: short delay = fine, long = broad
+      float timeNorm = (masterTime - 0.01f) / 3.99f;
+      if (timeNorm < 0.0f) timeNorm = 0.0f;
+      if (timeNorm > 1.0f) timeNorm = 1.0f;
+      float noiseScale = 0.04f + (1.0f - timeNorm) * 0.08f;
       float warpStrength = 3.0f;
       // Bump radius scales with tap count
       float bumpRadius = 8.0f / sqrtf((float)tapCount);
@@ -324,17 +328,21 @@ namespace stolmine
         mSlewedField[i] = (uint8_t)(current + 0.5f);
       }
 
-      // --- 9. Multi-threshold marching squares ---
-      int baseThresh = (int)((0.1f + 0.5f) * 255.0f);
-      int threshSpacing = 20;
+      // --- 9. Adaptive multi-threshold marching squares ---
+      int fieldMin = 255, fieldMax = 0;
+      for (int i = 0; i < gw * gh; i++)
+      {
+        if (mSlewedField[i] < fieldMin) fieldMin = mSlewedField[i];
+        if (mSlewedField[i] > fieldMax) fieldMax = mSlewedField[i];
+      }
+      int fieldRange = fieldMax - fieldMin;
+      if (fieldRange < 10) fieldRange = 10;
 
       for (int lvl = 0; lvl < kNumThresholds; lvl++)
       {
-        int thresh = baseThresh + lvl * threshSpacing;
-        if (thresh > 250)
-          break;
+        // Space thresholds evenly across actual field range
+        int thresh = fieldMin + (fieldRange * (lvl + 1)) / (kNumThresholds + 1);
 
-        // Outer contours brightest, inner dimmer
         int brightness = WHITE - lvl * 3;
         if (brightness < 3)
           brightness = 3;

@@ -40,6 +40,9 @@ namespace stolmine
     // Per-tap energy (for visualization)
     float tapEnergy[kMaxTaps];
 
+    // Per-tap drift offsets (smoothly varying random time jitter)
+    float driftPhase[kMaxTaps];
+
     // Granular pitch shift state
     struct TapGrain
     {
@@ -48,6 +51,7 @@ namespace stolmine
       float phaseDelta;
       float speed;
       bool active;
+      bool reverse;
     };
     TapGrain grains[kMaxTaps][kGrainsPerTap];
     int grainSpawnCounter[kMaxTaps];
@@ -82,9 +86,13 @@ namespace stolmine
         filterType[i] = TAP_FILTER_OFF;
         filters[i].Init();
         tapEnergy[i] = 0.0f;
+        driftPhase[i] = (float)i * 1.618f; // golden ratio spread
         grainSpawnCounter[i] = 0;
         for (int g = 0; g < kGrainsPerTap; g++)
+        {
           grains[i][g].active = false;
+          grains[i][g].reverse = false;
+        }
       }
       // Pre-compute sine LUT (half sine = grain envelope)
       for (int i = 0; i < kSineLUTSize; i++)
@@ -109,6 +117,8 @@ namespace stolmine
     addParameter(mVOctPitch);
     addParameter(mSkew);
     addParameter(mGrainSize);
+    addParameter(mDrift);
+    addParameter(mReverse);
     addParameter(mXformTarget);
     addParameter(mXformDepth);
     addParameter(mXformSpread);
@@ -279,7 +289,9 @@ namespace stolmine
     case 2: mBiasFeedbackTone = param; break;
     case 3: mBiasSkew = param; break;
     case 4: mBiasGrainSize = param; break;
-    case 5: mBiasTapCount = param; break;
+    case 5: mBiasDrift = param; break;
+    case 6: mBiasReverse = param; break;
+    case 7: mBiasTapCount = param; break;
     }
   }
 
@@ -317,11 +329,13 @@ namespace stolmine
       if (p) p->hardSet(floorf(randomizeValue(p->value(), mn, mx, depth, spread) + 0.5f));
     };
     auto rndAllTopLevel = [&]() {
-      rndBias(mBiasMasterTime, 0.01f, 2.0f);
+      rndBias(mBiasMasterTime, 0.01f, 4.0f);
       rndBias(mBiasFeedback, 0.0f, 0.95f);
       rndBias(mBiasFeedbackTone, -1.0f, 1.0f);
       rndBias(mBiasSkew, -2.0f, 2.0f);
       rndBias(mBiasGrainSize, 0.0f, 1.0f);
+      rndBias(mBiasDrift, 0.0f, 1.0f);
+      rndBias(mBiasReverse, 0.0f, 1.0f);
       rndBiasInt(mBiasTapCount, 1.0f, 16.0f);
     };
     auto resetAllTopLevel = [&]() {
@@ -330,6 +344,8 @@ namespace stolmine
       if (mBiasFeedbackTone) mBiasFeedbackTone->hardSet(0.0f);
       if (mBiasSkew) mBiasSkew->hardSet(0.0f);
       if (mBiasGrainSize) mBiasGrainSize->hardSet(0.5f);
+      if (mBiasDrift) mBiasDrift->hardSet(0.0f);
+      if (mBiasReverse) mBiasReverse->hardSet(0.0f);
       if (mBiasTapCount) mBiasTapCount->hardSet(4.0f);
     };
 
@@ -348,13 +364,15 @@ namespace stolmine
     case 7: rndCutoff(); break;
     case 8: rndQ(); break;
     case 9: rndType(); break;
-    case 10: rndBias(mBiasMasterTime, 0.01f, 2.0f); break;
+    case 10: rndBias(mBiasMasterTime, 0.01f, 4.0f); break;
     case 11: rndBias(mBiasFeedback, 0.0f, 0.95f); break;
     case 12: rndBias(mBiasFeedbackTone, -1.0f, 1.0f); break;
     case 13: rndBias(mBiasSkew, -2.0f, 2.0f); break;
     case 14: rndBias(mBiasGrainSize, 0.0f, 1.0f); break;
-    case 15: rndBiasInt(mBiasTapCount, 1.0f, 16.0f); break;
-    case 16: // reset
+    case 15: rndBias(mBiasDrift, 0.0f, 1.0f); break;
+    case 16: rndBias(mBiasReverse, 0.0f, 1.0f); break;
+    case 17: rndBiasInt(mBiasTapCount, 1.0f, 16.0f); break;
+    case 18: // reset
       for (int i = 0; i < kMaxTaps; i++)
       {
         s.tapLevel[i] = 1.0f; s.tapPan[i] = 0.0f; s.tapPitch[i] = 0.0f;
@@ -396,13 +414,15 @@ namespace stolmine
     int tapCount = CLAMP(1, kMaxTaps, (int)(mTapCount.value() + 0.5f));
     mCachedTapCount = tapCount;
 
-    float masterTime = CLAMP(0.001f, 2.0f, mMasterTime.value());
+    float masterTime = CLAMP(0.001f, 4.0f, mMasterTime.value());
     float feedback = CLAMP(0.0f, 0.95f, mFeedback.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
     float tanhAmt = CLAMP(0.0f, 1.0f, mTanhAmt.value());
     float skew = mSkew.value();
+    float drift = CLAMP(0.0f, 1.0f, mDrift.value());
+    float reverse = CLAMP(0.0f, 1.0f, mReverse.value());
     float grainSizeParam = CLAMP(0.0f, 1.0f, mGrainSize.value());
 
     int maxDelay = mMaxDelayInSamples;
@@ -418,14 +438,23 @@ namespace stolmine
     if (grainPeriod < 32) grainPeriod = 32;
     float grainPhaseDelta = 1.0f / (float)grainDuration;
 
-    // Recompute tap distribution only when params change
-    bool distDirty = (tapCount != mLastTapCount || skew != mLastSkew || masterTime != mLastMasterTime);
+    // Recompute tap distribution when params change, or every frame if drift active
+    bool distDirty = (tapCount != mLastTapCount || skew != mLastSkew
+                      || masterTime != mLastMasterTime || drift != mLastDrift
+                      || drift > 0.0f);
     if (distDirty)
     {
       float skewExp = powf(2.0f, skew);
       for (int t = 0; t < tapCount; t++)
       {
         float pos = powf((float)(t + 1) / (float)tapCount, skewExp);
+        // Drift: per-tap slow sinusoidal offset, max +/-10% of master time
+        if (drift > 0.001f)
+        {
+          s.driftPhase[t] += 0.0003f + 0.0001f * (float)t;
+          float offset = sinf(s.driftPhase[t]) * drift * 0.1f;
+          pos = CLAMP(0.001f, 1.0f, pos + offset);
+        }
         s.tapTime[t] = pos;
         mCachedDelaySamples[t] = pos * masterTime * sr;
       }
@@ -437,10 +466,14 @@ namespace stolmine
         mCachedPanL[t] = cosf(a);
         mCachedPanR[t] = sinf(a);
       }
+      // Only reload edit buffer when discrete params change, not on drift frames
+      bool paramsChanged = (tapCount != mLastTapCount || skew != mLastSkew || masterTime != mLastMasterTime);
       mLastTapCount = tapCount;
       mLastSkew = skew;
       mLastMasterTime = masterTime;
-      loadTap(mLastLoadedTap);
+      mLastDrift = drift;
+      if (paramsChanged)
+        loadTap(mLastLoadedTap);
     }
 
     // Update filter coefficients -- FFB parametrization
@@ -530,6 +563,9 @@ namespace stolmine
               s.grains[t][g].phase = 0.0f;
               s.grains[t][g].phaseDelta = grainPhaseDelta;
               s.grains[t][g].speed = tapSpeed;
+              // Reverse: probability-based per grain
+              bool rev = reverse > 0.001f && ((float)rand() / (float)RAND_MAX) < reverse;
+              s.grains[t][g].reverse = rev;
               // Start reading from the tap's delay position
               float startPos = (float)s.writeIndex - delaySamples;
               while (startPos < 0.0f) startPos += (float)maxDelay;
@@ -555,8 +591,9 @@ namespace stolmine
           int idx2 = (idx + 1) % maxDelay;
           float sample = buf[idx] + (buf[idx2] - buf[idx]) * frac;
           tapOut += sample * env;
-          // Advance grain
-          gr.readPos += gr.speed;
+          // Advance grain (forward or reverse)
+          gr.readPos += gr.reverse ? -gr.speed : gr.speed;
+          if (gr.readPos < 0.0f) gr.readPos += (float)maxDelay;
           gr.phase += gr.phaseDelta;
           if (gr.phase >= 1.0f) gr.active = false;
         }

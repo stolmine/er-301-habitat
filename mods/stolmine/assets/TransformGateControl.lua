@@ -316,11 +316,29 @@ function TransformGateControl:onCursorLeave(spot)
 end
 
 function TransformGateControl:shiftPressed()
+  if self.focusedReadout then
+    self.shiftDeferred = true
+    self.shiftSnapshot = self.focusedReadout:getValueInUnits()
+    return true
+  end
+  self.shiftDeferred = false
   self:setMathMode(not self.mathMode)
   return true
 end
 
 function TransformGateControl:shiftReleased()
+  if self.shiftDeferred then
+    self.shiftDeferred = false
+    if self.focusedReadout and self.shiftSnapshot then
+      local cur = self.focusedReadout:getValueInUnits()
+      if cur == self.shiftSnapshot then
+        self:setMathMode(not self.mathMode)
+      end
+    else
+      self:setMathMode(not self.mathMode)
+    end
+    self.shiftSnapshot = nil
+  end
   return true
 end
 

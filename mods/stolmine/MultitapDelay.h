@@ -44,6 +44,8 @@ namespace stolmine
     od::Parameter mVOctPitch{"VOctPitch", 0.0f};
     od::Parameter mSkew{"Skew", 0.0f};
     od::Parameter mGrainSize{"GrainSize", 0.5f};
+    od::Parameter mDrift{"Drift", 0.0f};
+    od::Parameter mReverse{"Reverse", 0.0f};
     od::Parameter mInputLevel{"InputLevel", 1.0f};
     od::Parameter mOutputLevel{"OutputLevel", 1.0f};
     od::Parameter mTanhAmt{"TanhAmt", 0.0f};
@@ -113,6 +115,7 @@ namespace stolmine
     int mLastTapCount = -1;
     float mLastSkew = -999.0f;
     float mLastMasterTime = -1.0f;
+    float mLastDrift = -1.0f;
     float mCachedDelaySamples[kMaxTaps];
     float mCachedPanL[kMaxTaps];
     float mCachedPanR[kMaxTaps];
@@ -127,6 +130,8 @@ namespace stolmine
     od::Parameter *mBiasFeedbackTone = 0;
     od::Parameter *mBiasSkew = 0;
     od::Parameter *mBiasGrainSize = 0;
+    od::Parameter *mBiasDrift = 0;
+    od::Parameter *mBiasReverse = 0;
     od::Parameter *mBiasTapCount = 0;
 
     void applyRandomize();

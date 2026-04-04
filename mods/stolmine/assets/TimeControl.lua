@@ -30,7 +30,13 @@ function TimeControl:init(args)
     return g
   end
 
-  local grainMap = (function()
+  local driftMap = (function()
+    local m = app.LinearDialMap(0, 1)
+    m:setSteps(0.1, 0.01, 0.001, 0.001)
+    return m
+  end)()
+
+  local reverseMap = (function()
     local m = app.LinearDialMap(0, 1)
     m:setSteps(0.1, 0.01, 0.001, 0.001)
     return m
@@ -42,31 +48,24 @@ function TimeControl:init(args)
     return m
   end)()
 
-  local tapCountMap = (function()
-    local m = app.LinearDialMap(1, 16)
-    m:setSteps(4, 1, 0.25, 0.25)
-    m:setRounding(1)
-    return m
-  end)()
+  self.driftReadout = makeReadout(args.drift, driftMap, 2, app.unitNone, col1)
+  self.reverseReadout = makeReadout(args.reverse, reverseMap, 2, app.unitNone, col2)
+  self.skewReadout = makeReadout(args.skew, skewMap, 2, app.unitNone, col3)
 
-  self.grainReadout = makeReadout(args.grainSize, grainMap, 2, app.unitNone, col1)
-  self.skewReadout = makeReadout(args.skew, skewMap, 2, app.unitNone, col2)
-  self.tapCountReadout = makeReadout(args.tapCount, tapCountMap, 0, app.unitNone, col3)
-
-  local desc = app.Label("Grain / Skew / Taps", 10)
+  local desc = app.Label("Drift / Rev / Skew", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
   desc:setCornerRadius(3, 0, 0, 3)
   desc:setCenter(col2, center1 + 1)
 
-  self.paramSubGraphic:addChild(self.grainReadout)
+  self.paramSubGraphic:addChild(self.driftReadout)
+  self.paramSubGraphic:addChild(self.reverseReadout)
   self.paramSubGraphic:addChild(self.skewReadout)
-  self.paramSubGraphic:addChild(self.tapCountReadout)
   self.paramSubGraphic:addChild(desc)
-  self.paramSubGraphic:addChild(app.SubButton("grain", 1))
-  self.paramSubGraphic:addChild(app.SubButton("skew", 2))
-  self.paramSubGraphic:addChild(app.SubButton("taps", 3))
+  self.paramSubGraphic:addChild(app.SubButton("drift", 1))
+  self.paramSubGraphic:addChild(app.SubButton("rev", 2))
+  self.paramSubGraphic:addChild(app.SubButton("skew", 3))
 end
 
 function TimeControl:setParamMode(enabled)
@@ -102,14 +101,28 @@ end
 function TimeControl:shiftPressed()
   self.shiftHeld = true
   self.shiftUsed = false
+  if self.paramFocusedReadout then
+    self.shiftSnapshot = self.paramFocusedReadout:getValueInUnits()
+  else
+    self.shiftSnapshot = nil
+  end
   return true
 end
 
 function TimeControl:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
+    if self.paramFocusedReadout and self.shiftSnapshot then
+      local cur = self.paramFocusedReadout:getValueInUnits()
+      if cur ~= self.shiftSnapshot then
+        self.shiftHeld = false
+        self.shiftSnapshot = nil
+        return true
+      end
+    end
     self:setParamMode(not self.paramMode)
   end
   self.shiftHeld = false
+  self.shiftSnapshot = nil
   return true
 end
 
@@ -125,9 +138,9 @@ end
 function TimeControl:subReleased(i, shifted)
   if shifted then return false end
   if self.paramMode then
-    local readout = i == 1 and self.grainReadout
-        or i == 2 and self.skewReadout
-        or i == 3 and self.tapCountReadout or nil
+    local readout = i == 1 and self.driftReadout
+        or i == 2 and self.reverseReadout
+        or i == 3 and self.skewReadout or nil
     if readout then
       readout:save()
       self.paramFocusedReadout = readout
