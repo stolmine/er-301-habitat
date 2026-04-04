@@ -59,7 +59,7 @@ namespace stolmine
         // Selected segment outline
         if (seg == mSelectedSegment)
         {
-          fb.box(WHITE, mWorldLeft, y, mWorldLeft + mWidth - 1, y + rowHeight - 1);
+          fb.box(mFocused ? WHITE : GRAY5, mWorldLeft, y, mWorldLeft + mWidth - 1, y + rowHeight - 1);
         }
 
         // Segment number
@@ -98,12 +98,14 @@ namespace stolmine
     void setSelectedSegment(int seg) { mSelectedSegment = seg; }
     int getSelectedSegment() { return mSelectedSegment; }
     void setEditParam(od::Parameter *editOffset) { mpEditOffset = editOffset; }
+    void setFocused(bool focused) { mFocused = focused; }
 
   private:
     Etcher *mpEtcher = 0;
     od::Parameter *mpEditOffset = 0;
     int mSelectedSegment = 0;
     int mScrollOffset = 0;
+    bool mFocused = false;
   };
 
 } // namespace stolmine

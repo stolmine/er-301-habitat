@@ -52,7 +52,7 @@ namespace stolmine
         // Selected band outline
         if (band == mSelectedBand)
         {
-          fb.box(WHITE, mWorldLeft, y, mWorldLeft + mWidth - 1, y + rowHeight - 1);
+          fb.box(mFocused ? WHITE : GRAY5, mWorldLeft, y, mWorldLeft + mWidth - 1, y + rowHeight - 1);
         }
 
         // Band number
@@ -110,12 +110,14 @@ namespace stolmine
     void setSelectedBand(int band) { mSelectedBand = band; }
     int getSelectedBand() { return mSelectedBand; }
     void setEditParam(od::Parameter *editFreq) { mpEditFreq = editFreq; }
+    void setFocused(bool focused) { mFocused = focused; }
 
   private:
     Filterbank *mpFB = 0;
     od::Parameter *mpEditFreq = 0;
     int mSelectedBand = 0;
     int mScrollOffset = 0;
+    bool mFocused = false;
   };
 
 } // namespace stolmine

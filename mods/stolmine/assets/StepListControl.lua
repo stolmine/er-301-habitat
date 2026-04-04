@@ -236,4 +236,14 @@ function StepListControl:upReleased(shifted)
   return false
 end
 
+function StepListControl:onCursorEnter(spot)
+  Base.onCursorEnter(self, spot)
+  self.pDisplay:setFocused(true)
+end
+
+function StepListControl:onCursorLeave(spot)
+  self.pDisplay:setFocused(false)
+  Base.onCursorLeave(self, spot)
+end
+
 return StepListControl

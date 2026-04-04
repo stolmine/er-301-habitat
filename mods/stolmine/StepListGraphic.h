@@ -59,7 +59,7 @@ namespace stolmine
         // Selected step outline
         if (step == mSelectedStep)
         {
-          fb.box(WHITE, mWorldLeft, y, mWorldLeft + mWidth - 1, y + rowHeight - 1);
+          fb.box(mFocused ? WHITE : GRAY5, mWorldLeft, y, mWorldLeft + mWidth - 1, y + rowHeight - 1);
         }
 
         // Step number
@@ -98,12 +98,14 @@ namespace stolmine
     void setSelectedStep(int step) { mSelectedStep = step; }
     int getSelectedStep() { return mSelectedStep; }
     void setEditParam(od::Parameter *editOffset) { mpEditOffset = editOffset; }
+    void setFocused(bool focused) { mFocused = focused; }
 
   private:
     TrackerSeq *mpSeq = 0;
     od::Parameter *mpEditOffset = 0;
     int mSelectedStep = 0;
     int mScrollOffset = 0;
+    bool mFocused = false;
   };
 
 } // namespace stolmine

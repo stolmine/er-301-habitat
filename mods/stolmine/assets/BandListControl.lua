@@ -245,4 +245,14 @@ function BandListControl:upReleased(shifted)
   return false
 end
 
+function BandListControl:onCursorEnter(spot)
+  Base.onCursorEnter(self, spot)
+  self.pDisplay:setFocused(true)
+end
+
+function BandListControl:onCursorLeave(spot)
+  self.pDisplay:setFocused(false)
+  Base.onCursorLeave(self, spot)
+end
+
 return BandListControl

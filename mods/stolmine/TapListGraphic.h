@@ -49,7 +49,7 @@ namespace stolmine
         int y = mWorldBottom + mHeight - (r + 1) * rowHeight;
 
         if (tap == mSelectedTap)
-          fb.box(WHITE, mWorldLeft, y, mWorldLeft + mWidth - 1, y + rowHeight - 1);
+          fb.box(mFocused ? WHITE : GRAY5, mWorldLeft, y, mWorldLeft + mWidth - 1, y + rowHeight - 1);
 
         // Tap number
         char buf[16];
@@ -118,6 +118,7 @@ namespace stolmine
     int getSelectedTap() { return mSelectedTap; }
     void setEditParam(od::Parameter *editLevel) { mpEditLevel = editLevel; }
     void setShowCutoff(bool show) { mShowCutoff = show; }
+    void setFocused(bool focused) { mFocused = focused; }
 
     static void formatFreq(char *buf, int bufSize, float hz)
     {
@@ -139,6 +140,7 @@ namespace stolmine
     int mSelectedTap = 0;
     int mScrollOffset = 0;
     bool mShowCutoff = false;
+    bool mFocused = false;
   };
 
 } // namespace stolmine

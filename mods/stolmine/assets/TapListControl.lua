@@ -232,4 +232,14 @@ function TapListControl:upReleased(shifted)
   return false
 end
 
+function TapListControl:onCursorEnter(spot)
+  Base.onCursorEnter(self, spot)
+  self.pDisplay:setFocused(true)
+end
+
+function TapListControl:onCursorLeave(spot)
+  self.pDisplay:setFocused(false)
+  Base.onCursorLeave(self, spot)
+end
+
 return TapListControl

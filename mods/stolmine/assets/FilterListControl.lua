@@ -223,4 +223,14 @@ function FilterListControl:upReleased(shifted)
   return false
 end
 
+function FilterListControl:onCursorEnter(spot)
+  Base.onCursorEnter(self, spot)
+  self.pDisplay:setFocused(true)
+end
+
+function FilterListControl:onCursorLeave(spot)
+  self.pDisplay:setFocused(false)
+  Base.onCursorLeave(self, spot)
+end
+
 return FilterListControl

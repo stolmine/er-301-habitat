@@ -248,4 +248,14 @@ function SegmentListControl:upReleased(shifted)
   return false
 end
 
+function SegmentListControl:onCursorEnter(spot)
+  Base.onCursorEnter(self, spot)
+  self.pDisplay:setFocused(true)
+end
+
+function SegmentListControl:onCursorLeave(spot)
+  self.pDisplay:setFocused(false)
+  Base.onCursorLeave(self, spot)
+end
+
 return SegmentListControl
