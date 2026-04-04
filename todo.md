@@ -382,11 +382,9 @@ Input: GainBias branch (no inlet). Output: 10Vpp (-5V to +5V).
 - [ ] Transforms: adapt Excel transform pattern for segment data (rotate, reverse, random, etc.)
 - [ ] Additional presets: sine wave, triangle, custom user presets via save/restore
 
-## Traffic-like (Priority Gate Router)
+## Gridlock (Priority Gate Router)
 
-Multiple gate inputs compete to set output voltage. Highest-priority active gate wins.
-
-- [ ] just 3 gate inputs, each with a bipolar fader representing its assigned output value. priority going from left to right
+- [x] 3 gate inputs with descending priority, bipolar CV values, latching output
 
 ## Spectrogram
 
