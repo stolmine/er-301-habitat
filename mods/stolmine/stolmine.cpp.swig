@@ -31,6 +31,7 @@
 #include "DJFilter.h"
 #include "Gridlock.h"
 #include "Integrator.h"
+#include "SpectralFollower.h"
 #define SWIGLUA
 %}
 
@@ -62,3 +63,4 @@
 %include "DJFilter.h"
 %include "Gridlock.h"
 %include "Integrator.h"
+%include "SpectralFollower.h"

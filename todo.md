@@ -396,11 +396,7 @@ FFT-based visual display unit, audio passthrough.
 
 ## Spectral Envelope Follower
 
-Inlet > BPF > envelope follower. Tracks energy in a tunable frequency band.
-
-- [ ] Cutoff (20Hz-20kHz), bandwidth (0.1-4 octaves), attack (0.1-500ms), decay (0.1-5000ms)
-- [ ] Under 1% CPU (one biquad + one-pole envelope)
-- [ ] Use cases: kick detection, sibilance tracking, spectral-driven modulation
+- [x] BPF (RBJ biquad) + one-pole envelope follower. Center freq, bandwidth, attack, decay.
 
 ## Tone Cluster / Drone Machine
 

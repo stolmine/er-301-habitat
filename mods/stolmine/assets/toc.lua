@@ -18,6 +18,8 @@ return {
     { title = "Tilt EQ",    moduleName = "TiltEQ",           category = "stolmine", keywords = "eq, tilt, tone, filter, effect" },
     { title = "DJ Filter",  moduleName = "DJFilter",         category = "stolmine", keywords = "filter, dj, lp, hp, sweep, effect" },
     { title = "Gridlock",  moduleName = "Gridlock",         category = "stolmine", keywords = "gate, priority, router, cv, utility" },
-    { title = "Integrator", moduleName = "Integrator",     category = "stolmine", keywords = "integrator, accumulator, cv, utility, modulation" }
+    { title = "Integrator", moduleName = "Integrator",     category = "stolmine", keywords = "integrator, accumulator, cv, utility, modulation" },
+    { title = "Spectral Follower", moduleName = "SpectralFollower", category = "stolmine", keywords = "envelope, follower, bandpass, spectral, detector, cv" },
+    { title = "Quantoffset", moduleName = "Quantoffset",   category = "stolmine", keywords = "quantizer, offset, cv, utility, pitch" }
   }
 }
