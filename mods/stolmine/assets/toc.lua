@@ -13,6 +13,7 @@ return {
     { title = "Gesture",        moduleName = "GestureSeq",  category = "stolmine", keywords = "sequencer, gesture, recorder, looper, CV" },
     { title = "Etcher",         moduleName = "Etcher",      category = "stolmine", keywords = "transfer, curve, waveshaper, mapper, CV, modulation" },
     { title = "Tomograph",    moduleName = "Filterbank",  category = "stolmine", keywords = "filter, bank, resonator, EQ, spectral, effect, tomograph" },
-    { title = "Petrichor",    moduleName = "MultitapDelay", category = "stolmine", keywords = "delay, multitap, echo, feedback, filter, pitch, petrichor" }
+    { title = "Petrichor",    moduleName = "MultitapDelay", category = "stolmine", keywords = "delay, multitap, echo, feedback, filter, pitch, petrichor" },
+    { title = "Gated Slew",  moduleName = "GatedSlewLimiter", category = "stolmine", keywords = "slew, gate, utility, filter, envelope" }
   }
 }

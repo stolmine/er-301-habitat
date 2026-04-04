@@ -26,6 +26,7 @@
 #include "MultitapDelay.h"
 #include "TapListGraphic.h"
 #include "RaindropGraphic.h"
+#include "GatedSlewLimiter.h"
 #define SWIGLUA
 %}
 
@@ -52,3 +53,4 @@
 %include "MultitapDelay.h"
 %include "TapListGraphic.h"
 %include "RaindropGraphic.h"
+%include "GatedSlewLimiter.h"
