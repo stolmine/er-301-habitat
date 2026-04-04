@@ -47,6 +47,7 @@ namespace stolmine
     od::Parameter mDrift{"Drift", 0.0f};
     od::Parameter mReverse{"Reverse", 0.0f};
     od::Parameter mStack{"Stack", 0.0f};
+    od::Parameter mGrid{"Grid", 0.0f};
     od::Parameter mInputLevel{"InputLevel", 1.0f};
     od::Parameter mOutputLevel{"OutputLevel", 1.0f};
     od::Parameter mTanhAmt{"TanhAmt", 0.0f};
@@ -102,6 +103,7 @@ namespace stolmine
     // Buffer allocation
     float allocateTimeUpTo(float seconds);
     float maximumDelayTime();
+    float getMaxBeatTime();
 
   private:
     struct Internal;
@@ -118,6 +120,7 @@ namespace stolmine
     float mLastMasterTime = -1.0f;
     float mLastDrift = -1.0f;
     int mLastStack = -1;
+    int mLastGrid = -1;
     float mCachedDelaySamples[kMaxTaps];
     float mCachedPanL[kMaxTaps];
     float mCachedPanR[kMaxTaps];
@@ -135,6 +138,7 @@ namespace stolmine
     od::Parameter *mBiasDrift = 0;
     od::Parameter *mBiasReverse = 0;
     od::Parameter *mBiasStack = 0;
+    od::Parameter *mBiasGrid = 0;
     od::Parameter *mBiasTapCount = 0;
 
     void applyRandomize();

@@ -74,8 +74,7 @@ function RaindropControl:init(args)
   self.tapCountReadout = makeReadout(args.tapCount, tapCountMap, 0, app.unitNone, col2)
 
   -- Stack: hidden readout for encoder control, visible label for display
-  self.stackReadout = makeReadout(args.stack, stackMap, 0, app.unitNone, col3)
-  self.stackReadout:hide()
+  self.stackReadout = makeReadout(args.stack, stackMap, 0, app.unitNone, -ply)
 
   self.stackLabel = app.Label("1", 10)
   self.stackLabel:fitToText(0)

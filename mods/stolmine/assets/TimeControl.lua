@@ -30,9 +30,10 @@ function TimeControl:init(args)
     return g
   end
 
-  local driftMap = (function()
-    local m = app.LinearDialMap(0, 1)
-    m:setSteps(0.1, 0.01, 0.001, 0.001)
+  local gridMap = (function()
+    local m = app.LinearDialMap(0, 4)
+    m:setSteps(1, 1, 1, 1)
+    m:setRounding(1)
     return m
   end)()
 
@@ -48,22 +49,29 @@ function TimeControl:init(args)
     return m
   end)()
 
-  self.driftReadout = makeReadout(args.drift, driftMap, 2, app.unitNone, col1)
+  -- Grid: hidden readout for encoder, visible label for power-of-2 display
+  self.gridNames = { [0] = "1", "2", "4", "8", "16" }
+  self.gridReadout = makeReadout(args.grid, gridMap, 0, app.unitNone, -ply)
+  self.gridLabel = app.Label("1", 10)
+  self.gridLabel:fitToText(0)
+  self.gridLabel:setCenter(col1, center4)
+
   self.reverseReadout = makeReadout(args.reverse, reverseMap, 2, app.unitNone, col2)
   self.skewReadout = makeReadout(args.skew, skewMap, 2, app.unitNone, col3)
 
-  local desc = app.Label("Drift / Rev / Skew", 10)
+  local desc = app.Label("Grid / Rev / Skew", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
   desc:setCornerRadius(3, 0, 0, 3)
   desc:setCenter(col2, center1 + 1)
 
-  self.paramSubGraphic:addChild(self.driftReadout)
+  self.paramSubGraphic:addChild(self.gridReadout)
+  self.paramSubGraphic:addChild(self.gridLabel)
   self.paramSubGraphic:addChild(self.reverseReadout)
   self.paramSubGraphic:addChild(self.skewReadout)
   self.paramSubGraphic:addChild(desc)
-  self.paramSubGraphic:addChild(app.SubButton("drift", 1))
+  self.paramSubGraphic:addChild(app.SubButton("grid", 1))
   self.paramSubGraphic:addChild(app.SubButton("rev", 2))
   self.paramSubGraphic:addChild(app.SubButton("skew", 3))
 end
@@ -138,7 +146,7 @@ end
 function TimeControl:subReleased(i, shifted)
   if shifted then return false end
   if self.paramMode then
-    local readout = i == 1 and self.driftReadout
+    local readout = i == 1 and self.gridReadout
         or i == 2 and self.reverseReadout
         or i == 3 and self.skewReadout or nil
     if readout then
@@ -152,12 +160,21 @@ function TimeControl:subReleased(i, shifted)
   return GainBias.subReleased(self, i, shifted)
 end
 
+function TimeControl:updateGridLabel()
+  local val = math.floor(self.gridReadout:getValueInUnits() + 0.5)
+  local name = self.gridNames[val] or tostring(val)
+  self.gridLabel:setText(name)
+end
+
 function TimeControl:encoder(change, shifted)
   if shifted and self.shiftHeld then
     self.shiftUsed = true
   end
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Coarse)
+    if self.paramFocusedReadout == self.gridReadout then
+      self:updateGridLabel()
+    end
     return true
   end
   return GainBias.encoder(self, change, shifted)
@@ -166,6 +183,9 @@ end
 function TimeControl:zeroPressed()
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:zero()
+    if self.paramFocusedReadout == self.gridReadout then
+      self:updateGridLabel()
+    end
     return true
   end
   return GainBias.zeroPressed(self)
@@ -174,6 +194,9 @@ end
 function TimeControl:cancelReleased(shifted)
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:restore()
+    if self.paramFocusedReadout == self.gridReadout then
+      self:updateGridLabel()
+    end
     return true
   end
   return GainBias.cancelReleased(self, shifted)
