@@ -1,0 +1,44 @@
+%module biome_libbiome
+%include <od/glue/mod.cpp.swig>
+
+%{
+#undef SWIGLUA
+#include "NR.h"
+#include "NRCircle.h"
+#include "Discont.h"
+#include "LatchFilter.h"
+#include "Canals.h"
+#include "GestureSeq.h"
+#include "GestureHeadDisplay.h"
+#include "WriteIndicator.h"
+#include "GatedSlewLimiter.h"
+#include "TiltEQ.h"
+#include "DJFilter.h"
+#include "Gridlock.h"
+#include "Integrator.h"
+#include "SpectralFollower.h"
+#include "PingableScaledRandom.h"
+#include "CodescanOsc.h"
+#include "CodescanFilter.h"
+#include "FadeMixer.h"
+#define SWIGLUA
+%}
+
+%include "NR.h"
+%include "NRCircle.h"
+%include "Discont.h"
+%include "LatchFilter.h"
+%include "Canals.h"
+%include "GestureSeq.h"
+%include "GestureHeadDisplay.h"
+%include "WriteIndicator.h"
+%include "GatedSlewLimiter.h"
+%include "TiltEQ.h"
+%include "DJFilter.h"
+%include "Gridlock.h"
+%include "Integrator.h"
+%include "SpectralFollower.h"
+%include "PingableScaledRandom.h"
+%include "CodescanOsc.h"
+%include "CodescanFilter.h"
+%include "FadeMixer.h"
