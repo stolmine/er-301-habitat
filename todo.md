@@ -468,24 +468,11 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 ### PSR (Pingable Scaled Random)
 - [x] C++ rewrite (1 object vs 11 in Lua original). Trigger, scale, offset, quantize levels.
 
-### Codescan Oscillator
-Reads the ER-301's own firmware binary as a wavetable. Inspired by the Buchla 259e and IME Kermit MkIII codescan modes.
+### Bletchley Park (Codescan Oscillator)
+- [x] Reads libstolmine.so as wavetable. 256-byte windows, scan position, V/Oct, sync. Timbres unique per build/platform.
 
-- [ ] Phase accumulator indexes into firmware .text region, treating raw machine code bytes as sample values
-- [ ] Scan position (GainBias): offset into firmware address space, CV-modulatable at audio rate
-- [ ] Pitch (V/Oct)
-- [ ] Byte-to-sample mapping: signed 8-bit normalized to -1/+1, with interpolation between samples
-- [ ] Sweeping scan produces timbral animation -- tight loops sound buzzy/tonal, varied data regions sound noisy/chaotic
-- [ ] Timbres unique to each firmware build
-
-### Codescan Filter
-Reads firmware binary as FIR tap weights, applied as convolution on the input signal. Companion to Codescan Oscillator.
-
-- [ ] Read N consecutive firmware bytes as FIR kernel (16-64 taps), normalized to -1/+1
-- [ ] Scan position (GainBias): offset into firmware address space, CV-modulatable
-- [ ] Kernel length control (fewer taps = comb/resonance, more taps = complex spectral shaping)
-- [ ] Mix (dry/wet)
-- [ ] Different firmware regions produce wildly different impulse responses -- sweeping scan reshapes the filter in real time
+### Station X (Codescan FIR)
+- [x] Reads libstolmine.so as FIR kernel (4-64 taps, normalized). Scan position, dry/wet mix. On reserve -- random kernels mostly produce noise-like filtering.
 
 ### Varishape Oscillator
 - [ ] Continuously variable waveshape: sine > triangle > saw > square > pulse

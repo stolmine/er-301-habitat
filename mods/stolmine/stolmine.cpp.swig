@@ -33,6 +33,8 @@
 #include "Integrator.h"
 #include "SpectralFollower.h"
 #include "PingableScaledRandom.h"
+#include "CodescanOsc.h"
+#include "CodescanFilter.h"
 #define SWIGLUA
 %}
 
@@ -66,3 +68,5 @@
 %include "Integrator.h"
 %include "SpectralFollower.h"
 %include "PingableScaledRandom.h"
+%include "CodescanOsc.h"
+%include "CodescanFilter.h"
