@@ -467,9 +467,7 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [ ] Pure visualization, negligible DSP
 
 ### Integrator / Location Tracker
-- [ ] Running accumulator with configurable leak/decay
-- [ ] Shape: linear, exponential (Cold Mac location), logarithmic
-- [ ] Controls: rate, decay/leak, shape, gate reset
+- [x] Running accumulator with rate, leak (decay toward zero), trigger reset. Clipped +/-5V.
 
 ### Pingable Scaled Random
 - [ ] C++ rewrite of SuperNiCd's pingable scaled random for performance

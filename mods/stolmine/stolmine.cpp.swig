@@ -30,6 +30,7 @@
 #include "TiltEQ.h"
 #include "DJFilter.h"
 #include "Gridlock.h"
+#include "Integrator.h"
 #define SWIGLUA
 %}
 
@@ -60,3 +61,4 @@
 %include "TiltEQ.h"
 %include "DJFilter.h"
 %include "Gridlock.h"
+%include "Integrator.h"

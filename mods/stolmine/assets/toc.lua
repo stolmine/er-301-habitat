@@ -17,6 +17,7 @@ return {
     { title = "Gated Slew",  moduleName = "GatedSlewLimiter", category = "stolmine", keywords = "slew, gate, utility, filter, envelope" },
     { title = "Tilt EQ",    moduleName = "TiltEQ",           category = "stolmine", keywords = "eq, tilt, tone, filter, effect" },
     { title = "DJ Filter",  moduleName = "DJFilter",         category = "stolmine", keywords = "filter, dj, lp, hp, sweep, effect" },
-    { title = "Gridlock",  moduleName = "Gridlock",         category = "stolmine", keywords = "gate, priority, router, cv, utility" }
+    { title = "Gridlock",  moduleName = "Gridlock",         category = "stolmine", keywords = "gate, priority, router, cv, utility" },
+    { title = "Integrator", moduleName = "Integrator",     category = "stolmine", keywords = "integrator, accumulator, cv, utility, modulation" }
   }
 }
