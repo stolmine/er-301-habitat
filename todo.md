@@ -213,7 +213,8 @@ Spreadsheet paradigm: N voices with per-voice params.
 
 ## Effects
 
-- [ ] Tilt EQ
+- [x] Tilt EQ
+- [x] DJ Filter -- bipolar LP/HP sweep with resonance
 - [x] Canals (Three Sisters clone) — linked resonant filter with crossover/formant modes
 
 ## Canals Improvements (Three Sisters fidelity)
@@ -460,8 +461,7 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 ## Utilities
 
 ### Gated Slew
-- [ ] One-pole slew that only acts when gate is high. Raw signal passes when gate low.
-- [ ] Controls: rise time, fall time, gate input
+- [x] Per-sample slew limiter with gate activation. Up/both/down modes. Stereo.
 
 ### Goniometer / Lissajous
 - [ ] XY scope display: goniometer (L+R vs L-R stereo field) or Lissajous (arbitrary XY)

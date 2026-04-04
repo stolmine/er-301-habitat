@@ -27,6 +27,8 @@
 #include "TapListGraphic.h"
 #include "RaindropGraphic.h"
 #include "GatedSlewLimiter.h"
+#include "TiltEQ.h"
+#include "DJFilter.h"
 #define SWIGLUA
 %}
 
@@ -54,3 +56,5 @@
 %include "TapListGraphic.h"
 %include "RaindropGraphic.h"
 %include "GatedSlewLimiter.h"
+%include "TiltEQ.h"
+%include "DJFilter.h"
