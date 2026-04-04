@@ -11,8 +11,6 @@ local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
 local col3 = app.BUTTON3_CENTER
 
-local stackNames = { [0] = "1", "2", "4", "8", "16" }
-
 local RaindropControl = Class {
   type = "RaindropControl",
   canEdit = false,
@@ -72,13 +70,12 @@ function RaindropControl:init(args)
 
   self.grainReadout = makeReadout(args.grainSize, grainMap, 2, app.unitNone, col1)
   self.tapCountReadout = makeReadout(args.tapCount, tapCountMap, 0, app.unitNone, col2)
-
-  -- Stack: hidden readout for encoder control, visible label for display
-  self.stackReadout = makeReadout(args.stack, stackMap, 0, app.unitNone, -ply)
-
-  self.stackLabel = app.Label("1", 10)
-  self.stackLabel:fitToText(0)
-  self.stackLabel:setCenter(col3, center4)
+  self.stackReadout = makeReadout(args.stack, stackMap, 0, app.unitNone, col3)
+  if self.stackReadout.addName then
+    for _, v in ipairs({"1", "2", "4", "8", "16"}) do
+      self.stackReadout:addName(v)
+    end
+  end
 
   local desc = app.Label("Grain / Taps / Stack", 10)
   desc:fitToText(3)
@@ -90,7 +87,6 @@ function RaindropControl:init(args)
   subGraphic:addChild(self.grainReadout)
   subGraphic:addChild(self.tapCountReadout)
   subGraphic:addChild(self.stackReadout)
-  subGraphic:addChild(self.stackLabel)
   subGraphic:addChild(desc)
   subGraphic:addChild(app.SubButton("grain", 1))
   subGraphic:addChild(app.SubButton("taps", 2))
@@ -98,13 +94,6 @@ function RaindropControl:init(args)
 
   self.subGraphic = subGraphic
   self.focusedReadout = nil
-  self:updateStackLabel()
-end
-
-function RaindropControl:updateStackLabel()
-  local val = math.floor(self.stackReadout:getValueInUnits() + 0.5)
-  local name = stackNames[val] or tostring(val)
-  self.stackLabel:setText(name)
 end
 
 function RaindropControl:setSelectedTap(tap)
@@ -135,9 +124,6 @@ end
 function RaindropControl:encoder(change, shifted)
   if self.focusedReadout then
     self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Coarse)
-    if self.focusedReadout == self.stackReadout then
-      self:updateStackLabel()
-    end
     return true
   end
   return true
@@ -146,9 +132,6 @@ end
 function RaindropControl:zeroPressed()
   if self.focusedReadout then
     self.focusedReadout:zero()
-    if self.focusedReadout == self.stackReadout then
-      self:updateStackLabel()
-    end
     return true
   end
   return true
@@ -157,9 +140,6 @@ end
 function RaindropControl:cancelReleased(shifted)
   if self.focusedReadout then
     self.focusedReadout:restore()
-    if self.focusedReadout == self.stackReadout then
-      self:updateStackLabel()
-    end
     return true
   end
   return true

@@ -49,12 +49,12 @@ function TimeControl:init(args)
     return m
   end)()
 
-  -- Grid: hidden readout for encoder, visible label for power-of-2 display
-  self.gridNames = { [0] = "1", "2", "4", "8", "16" }
-  self.gridReadout = makeReadout(args.grid, gridMap, 0, app.unitNone, -ply)
-  self.gridLabel = app.Label("1", 10)
-  self.gridLabel:fitToText(0)
-  self.gridLabel:setCenter(col1, center4)
+  self.gridReadout = makeReadout(args.grid, gridMap, 0, app.unitNone, col1)
+  if self.gridReadout.addName then
+    for _, v in ipairs({"1", "2", "4", "8", "16"}) do
+      self.gridReadout:addName(v)
+    end
+  end
 
   self.reverseReadout = makeReadout(args.reverse, reverseMap, 2, app.unitNone, col2)
   self.skewReadout = makeReadout(args.skew, skewMap, 2, app.unitNone, col3)
@@ -67,7 +67,6 @@ function TimeControl:init(args)
   desc:setCenter(col2, center1 + 1)
 
   self.paramSubGraphic:addChild(self.gridReadout)
-  self.paramSubGraphic:addChild(self.gridLabel)
   self.paramSubGraphic:addChild(self.reverseReadout)
   self.paramSubGraphic:addChild(self.skewReadout)
   self.paramSubGraphic:addChild(desc)
@@ -160,21 +159,12 @@ function TimeControl:subReleased(i, shifted)
   return GainBias.subReleased(self, i, shifted)
 end
 
-function TimeControl:updateGridLabel()
-  local val = math.floor(self.gridReadout:getValueInUnits() + 0.5)
-  local name = self.gridNames[val] or tostring(val)
-  self.gridLabel:setText(name)
-end
-
 function TimeControl:encoder(change, shifted)
   if shifted and self.shiftHeld then
     self.shiftUsed = true
   end
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Coarse)
-    if self.paramFocusedReadout == self.gridReadout then
-      self:updateGridLabel()
-    end
     return true
   end
   return GainBias.encoder(self, change, shifted)
@@ -183,9 +173,6 @@ end
 function TimeControl:zeroPressed()
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:zero()
-    if self.paramFocusedReadout == self.gridReadout then
-      self:updateGridLabel()
-    end
     return true
   end
   return GainBias.zeroPressed(self)
@@ -194,9 +181,6 @@ end
 function TimeControl:cancelReleased(shifted)
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:restore()
-    if self.paramFocusedReadout == self.gridReadout then
-      self:updateGridLabel()
-    end
     return true
   end
   return GainBias.cancelReleased(self, shifted)

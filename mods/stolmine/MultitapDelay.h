@@ -100,6 +100,8 @@ namespace stolmine
     void fireRandomize();
     void setTopLevelBias(int which, od::Parameter *param);
 
+    void setMono(bool mono);
+
     // Buffer allocation
     float allocateTimeUpTo(float seconds);
     float maximumDelayTime();
@@ -109,6 +111,7 @@ namespace stolmine
     struct Internal;
     Internal *mpInternal;
 
+    bool mMono = false;
     int mCachedTapCount = 4;
     int mLastLoadedTap = 0;
     int mLastLoadedFilter = 0;

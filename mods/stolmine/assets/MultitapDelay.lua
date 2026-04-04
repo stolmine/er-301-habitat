@@ -86,6 +86,8 @@ function MultitapDelay:onLoadGraph(channelCount)
   if channelCount > 1 then
     connect(self, "In2", op, "In")
     connect(op, "OutR", self, "Out2")
+  else
+    op:setMono(true)
   end
 
   local function tieParam(name, adapter)

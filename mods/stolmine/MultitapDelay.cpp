@@ -211,6 +211,8 @@ namespace stolmine
     return 0;
   }
 
+  void MultitapDelay::setMono(bool mono) { mMono = mono; }
+
   float MultitapDelay::maximumDelayTime()
   {
     return mMaxDelayInSamples * globalConfig.samplePeriod;
@@ -720,8 +722,15 @@ namespace stolmine
       }
 
       // Output limiter (invisible, always on)
-      out[i] = tanhf(mixedL * outputLevel);
-      outR[i] = tanhf(mixedR * outputLevel);
+      if (mMono)
+      {
+        out[i] = tanhf((mixedL + mixedR) * 0.5f * outputLevel);
+      }
+      else
+      {
+        out[i] = tanhf(mixedL * outputLevel);
+        outR[i] = tanhf(mixedR * outputLevel);
+      }
     }
   }
 
