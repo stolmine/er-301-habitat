@@ -23,8 +23,8 @@ function SpectralFollower:onLoadGraph(channelCount)
 
   freq:hardSet("Bias", 1000.0)
   bandwidth:hardSet("Bias", 1.0)
-  attack:hardSet("Bias", 5.0)
-  decay:hardSet("Bias", 50.0)
+  attack:hardSet("Bias", 0.005)
+  decay:hardSet("Bias", 0.050)
 
   connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
@@ -61,14 +61,14 @@ local function bwMap()
 end
 
 local function attackMap()
-  local m = app.LinearDialMap(0.1, 500)
-  m:setSteps(50, 10, 1, 0.1)
+  local m = app.LinearDialMap(0.0001, 0.5)
+  m:setSteps(0.1, 0.01, 0.001, 0.0001)
   return m
 end
 
 local function decayMap()
-  local m = app.LinearDialMap(0.1, 5000)
-  m:setSteps(500, 100, 10, 1)
+  local m = app.LinearDialMap(0.0001, 5.0)
+  m:setSteps(0.5, 0.1, 0.01, 0.001)
   return m
 end
 
@@ -107,8 +107,8 @@ function SpectralFollower:onLoadViews(objects, branches)
     range = objects.attack,
     biasMap = attackMap(),
     biasUnits = app.unitSecs,
-    biasPrecision = 1,
-    initialBias = 5.0
+    biasPrecision = 3,
+    initialBias = 0.005
   }
 
   controls.decay = GainBias {
@@ -119,8 +119,8 @@ function SpectralFollower:onLoadViews(objects, branches)
     range = objects.decay,
     biasMap = decayMap(),
     biasUnits = app.unitSecs,
-    biasPrecision = 1,
-    initialBias = 50.0
+    biasPrecision = 3,
+    initialBias = 0.050
   }
 
   return controls, views

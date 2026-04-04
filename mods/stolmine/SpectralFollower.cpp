@@ -28,8 +28,8 @@ namespace stolmine
 
     float freq = CLAMP(20.0f, sr * 0.49f, mFreq.value());
     float bw = CLAMP(0.1f, 4.0f, mBandwidth.value());
-    float attackMs = CLAMP(0.1f, 500.0f, mAttack.value());
-    float decayMs = CLAMP(0.1f, 5000.0f, mDecay.value());
+    float attackSec = CLAMP(0.0001f, 0.5f, mAttack.value());
+    float decaySec = CLAMP(0.0001f, 5.0f, mDecay.value());
 
     // Biquad BPF coefficients (RBJ cookbook)
     float w0 = 2.0f * 3.14159265f * freq / sr;
@@ -50,26 +50,44 @@ namespace stolmine
     a1 /= a0;
     a2 /= a0;
 
-    // Envelope coefficients
-    float attCoeff = 1.0f - expf(-1.0f / (attackMs * 0.001f * sr));
-    float decCoeff = 1.0f - expf(-1.0f / (decayMs * 0.001f * sr));
+    // Envelope coefficients (within 1% in attack/release time)
+    if (attackSec < 0.5f * globalConfig.framePeriod) attackSec = 0.5f * globalConfig.framePeriod;
+    if (decaySec < 0.5f * globalConfig.framePeriod) decaySec = 0.5f * globalConfig.framePeriod;
 
+    float attCoeff = expf(logf(0.01f) / (attackSec * sr));
+    float decCoeff = expf(logf(0.01f) / (decaySec * sr));
+    float att2 = 1.0f - attCoeff;
+    float dec2 = 1.0f - decCoeff;
+
+    // Adaptive threshold (slewed average of rectified BPF output)
+    float slow = (attackSec > decaySec ? attackSec : decaySec) * 3.0f;
+    float slowCoeff = expf(logf(0.01f) / (slow * globalConfig.frameRate));
+    float slow2 = 1.0f - slowCoeff;
+
+    // First pass: BPF + accumulate rectified sum for threshold
+    float rectSum = 0.0f;
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float x = in[i];
-
-      // BPF
       float y = b0 * x + b1 * mX1 + b2 * mX2 - a1 * mY1 - a2 * mY2;
       mX2 = mX1;
       mX1 = x;
       mY2 = mY1;
       mY1 = y;
+      out[i] = y; // temporarily store BPF output
+      rectSum += fabsf(y);
+    }
 
-      // Rectify + envelope follow
-      float rect = fabsf(y);
-      float coeff = (rect > mEnv) ? attCoeff : decCoeff;
-      mEnv += (rect - mEnv) * coeff;
+    mThreshold = slow2 * rectSum / FRAMELENGTH + slowCoeff * mThreshold;
 
+    // Second pass: envelope follow using adaptive threshold
+    for (int i = 0; i < FRAMELENGTH; i++)
+    {
+      float rect = fabsf(out[i]);
+      if (rect > mThreshold)
+        mEnv = att2 * rect + attCoeff * mEnv;
+      else
+        mEnv = dec2 * rect + decCoeff * mEnv;
       out[i] = mEnv;
     }
   }

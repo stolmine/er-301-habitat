@@ -17,8 +17,8 @@ namespace stolmine
     od::Outlet mOutput{"Out"};
     od::Parameter mFreq{"Freq", 1000.0f};      // Center frequency Hz
     od::Parameter mBandwidth{"Bandwidth", 1.0f}; // Octaves
-    od::Parameter mAttack{"Attack", 5.0f};       // ms
-    od::Parameter mDecay{"Decay", 50.0f};        // ms
+    od::Parameter mAttack{"Attack", 0.005f};      // seconds
+    od::Parameter mDecay{"Decay", 0.050f};       // seconds
 #endif
 
   private:
@@ -27,6 +27,7 @@ namespace stolmine
     float mY1 = 0.0f, mY2 = 0.0f;
     // Envelope state
     float mEnv = 0.0f;
+    float mThreshold = 0.0f;
   };
 
 } // namespace stolmine
