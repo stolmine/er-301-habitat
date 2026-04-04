@@ -465,9 +465,8 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 ### Integrator / Location Tracker
 - [x] Running accumulator with rate, leak (decay toward zero), trigger reset. Clipped +/-5V.
 
-### Pingable Scaled Random
-- [ ] C++ rewrite of SuperNiCd's pingable scaled random for performance
-- [ ] Clock input triggers new random values, scaled/quantized to range
+### PSR (Pingable Scaled Random)
+- [x] C++ rewrite (1 object vs 11 in Lua original). Trigger, scale, offset, quantize levels.
 
 ### Codescan Oscillator
 Reads the ER-301's own firmware binary as a wavetable. Inspired by the Buchla 259e and IME Kermit MkIII codescan modes.

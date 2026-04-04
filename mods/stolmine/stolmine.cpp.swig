@@ -32,6 +32,7 @@
 #include "Gridlock.h"
 #include "Integrator.h"
 #include "SpectralFollower.h"
+#include "PingableScaledRandom.h"
 #define SWIGLUA
 %}
 
@@ -64,3 +65,4 @@
 %include "Gridlock.h"
 %include "Integrator.h"
 %include "SpectralFollower.h"
+%include "PingableScaledRandom.h"

@@ -20,6 +20,7 @@ return {
     { title = "Gridlock",  moduleName = "Gridlock",         category = "stolmine", keywords = "gate, priority, router, cv, utility" },
     { title = "Integrator", moduleName = "Integrator",     category = "stolmine", keywords = "integrator, accumulator, cv, utility, modulation" },
     { title = "Spectral Follower", moduleName = "SpectralFollower", category = "stolmine", keywords = "envelope, follower, bandpass, spectral, detector, cv" },
-    { title = "Quantoffset", moduleName = "Quantoffset",   category = "stolmine", keywords = "quantizer, offset, cv, utility, pitch" }
+    { title = "Quantoffset", moduleName = "Quantoffset",   category = "stolmine", keywords = "quantizer, offset, cv, utility, pitch" },
+    { title = "PSR", moduleName = "PingableScaledRandom", category = "stolmine", keywords = "random, trigger, cv, utility, modulation, sample and hold, psr" }
   }
 }
