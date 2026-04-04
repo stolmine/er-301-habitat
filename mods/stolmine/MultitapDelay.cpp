@@ -154,10 +154,23 @@ namespace stolmine
 
   // --- Buffer allocation ---
 
+  static inline void bufWrite(int16_t *buf, int idx, float v)
+  {
+    int s = (int)(v * 32767.0f);
+    if (s > 32767) s = 32767;
+    if (s < -32767) s = -32767;
+    buf[idx] = (int16_t)s;
+  }
+
+  static inline float bufRead(const int16_t *buf, int idx)
+  {
+    return (float)buf[idx] * (1.0f / 32767.0f);
+  }
+
   bool MultitapDelay::allocate(int Ns)
   {
     deallocate();
-    int nbytes = Ns * sizeof(float);
+    int nbytes = Ns * sizeof(int16_t);
     mpInternal->buffer = new (std::nothrow) char[nbytes];
     if (mpInternal->buffer)
       memset(mpInternal->buffer, 0, nbytes);
@@ -347,7 +360,7 @@ namespace stolmine
       if (p) p->hardSet(floorf(randomizeValue(p->value(), mn, mx, depth, spread) + 0.5f));
     };
     auto rndAllTopLevel = [&]() {
-      rndBias(mBiasMasterTime, 0.01f, 4.0f);
+      rndBias(mBiasMasterTime, 0.01f, 20.0f);
       rndBias(mBiasFeedback, 0.0f, 0.95f);
       rndBias(mBiasFeedbackTone, -1.0f, 1.0f);
       rndBias(mBiasSkew, -2.0f, 2.0f);
@@ -386,7 +399,7 @@ namespace stolmine
     case 7: rndCutoff(); break;
     case 8: rndQ(); break;
     case 9: rndType(); break;
-    case 10: rndBias(mBiasMasterTime, 0.01f, 4.0f); break;
+    case 10: rndBias(mBiasMasterTime, 0.01f, 20.0f); break;
     case 11: rndBias(mBiasFeedback, 0.0f, 0.95f); break;
     case 12: rndBias(mBiasFeedbackTone, -1.0f, 1.0f); break;
     case 13: rndBias(mBiasSkew, -2.0f, 2.0f); break;
@@ -433,12 +446,12 @@ namespace stolmine
     float *in = mIn.buffer();
     float *out = mOut.buffer();
     float *outR = mOutR.buffer();
-    float *buf = (float *)s.buffer;
+    int16_t *buf = (int16_t *)s.buffer;
 
     int tapCount = CLAMP(1, kMaxTaps, (int)(mTapCount.value() + 0.5f));
     mCachedTapCount = tapCount;
 
-    float masterTimeRaw = CLAMP(0.001f, 4.0f, mMasterTime.value());
+    float masterTimeRaw = CLAMP(0.001f, 20.0f, mMasterTime.value());
     float feedback = CLAMP(0.0f, 0.95f, mFeedback.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
@@ -575,7 +588,7 @@ namespace stolmine
 
       // Write input + feedback to buffer
       if (s.writeIndex >= maxDelay) s.writeIndex = 0;
-      buf[s.writeIndex] = x;
+      bufWrite(buf, s.writeIndex, x);
 
       float wetL = 0.0f;
       float wetR = 0.0f;
@@ -628,7 +641,9 @@ namespace stolmine
           if (idx < 0) idx += maxDelay;
           float frac = gr.readPos - floorf(gr.readPos);
           int idx2 = (idx + 1) % maxDelay;
-          float sample = buf[idx] + (buf[idx2] - buf[idx]) * frac;
+          float s0 = bufRead(buf, idx);
+          float s1 = bufRead(buf, idx2);
+          float sample = s0 + (s1 - s0) * frac;
           tapOut += sample * env;
           // Advance grain (forward or reverse)
           gr.readPos += gr.reverse ? -gr.speed : gr.speed;
@@ -687,7 +702,7 @@ namespace stolmine
         s.fbHpState += (fb - s.fbHpState) * lpCoeff;
         fbOut = fb - s.fbHpState * tone;
       }
-      buf[s.writeIndex] += tanhf(fbOut);
+      bufWrite(buf, s.writeIndex, bufRead(buf, s.writeIndex) + tanhf(fbOut));
 
       // Advance write index
       s.writeIndex = (s.writeIndex + 1) % maxDelay;

@@ -56,7 +56,7 @@ local xformTargetNames = {
 }
 
 local mixMap = floatMap(0, 1)
-local timeMap = floatMap(0.01, 4.0)
+local timeMap = floatMap(0.01, 20.0)
 local feedbackMap = floatMap(0, 0.95)
 local feedbackToneMap = floatMap(-1, 1)
 local tapCountMap = intMap(1, 16)
@@ -79,7 +79,7 @@ function MultitapDelay:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.MultitapDelay())
 
   -- Allocate 2 seconds of delay buffer
-  op:allocateTimeUpTo(4.0)
+  op:allocateTimeUpTo(20.0)
 
   connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
@@ -399,7 +399,7 @@ function MultitapDelay:applyRandomize(target, depth, spread)
   if target == 0 then -- all
     rndTapLevels(); rndTapPans(); rndTapPitch()
     rndCutoff(); rndQ(); rndType()
-    rndParam(self.objects.masterTime, "Bias", 0.01, 4.0)
+    rndParam(self.objects.masterTime, "Bias", 0.01, 20.0)
     rndParam(self.objects.feedback, "Bias", 0, 0.95)
     rndParam(self.objects.feedbackTone, "Bias", -1, 1)
     rndParam(self.objects.skew, "Bias", -2, 2)
@@ -411,7 +411,7 @@ function MultitapDelay:applyRandomize(target, depth, spread)
     rndParam(self.objects.tapCount, "Bias", 1, 16)
   elseif target == 1 then rndTapLevels(); rndTapPans(); rndTapPitch()  -- taps
   elseif target == 2 then -- delay
-    rndParam(self.objects.masterTime, "Bias", 0.01, 4.0)
+    rndParam(self.objects.masterTime, "Bias", 0.01, 20.0)
     rndParam(self.objects.feedback, "Bias", 0, 0.95)
     rndParam(self.objects.feedbackTone, "Bias", -1, 1)
     rndParam(self.objects.skew, "Bias", -2, 2)
@@ -428,7 +428,7 @@ function MultitapDelay:applyRandomize(target, depth, spread)
   elseif target == 7 then rndCutoff()                                   -- cutoff
   elseif target == 8 then rndQ()                                        -- Q
   elseif target == 9 then rndType()                                     -- type
-  elseif target == 10 then rndParam(self.objects.masterTime, "Bias", 0.01, 4.0) -- time
+  elseif target == 10 then rndParam(self.objects.masterTime, "Bias", 0.01, 20.0) -- time
   elseif target == 11 then rndParam(self.objects.feedback, "Bias", 0, 0.95)     -- fdbk
   elseif target == 12 then rndParam(self.objects.feedbackTone, "Bias", -1, 1)   -- tone
   elseif target == 13 then rndParam(self.objects.skew, "Bias", -2, 2)           -- skew
