@@ -1,7 +1,6 @@
 #pragma once
 
 #include <od/objects/Object.h>
-#include <string>
 
 namespace stolmine
 {
@@ -32,8 +31,8 @@ namespace stolmine
     int mDataSize = 0;
     float mDelayLine[kMaxFIRTaps];
     int mWriteIdx = 0;
-    float mDCState = 0.0f; // one-pole DC blocker state
-    std::string mFilePath;
+    float mDCState = 0.0f;
+    char mFilePath[256];
   };
 
 } // namespace stolmine

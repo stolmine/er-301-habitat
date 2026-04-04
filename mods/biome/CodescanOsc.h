@@ -1,10 +1,11 @@
 #pragma once
 
 #include <od/objects/Object.h>
-#include <string>
 
 namespace stolmine
 {
+
+  static const int kMaxPathLen = 256;
 
   class CodescanOsc : public od::Object
   {
@@ -30,8 +31,8 @@ namespace stolmine
     int mDataSize = 0;
     float mPhase = 0.0f;
     bool mSyncWasHigh = false;
-    float mDCState = 0.0f; // one-pole DC blocker state
-    std::string mFilePath;
+    float mDCState = 0.0f;
+    char mFilePath[kMaxPathLen];
   };
 
 } // namespace stolmine

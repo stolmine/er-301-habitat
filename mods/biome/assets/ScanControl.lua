@@ -13,6 +13,7 @@ end
 
 function ScanControl:updateLabel()
   if not self.op then return end
+  if not self.bias then return end
   local dataSize = self.op:getDataSize()
   if dataSize < self.windowSize then
     self.fader:setLabel("no data")

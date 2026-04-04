@@ -22,6 +22,7 @@ namespace stolmine
     addParameter(mTaps);
     addParameter(mMix);
     memset(mDelayLine, 0, sizeof(mDelayLine));
+    mFilePath[0] = '\0';
   }
 
   CodescanFilter::~CodescanFilter()
@@ -42,7 +43,15 @@ namespace stolmine
       mDataSize = 0;
     }
 
-    mFilePath = path ? path : "";
+    if (path)
+    {
+      strncpy(mFilePath, path, 256 - 1);
+      mFilePath[256 - 1] = '\0';
+    }
+    else
+    {
+      mFilePath[0] = '\0';
+    }
 
 #ifdef __arm__
     od::FileReader reader;
@@ -88,7 +97,7 @@ namespace stolmine
 
   const char *CodescanFilter::getFilePath()
   {
-    return mFilePath.c_str();
+    return mFilePath;
   }
 
   int CodescanFilter::getDataSize()

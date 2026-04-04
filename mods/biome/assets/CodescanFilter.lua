@@ -3,7 +3,7 @@ local libstolmine = require "biome.libbiome"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
-local ScanControl = require "biome.ScanControl"
+-- local ScanControl = require "biome.ScanControl"
 local Task = require "Unit.MenuControl.Task"
 local Encoder = require "Encoder"
 
@@ -20,8 +20,12 @@ function CodescanFilter:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.CodescanFilter())
 
   -- Default: load our own .so as the FIR kernel data
-  local libPath = app.roots.rear .. "/v0.7/libs/biome/libbiome.so"
-  op:loadData(libPath)
+  -- No default data load on hardware; user loads via menu
+  local libPath = nil
+  if not app.roots or not app.roots.rear then
+    libPath = "testing/linux/libbiome.so"
+    op:loadData(libPath)
+  end
 
   local scan = self:addObject("scan", app.ParameterAdapter())
   local taps = self:addObject("taps", app.ParameterAdapter())
@@ -34,7 +38,7 @@ function CodescanFilter:onLoadGraph(channelCount)
   connect(op, "Out", self, "Out1")
   if channelCount > 1 then
     local op2 = self:addObject("op2", libstolmine.CodescanFilter())
-    op2:loadData(libPath)
+    if libPath then op2:loadData(libPath) end
     connect(self, "In2", op2, "In")
     connect(op2, "Out", self, "Out2")
     tie(op2, "Scan", scan, "Out")
@@ -62,12 +66,6 @@ end
 
 function CodescanFilter:deserialize(t)
   Unit.deserialize(self, t)
-  if t.dataFile then
-    self.objects.op:loadData(t.dataFile)
-    if self.objects.op2 then
-      self.objects.op2:loadData(t.dataFile)
-    end
-  end
 end
 
 function CodescanFilter:doLoadFile()
@@ -111,7 +109,8 @@ function CodescanFilter:onShowMenu(objects, branches)
   local info = name .. " (" .. size .. " bytes)"
 
   controls.dataInfo = Task {
-    description = info
+    description = info,
+    task = function() end
   }
 
   return controls, menu
@@ -144,7 +143,7 @@ end
 function CodescanFilter:onLoadViews(objects, branches)
   local controls = {}
 
-  controls.scan = ScanControl {
+  controls.scan = GainBias {
     button = "scan",
     branch = branches.scan,
     description = "Scan",
@@ -153,9 +152,7 @@ function CodescanFilter:onLoadViews(objects, branches)
     biasMap = scanMap(),
     biasUnits = app.unitNone,
     biasPrecision = 3,
-    initialBias = 0.0,
-    op = objects.op,
-    windowSize = 64
+    initialBias = 0.0
   }
 
   controls.taps = GainBias {

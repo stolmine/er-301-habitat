@@ -21,6 +21,7 @@ namespace stolmine
     addOutput(mOutput);
     addParameter(mScan);
     addParameter(mFundamental);
+    mFilePath[0] = '\0';
   }
 
   CodescanOsc::~CodescanOsc()
@@ -41,7 +42,15 @@ namespace stolmine
       mDataSize = 0;
     }
 
-    mFilePath = path ? path : "";
+    if (path)
+    {
+      strncpy(mFilePath, path, kMaxPathLen - 1);
+      mFilePath[kMaxPathLen - 1] = '\0';
+    }
+    else
+    {
+      mFilePath[0] = '\0';
+    }
 
 #ifdef __arm__
     od::FileReader reader;
@@ -87,7 +96,7 @@ namespace stolmine
 
   const char *CodescanOsc::getFilePath()
   {
-    return mFilePath.c_str();
+    return mFilePath;
   }
 
   int CodescanOsc::getDataSize()

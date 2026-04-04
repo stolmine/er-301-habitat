@@ -5,7 +5,7 @@ local Unit = require "Unit"
 local Pitch = require "Unit.ViewControl.Pitch"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
-local ScanControl = require "biome.ScanControl"
+-- local ScanControl = require "biome.ScanControl"
 local Task = require "Unit.MenuControl.Task"
 local Encoder = require "Encoder"
 
@@ -21,9 +21,11 @@ end
 function CodescanOsc:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.CodescanOsc())
 
-  -- Default: load our own .so as the wavetable data
-  local libPath = app.roots.rear .. "/v0.7/libs/biome/libbiome.so"
-  op:loadData(libPath)
+  -- No default data load on hardware; user loads via menu
+  -- On emulator, load our own .so for testing
+  if not app.roots or not app.roots.rear then
+    op:loadData("testing/linux/libbiome.so")
+  end
 
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
@@ -71,9 +73,6 @@ end
 
 function CodescanOsc:deserialize(t)
   Unit.deserialize(self, t)
-  if t.dataFile then
-    self.objects.op:loadData(t.dataFile)
-  end
 end
 
 function CodescanOsc:doLoadFile()
@@ -114,7 +113,8 @@ function CodescanOsc:onShowMenu(objects, branches)
   local info = name .. " (" .. size .. " bytes)"
 
   controls.dataInfo = Task {
-    description = info
+    description = info,
+    task = function() end
   }
 
   return controls, menu
@@ -140,7 +140,7 @@ end
 function CodescanOsc:onLoadViews(objects, branches)
   local controls = {}
 
-  controls.scan = ScanControl {
+  controls.scan = GainBias {
     button = "scan",
     branch = branches.scan,
     description = "Scan",
@@ -149,9 +149,7 @@ function CodescanOsc:onLoadViews(objects, branches)
     biasMap = scanMap(),
     biasUnits = app.unitNone,
     biasPrecision = 3,
-    initialBias = 0.0,
-    op = objects.op,
-    windowSize = 256
+    initialBias = 0.0
   }
 
   controls.tune = Pitch {
