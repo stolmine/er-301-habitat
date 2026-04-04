@@ -350,10 +350,7 @@ Rainmaker-inspired multitap delay. 16 taps, 20s max int16 buffer (~1.875MB). Per
 
 ## Fade Mixer
 
-N-input crossfader with single CV position control.
-
-- [ ] Per-input (4 inputs on top level, refer to warps for inserting mono branches): position on fade axis, curve (linear/equal-power), level trim -- sub-display params with gate control on shift
-- [ ] Global: fade position (CV-controllable), fade width (overlap), output level
+- [x] 4-input crossfader with BranchMeter controls (gain, meter, solo/mute). Equal-power crossfade, CV fade position, output level. Chain passthrough summed with crossfaded mix.
 
 ## Etcher (Transfer Function Designer, inspired by MI Frames)
 

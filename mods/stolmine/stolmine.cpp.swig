@@ -35,6 +35,7 @@
 #include "PingableScaledRandom.h"
 #include "CodescanOsc.h"
 #include "CodescanFilter.h"
+#include "FadeMixer.h"
 #define SWIGLUA
 %}
 
@@ -70,3 +71,4 @@
 %include "PingableScaledRandom.h"
 %include "CodescanOsc.h"
 %include "CodescanFilter.h"
+%include "FadeMixer.h"

@@ -23,6 +23,7 @@ return {
     { title = "Quantoffset", moduleName = "Quantoffset",   category = "stolmine", keywords = "quantizer, offset, cv, utility, pitch" },
     { title = "PSR", moduleName = "PingableScaledRandom", category = "stolmine", keywords = "random, trigger, cv, utility, modulation, sample and hold, psr" },
     { title = "Bletchley Park", moduleName = "CodescanOsc", category = "stolmine", keywords = "oscillator, wavetable, codescan, generator, digital, bletchley" },
-    { title = "Station X", moduleName = "CodescanFilter", category = "stolmine", keywords = "filter, fir, convolution, codescan, effect, digital, station x" }
+    { title = "Station X", moduleName = "CodescanFilter", category = "stolmine", keywords = "filter, fir, convolution, codescan, effect, digital, station x" },
+    { title = "Fade Mixer", moduleName = "FadeMixer", category = "stolmine", keywords = "mixer, crossfade, fade, utility" }
   }
 }
