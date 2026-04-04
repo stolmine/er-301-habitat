@@ -5,7 +5,7 @@ local Unit = require "Unit"
 local Pitch = require "Unit.ViewControl.Pitch"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
--- local ScanControl = require "biome.ScanControl"
+local ScanControl = require "biome.ScanControl"
 local Task = require "Unit.MenuControl.Task"
 local Encoder = require "Encoder"
 
@@ -140,7 +140,7 @@ end
 function CodescanOsc:onLoadViews(objects, branches)
   local controls = {}
 
-  controls.scan = GainBias {
+  controls.scan = ScanControl {
     button = "scan",
     branch = branches.scan,
     description = "Scan",
@@ -149,7 +149,9 @@ function CodescanOsc:onLoadViews(objects, branches)
     biasMap = scanMap(),
     biasUnits = app.unitNone,
     biasPrecision = 3,
-    initialBias = 0.0
+    initialBias = 0.0,
+    op = objects.op,
+    windowSize = 256
   }
 
   controls.tune = Pitch {

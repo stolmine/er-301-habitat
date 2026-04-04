@@ -3,7 +3,7 @@ local libstolmine = require "biome.libbiome"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
--- local ScanControl = require "biome.ScanControl"
+local ScanControl = require "biome.ScanControl"
 local Task = require "Unit.MenuControl.Task"
 local Encoder = require "Encoder"
 
@@ -143,7 +143,7 @@ end
 function CodescanFilter:onLoadViews(objects, branches)
   local controls = {}
 
-  controls.scan = GainBias {
+  controls.scan = ScanControl {
     button = "scan",
     branch = branches.scan,
     description = "Scan",
@@ -152,7 +152,9 @@ function CodescanFilter:onLoadViews(objects, branches)
     biasMap = scanMap(),
     biasUnits = app.unitNone,
     biasPrecision = 3,
-    initialBias = 0.0
+    initialBias = 0.0,
+    op = objects.op,
+    windowSize = 64
   }
 
   controls.taps = GainBias {
