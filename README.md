@@ -91,6 +91,7 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 | | Bletchley Park | Codescan wavetable oscillator -- reads arbitrary binary files as waveforms |
 | | Station X | Codescan FIR filter -- reads binary files as filter kernels |
 | | Fade Mixer | 4-input crossfader with BranchMeter controls |
+| | Varishape Voice | Simple synth voice -- POLYBLEP oscillator (tri/saw/square), gate-triggered decay envelope |
 | **spreadsheet** | Excel | 64-step CV tracker sequencer with math transforms |
 | | Ballot | 64-step gate sequencer with chaselight display and algorithmic transforms |
 | | Etcher | CV-addressed piecewise transfer function |
