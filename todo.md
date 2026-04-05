@@ -73,7 +73,7 @@ Refinements:
 
 ## Biome
 
-- [ ] Varishape Voice -- simple synth voice for quick testing. Replaces varishape osc.
+- [x] Varishape Voice -- simple synth voice for quick testing. Replaces varishape osc.
   - Varishape oscillator core with shape control
   - V/Oct, f0, level (same layout as SingleCycle/Bletchley Park)
   - Gate input with built-in decay envelope (AD or just D)
