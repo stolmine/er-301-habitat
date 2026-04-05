@@ -52,7 +52,7 @@ Based on code by Émilie Gillet (MIT License).
 
 ### Peaks / Dead Man's Catch
 
-Based on code by Émilie Gillet and Tim Churches (MIT License). These still need some testing for hardware parity. IF you're willing, just sound off.
+Based on code by Émilie Gillet and Tim Churches (MIT License). These still need some testing for hardware parity. If you're willing, just sound off.
 
 | Unit | Category | Description |
 |------|----------|-------------|
