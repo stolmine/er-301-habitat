@@ -118,6 +118,7 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 - Bletchley Park: codescan wavetable oscillator, reads arbitrary binary files as waveforms, hex address scan label, DC blocker, file chooser menu
 - Station X: codescan FIR filter, reads binary files as filter kernels, DC blocker, file chooser menu
 - Fade Mixer: 4-input crossfader with BranchMeter controls
+- Varishape Voice: simple synth voice with POLYBLEP oscillator (tri/saw/square morph), gate-triggered decay envelope, V/Oct pitch
 
 **New unit: spreadsheet**
 - Petrichor: Rainmaker-inspired multitap delay, 8 taps, 20s int16 buffer, per-tap SVF filtering (LP/BP/HP/notch), granular pitch shift with reverse, grid/stack tap distribution, tap/filter/volume/pan/cutoff/Q/type macro presets, gate-triggered randomization with 21 targets, feedback tone damping, V/Oct pitch, info overview display
