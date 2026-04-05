@@ -491,11 +491,16 @@ namespace stolmine
     if (grainPeriod < 32) grainPeriod = 32;
     float grainPhaseDelta = 1.0f / (float)grainDuration;
 
-    // Clamp masterTime so all taps fit in buffer
+    // Tap distribution: each tap at masterTime * (groupIndex + 1) / grid
+    // grid=1: taps at 1x, 2x, 3x... masterTime (widely spaced)
+    // grid=16: taps at 1/16, 2/16... masterTime (tightly spaced)
     int numGroups = (tapCount + stack - 1) / stack;
     if (numGroups < 1) numGroups = 1;
-    float maxBeatTime = (float)maxDelay * globalConfig.samplePeriod * (float)grid / (float)numGroups;
-    float masterTime = (masterTimeRaw < maxBeatTime) ? masterTimeRaw : maxBeatTime;
+    // Total delay span: masterTime * numGroups / grid
+    float totalSpan = masterTimeRaw * (float)numGroups / (float)grid;
+    float maxSpanSec = (float)maxDelay * globalConfig.samplePeriod;
+    if (totalSpan > maxSpanSec) totalSpan = maxSpanSec;
+    float masterTime = totalSpan * (float)grid / (float)numGroups;
 
     // Recompute tap distribution when params change, or every frame if drift active
     bool distDirty = (tapCount != mLastTapCount || skew != mLastSkew
@@ -508,16 +513,21 @@ namespace stolmine
       for (int t = 0; t < tapCount; t++)
       {
         int groupIndex = t / stack;
+        // Distribute taps: each at masterTime * (groupIndex+1) / grid
         float pos = powf((float)(groupIndex + 1) / (float)grid, skewExp);
-        // Drift: per-tap slow sinusoidal offset, max +/-10% of master time
+        // Drift: per-tap slow sinusoidal offset
         if (drift > 0.001f)
         {
           s.driftPhase[t] += 0.0003f + 0.0001f * (float)t;
           float offset = sinf(s.driftPhase[t]) * drift * 0.1f;
-          pos = CLAMP(0.001f, 1.0f, pos + offset);
+          pos += offset;
         }
+        if (pos < 0.001f) pos = 0.001f;
         s.tapTime[t] = pos;
         mCachedDelaySamples[t] = pos * masterTime * sr;
+        // Clamp to buffer
+        if (mCachedDelaySamples[t] > (float)(maxDelay - 1))
+          mCachedDelaySamples[t] = (float)(maxDelay - 1);
       }
       // Pre-cache pan coefficients (equal power)
       for (int t = 0; t < tapCount; t++)
@@ -713,7 +723,9 @@ namespace stolmine
         s.fbHpState += (fb - s.fbHpState) * lpCoeff;
         fbOut = fb - s.fbHpState * tone;
       }
-      bufWrite(buf, s.writeIndex, bufRead(buf, s.writeIndex) + fast_tanh(fbOut));
+      // Linear feedback -- only soft-clip if signal is hot
+      float fbInjection = (fabsf(fbOut) > 1.5f) ? fast_tanh(fbOut) : fbOut;
+      bufWrite(buf, s.writeIndex, bufRead(buf, s.writeIndex) + fbInjection);
 
       // Advance write index
       s.writeIndex = (s.writeIndex + 1) % maxDelay;
