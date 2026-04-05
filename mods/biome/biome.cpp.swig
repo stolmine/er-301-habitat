@@ -21,6 +21,7 @@
 #include "CodescanOsc.h"
 #include "CodescanFilter.h"
 #include "FadeMixer.h"
+#include "VarishapeVoice.h"
 #define SWIGLUA
 %}
 
@@ -42,3 +43,4 @@
 %include "CodescanOsc.h"
 %include "CodescanFilter.h"
 %include "FadeMixer.h"
+%include "VarishapeVoice.h"

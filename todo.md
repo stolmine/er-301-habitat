@@ -71,6 +71,15 @@ Refinements:
 - [ ] UI: sub-displays for timbre/meta pairs (tomf pattern) or expanded controls (polygon pattern)
 - [ ] NEON optimization pass
 
+## Biome
+
+- [ ] Varishape Voice -- simple synth voice for quick testing. Replaces varishape osc.
+  - Varishape oscillator core with shape control
+  - V/Oct, f0, level (same layout as SingleCycle/Bletchley Park)
+  - Gate input with built-in decay envelope (AD or just D)
+  - Envelope controls amplitude; gate triggers attack, release on gate off or decay end
+  - Goal: drop in a voice, patch a gate and a pitch, hear sound immediately
+
 ## Sequencer Suite
 
 - [ ] 101 Sequencer — 64-step CV sequencer inspired by the SH-101

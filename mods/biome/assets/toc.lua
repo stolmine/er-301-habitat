@@ -19,6 +19,7 @@ return {
     { title = "PSR",              moduleName = "PingableScaledRandom",  category = "Biome", keywords = "random, trigger, cv, utility, modulation, sample and hold, psr" },
     { title = "Bletchley Park",   moduleName = "CodescanOsc",           category = "Biome", keywords = "oscillator, wavetable, codescan, generator, digital, bletchley" },
     { title = "Station X",        moduleName = "CodescanFilter",        category = "Biome", keywords = "filter, fir, convolution, codescan, effect, digital, station x" },
-    { title = "Fade Mixer",       moduleName = "FadeMixer",             category = "Biome", keywords = "mixer, crossfade, fade, utility" }
+    { title = "Fade Mixer",       moduleName = "FadeMixer",             category = "Biome", keywords = "mixer, crossfade, fade, utility" },
+    { title = "Varishape Voice", moduleName = "VarishapeVoice",       category = "Biome", keywords = "oscillator, voice, synth, varishape, generator" }
   }
 }
