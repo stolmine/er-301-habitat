@@ -1,4 +1,4 @@
-# er-301-habitat
+u# er-301-habitat
 
 Custom units for the ER-301 sound computer.
 
@@ -52,7 +52,7 @@ Based on code by Émilie Gillet (MIT License).
 
 ### Peaks / Dead Man's Catch
 
-Based on code by Émilie Gillet and Tim Churches (MIT License).
+Based on code by Émilie Gillet and Tim Churches (MIT License). These still need some testing for hardware parity. IF you're willing, just sound off.
 
 | Unit | Category | Description |
 |------|----------|-------------|
@@ -78,7 +78,7 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 | **biome** | NR | Gate sequencer inspired by the Noise Engineering Numeric Repetitor |
 | | 94 Discont | 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush) |
 | | Latch Filter | Switched-capacitor S&H into SVF with V/Oct tracking |
-| | Canals | Linked resonant filter inspired by Three Sisters -- crossover/formant modes |
+| | Canals | Linked resonant filter inspired by Three Sisters -- crossover/formant modes - still cooking |
 | | Gesture | Continuous gesture recorder/looper -- 5/10/20s buffer, movement-detected auto-write |
 | | Gated Slew | Slew limiter with gate-controlled activation |
 | | Tilt EQ | One-knob spectral tilt filter |
@@ -89,14 +89,14 @@ Based on code by Émilie Gillet and Tim Churches (MIT License).
 | | Quantoffset | Quantizer with CV offset |
 | | PSR | Pingable scaled random |
 | | Bletchley Park | Codescan wavetable oscillator -- reads arbitrary binary files as waveforms |
-| | Station X | Codescan FIR filter -- reads binary files as filter kernels |
+| | Station X | Codescan FIR filter -- reads binary files as filter kernels - still cooking |
 | | Fade Mixer | 4-input crossfader with BranchMeter controls |
 | | Varishape Voice | Simple synth voice -- POLYBLEP oscillator (tri/saw/square), gate-triggered decay envelope |
 | **spreadsheet** | Excel | 64-step CV tracker sequencer with math transforms |
 | | Ballot | 64-step gate sequencer with chaselight display and algorithmic transforms |
 | | Etcher | CV-addressed piecewise transfer function |
 | | Tomograph | Parallel resonant filter bank with scale distribution |
-| | Petrichor | Multitap delay -- 8 taps, per-tap SVF/pitch, granular reverse, macro presets |
+| | Petrichor | Multitap delay -- 8 taps, per-tap SVF/pitch, granular reverse, macro presets - still cooking |
 | **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization -- stereo-aware passthrough with waveform display |
 
 ## Changelog
