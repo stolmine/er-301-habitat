@@ -46,9 +46,9 @@ namespace stolmine
     float f0 = CLAMP(0.1f, sr * 0.49f, mFundamental.value());
     float shape = CLAMP(0.0f, 1.0f, mShape.value());
 
-    // Decay: 0 = fast pluck, 1 = long sustain
+    // Decay: 0 = fast pluck, 1 = long sustain (exponential scaling)
     float decayParam = CLAMP(0.0f, 1.0f, mDecay.value());
-    float decayCoeff = 0.0001f + (1.0f - decayParam) * 0.05f;
+    float decayCoeff = 0.05f * powf(0.002f, decayParam);
 
     // Gate edge detection
     for (int i = 0; i < FRAMELENGTH; i++)
