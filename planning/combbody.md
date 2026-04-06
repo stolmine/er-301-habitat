@@ -1,30 +1,27 @@
-# CombBody: Rainmaker Comb Resonator for ER-301
+# Pecto: Rainmaker Comb Resonator for ER-301
 
 ## Context
 
-The Rainmaker's comb section is a single feedback comb filter whose spectral shape is sculpted by multiple passive read taps on one shared delay line. All taps are fractions of a master "comb size" so the entire harmonic structure transposes together under V/Oct. This is distinct from the existing "Comb Bank" todo item (N independent parallel combs) -- CombBody is one resonant body with pattern-driven harmonic shaping.
+The Rainmaker's comb section is a single feedback comb filter whose spectral shape is sculpted by multiple passive read taps on one shared delay line. All taps are fractions of a master "comb size" so the entire harmonic structure transposes together under V/Oct. This is distinct from the existing "Comb Bank" todo item (N independent parallel combs) -- Pecto is one resonant body with pattern-driven harmonic shaping.
 
-We already have Petrichor (multitap delay with independent per-tap processing) and Filterbank (parallel SVFs with scale distribution). CombBody is cheaper than both: no per-tap filters, no granular pitch shift. Just N reads + weighted sum + one feedback loop.
+We already have Petrichor (multitap delay with independent per-tap processing) and Filterbank (parallel SVFs with scale distribution). Pecto is cheaper than both: no per-tap filters, no granular pitch shift. Just N reads + weighted sum + one feedback loop.
 
 ## Files to Create
 
 | File | Purpose |
 |------|---------|
-| `mods/spreadsheet/CombBody.h` | DSP class header, pimpl pattern |
-| `mods/spreadsheet/CombBody.cpp` | DSP: buffer, tap patterns, feedback, resonators, LFO |
-| `mods/spreadsheet/CombBodyGraphic.h` | Scrollable tap list display (read-only) |
-| `mods/spreadsheet/CombInfoGraphic.h` | Overview: f0 freq, density, pattern, resonator type |
-| `mods/spreadsheet/assets/CombBody.lua` | Unit wiring, 7-ply view layout |
-| `mods/spreadsheet/assets/CombListControl.lua` | Read-only tap list with density/pattern/slope in expansion |
-| `mods/spreadsheet/assets/CombInfoControl.lua` | Overview wrapper (EncoderControl around CombInfoGraphic) |
-| `mods/spreadsheet/assets/CombSizeControl.lua` | Size ply with LFO shift-SD |
+| `mods/spreadsheet/Pecto.h` | DSP class header, pimpl pattern |
+| `mods/spreadsheet/Pecto.cpp` | DSP: buffer, tap patterns, feedback, resonators |
+| `mods/spreadsheet/PectoInfoGraphic.h` | Info display: f0 freq, density, pattern, resonator type |
+| `mods/spreadsheet/assets/Pecto.lua` | Unit wiring, 6-ply view layout |
+| `mods/spreadsheet/assets/PectoInfoControl.lua` | Density ply with pattern/slope/resonator sub-display |
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `mods/spreadsheet/spreadsheet.cpp.swig` | Add CombBody, CombBodyGraphic, CombInfoGraphic includes |
-| `mods/spreadsheet/assets/toc.lua` | Register CombBody unit |
+| `mods/spreadsheet/spreadsheet.cpp.swig` | Add Pecto, PectoInfoGraphic includes |
+| `mods/spreadsheet/assets/toc.lua` | Register Pecto unit |
 
 ## C++ Architecture
 
@@ -34,93 +31,94 @@ buffer (int16 circular, 20s max ~1.875MB)
 writeIndex
 tapPosition[64]     -- 0-1 fractions of master size (from pattern)
 tapWeight[64]       -- amplitude envelope (from slope)
-tapEnergy[64]       -- RMS followers for viz
-fbFilterState       -- one-pole LP for tone
-fbHpState           -- one-pole HP for tone > 0
+fbFilterState       -- one-pole LP for Guitar resonator
 sitarModState       -- amplitude tracker for Sitar mode
-lfoPhase            -- 0-1 accumulator
 ```
 
 ### Parameters
-- **Global**: CombSize (0.1ms-20s exp), Feedback (0-0.99), FeedbackTone (bipolar), ResonatorType (0-3), Density (1-64), Pattern (0-15), Slope (0-3), VOctPitch, LFORate/Depth/Waveform, Mix, InputLevel, OutputLevel, TanhAmt
+- **Global**: CombSize (0.1ms-20s exp, as fundamental Hz), Feedback (0-0.99), ResonatorType (0-3), Density (1-64), Pattern (0-15), Slope (0-3), VOctPitch, Mix, InputLevel, OutputLevel, TanhAmt
 - **Per-tap**: None editable. Derived from Pattern + Slope + Density via `recomputeTaps()`.
+- No LFO, no tone control -- users bring their own modulation, resonator type handles timbral character.
 
 ### Signal Flow
 ```
 Input -> [write to buffer] -> [read N taps, weight, sum] -> wet output
               ^                                                |
-              +-- [tone] <- [nonlinearity] <- [feedback tap] <-+
+              +-- [nonlinearity/filter] <- [feedback tap] <----+
 ```
 
-### 16 Tap Patterns
-0-7: Uniform, Fibonacci, Early, Late, Middle, Ess, Flat, Rev-Fibonacci
+Feedback is taken from the longest tap (tap N-1), passed through the resonator nonlinearity, and written back to the buffer at the write head.
+
+### 16 Tap Patterns (from Rainmaker)
+0: Uniform, 1: Fibonacci, 2: Early, 3: Late, 4: Middle, 5: Ess, 6: Flat, 7: Rev-Fibonacci
 8-15: Randomized variants of 0-7 (seeded perturbation)
 
+Tap positions are fractions of master comb size: `tapPosition[i] = pattern_func(i, density)`. All taps scale together under V/Oct.
+
 ### 4 Slope Types
-Flat (1.0), Rise (linear up), Fall (linear down), Rise-Fall (sine hump)
+- Flat (all taps equal amplitude)
+- Rise (linear ramp up)
+- Fall (linear ramp down)
+- Rise-Fall (sine hump, center taps loudest)
 
 ### 4 Resonator Types
-- **Raw**: wire (tone filter only)
-- **Guitar**: one-pole LP damping in feedback (KS frequency-dependent decay)
+- **Raw**: direct wire (no processing on feedback path)
+- **Guitar**: one-pole LP damping in feedback (Karplus-Strong frequency-dependent decay)
 - **Clarinet**: `x - x^3/3` odd-harmonic nonlinearity
-- **Sitar**: `delay_actual = delay_base + k * |fb_signal|` (amplitude-dependent delay mod)
+- **Sitar**: `delay_actual = delay_base + k * |fb_signal|` (amplitude-dependent delay modulation)
 
 ### Reuse from Petrichor
-- int16 bufRead/bufWrite helpers + bufReadInterp for fractional delay
+- int16 bufRead/bufWrite helpers
 - Buffer allocation with fallback halving
-- Feedback normalization by tap count: `fb / (1 + 0.15 * sqrt(N))`
-- tanh soft limiter on feedback injection
+- Feedback normalization: `fb / (1 + 0.15 * sqrt(N))`
+- Linear feedback with tanh safety limiter (>1.5 amplitude only)
 - V/Oct: ConstantOffset * 10 -> octaves, applied as `size * 2^(-voct)`
 
-## Lua UI Layout (7 plies)
+## Lua UI Layout (6 plies)
 
 1. **tune** -- V/Oct (Pitch control, ConstantOffset)
-2. **taps** -- CombListControl: read-only tap list, expansion: density/pattern/slope
-3. **overview** -- CombInfoControl: f0 Hz, density, pattern, resonator type
-4. **size** -- CombSizeControl: comb size GainBias, shift-SD: LFO rate/depth/waveform
-5. **feedback** -- FeedbackControl (reuse): shift-SD: tone + resonator type
-6. **xform** -- TransformGateControl (reuse): targets for all params
-7. **mix** -- MixControl (reuse): input/output/tanh
+2. **f0** -- Comb size as fundamental frequency (GainBias, Hz)
+3. **density** -- Tap count 1-64 (GainBias integer), sub-display: pattern / slope / resonator (all with addName labels)
+   - Expansion view: density, pattern, slope, resonator as full controls
+4. **feedback** -- Feedback amount 0-0.99 (GainBias, simple, no shift SD)
+5. **xform** -- TransformGateControl (reuse from Petrichor), targets adapted for Pecto
+6. **mix** -- MixControl (reuse), shift-SD: input / output / tanh
 
-No per-tap serialization needed (taps are derived). Standard Unit.serialize suffices.
+No per-tap serialization needed. Standard Unit.serialize suffices.
 
 ## Xform Gate (Randomization)
 
-Gate input on Comparator triggers randomization of top-level parameters. Follows Petrichor's TransformGateControl pattern exactly.
+Gate input on Comparator triggers randomization. Follows Petrichor's TransformGateControl pattern.
 
-### Targets (single selector, 0-12)
+### Targets (single selector, 0-8)
 0. **all** -- randomize everything below
-1. **size** -- comb size
+1. **size** -- comb size / fundamental
 2. **feedback** -- feedback amount
-3. **tone** -- feedback tone
-4. **resonator** -- resonator type (integer 0-3)
-5. **density** -- tap count (integer 1-64)
-6. **pattern** -- tap pattern (integer 0-15)
-7. **slope** -- slope type (integer 0-3)
-8. **lfo rate** -- LFO rate
-9. **lfo depth** -- LFO depth
-10. **lfo wave** -- LFO waveform (integer 0-3)
-11. **mix** -- wet/dry mix
-12. **reset** -- restore all to defaults
+3. **resonator** -- resonator type (integer 0-3)
+4. **density** -- tap count (integer 1-64)
+5. **pattern** -- tap pattern (integer 0-15)
+6. **slope** -- slope type (integer 0-3)
+7. **mix** -- wet/dry mix
+8. **reset** -- restore all to defaults
 
 ### C++ Implementation
 - `od::Parameter *mBias*` pointers for each randomizable param (set from Lua via `setTopLevelBias`)
 - `mXformTarget`, `mXformDepth` parameters
 - `fireRandomize()` called from gate rising edge or manual trigger
 - `applyRandomize()` uses depth to scale random deviation from current value
-- Integer params (resonator, pattern, slope, density, lfo wave) snap to valid integer range
+- Integer params (resonator, pattern, slope, density) snap to valid integer range
 
 ### Lua Wiring
 - Comparator on XformGate inlet
-- TransformGateControl (reuse from Petrichor) with target names adapted for CombBody
+- TransformGateControl (reuse from Petrichor) with target names adapted
 - Sub-display: target / depth / fire
 - `setTopLevelBias(0..N, adapter:getParameter("Bias"))` for each randomizable param
 
 ## Build Order
 
 ### Phase 1: Skeleton
-- CombBody.h/cpp with buffer alloc, passthrough, CombSize/Feedback/Mix params
-- Minimal CombBody.lua with GainBias controls
+- Pecto.h/cpp with buffer alloc, passthrough, CombSize/Feedback/Mix params
+- Minimal Pecto.lua with GainBias controls (6 plies, no custom controls yet)
 - SWIG + toc registration
 - **Test**: unit loads, audio passes through
 
@@ -138,18 +136,13 @@ Gate input on Comparator triggers randomization of top-level parameters. Follows
 - Raw, Guitar, Clarinet, Sitar feedback nonlinearities
 - **Test**: each produces distinct timbral character
 
-### Phase 5: LFO
-- Phase accumulator, 4 waveforms (sine/tri/chirp/S&H)
-- Modulate comb size
-- **Test**: vibrato/chorus effect
+### Phase 5: Full UI
+- PectoInfoGraphic.h (density display with pattern/resonator info)
+- PectoInfoControl.lua (density ply with pattern/slope/resonator sub-display)
+- Full 6-ply Pecto.lua with MixControl and TransformGateControl reuse
+- Xform wiring with Pecto targets
 
-### Phase 6: Full UI
-- CombBodyGraphic.h, CombInfoGraphic.h
-- CombListControl.lua, CombInfoControl.lua, CombSizeControl.lua
-- Full 7-ply CombBody.lua
-- TransformGateControl with CombBody targets + xform wiring
-
-### Phase 7: Polish
+### Phase 6: Polish
 - Stereo support (mono flag, OutR)
 - Parameter defaults tuning
 - CPU profiling on Cortex-A8
@@ -157,17 +150,18 @@ Gate input on Comparator triggers randomization of top-level parameters. Follows
 ## Verification
 
 - 64 taps at 48kHz should be well within CPU budget (just N reads + N multiplies per sample)
-- Feedback at 0.99 must not blow up (tanh limiter + normalization)
-- V/Oct: 1V = double frequency
+- Feedback at 0.99 must not blow up (linear fb with tanh safety limiter)
+- V/Oct: 1V = double frequency (halves comb size)
 - Patterns: uniform vs fibonacci should sound clearly different
 - Sitar mode: amplitude-dependent pitch wobble audible at high feedback
+- Guitar mode: high frequencies decay faster (KS damping)
 - Xform gate fires randomization, integer params snap correctly
-- All 7 plies display correctly in collapsed and expanded views
+- All 6 plies display correctly in collapsed and expanded views
 
 ## Key Reference Files
 - `mods/spreadsheet/MultitapDelay.h/.cpp` -- buffer, feedback, tap patterns
 - `mods/spreadsheet/Filterbank.h/.cpp` -- energy followers, dirty-check pattern
-- `mods/spreadsheet/assets/MultitapDelay.lua` -- 7-ply layout, control reuse
-- `mods/spreadsheet/assets/TapListControl.lua` -- list control scrolling
+- `mods/spreadsheet/assets/MultitapDelay.lua` -- ply layout, control reuse
 - `mods/spreadsheet/assets/TransformGateControl.lua` -- xform gate pattern
+- `mods/spreadsheet/assets/MixControl.lua` -- MixControl with shift-SD
 - `eurorack/stmlib/dsp/delay_line.h` -- interpolation reference
