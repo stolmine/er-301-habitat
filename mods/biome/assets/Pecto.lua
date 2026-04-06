@@ -78,7 +78,7 @@ function Pecto:onLoadGraph(channelCount)
   -- Comb size (f0 Hz -> combSize seconds via adapter)
   -- User sets Hz, we invert to seconds for C++
   local combSize = self:addObject("combSize", app.ParameterAdapter())
-  combSize:hardSet("Bias", 0.01) -- 100 Hz default
+  combSize:hardSet("Bias", 55.0) -- Hz
   tieParam("CombSize", combSize)
   self:addMonoBranch("combSize", combSize, "In", combSize, "Out")
 
@@ -182,7 +182,7 @@ function Pecto:onLoadViews()
       biasMap = f0Map,
       biasUnits = app.unitHertz,
       biasPrecision = 1,
-      initialBias = 0.01
+      initialBias = 55.0
     },
     density = DensityControl {
       button = "dens",

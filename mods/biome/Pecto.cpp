@@ -230,7 +230,7 @@ namespace stolmine
     switch (target)
     {
     case 0: // all
-      rndBias(mBiasCombSize, 0.0005f, 0.05f);
+      rndBias(mBiasCombSize, 20.0f, 5000.0f);
       rndBias(mBiasFeedback, 0.0f, 0.99f);
       rndBiasInt(mBiasResonatorType, 0.0f, 3.0f);
       rndBiasInt(mBiasDensity, 1.0f, 64.0f);
@@ -238,7 +238,7 @@ namespace stolmine
       rndBiasInt(mBiasSlope, 0.0f, 3.0f);
       rndBias(mBiasMix, 0.0f, 1.0f);
       break;
-    case 1: rndBias(mBiasCombSize, 0.0005f, 0.05f); break;
+    case 1: rndBias(mBiasCombSize, 20.0f, 5000.0f); break;
     case 2: rndBias(mBiasFeedback, 0.0f, 0.99f); break;
     case 3: rndBiasInt(mBiasResonatorType, 0.0f, 3.0f); break;
     case 4: rndBiasInt(mBiasDensity, 1.0f, 64.0f); break;
@@ -246,7 +246,7 @@ namespace stolmine
     case 6: rndBiasInt(mBiasSlope, 0.0f, 3.0f); break;
     case 7: rndBias(mBiasMix, 0.0f, 1.0f); break;
     case 8: // reset
-      if (mBiasCombSize) mBiasCombSize->hardSet(0.01f);
+      if (mBiasCombSize) mBiasCombSize->hardSet(55.0f);
       if (mBiasFeedback) mBiasFeedback->hardSet(0.5f);
       if (mBiasResonatorType) mBiasResonatorType->hardSet(0.0f);
       if (mBiasDensity) mBiasDensity->hardSet(8.0f);
@@ -284,7 +284,8 @@ namespace stolmine
     int maxDelay = mMaxDelayInSamples;
     float sr = globalConfig.sampleRate;
 
-    float combSize = CLAMP(0.00002f, 20.0f, mCombSize.value());
+    // CombSize parameter receives Hz from Lua f0 fader
+    float f0Hz = CLAMP(0.5f, sr * 0.49f, mCombSize.value());
     float feedback = CLAMP(0.0f, 0.99f, mFeedback.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
@@ -304,8 +305,8 @@ namespace stolmine
       recomputeTaps(density, pattern, slope);
     }
 
-    // Compute base delay in samples from comb size + V/Oct
-    float baseDelay = combSize * sr / powf(2.0f, voctPitch);
+    // Compute base delay in samples: sr / f0, scaled by V/Oct
+    float baseDelay = sr / (f0Hz * powf(2.0f, voctPitch));
     if (baseDelay < 1.0f) baseDelay = 1.0f;
     if (baseDelay > (float)(maxDelay - 1)) baseDelay = (float)(maxDelay - 1);
 
@@ -316,8 +317,9 @@ namespace stolmine
       mCachedTapWeight[t] = s.tapWeight[t];
     }
 
-    // Feedback normalization
-    float fbNorm = feedback / (1.0f + 0.15f * sqrtf((float)density));
+    // Comb feedback: direct, no tap-count normalization
+    // (unlike Petrichor, feedback is from a single tap, not a sum)
+    float fbNorm = feedback;
 
     // Xform gate edge detection
     {
@@ -336,16 +338,17 @@ namespace stolmine
       }
     }
 
+    // No tap normalization -- comb taps sum coherently for resonance.
+    // Output limiter (tanh) handles any clipping.
+
     // Process audio
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float x = in[i] * inputLevel;
 
-      // Write input to buffer
+      // Read taps before writing (so we read previous frame's data)
       if (s.writeIndex >= maxDelay) s.writeIndex = 0;
-      bufWrite(buf, s.writeIndex, x);
 
-      // Read and sum taps
       float wet = 0.0f;
       float lastTapOut = 0.0f;
       for (int t = 0; t < density; t++)
@@ -357,9 +360,6 @@ namespace stolmine
         lastTapOut = tapOut;
       }
 
-      // Normalize by tap count
-      if (density > 1)
-        wet *= 1.0f / sqrtf((float)density);
 
       // Feedback from last (longest) tap
       float fb = lastTapOut * fbNorm;
@@ -376,13 +376,13 @@ namespace stolmine
       case 2: // Clarinet -- odd-harmonic nonlinearity
         fb = fb - (fb * fb * fb) / 3.0f;
         break;
-      case 3: // Sitar -- amplitude-dependent delay mod (handled above, stub for now)
+      case 3: // Sitar -- amplitude-dependent delay mod (stub)
         break;
       }
 
-      // Linear feedback with safety limiter
+      // Write input + feedback combined (avoids int16 clipping on separate writes)
       float fbInjection = (fabsf(fb) > 1.5f) ? fast_tanh(fb) : fb;
-      bufWrite(buf, s.writeIndex, bufRead(buf, s.writeIndex) + fbInjection);
+      bufWrite(buf, s.writeIndex, x + fbInjection);
 
       // Advance write index
       s.writeIndex++;
