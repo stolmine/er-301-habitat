@@ -23,6 +23,7 @@
 #include "FadeMixer.h"
 #include "VarishapeVoice.h"
 #include "Pecto.h"
+#include "Transport.h"
 #define SWIGLUA
 %}
 
@@ -46,3 +47,4 @@
 %include "FadeMixer.h"
 %include "VarishapeVoice.h"
 %include "Pecto.h"
+%include "Transport.h"
