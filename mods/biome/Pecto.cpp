@@ -50,11 +50,13 @@ namespace stolmine
     float tapPosition[kMaxCombTaps];
     float tapWeight[kMaxCombTaps];
     float fbFilterState = 0.0f;
+    float sitarEnvFollower = 0.0f;
 
     void Init()
     {
       writeIndex = 0;
       fbFilterState = 0.0f;
+      sitarEnvFollower = 0.0f;
       for (int i = 0; i < kMaxCombTaps; i++)
       {
         tapPosition[i] = (float)(i + 1) / (float)kMaxCombTaps;
@@ -295,10 +297,11 @@ namespace stolmine
 
   static float randomizeValue(float cur, float mn, float mx, float depth)
   {
-    float range = mx - mn;
-    float r = ((float)(rand() & 0x7FFF) / 16383.0f) * 2.0f - 1.0f;
-    float v = cur + r * depth * range * 0.5f;
-    return CLAMP(mn, mx, v);
+    // Blend between current value and a random position in range.
+    // depth=0: no change, depth=1: fully random across range.
+    float r = (float)(rand() & 0x7FFF) / 32767.0f; // 0-1
+    float randomPos = mn + r * (mx - mn);
+    return cur + (randomPos - cur) * depth;
   }
 
   void Pecto::fireRandomize() { mManualFire = true; }
@@ -468,28 +471,68 @@ namespace stolmine
       }
 
 
-      // Feedback from last (longest) tap
+      // Feedback from longest tap (last position, highest delay)
       float fb = lastTapOut * fbNorm;
 
       // Resonator type processing on feedback
       switch (resonatorType)
       {
-      case 0: // Raw -- direct
+      case 0: // Raw -- direct wire, bright and metallic
         break;
       case 1: // Guitar -- one-pole LP damping (Karplus-Strong)
-        s.fbFilterState += (fb - s.fbFilterState) * 0.4f;
+      {
+        // Coefficient ~0.15 gives strong HF damping: highs decay fast, lows ring
+        float coeff = 0.15f;
+        s.fbFilterState += (fb - s.fbFilterState) * coeff;
         fb = s.fbFilterState;
         break;
-      case 2: // Clarinet -- odd-harmonic nonlinearity
-        fb = fb - (fb * fb * fb) / 3.0f;
-        break;
-      case 3: // Sitar -- amplitude-dependent delay mod (stub)
+      }
+      case 2: // Clarinet -- soft clip + one-pole HP for odd-harmonic emphasis
+      {
+        // Drive into soft clip to generate odd harmonics
+        float driven = fb * 3.0f;
+        fb = driven - (driven * driven * driven) / 3.0f;
+        fb *= 0.33f; // compensate gain
         break;
       }
+      case 3: // Sitar -- amplitude-dependent delay modulation (jawari buzz)
+      {
+        // Track amplitude envelope of feedback signal
+        float absVal = fabsf(fb);
+        float attackCoeff = 0.01f;  // fast attack
+        float releaseCoeff = 0.001f; // slow release
+        if (absVal > s.sitarEnvFollower)
+          s.sitarEnvFollower += (absVal - s.sitarEnvFollower) * attackCoeff;
+        else
+          s.sitarEnvFollower += (absVal - s.sitarEnvFollower) * releaseCoeff;
+        break;
+      }
+      }
 
-      // Write input + feedback combined (avoids int16 clipping on separate writes)
+      // Sitar delay modulation: shift write position based on envelope
+      // This creates pitch wobble proportional to signal amplitude (jawari effect)
+      float writeOffset = 0.0f;
+      if (resonatorType == 3)
+      {
+        // Modulate delay by up to +/-2 samples based on amplitude
+        writeOffset = s.sitarEnvFollower * 4.0f;
+      }
+
+      // Write input + feedback combined
       float fbInjection = (fabsf(fb) > 1.5f) ? fast_tanh(fb) : fb;
-      bufWrite(buf, s.writeIndex, x + fbInjection);
+      int writePos = s.writeIndex;
+      if (writeOffset > 0.001f)
+      {
+        // Sitar: write at modulated position for pitch instability
+        int modPos = writePos + (int)(writeOffset);
+        if (modPos >= maxDelay) modPos -= maxDelay;
+        if (modPos < 0) modPos += maxDelay;
+        bufWrite(buf, modPos, x + fbInjection);
+      }
+      else
+      {
+        bufWrite(buf, writePos, x + fbInjection);
+      }
 
       // Advance write index
       s.writeIndex++;
