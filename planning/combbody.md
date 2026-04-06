@@ -10,18 +10,18 @@ We already have Petrichor (multitap delay with independent per-tap processing) a
 
 | File | Purpose |
 |------|---------|
-| `mods/spreadsheet/Pecto.h` | DSP class header, pimpl pattern |
-| `mods/spreadsheet/Pecto.cpp` | DSP: buffer, tap patterns, feedback, resonators |
-| `mods/spreadsheet/PectoInfoGraphic.h` | Info display: f0 freq, density, pattern, resonator type |
-| `mods/spreadsheet/assets/Pecto.lua` | Unit wiring, 6-ply view layout |
-| `mods/spreadsheet/assets/PectoInfoControl.lua` | Density ply with pattern/slope/resonator sub-display |
+| `mods/biome/Pecto.h` | DSP class header, pimpl pattern |
+| `mods/biome/Pecto.cpp` | DSP: buffer, tap patterns, feedback, resonators |
+| `mods/biome/PectoInfoGraphic.h` | Info display: f0 freq, density, pattern, resonator type |
+| `mods/biome/assets/Pecto.lua` | Unit wiring, 6-ply view layout |
+| `mods/biome/assets/PectoInfoControl.lua` | Density ply with pattern/slope/resonator sub-display |
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `mods/spreadsheet/spreadsheet.cpp.swig` | Add Pecto, PectoInfoGraphic includes |
-| `mods/spreadsheet/assets/toc.lua` | Register Pecto unit |
+| `mods/biome/biome.cpp.swig` | Add Pecto, PectoInfoGraphic includes |
+| `mods/biome/assets/toc.lua` | Register Pecto unit |
 
 ## C++ Architecture
 
@@ -159,9 +159,9 @@ Gate input on Comparator triggers randomization. Follows Petrichor's TransformGa
 - All 6 plies display correctly in collapsed and expanded views
 
 ## Key Reference Files
-- `mods/spreadsheet/MultitapDelay.h/.cpp` -- buffer, feedback, tap patterns
-- `mods/spreadsheet/Filterbank.h/.cpp` -- energy followers, dirty-check pattern
-- `mods/spreadsheet/assets/MultitapDelay.lua` -- ply layout, control reuse
-- `mods/spreadsheet/assets/TransformGateControl.lua` -- xform gate pattern
-- `mods/spreadsheet/assets/MixControl.lua` -- MixControl with shift-SD
+- `mods/biome/MultitapDelay.h/.cpp` -- buffer, feedback, tap patterns
+- `mods/biome/Filterbank.h/.cpp` -- energy followers, dirty-check pattern
+- `mods/biome/assets/MultitapDelay.lua` -- ply layout, control reuse
+- `mods/biome/assets/TransformGateControl.lua` -- xform gate pattern
+- `mods/biome/assets/MixControl.lua` -- MixControl with shift-SD
 - `eurorack/stmlib/dsp/delay_line.h` -- interpolation reference

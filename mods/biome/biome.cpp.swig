@@ -22,6 +22,7 @@
 #include "CodescanFilter.h"
 #include "FadeMixer.h"
 #include "VarishapeVoice.h"
+#include "Pecto.h"
 #define SWIGLUA
 %}
 
@@ -44,3 +45,4 @@
 %include "CodescanFilter.h"
 %include "FadeMixer.h"
 %include "VarishapeVoice.h"
+%include "Pecto.h"
