@@ -73,6 +73,9 @@ end
 
 function CodescanOsc:deserialize(t)
   Unit.deserialize(self, t)
+  if t.dataFile and #t.dataFile > 0 then
+    self.objects.op:loadData(t.dataFile)
+  end
 end
 
 function CodescanOsc:doLoadFile()
