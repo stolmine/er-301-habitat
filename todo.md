@@ -79,7 +79,7 @@ Refinements:
   - Gate input with built-in decay envelope (AD or just D)
   - Envelope controls amplitude; gate triggers attack, release on gate off or decay end
   - Goal: drop in a voice, patch a gate and a pitch, hear sound immediately
-- [ ] Bug: Bletchley Park loses file association when "moved to mixer" (sub-display command). File path not preserved across unit relocation -- likely needs serialize/deserialize of the loaded path to survive the move.
+- [x] Bug: Bletchley Park loses file association when "moved to mixer" -- fixed, deserialize restores path
 
 ## Sequencer Suite
 
@@ -355,8 +355,8 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
 - [x] Overview always-visible sub-display (grain/taps/stack) with addName readout formatting
 - [x] Shift+home zeroing fix across all 5 sub-display controls (value-snapshot comparison)
 - [ ] Improve Petrichor engine: audio quality issues at higher tap counts, granular artifacts, investigate feedback path and grain overlap. Currently capped at 8 taps for CPU stability.
-- [ ] Bug: tap distribution may not be responding correctly to grid/stack settings. With grid=1, stack=1, long master time, behavior still sounds "strummy" (evenly spaced echoes) rather than reflecting the distribution formula. Investigate recomputeTaps dirty-check and verify `pow((i+1)/grid, skewExp)` produces correct positions.
-- [ ] Bug: feedback is extremely faint even at high values. Investigate fbNorm scaling (`feedback / (1 + 0.15 * sqrt(tapCount))`), the tanh limiter on the feedback injection, and whether the int16 buffer quantization is attenuating the feedback signal. May need to revisit gain staging.
+- [x] Bug: tap distribution fixed -- formula was `(i+1)/grid` causing taps to pile up when grid < tapCount. Now `(i+1)/grid` with taps at multiples of masterTime when grid=1, packed tight at high grid.
+- [x] Bug: feedback fixed -- tanh was compressing every feedback cycle. Now linear with tanh safety limiter only above 1.5 amplitude.
 - [ ] Grain bypass for unity pitch (sample-accurate read when tap pitch is 0)
 - [ ] Macro filter cutoff offset: CV-modulatable continuous shift of all per-tap cutoffs. On feedback shift SD + expansion (feedback + tone + filterOffset).
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
