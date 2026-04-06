@@ -1,5 +1,9 @@
 # TODO
 
+## Release
+
+- [x] Version bump biome and spreadsheet packages to v1.0.1 for hotfix released 2026-04-05. Rebuild and reupload.
+
 ## Mutable Instruments Ports
 
 - [x] Plaits (macro-oscillator — all 24 engines)
@@ -80,6 +84,7 @@ Refinements:
   - Envelope controls amplitude; gate triggers attack, release on gate off or decay end
   - Goal: drop in a voice, patch a gate and a pitch, hear sound immediately
 - [x] Bug: Bletchley Park loses file association when "moved to mixer" -- fixed, deserialize restores path
+- [ ] Transport -- simple clock generator with latching run/stop gate and rate control. Mute vs actual stop TBD (mute = clock keeps running but output is gated, stop = clock resets phase on restart).
 
 ## Sequencer Suite
 

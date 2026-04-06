@@ -151,16 +151,118 @@ namespace stolmine
 
   // --- Tap distribution ---
 
+  // Base pattern: compute tap positions as fractions of comb size (0,1]
+  static void computePattern(float *pos, int density, int basePattern)
+  {
+    int N = density;
+    switch (basePattern)
+    {
+    default:
+    case 0: // Uniform -- evenly spaced
+      for (int i = 0; i < N; i++)
+        pos[i] = (float)(i + 1) / (float)N;
+      break;
+
+    case 1: // Fibonacci -- golden ratio spacing, sorted
+    {
+      float phi = 1.6180339887f;
+      for (int i = 0; i < N; i++)
+        pos[i] = fmodf((float)(i + 1) * (1.0f / phi), 1.0f);
+      // Sort ascending
+      for (int i = 0; i < N - 1; i++)
+        for (int j = i + 1; j < N; j++)
+          if (pos[j] < pos[i]) { float tmp = pos[i]; pos[i] = pos[j]; pos[j] = tmp; }
+      // Ensure no zero positions
+      for (int i = 0; i < N; i++)
+        if (pos[i] < 0.001f) pos[i] = 0.001f;
+      break;
+    }
+
+    case 2: // Early -- clustered toward start (power < 1)
+      for (int i = 0; i < N; i++)
+      {
+        float t = (float)(i + 1) / (float)N;
+        pos[i] = powf(t, 0.5f);
+      }
+      break;
+
+    case 3: // Late -- clustered toward end (power > 1)
+      for (int i = 0; i < N; i++)
+      {
+        float t = (float)(i + 1) / (float)N;
+        pos[i] = powf(t, 2.0f);
+      }
+      break;
+
+    case 4: // Middle -- clustered toward center (sine warp)
+      for (int i = 0; i < N; i++)
+      {
+        float t = (float)(i + 1) / (float)(N + 1);
+        pos[i] = 0.5f + 0.5f * sinf((t - 0.5f) * 3.14159f);
+      }
+      break;
+
+    case 5: // Ess -- S-curve, sparse at ends, dense in middle
+      for (int i = 0; i < N; i++)
+      {
+        float t = (float)(i + 1) / (float)(N + 1);
+        float s = t * t * (3.0f - 2.0f * t); // smoothstep
+        pos[i] = s;
+      }
+      break;
+
+    case 6: // Flat -- all taps at same position (unison/chorus)
+      for (int i = 0; i < N; i++)
+        pos[i] = 1.0f;
+      break;
+
+    case 7: // Rev-Fibonacci -- fibonacci mirrored
+    {
+      float phi = 1.6180339887f;
+      for (int i = 0; i < N; i++)
+        pos[i] = fmodf((float)(i + 1) * (1.0f / phi), 1.0f);
+      for (int i = 0; i < N - 1; i++)
+        for (int j = i + 1; j < N; j++)
+          if (pos[j] < pos[i]) { float tmp = pos[i]; pos[i] = pos[j]; pos[j] = tmp; }
+      // Mirror: reflect around 0.5
+      for (int i = 0; i < N; i++)
+        pos[i] = 1.0f - pos[i];
+      // Re-sort ascending
+      for (int i = 0; i < N - 1; i++)
+        for (int j = i + 1; j < N; j++)
+          if (pos[j] < pos[i]) { float tmp = pos[i]; pos[i] = pos[j]; pos[j] = tmp; }
+      for (int i = 0; i < N; i++)
+        if (pos[i] < 0.001f) pos[i] = 0.001f;
+      break;
+    }
+    }
+  }
+
+  // Seeded perturbation for patterns 8-15
+  static void perturbPattern(float *pos, int density, unsigned int seed)
+  {
+    unsigned int s = seed;
+    for (int i = 0; i < density; i++)
+    {
+      // Simple LCG
+      s = s * 1103515245u + 12345u;
+      float r = ((float)((s >> 8) & 0x7FFF) / 16383.0f) * 2.0f - 1.0f;
+      // Perturb by up to +/-10% of spacing
+      float spacing = (i < density - 1) ? (pos[i + 1] - pos[i]) : (1.0f - pos[i]);
+      pos[i] += r * spacing * 0.1f;
+      if (pos[i] < 0.001f) pos[i] = 0.001f;
+      if (pos[i] > 1.0f) pos[i] = 1.0f;
+    }
+  }
+
   void Pecto::recomputeTaps(int density, int pattern, int slope)
   {
     Internal &s = *mpInternal;
 
-    // Phase 1: uniform distribution only
-    // TODO: implement all 16 patterns
-    for (int i = 0; i < density; i++)
-    {
-      s.tapPosition[i] = (float)(i + 1) / (float)density;
-    }
+    int basePattern = pattern & 7;
+    computePattern(s.tapPosition, density, basePattern);
+    if (pattern >= 8)
+      perturbPattern(s.tapPosition, density, (unsigned int)(pattern * 7919 + density * 131));
 
     // Slope: weight envelope
     for (int i = 0; i < density; i++)
@@ -230,7 +332,7 @@ namespace stolmine
     switch (target)
     {
     case 0: // all
-      rndBias(mBiasCombSize, 20.0f, 5000.0f);
+      rndBias(mBiasCombSize, 0.001f, 1.0f);
       rndBias(mBiasFeedback, 0.0f, 0.99f);
       rndBiasInt(mBiasResonatorType, 0.0f, 3.0f);
       rndBiasInt(mBiasDensity, 1.0f, 64.0f);
@@ -238,7 +340,7 @@ namespace stolmine
       rndBiasInt(mBiasSlope, 0.0f, 3.0f);
       rndBias(mBiasMix, 0.0f, 1.0f);
       break;
-    case 1: rndBias(mBiasCombSize, 20.0f, 5000.0f); break;
+    case 1: rndBias(mBiasCombSize, 0.001f, 1.0f); break;
     case 2: rndBias(mBiasFeedback, 0.0f, 0.99f); break;
     case 3: rndBiasInt(mBiasResonatorType, 0.0f, 3.0f); break;
     case 4: rndBiasInt(mBiasDensity, 1.0f, 64.0f); break;
@@ -246,7 +348,7 @@ namespace stolmine
     case 6: rndBiasInt(mBiasSlope, 0.0f, 3.0f); break;
     case 7: rndBias(mBiasMix, 0.0f, 1.0f); break;
     case 8: // reset
-      if (mBiasCombSize) mBiasCombSize->hardSet(55.0f);
+      if (mBiasCombSize) mBiasCombSize->hardSet(0.1f);
       if (mBiasFeedback) mBiasFeedback->hardSet(0.5f);
       if (mBiasResonatorType) mBiasResonatorType->hardSet(0.0f);
       if (mBiasDensity) mBiasDensity->hardSet(8.0f);
@@ -284,17 +386,22 @@ namespace stolmine
     int maxDelay = mMaxDelayInSamples;
     float sr = globalConfig.sampleRate;
 
-    // CombSize parameter receives Hz from Lua f0 fader
-    float f0Hz = CLAMP(0.5f, sr * 0.49f, mCombSize.value());
+    // CombSize parameter is in seconds
+    float combSize = CLAMP(0.00002f, 20.0f, mCombSize.value());
     float feedback = CLAMP(0.0f, 0.99f, mFeedback.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
     float tanhAmt = CLAMP(0.0f, 1.0f, mTanhAmt.value());
     int density = CLAMP(1, kMaxCombTaps, (int)(mDensity.value() + 0.5f));
-    int pattern = CLAMP(0, 15, (int)(mPattern.value() + 0.5f));
-    int slope = CLAMP(0, 3, (int)(mSlope.value() + 0.5f));
-    int resonatorType = CLAMP(0, 3, (int)(mResonatorType.value() + 0.5f));
+    // Read pattern/slope/resonator from Bias refs (direct from UI)
+    // since tied ParameterAdapters may not be scheduled without graph connections
+    int pattern = mBiasPattern ? CLAMP(0, 15, (int)(mBiasPattern->value() + 0.5f))
+                               : CLAMP(0, 15, (int)(mPattern.value() + 0.5f));
+    int slope = mBiasSlope ? CLAMP(0, 3, (int)(mBiasSlope->value() + 0.5f))
+                           : CLAMP(0, 3, (int)(mSlope.value() + 0.5f));
+    int resonatorType = mBiasResonatorType ? CLAMP(0, 3, (int)(mBiasResonatorType->value() + 0.5f))
+                                           : CLAMP(0, 3, (int)(mResonatorType.value() + 0.5f));
 
     // V/Oct pitch
     float voctPitch = mVOctPitch.value() * 10.0f;
@@ -305,8 +412,8 @@ namespace stolmine
       recomputeTaps(density, pattern, slope);
     }
 
-    // Compute base delay in samples: sr / f0, scaled by V/Oct
-    float baseDelay = sr / (f0Hz * powf(2.0f, voctPitch));
+    // Compute base delay in samples from comb size, V/Oct shrinks delay (raises pitch)
+    float baseDelay = combSize * sr / powf(2.0f, voctPitch);
     if (baseDelay < 1.0f) baseDelay = 1.0f;
     if (baseDelay > (float)(maxDelay - 1)) baseDelay = (float)(maxDelay - 1);
 

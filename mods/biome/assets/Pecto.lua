@@ -7,6 +7,7 @@ local Pitch = require "Unit.ViewControl.Pitch"
 local MixControl = require "spreadsheet.MixControl"
 local TransformGateControl = require "spreadsheet.TransformGateControl"
 local DensityControl = require "biome.DensityControl"
+local ModeSelector = require "biome.ModeSelector"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max)
@@ -22,9 +23,9 @@ local function intMap(min, max)
   return map
 end
 
-local f0Map = (function()
-  local map = app.LinearDialMap(20, 5000)
-  map:setSteps(100, 10, 1, 0.1)
+local sizeMap = (function()
+  local map = app.LinearDialMap(0.001, 2.0)
+  map:setSteps(0.1, 0.01, 0.001, 0.0001)
   return map
 end)()
 
@@ -78,7 +79,7 @@ function Pecto:onLoadGraph(channelCount)
   -- Comb size (f0 Hz -> combSize seconds via adapter)
   -- User sets Hz, we invert to seconds for C++
   local combSize = self:addObject("combSize", app.ParameterAdapter())
-  combSize:hardSet("Bias", 55.0) -- Hz
+  combSize:hardSet("Bias", 0.1) -- 100ms default
   tieParam("CombSize", combSize)
   self:addMonoBranch("combSize", combSize, "In", combSize, "Out")
 
@@ -173,16 +174,16 @@ function Pecto:onLoadViews()
       offset = self.objects.tune,
       range = self.objects.tuneRange
     },
-    f0 = GainBias {
-      button = "f0",
-      description = "Fundamental",
+    size = GainBias {
+      button = "size",
+      description = "Comb Size",
       branch = self.branches.combSize,
       gainbias = self.objects.combSize,
       range = self.objects.combSize,
-      biasMap = f0Map,
-      biasUnits = app.unitHertz,
-      biasPrecision = 1,
-      initialBias = 55.0
+      biasMap = sizeMap,
+      biasUnits = app.unitSecs,
+      biasPrecision = 3,
+      initialBias = 0.1
     },
     density = DensityControl {
       button = "dens",
@@ -249,7 +250,7 @@ function Pecto:onLoadViews()
       biasPrecision = 0,
       initialBias = 8
     },
-    patternFader = GainBias {
+    patternFader = ModeSelector {
       button = "patt",
       description = "Pattern",
       branch = self.branches.pattern,
@@ -258,9 +259,13 @@ function Pecto:onLoadViews()
       biasMap = intMap(0, 15),
       biasUnits = app.unitNone,
       biasPrecision = 0,
-      initialBias = 0
+      initialBias = 0,
+      modeNames = {
+        [0] = "unif", "fib", "early", "late", "mid", "ess", "flat", "rfib",
+        [8] = "r.un", "r.fi", "r.ea", "r.la", "r.mi", "r.es", "r.fl", "r.rf"
+      }
     },
-    slopeFader = GainBias {
+    slopeFader = ModeSelector {
       button = "slope",
       description = "Slope",
       branch = self.branches.slope,
@@ -269,9 +274,10 @@ function Pecto:onLoadViews()
       biasMap = intMap(0, 3),
       biasUnits = app.unitNone,
       biasPrecision = 0,
-      initialBias = 0
+      initialBias = 0,
+      modeNames = { [0] = "flat", "rise", "fall", "hump" }
     },
-    resonatorFader = GainBias {
+    resonatorFader = ModeSelector {
       button = "res",
       description = "Resonator",
       branch = self.branches.resonatorType,
@@ -280,7 +286,8 @@ function Pecto:onLoadViews()
       biasMap = intMap(0, 3),
       biasUnits = app.unitNone,
       biasPrecision = 0,
-      initialBias = 0
+      initialBias = 0,
+      modeNames = { [0] = "raw", "gtr", "clar", "sitr" }
     },
     inputLevel = GainBias {
       button = "input",
@@ -316,7 +323,7 @@ function Pecto:onLoadViews()
       initialBias = 0.0
     }
   }, {
-    expanded = { "tune", "f0", "density", "feedback", "xform", "mix" },
+    expanded = { "tune", "size", "density", "feedback", "xform", "mix" },
     collapsed = {},
     density = { "densityFader", "patternFader", "slopeFader", "resonatorFader" },
     mix = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
