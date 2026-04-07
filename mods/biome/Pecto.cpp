@@ -335,7 +335,7 @@ namespace stolmine
       rndBias(mBiasCombSize, 0.001f, 1.0f);
       rndBias(mBiasFeedback, 0.0f, 0.99f);
       rndBiasInt(mBiasResonatorType, 0.0f, 3.0f);
-      rndBiasInt(mBiasDensity, 1.0f, 64.0f);
+      rndBiasInt(mBiasDensity, 1.0f, 24.0f);
       rndBiasInt(mBiasPattern, 0.0f, 15.0f);
       rndBiasInt(mBiasSlope, 0.0f, 3.0f);
       rndBias(mBiasMix, 0.0f, 1.0f);
@@ -343,7 +343,7 @@ namespace stolmine
     case 1: rndBias(mBiasCombSize, 0.001f, 1.0f); break;
     case 2: rndBias(mBiasFeedback, 0.0f, 0.99f); break;
     case 3: rndBiasInt(mBiasResonatorType, 0.0f, 3.0f); break;
-    case 4: rndBiasInt(mBiasDensity, 1.0f, 64.0f); break;
+    case 4: rndBiasInt(mBiasDensity, 1.0f, 24.0f); break;
     case 5: rndBiasInt(mBiasPattern, 0.0f, 15.0f); break;
     case 6: rndBiasInt(mBiasSlope, 0.0f, 3.0f); break;
     case 7: rndBias(mBiasMix, 0.0f, 1.0f); break;
