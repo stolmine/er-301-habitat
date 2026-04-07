@@ -409,25 +409,28 @@ Input: GainBias branch (no inlet). Output: 10Vpp (-5V to +5V).
 
 Inline spectrum analyzer, adapted from Parfait's SpectrumGraphic. Stereo passthrough, mono mixdown for FFT analysis. 2-ply display.
 
-- [ ] C++ DSP: ring buffer + 256-point pffft FFT (extract from Parfait), stereo passthrough, L+R sum for analysis
-- [ ] Lua: 2-ply SpectrumGraphic (full 20-20kHz), adapt from Parfait (remove band indexing)
-- [ ] Scope package (alongside existing Scope units)
+- [x] C++ DSP: ring buffer + 256-point pffft FFT (extract from Parfait), stereo passthrough, L+R sum for analysis
+- [x] Lua: 2-ply SpectrogramGraphic (full 20-20kHz), Catmull-Rom spline, peak hold + RMS gradient
+- [x] Scope package, pffft copied from spreadsheet
 
 ## Varishape Oscillator
 
 Raw POLYBLEP oscillator extracted from VarishapeVoice. No envelope, no gate -- pure oscillator.
 
-- [ ] C++ DSP: stages::VariableShapeOscillator wrapper, V/Oct, f0, shape, sync, level
-- [ ] Lua: standard oscillator layout (f0, V/Oct, shape, level)
-- [ ] Biome package
+- [x] C++ DSP: stages::VariableShapeOscillator wrapper, V/Oct, f0, shape, sync, level
+- [x] Lua: shape, V/Oct, f0, level (matches VarishapeVoice control order)
+- [x] Biome package
 
 ## Flakes (granular shimmer/freeze)
 
-C++ rewrite of Joe's Shards Lua preset. Feedback looper + delay + ladder LPF + noise/sine modulation.
+C++ rewrite of Joe's Shards Lua preset. Feedback looper with self-modulating delay.
 
-- [ ] C++ DSP: circular buffer (10s), freeze gate, variable delay with feedback, one-pole or ladder LPF, delay modulation (sine + noise), dry/wet mix
-- [ ] Controls: Freeze (gate), Depth, Delay, Warble, Noise, Dry/Wet
-- [ ] Biome package
+- [x] C++ DSP: int16 circular buffer (10s), freeze gate, variable delay with feedback, self-modulation engine, warble LFO, noise injection, dry/wet mix
+- [x] Controls: Freeze (gate), Depth, Delay, Warble, Noise, Dry/Wet
+- [x] Biome package, dual-instance stereo
+- [ ] Compare to original Shards and tune self-modulation engine (threshold, envelope times, mod depths) for closer character match
+- [ ] Consider adding ladder-style filter or steeper LP on feedback path
+- [ ] Evaluate whether Manual Loops / sample playback element is needed for full Shards fidelity
 
 ## Spectral Envelope Follower
 

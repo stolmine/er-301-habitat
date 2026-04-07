@@ -116,7 +116,7 @@ function VarishapeOsc:onLoadViews(objects, branches)
       initialBias = 0.5
     }
   }, {
-    expanded = { "tune", "f0", "shape", "level" },
+    expanded = { "shape", "tune", "f0", "level" },
     collapsed = {}
   }
 end
