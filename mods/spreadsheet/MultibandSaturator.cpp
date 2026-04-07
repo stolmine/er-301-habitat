@@ -65,8 +65,8 @@ namespace stolmine
       wet = s;
       break;
     }
-    case 3: // Half Rect -- half-wave rectifier
-      wet = (sig > 0.0f) ? sig : 0.0f;
+    case 3: // Half Rect -- asymmetric soft clip (even harmonics)
+      wet = (sig > 0.0f) ? fast_tanh(sig) : 0.0f;
       break;
     case 4: // Crush -- bit reduction with mu-law companding
     {
@@ -79,12 +79,19 @@ namespace stolmine
       wet = (quantized >= 0 ? 1.0f : -1.0f) * ((1.0f + mu * absQ) - 1.0f) / mu;
       break;
     }
-    case 5: // Sine Fold -- sinusoidal waveshaper
-      wet = sinf(sig * 3.14159f);
-      break;
-    case 6: // Fractal -- iterated polynomial
+    case 5: // Sine Fold -- tonal wavefolder (decoupled gain, ~1-2 folds max)
     {
-      float s = sig;
+      float depth = 1.0f + amount * 2.0f;
+      float s = (x + bias) * depth;
+      wet = sinf(s * 3.14159f);
+      break;
+    }
+    case 6: // Fractal -- iterated polynomial (decoupled gain, clamped to stable region)
+    {
+      float depth = 0.5f + amount * 1.5f;
+      float s = (x + bias) * depth;
+      if (s > 1.7f) s = 1.7f;
+      if (s < -1.7f) s = -1.7f;
       for (int j = 0; j < 3; j++)
       {
         s = s - (s * s * s) / 3.0f;
@@ -529,6 +536,10 @@ namespace stolmine
       // DC blocker (~5Hz one-pole highpass)
       s.dcState += (wet - s.dcState) * (5.0f / sr);
       wet -= s.dcState;
+
+      // Safety limiter (~1.5x soft clip -- transparent at normal levels)
+      if (wet > 1.5f || wet < -1.5f)
+        wet = fast_tanh(wet * 0.67f) * 1.5f;
 
       // FFT ring buffer (capture post-sum signal)
       s.ringBuf[s.ringPos] = wet;
