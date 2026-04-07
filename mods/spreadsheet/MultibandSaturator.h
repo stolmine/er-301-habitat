@@ -62,10 +62,16 @@ namespace stolmine
     // SWIG-visible
     float getCrossoverFreq(int band);
     float getBandEnergy(int band);
+    void setBandBias(int band, int param, od::Parameter *p);
 
   private:
     struct Internal;
     Internal *mpInternal;
+
+    // Bias refs for per-band params (read directly from UI)
+    // [band][param]: 0=amount, 1=bias, 2=type, 3=weight, 4=filterFreq, 5=filterMorph, 6=filterQ
+    static const int kBiasCount = 7;
+    od::Parameter *mBandBias[3][7];
 
     // Dirty-check
     float mLastWeight[3];

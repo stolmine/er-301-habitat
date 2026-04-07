@@ -3,7 +3,9 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
-local MixControl = require "spreadsheet.MixControl"
+local BandControl = require "spreadsheet.BandControl"
+local DriveControl = require "spreadsheet.DriveControl"
+local ParfaitMixControl = require "spreadsheet.ParfaitMixControl"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max)
@@ -25,9 +27,6 @@ local skewMap = (function()
 end)()
 
 local mixMap = floatMap(0, 1)
-local levelMap = floatMap(0, 4)
-local tanhMap = floatMap(0, 1)
-local compMap = floatMap(0, 1)
 local bandLevelMap = floatMap(0, 2)
 
 local MultibandSaturator = Class {}
@@ -175,11 +174,35 @@ function MultibandSaturator:onLoadGraph(channelCount)
     tieParam("BandFilterQ" .. i, adapter)
     self:addMonoBranch(name, adapter, "In", adapter, "Out")
   end
+
+  -- Set Bias refs for per-band params (direct read from UI, bypasses unscheduled adapters)
+  -- param indices: 0=amount, 1=bias, 2=type, 3=weight, 4=filterFreq, 5=filterMorph, 6=filterQ
+  for i = 0, 2 do
+    op:setBandBias(i, 0, self.objects["bandAmount" .. i]:getParameter("Bias"))
+    op:setBandBias(i, 1, self.objects["bandBias" .. i]:getParameter("Bias"))
+    op:setBandBias(i, 2, self.objects["bandType" .. i]:getParameter("Bias"))
+    op:setBandBias(i, 3, self.objects["bandWeight" .. i]:getParameter("Bias"))
+    op:setBandBias(i, 4, self.objects["bandFilterFreq" .. i]:getParameter("Bias"))
+    op:setBandBias(i, 5, self.objects["bandFilterMorph" .. i]:getParameter("Bias"))
+    op:setBandBias(i, 6, self.objects["bandFilterQ" .. i]:getParameter("Bias"))
+    if stereo then
+      self.objects.opR:setBandBias(i, 0, self.objects["bandAmount" .. i]:getParameter("Bias"))
+      self.objects.opR:setBandBias(i, 1, self.objects["bandBias" .. i]:getParameter("Bias"))
+      self.objects.opR:setBandBias(i, 2, self.objects["bandType" .. i]:getParameter("Bias"))
+      self.objects.opR:setBandBias(i, 3, self.objects["bandWeight" .. i]:getParameter("Bias"))
+      self.objects.opR:setBandBias(i, 4, self.objects["bandFilterFreq" .. i]:getParameter("Bias"))
+      self.objects.opR:setBandBias(i, 5, self.objects["bandFilterMorph" .. i]:getParameter("Bias"))
+      self.objects.opR:setBandBias(i, 6, self.objects["bandFilterQ" .. i]:getParameter("Bias"))
+    end
+  end
 end
 
 function MultibandSaturator:onLoadViews()
-  return {
-    drive = GainBias {
+  local bandNames = { "lo", "mid", "hi" }
+  local bandDescs = { "Band Low", "Band Mid", "Band High" }
+
+  local controls = {
+    drive = DriveControl {
       button = "drive",
       description = "Drive",
       branch = self.branches.drive,
@@ -188,41 +211,9 @@ function MultibandSaturator:onLoadViews()
       biasMap = driveMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 1.0
-    },
-    -- Phase 6: replace with BandControl + SpectrumGraphic
-    bandLo = GainBias {
-      button = "lo",
-      description = "Band Low Level",
-      branch = self.branches.bandLevel0,
-      gainbias = self.objects.bandLevel0,
-      range = self.objects.bandLevel0,
-      biasMap = bandLevelMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 1.0
-    },
-    bandMid = GainBias {
-      button = "mid",
-      description = "Band Mid Level",
-      branch = self.branches.bandLevel1,
-      gainbias = self.objects.bandLevel1,
-      range = self.objects.bandLevel1,
-      biasMap = bandLevelMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 1.0
-    },
-    bandHi = GainBias {
-      button = "hi",
-      description = "Band High Level",
-      branch = self.branches.bandLevel2,
-      gainbias = self.objects.bandLevel2,
-      range = self.objects.bandLevel2,
-      biasMap = bandLevelMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 1.0
+      initialBias = 1.0,
+      toneAmount = self.objects.toneAmount:getParameter("Bias"),
+      toneFreq = self.objects.toneFreq:getParameter("Bias")
     },
     skew = GainBias {
       button = "skew",
@@ -235,7 +226,7 @@ function MultibandSaturator:onLoadViews()
       biasPrecision = 2,
       initialBias = 1.0
     },
-    mix = MixControl {
+    mix = ParfaitMixControl {
       button = "mix",
       description = "Mix",
       branch = self.branches.mix,
@@ -245,12 +236,34 @@ function MultibandSaturator:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 1.0,
-      inputLevel = self.objects.compressAmt:getParameter("Bias"),
+      compressAmt = self.objects.compressAmt:getParameter("Bias"),
       outputLevel = self.objects.outputLevel:getParameter("Bias"),
       tanhAmt = self.objects.tanhAmt:getParameter("Bias")
     }
-  }, {
-    expanded = { "drive", "bandLo", "bandMid", "bandHi", "skew", "mix" },
+  }
+
+  for i = 0, 2 do
+    controls["band" .. bandNames[i + 1]] = BandControl {
+      button = bandNames[i + 1],
+      description = bandDescs[i + 1],
+      branch = self.branches["bandLevel" .. i],
+      gainbias = self.objects["bandLevel" .. i],
+      range = self.objects["bandLevel" .. i],
+      biasMap = bandLevelMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 1.0,
+      amount = self.objects["bandAmount" .. i]:getParameter("Bias"),
+      bias = self.objects["bandBias" .. i]:getParameter("Bias"),
+      shaperType = self.objects["bandType" .. i]:getParameter("Bias"),
+      weight = self.objects["bandWeight" .. i]:getParameter("Bias"),
+      filterFreq = self.objects["bandFilterFreq" .. i]:getParameter("Bias"),
+      filterMorph = self.objects["bandFilterMorph" .. i]:getParameter("Bias")
+    }
+  end
+
+  return controls, {
+    expanded = { "drive", "bandlo", "bandmid", "bandhi", "skew", "mix" },
     collapsed = {}
   }
 end
