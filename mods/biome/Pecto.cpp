@@ -71,7 +71,6 @@ namespace stolmine
     addInput(mVOct);
     addInput(mXformGate);
     addOutput(mOut);
-    addOutput(mOutR);
     addParameter(mCombSize);
     addParameter(mFeedback);
     addParameter(mVOctPitch);
@@ -148,8 +147,6 @@ namespace stolmine
   {
     return mMaxDelayInSamples * globalConfig.samplePeriod;
   }
-
-  void Pecto::setMono(bool mono) { mMono = mono; }
 
   // --- Tap distribution ---
 
@@ -372,19 +369,14 @@ namespace stolmine
     {
       float *in = mIn.buffer();
       float *out = mOut.buffer();
-      float *outR = mOutR.buffer();
       for (int i = 0; i < FRAMELENGTH; i++)
-      {
         out[i] = in[i];
-        outR[i] = in[i];
-      }
       return;
     }
 
     float *in = mIn.buffer();
     float *voct = mVOct.buffer();
     float *out = mOut.buffer();
-    float *outR = mOutR.buffer();
     int16_t *buf = (int16_t *)s.buffer;
     int maxDelay = mMaxDelayInSamples;
     float sr = globalConfig.sampleRate;
@@ -549,15 +541,7 @@ namespace stolmine
       }
 
       // Output
-      if (mMono)
-      {
-        out[i] = fast_tanh(mixed * outputLevel);
-      }
-      else
-      {
-        out[i] = fast_tanh(mixed * outputLevel);
-        outR[i] = out[i];
-      }
+      out[i] = fast_tanh(mixed * outputLevel);
     }
   }
 

@@ -51,19 +51,22 @@ end
 
 function Pecto:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.Pecto())
-  op:allocateTimeUpTo(20.0)
+  op:allocateTimeUpTo(2.0)
 
   connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
   if channelCount > 1 then
-    connect(self, "In2", op, "In")
-    connect(op, "OutR", self, "Out2")
-  else
-    op:setMono(true)
+    local opR = self:addObject("opR", libstolmine.Pecto())
+    opR:allocateTimeUpTo(2.0)
+    connect(self, "In2", opR, "In")
+    connect(opR, "Out", self, "Out2")
   end
+
+  local stereo = channelCount > 1
 
   local function tieParam(name, adapter)
     tie(op, name, adapter, "Out")
+    if stereo then tie(self.objects.opR, name, adapter, "Out") end
   end
 
   -- V/Oct
@@ -76,10 +79,9 @@ function Pecto:onLoadGraph(channelCount)
   tieParam("VOctPitch", vOctAdapter)
   self:addMonoBranch("tune", tune, "In", tune, "Out")
 
-  -- Comb size (f0 Hz -> combSize seconds via adapter)
-  -- User sets Hz, we invert to seconds for C++
+  -- Comb size
   local combSize = self:addObject("combSize", app.ParameterAdapter())
-  combSize:hardSet("Bias", 0.1) -- 100ms default
+  combSize:hardSet("Bias", 0.1)
   tieParam("CombSize", combSize)
   self:addMonoBranch("combSize", combSize, "In", combSize, "Out")
 
@@ -139,6 +141,7 @@ function Pecto:onLoadGraph(channelCount)
   local xformGate = self:addObject("xformGate", app.Comparator())
   xformGate:setTriggerMode()
   connect(xformGate, "Out", op, "XformGate")
+  if stereo then connect(xformGate, "Out", self.objects.opR, "XformGate") end
   self:addMonoBranch("xformGate", xformGate, "In", xformGate, "Out")
 
   local xformTarget = self:addObject("xformTarget", app.ParameterAdapter())
@@ -151,7 +154,7 @@ function Pecto:onLoadGraph(channelCount)
   tieParam("XformDepth", xformDepth)
   self:addMonoBranch("xformDepth", xformDepth, "In", xformDepth, "Out")
 
-  -- Top-level bias refs for randomization
+  -- Top-level bias refs for randomization (shared, so only on op)
   op:setTopLevelBias(0, combSize:getParameter("Bias"))
   op:setTopLevelBias(1, feedback:getParameter("Bias"))
   op:setTopLevelBias(2, resonatorType:getParameter("Bias"))

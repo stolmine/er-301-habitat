@@ -21,7 +21,6 @@ namespace stolmine
     od::Inlet mVOct{"V/Oct"};
     od::Inlet mXformGate{"XformGate"};
     od::Outlet mOut{"Out"};
-    od::Outlet mOutR{"OutR"};
 
     od::Parameter mCombSize{"CombSize", 0.01f};
     od::Parameter mFeedback{"Feedback", 0.5f};
@@ -43,13 +42,11 @@ namespace stolmine
     float maximumDelayTime();
     void fireRandomize();
     void setTopLevelBias(int which, od::Parameter *param);
-    void setMono(bool mono);
 
   private:
     struct Internal;
     Internal *mpInternal;
 
-    bool mMono = false;
     int mMaxDelayInSamples = 0;
 
     // Dirty-check cache
