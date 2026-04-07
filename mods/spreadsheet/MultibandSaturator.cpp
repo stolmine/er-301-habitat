@@ -33,6 +33,42 @@ namespace stolmine
     return x / (1.0f + x * 0.5f);
   }
 
+  // Fast sine approximation (5th order, max error ~0.0002 on [-pi,pi])
+  static inline float fast_sinf(float x)
+  {
+    // Range reduce to [-pi, pi]
+    const float itp = 1.0f / 3.14159f;
+    float n = floorf(x * itp + 0.5f);
+    x -= n * 3.14159f;
+    float x2 = x * x;
+    float r = x * (1.0f + x2 * (-0.16605f + x2 * 0.00761f));
+    return ((int)n & 1) ? -r : r;
+  }
+
+  // Fast log2 via IEEE 754 bit extraction + linear refinement (~4 cycles)
+  static inline float fast_log2(float x)
+  {
+    union { float f; int32_t i; } v;
+    v.f = x;
+    float exp = (float)((v.i >> 23) - 127);
+    v.i = (v.i & 0x7FFFFF) | (127 << 23); // mantissa as [1,2)
+    float m = v.f;
+    // Minimax quadratic on [1,2): max error ~0.01
+    return exp + m * (m * -0.3333f + 2.0f) - 1.667f;
+  }
+
+  // Fast exp2 via IEEE 754 bit packing (~4 cycles)
+  static inline float fast_exp2(float x)
+  {
+    float xi = floorf(x);
+    float xf = x - xi;
+    // Quadratic on [0,1): max error ~0.01
+    float m = 1.0f + xf * (0.6602f + xf * 0.3398f);
+    union { float f; int32_t i; } v;
+    v.i = ((int32_t)xi + 127) << 23;
+    return v.f * m;
+  }
+
   static inline float applyShaper(float x, int type, float amount, float bias)
   {
     if (type == 0) return x; // Off -- passthrough
@@ -85,7 +121,7 @@ namespace stolmine
     {
       float depth = 1.0f + amount * 2.0f;
       float s = (x + bias) * depth;
-      wet = sinf(s * 3.14159f);
+      wet = fast_sinf(s * 3.14159f);
       break;
     }
     case 7: // Fractal -- iterated polynomial (decoupled gain, clamped to stable region)
@@ -568,12 +604,12 @@ namespace stolmine
         else
           s.compDetector += (energy - s.compDetector) * compRelease;
 
-        float levelDb = 10.0f * log10f(s.compDetector + 1e-20f);
+        float levelDb = 3.0103f * fast_log2(s.compDetector + 1e-20f);
         float overDb = levelDb - compThreshDb;
         if (overDb > 0.0f)
         {
           float gainDb = overDb * compRatioFactor;
-          wet *= powf(10.0f, -gainDb * 0.05f);
+          wet *= fast_exp2(-gainDb * 0.16609f); // 0.05 * log2(10) = 0.16609
         }
       }
 

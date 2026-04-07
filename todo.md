@@ -464,7 +464,7 @@ N BPFs locked to harmonic ratios of a fundamental. Reshapes harmonic content -- 
 - [x] Expansion views for bands (level, amt, bias, type w/ ModeSelector labels, wt, freq, morph, Q)
 - [x] Expansion views for drive (drive, tone amount, tone freq) and mix (mix, comp, SC HPF, output, tanh)
 - [ ] Filter morph adaptive labels (off/LP/L>B/BP/B>H/HP/H>N/ntch) -- needs firmware Readout API extension or custom control
-- [ ] Steeper crossover slopes (LR4) for better band isolation -- one-pole leaks low freqs
+- [x] LR4 crossover (24dB/oct) -- 4 cascaded one-pole stages per split point
 - [ ] CPU profiling on am335x
 - [ ] Defaults tuning
 
