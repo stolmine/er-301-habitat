@@ -254,7 +254,7 @@ namespace stolmine
     }
   }
 
-  void Pecto::recomputeTaps(int density, int pattern, int slope)
+  void __attribute__((optimize("O1"))) Pecto::recomputeTaps(int density, int pattern, int slope)
   {
     Internal &s = *mpInternal;
 
@@ -388,7 +388,7 @@ namespace stolmine
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
     float tanhAmt = CLAMP(0.0f, 1.0f, mTanhAmt.value());
-    int density = CLAMP(1, kMaxCombTaps, (int)(mDensity.value() + 0.5f));
+    int density = CLAMP(1, 24, (int)(mDensity.value() + 0.5f));
     // Read pattern/slope/resonator from Bias refs (direct from UI)
     // since tied ParameterAdapters may not be scheduled without graph connections
     int pattern = mBiasPattern ? CLAMP(0, 15, (int)(mBiasPattern->value() + 0.5f))
@@ -412,11 +412,25 @@ namespace stolmine
     if (baseDelay < 1.0f) baseDelay = 1.0f;
     if (baseDelay > (float)(maxDelay - 1)) baseDelay = (float)(maxDelay - 1);
 
-    // Cache per-tap delay positions
+    // Cache per-tap delay positions, sorted ascending for cache locality
     for (int t = 0; t < density; t++)
     {
       mCachedDelaySamples[t] = baseDelay * s.tapPosition[t];
       mCachedTapWeight[t] = s.tapWeight[t];
+    }
+    for (int t = 1; t < density; t++)
+    {
+      float dKey = mCachedDelaySamples[t];
+      float wKey = mCachedTapWeight[t];
+      int j = t - 1;
+      while (j >= 0 && mCachedDelaySamples[j] > dKey)
+      {
+        mCachedDelaySamples[j + 1] = mCachedDelaySamples[j];
+        mCachedTapWeight[j + 1] = mCachedTapWeight[j];
+        j--;
+      }
+      mCachedDelaySamples[j + 1] = dKey;
+      mCachedTapWeight[j + 1] = wKey;
     }
 
     // Comb feedback: direct, no tap-count normalization

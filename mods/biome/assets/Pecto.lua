@@ -34,7 +34,7 @@ local mixMap = floatMap(0, 1)
 local inputLevelMap = floatMap(0, 4)
 local outputLevelMap = floatMap(0, 4)
 local tanhMap = floatMap(0, 1)
-local densityMap = intMap(1, 64)
+local densityMap = intMap(1, 24)
 
 local xformTargetNames = {
   [0] = "all", "size", "fdbk", "res", "dens", "patt", "slope", "mix", "reset"
