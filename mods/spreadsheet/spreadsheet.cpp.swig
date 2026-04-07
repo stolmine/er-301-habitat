@@ -19,6 +19,7 @@
 #include "TapListGraphic.h"
 #include "RaindropGraphic.h"
 #include "DelayInfoGraphic.h"
+#include "MultibandSaturator.h"
 #define SWIGLUA
 %}
 
@@ -38,3 +39,4 @@
 %include "TapListGraphic.h"
 %include "RaindropGraphic.h"
 %include "DelayInfoGraphic.h"
+%include "MultibandSaturator.h"
