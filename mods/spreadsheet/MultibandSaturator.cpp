@@ -35,25 +35,27 @@ namespace stolmine
 
   static inline float applyShaper(float x, int type, float amount, float bias)
   {
+    if (type == 0) return x; // Off -- passthrough
+
     // Bias shifts input asymmetrically, drive scales with amount
     float sig = (x + bias) * (1.0f + amount * 5.0f);
     float wet;
     switch (type)
     {
     default:
-    case 0: // Tube -- asymmetric soft clip (even harmonics)
+    case 1: // Tube -- asymmetric soft clip (even harmonics)
     {
       float pos = fast_tanh(sig * 1.5f);
       float neg = fast_tanh(sig * 0.8f);
       wet = (sig >= 0) ? pos : neg;
       break;
     }
-    case 1: // Diode -- arctan with soft knee
+    case 2: // Diode -- arctan with soft knee
     {
       wet = sig / (1.0f + fabsf(sig) + 0.2f * sig * sig);
       break;
     }
-    case 2: // Tri Fold -- multi-pass wavefolder
+    case 3: // Tri Fold -- multi-pass wavefolder
     {
       float s = sig;
       for (int j = 0; j < 3; j++)
@@ -65,10 +67,10 @@ namespace stolmine
       wet = s;
       break;
     }
-    case 3: // Half Rect -- asymmetric soft clip (even harmonics)
+    case 4: // Half Rect -- asymmetric soft clip (even harmonics)
       wet = (sig > 0.0f) ? fast_tanh(sig) : 0.0f;
       break;
-    case 4: // Crush -- bit reduction with mu-law companding
+    case 5: // Crush -- bit reduction with mu-law companding
     {
       float mu = 8.0f;
       float sign = (sig >= 0) ? 1.0f : -1.0f;
@@ -79,14 +81,14 @@ namespace stolmine
       wet = (quantized >= 0 ? 1.0f : -1.0f) * ((1.0f + mu * absQ) - 1.0f) / mu;
       break;
     }
-    case 5: // Sine Fold -- tonal wavefolder (decoupled gain, ~1-2 folds max)
+    case 6: // Sine Fold -- tonal wavefolder (decoupled gain, ~1-2 folds max)
     {
       float depth = 1.0f + amount * 2.0f;
       float s = (x + bias) * depth;
       wet = sinf(s * 3.14159f);
       break;
     }
-    case 6: // Fractal -- iterated polynomial (decoupled gain, clamped to stable region)
+    case 7: // Fractal -- iterated polynomial (decoupled gain, clamped to stable region)
     {
       float depth = 0.5f + amount * 1.5f;
       float s = (x + bias) * depth;
@@ -396,7 +398,7 @@ namespace stolmine
     {
       bandAmount[b] = mBandBias[b][0] ? CLAMP(0.0f, 1.0f, mBandBias[b][0]->value()) : 0.5f;
       bandBiasVal[b] = mBandBias[b][1] ? CLAMP(-1.0f, 1.0f, mBandBias[b][1]->value()) : 0.0f;
-      bandType[b] = mBandBias[b][2] ? CLAMP(0, 6, (int)(mBandBias[b][2]->value() + 0.5f)) : 0;
+      bandType[b] = mBandBias[b][2] ? CLAMP(0, 7, (int)(mBandBias[b][2]->value() + 0.5f)) : 0;
       bandFilterFreq[b] = mBandBias[b][4] ? CLAMP(20.0f, 20000.0f, mBandBias[b][4]->value()) : 1000.0f;
       bandFilterMorph[b] = mBandBias[b][5] ? CLAMP(0.0f, 1.0f, mBandBias[b][5]->value()) : 0.0f;
       bandFilterQ[b] = mBandBias[b][6] ? CLAMP(0.5f, 20.0f, mBandBias[b][6]->value()) : 0.5f;

@@ -56,7 +56,7 @@ function BandControl:init(args)
   end)()
 
   local typeMap = (function()
-    local m = app.LinearDialMap(0, 6)
+    local m = app.LinearDialMap(0, 7)
     m:setSteps(1, 1, 1, 1)
     m:setRounding(1)
     return m
@@ -68,7 +68,7 @@ function BandControl:init(args)
   self.biasReadout = makeReadout(args.bias, biasMap, 2, col2)
   self.typeReadout = makeReadout(args.shaperType, typeMap, 0, col3)
   if self.typeReadout.addName then
-    for _, v in ipairs({"tube", "diod", "fold", "half", "crsh", "sine", "frac"}) do
+    for _, v in ipairs({"off", "tube", "diod", "fold", "half", "crsh", "sine", "frac"}) do
       self.typeReadout:addName(v)
     end
   end

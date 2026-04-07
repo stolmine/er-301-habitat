@@ -461,8 +461,8 @@ N BPFs locked to harmonic ratios of a fundamental. Reshapes harmonic content -- 
 - [x] Per-shaper gain management -- half rect (tanh soft clip), sine fold (decoupled 1-3x depth), fractal (decoupled 0.5-2x depth, clamped to stable region)
 - [x] Safety limiter after band sum (~1.5x soft clip, before comp/output chain)
 - [x] Symmetric skew -- replaced pow(accum, exponent) with linear shift in log-freq space, equal octave range both directions
-- [ ] Expansion views for bands (mute, amt, bias, type, wt, freq, morph, Q as individual faders)
-- [ ] Expansion views for drive (drive, tone amount, tone freq) and mix (mix, comp, output, tanh, SC HPF)
+- [x] Expansion views for bands (level, amt, bias, type w/ ModeSelector labels, wt, freq, morph, Q)
+- [x] Expansion views for drive (drive, tone amount, tone freq) and mix (mix, comp, SC HPF, output, tanh)
 - [ ] Filter morph adaptive labels (off/LP/L>B/BP/B>H/HP/H>N/ntch) -- needs firmware Readout API extension or custom control
 - [ ] Steeper crossover slopes (LR4) for better band isolation -- one-pole leaks low freqs
 - [ ] CPU profiling on am335x
