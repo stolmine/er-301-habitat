@@ -6,6 +6,7 @@ return {
   units = {
     { title = "Scope",         moduleName = "Scope",        category = "Measurement", keywords = "scope, monitor, waveform" },
     { title = "Scope 2x",      moduleName = "ScopeWide",    category = "Measurement", keywords = "scope, monitor, waveform" },
-    { title = "Scope Stereo",  moduleName = "ScopeStereo",  category = "Measurement", keywords = "scope, monitor, waveform, stereo" }
+    { title = "Scope Stereo",  moduleName = "ScopeStereo",  category = "Measurement", keywords = "scope, monitor, waveform, stereo" },
+    { title = "Spectrogram",  moduleName = "Spectrogram",  category = "Measurement", keywords = "spectrum, fft, analyzer, frequency, monitor" }
   }
 }

@@ -4,7 +4,9 @@
 %{
 #undef SWIGLUA
 #include "Scope.h"
+#include "Spectrogram.h"
 #define SWIGLUA
 %}
 
 %include "Scope.h"
+%include "Spectrogram.h"
