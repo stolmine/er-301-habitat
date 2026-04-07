@@ -258,7 +258,9 @@ function MultibandSaturator:onLoadViews()
       shaperType = self.objects["bandType" .. i]:getParameter("Bias"),
       weight = self.objects["bandWeight" .. i]:getParameter("Bias"),
       filterFreq = self.objects["bandFilterFreq" .. i]:getParameter("Bias"),
-      filterMorph = self.objects["bandFilterMorph" .. i]:getParameter("Bias")
+      filterMorph = self.objects["bandFilterMorph" .. i]:getParameter("Bias"),
+      dspObject = self.objects.op,
+      bandIndex = i
     }
   end
 

@@ -14,11 +14,13 @@ MOD_DIR = mods/$(PKGNAME)
 ASSET_DIR = $(MOD_DIR)/assets
 
 MOD_CPP = $(wildcard $(MOD_DIR)/*.cpp)
+MOD_C = $(wildcard $(MOD_DIR)/*.c)
 
 # stmlib for Svf filter (used by Petrichor/MultitapDelay)
 STMLIB_CC = $(EURORACK)/stmlib/dsp/units.cc
 
 OBJECTS = $(addprefix $(OUT_DIR)/,$(MOD_CPP:%.cpp=%.o))
+OBJECTS += $(addprefix $(OUT_DIR)/,$(MOD_C:%.c=%.o))
 OBJECTS += $(addprefix $(OUT_DIR)/,$(STMLIB_CC:%.cc=%.o))
 
 SWIG_SOURCE = $(MOD_DIR)/$(PKGNAME).cpp.swig
@@ -94,6 +96,11 @@ $(OUT_DIR)/%.o: %.cc
 	@echo [C++ $<]
 	@mkdir -p $(@D)
 	@$(CPP) $(CFLAGS) -std=gnu++11 -c $< -o $@
+
+$(OUT_DIR)/%.o: %.c
+	@echo [CC $<]
+	@mkdir -p $(@D)
+	@$(CC) $(CFLAGS) -std=gnu11 -c $< -o $@
 
 $(SWIG_WRAPPER): $(SWIG_SOURCE)
 	@echo [SWIG $<]

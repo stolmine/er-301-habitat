@@ -20,6 +20,7 @@
 #include "RaindropGraphic.h"
 #include "DelayInfoGraphic.h"
 #include "MultibandSaturator.h"
+#include "SpectrumGraphic.h"
 #define SWIGLUA
 %}
 
@@ -40,3 +41,4 @@
 %include "RaindropGraphic.h"
 %include "DelayInfoGraphic.h"
 %include "MultibandSaturator.h"
+%include "SpectrumGraphic.h"

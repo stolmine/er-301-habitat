@@ -1,4 +1,5 @@
 local app = app
+local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
@@ -15,6 +16,17 @@ BandControl:include(GainBias)
 
 function BandControl:init(args)
   GainBias.init(self, args)
+
+  -- Replace fader graphic with spectrum display
+  if args.dspObject and args.bandIndex then
+    local spectrum = libspreadsheet.SpectrumGraphic(0, 0, ply, 64)
+    spectrum:follow(args.dspObject)
+    spectrum:setBandIndex(args.bandIndex)
+    local container = app.Graphic(0, 0, ply, 64)
+    container:addChild(spectrum)
+    self:setMainCursorController(spectrum)
+    self:setControlGraphic(container)
+  end
 
   self.paramMode = 0  -- 0=normal, 1=shaper SD, 2=filter SD
   self.shiftHeld = false

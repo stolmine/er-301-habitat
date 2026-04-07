@@ -62,6 +62,10 @@ namespace stolmine
     // SWIG-visible
     float getCrossoverFreq(int band);
     float getBandEnergy(int band);
+    float getFFTPeak(int bin);
+    float getFFTRms(int bin);
+    float getBandLevel(int band);
+    bool getBandMuted(int band);
     void setBandBias(int band, int param, od::Parameter *p);
 
   private:

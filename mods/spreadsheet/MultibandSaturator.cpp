@@ -1,10 +1,11 @@
 #include "MultibandSaturator.h"
+#include "pffft.h"
 #include <od/config.h>
 #include <hal/ops.h>
-// stmlib::Svf not used -- inline SVF for per-sample morph filter
 #include <math.h>
 #include <string.h>
 #include <new>
+#include <stdlib.h>
 
 namespace stolmine
 {
@@ -86,6 +87,17 @@ namespace stolmine
     // Per-band energy (for graphic)
     float bandEnergy[3];
 
+    // FFT state
+    PFFFT_Setup *fftSetup;
+    float *fftIn;
+    float *fftOut;
+    float hannWindow[256];
+    float fftPeak[128];
+    float fftRms[128];
+    float ringBuf[256];
+    int ringPos;
+    int fftFrameCount;
+
     void Init()
     {
       tiltLpState = 0.0f;
@@ -106,6 +118,25 @@ namespace stolmine
       scHpState = 0.0f;
       for (int i = 0; i < 3; i++)
         bandEnergy[i] = 0.0f;
+
+      // FFT
+      fftSetup = pffft_new_setup(256, PFFFT_REAL);
+      fftIn = (float *)pffft_aligned_malloc(256 * sizeof(float));
+      fftOut = (float *)pffft_aligned_malloc(256 * sizeof(float));
+      for (int i = 0; i < 256; i++)
+        hannWindow[i] = 0.5f * (1.0f - cosf(2.0f * 3.14159f * (float)i / 255.0f));
+      memset(fftPeak, 0, sizeof(fftPeak));
+      memset(fftRms, 0, sizeof(fftRms));
+      memset(ringBuf, 0, sizeof(ringBuf));
+      ringPos = 0;
+      fftFrameCount = 0;
+    }
+
+    void Cleanup()
+    {
+      if (fftSetup) { pffft_destroy_setup(fftSetup); fftSetup = 0; }
+      if (fftIn) { pffft_aligned_free(fftIn); fftIn = 0; }
+      if (fftOut) { pffft_aligned_free(fftOut); fftOut = 0; }
     }
   };
 
@@ -167,6 +198,7 @@ namespace stolmine
 
   MultibandSaturator::~MultibandSaturator()
   {
+    mpInternal->Cleanup();
     delete mpInternal;
   }
 
@@ -218,6 +250,44 @@ namespace stolmine
   {
     if (band < 0 || band > 2) return 0.0f;
     return mpInternal->bandEnergy[band];
+  }
+
+  float MultibandSaturator::getFFTPeak(int bin)
+  {
+    if (bin < 0 || bin > 127) return 0.0f;
+    return mpInternal->fftPeak[bin];
+  }
+
+  float MultibandSaturator::getFFTRms(int bin)
+  {
+    if (bin < 0 || bin > 127) return 0.0f;
+    return mpInternal->fftRms[bin];
+  }
+
+  float MultibandSaturator::getBandLevel(int band)
+  {
+    if (band < 0 || band > 2) return 0.0f;
+    od::Parameter *p = mBandBias[band][0]; // amount is index 0, but we want level
+    // Read level directly from the parameter
+    switch (band)
+    {
+    case 0: return mBandLevel0.value();
+    case 1: return mBandLevel1.value();
+    case 2: return mBandLevel2.value();
+    }
+    return 1.0f;
+  }
+
+  bool MultibandSaturator::getBandMuted(int band)
+  {
+    if (band < 0 || band > 2) return false;
+    switch (band)
+    {
+    case 0: return mBandMute0.value() > 0.5f;
+    case 1: return mBandMute1.value() > 0.5f;
+    case 2: return mBandMute2.value() > 0.5f;
+    }
+    return false;
   }
 
   // --- Process ---
@@ -378,6 +448,10 @@ namespace stolmine
         }
       }
 
+      // FFT ring buffer (capture post-sum signal)
+      s.ringBuf[s.ringPos] = wet;
+      s.ringPos = (s.ringPos + 1) & 255;
+
       // Compressor
       if (compActive)
       {
@@ -421,6 +495,31 @@ namespace stolmine
     {
       float rms = sqrtf(energyAccum[b] / (float)FRAMELENGTH);
       s.bandEnergy[b] += (rms - s.bandEnergy[b]) * energyCoeff;
+    }
+
+    // FFT: compute every 4 frames (~12 FFTs/sec at 48kHz/128)
+    s.fftFrameCount++;
+    if (s.fftFrameCount >= 4 && s.fftSetup && s.fftIn && s.fftOut)
+    {
+      s.fftFrameCount = 0;
+      for (int k = 0; k < 256; k++)
+        s.fftIn[k] = s.ringBuf[(s.ringPos + k) & 255] * s.hannWindow[k];
+
+      pffft_transform_ordered(s.fftSetup, s.fftIn, s.fftOut, NULL, PFFFT_FORWARD);
+
+      float peakDecay = 0.92f;
+      float rmsSmooth = 0.3f;
+      for (int k = 0; k < 128; k++)
+      {
+        float re = s.fftOut[k * 2];
+        float im = s.fftOut[k * 2 + 1];
+        float mag = sqrtf(re * re + im * im) / 256.0f;
+        if (mag > s.fftPeak[k])
+          s.fftPeak[k] = mag;
+        else
+          s.fftPeak[k] *= peakDecay;
+        s.fftRms[k] += (mag - s.fftRms[k]) * rmsSmooth;
+      }
     }
   }
 
