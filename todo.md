@@ -446,7 +446,7 @@ N BPFs locked to harmonic ratios of a fundamental. Reshapes harmonic content -- 
 ### Implemented
 - [x] Drive + tilt EQ (one-pole split, variable freq)
 - [x] Weight/skew crossover (Etcher-style normalization, 12dB/oct one-pole)
-- [x] 7 shapers per band (soft/hard/fold/rectify/crush/sine/poly) with amount/bias
+- [x] 7 shapers per band (tube/diode/fold/half-rect/crush/sine/fractal) with amount/bias, anti-alias LP
 - [x] SVF morph filter per band (off/LP/BP/HP/notch, freq, Q)
 - [x] Single-knob compressor (program-dependent envelope, SC HPF)
 - [x] FFT spectrum display (256-point pffft, peak hold + RMS, Catmull-Rom spline with adaptive tension, per-pixel gradient)
@@ -457,6 +457,8 @@ N BPFs locked to harmonic ratios of a fundamental. Reshapes harmonic content -- 
 - [x] SpectrumGraphic replaces fader (setControlGraphic container pattern)
 
 ### Remaining
+- [ ] Safety limiter after band sum (~1.5x soft clip) -- sine and fractal shapers can blow up output level at high drive
+- [ ] Investigate per-shaper gain normalization -- some modes (sine, fractal) produce much higher output than others at equivalent drive
 - [ ] Expansion views for bands (mute, amt, bias, type, wt, freq, morph, Q as individual faders)
 - [ ] Expansion views for drive (drive, tone amount, tone freq) and mix (mix, comp, output, tanh, SC HPF)
 - [ ] Filter morph adaptive labels (off/LP/L>B/BP/B>H/HP/H>N/ntch) -- needs firmware Readout API extension or custom control

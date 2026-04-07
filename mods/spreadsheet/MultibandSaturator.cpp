@@ -27,36 +27,70 @@ namespace stolmine
     return x;
   }
 
+  // Fast ln(1+x) approximation for companding
+  static inline float fastLog1p(float x)
+  {
+    return x / (1.0f + x * 0.5f);
+  }
+
   static inline float applyShaper(float x, int type, float amount, float bias)
   {
-    // Bias shifts input asymmetrically
-    float sig = (x + bias) * (1.0f + amount * 3.0f);
+    // Bias shifts input asymmetrically, drive scales with amount
+    float sig = (x + bias) * (1.0f + amount * 5.0f);
     float wet;
     switch (type)
     {
     default:
-    case 0: // Soft -- tanh
-      wet = fast_tanh(sig);
+    case 0: // Tube -- asymmetric soft clip (even harmonics)
+    {
+      float pos = fast_tanh(sig * 1.5f);
+      float neg = fast_tanh(sig * 0.8f);
+      wet = (sig >= 0) ? pos : neg;
       break;
-    case 1: // Hard -- clip
-      wet = CLAMP(-1.0f, 1.0f, sig);
+    }
+    case 1: // Diode -- arctan with soft knee
+    {
+      wet = sig / (1.0f + fabsf(sig) + 0.2f * sig * sig);
       break;
-    case 2: // Fold -- triangle wavefolder
-      wet = fold2(sig);
+    }
+    case 2: // Tri Fold -- multi-pass wavefolder
+    {
+      float s = sig;
+      for (int j = 0; j < 3; j++)
+      {
+        while (s > 1.0f) s = 2.0f - s;
+        while (s < -1.0f) s = -2.0f - s;
+        s *= 1.2f;
+      }
+      wet = s;
       break;
-    case 3: // Rectify -- full-wave
-      wet = fabsf(sig);
+    }
+    case 3: // Half Rect -- half-wave rectifier
+      wet = (sig > 0.0f) ? sig : 0.0f;
       break;
-    case 4: // Crush -- bit reduction (8 levels)
-      wet = ((int)(sig * 8.0f + (sig < 0 ? -0.5f : 0.5f))) / 8.0f;
+    case 4: // Crush -- bit reduction with mu-law companding
+    {
+      float mu = 8.0f;
+      float sign = (sig >= 0) ? 1.0f : -1.0f;
+      float absig = fabsf(sig);
+      float compressed = sign * fastLog1p(mu * absig) / fastLog1p(mu);
+      float quantized = floorf(compressed * 8.0f + 0.5f) / 8.0f;
+      float absQ = fabsf(quantized);
+      wet = (quantized >= 0 ? 1.0f : -1.0f) * ((1.0f + mu * absQ) - 1.0f) / mu;
       break;
-    case 5: // Sine -- sinusoidal
+    }
+    case 5: // Sine Fold -- sinusoidal waveshaper
       wet = sinf(sig * 3.14159f);
       break;
-    case 6: // Polynomial -- odd-harmonic x - x^3/3
+    case 6: // Fractal -- iterated polynomial
     {
-      float driven = sig;
-      wet = driven - (driven * driven * driven) / 3.0f;
+      float s = sig;
+      for (int j = 0; j < 3; j++)
+      {
+        s = s - (s * s * s) / 3.0f;
+        s *= 1.5f;
+      }
+      wet = s * 0.67f;
       break;
     }
     }
@@ -83,6 +117,9 @@ namespace stolmine
     // Compressor state
     float compDetector = 0.0f;
     float scHpState = 0.0f;
+
+    // Anti-alias lowpass state (~18kHz one-pole per band)
+    float aaState[3];
 
     // DC blocker state (one-pole highpass ~5Hz)
     float dcState = 0.0f;
@@ -122,6 +159,8 @@ namespace stolmine
       compDetector = 0.0f;
       scHpState = 0.0f;
       dcState = 0.0f;
+      for (int i = 0; i < 3; i++)
+        aaState[i] = 0.0f;
       for (int i = 0; i < 3; i++)
         bandEnergy[i] = 0.0f;
 
@@ -392,6 +431,10 @@ namespace stolmine
     }
 
     // Compressor constants (hoisted out of sample loop)
+    // Anti-alias lowpass coefficient (~18kHz)
+    float aaCoeff = 18000.0f / sr;
+    if (aaCoeff > 1.0f) aaCoeff = 1.0f;
+
     float compAmt = CLAMP(0.0f, 1.0f, mCompressAmt.value());
     bool compActive = compAmt > 0.001f;
     bool scHpEnabled = mScHpf.value() > 0.5f;
@@ -435,6 +478,10 @@ namespace stolmine
         // Waveshaper
         if (bandAmount[b] > 0.001f)
           bandSig[b] = applyShaper(bandSig[b], bandType[b], bandAmount[b], bandBiasVal[b]);
+
+        // Anti-alias lowpass (~18kHz, always on)
+        s.aaState[b] += (bandSig[b] - s.aaState[b]) * aaCoeff;
+        bandSig[b] = s.aaState[b];
 
         // SVF morph filter: off(0) -> LP(0.25) -> BP(0.5) -> HP(0.75) -> Notch(1.0)
         float morph = bandFilterMorph[b];

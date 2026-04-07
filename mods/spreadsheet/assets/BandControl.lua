@@ -68,7 +68,7 @@ function BandControl:init(args)
   self.biasReadout = makeReadout(args.bias, biasMap, 2, col2)
   self.typeReadout = makeReadout(args.shaperType, typeMap, 0, col3)
   if self.typeReadout.addName then
-    for _, v in ipairs({"soft", "hard", "fold", "rect", "crsh", "sine", "poly"}) do
+    for _, v in ipairs({"tube", "diod", "fold", "half", "crsh", "sine", "frac"}) do
       self.typeReadout:addName(v)
     end
   end
