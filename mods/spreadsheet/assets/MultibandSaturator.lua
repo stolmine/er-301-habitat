@@ -21,8 +21,8 @@ local driveMap = (function()
 end)()
 
 local skewMap = (function()
-  local map = app.LinearDialMap(0.1, 4.0)
-  map:setSteps(0.5, 0.1, 0.01, 0.01)
+  local map = app.LinearDialMap(-1, 1)
+  map:setSteps(0.25, 0.1, 0.01, 0.01)
   return map
 end)()
 
@@ -64,7 +64,7 @@ function MultibandSaturator:onLoadGraph(channelCount)
 
   -- Skew
   local skew = self:addObject("skew", app.ParameterAdapter())
-  skew:hardSet("Bias", 1.0)
+  skew:hardSet("Bias", 0.0)
   tieParam("Skew", skew)
   self:addMonoBranch("skew", skew, "In", skew, "Out")
 
@@ -175,6 +175,14 @@ function MultibandSaturator:onLoadGraph(channelCount)
     self:addMonoBranch(name, adapter, "In", adapter, "Out")
   end
 
+  -- Set band level Bias refs for graphic brightness
+  for i = 0, 2 do
+    op:setBandLevelBias(i, self.objects["bandLevel" .. i]:getParameter("Bias"))
+    if stereo then
+      self.objects.opR:setBandLevelBias(i, self.objects["bandLevel" .. i]:getParameter("Bias"))
+    end
+  end
+
   -- Set Bias refs for per-band params (direct read from UI, bypasses unscheduled adapters)
   -- param indices: 0=amount, 1=bias, 2=type, 3=weight, 4=filterFreq, 5=filterMorph, 6=filterQ
   for i = 0, 2 do
@@ -224,7 +232,7 @@ function MultibandSaturator:onLoadViews()
       biasMap = skewMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 1.0
+      initialBias = 0.0
     },
     mix = ParfaitMixControl {
       button = "mix",

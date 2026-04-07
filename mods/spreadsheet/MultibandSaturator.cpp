@@ -192,8 +192,11 @@ namespace stolmine
       mLastWeight[i] = -1.0f;
     mLastSkew = -1.0f;
     for (int b = 0; b < 3; b++)
+    {
       for (int p = 0; p < kBiasCount; p++)
         mBandBias[b][p] = 0;
+      mBandLevelBias[b] = 0;
+    }
   }
 
   MultibandSaturator::~MultibandSaturator()
@@ -210,7 +213,10 @@ namespace stolmine
     float w0 = CLAMP(0.1f, 4.0f, mBandWeight0.value());
     float w1 = CLAMP(0.1f, 4.0f, mBandWeight1.value());
     float w2 = CLAMP(0.1f, 4.0f, mBandWeight2.value());
-    float skew = CLAMP(0.1f, 4.0f, mSkew.value());
+    // Fader is -1..+1, convert to power exponent: 0 = no skew (exponent 1.0)
+    // -1 = crossovers bunch high (exponent 0.25), +1 = bunch low (exponent 4.0)
+    float skewParam = CLAMP(-1.0f, 1.0f, mSkew.value());
+    float skew = powf(4.0f, skewParam); // -1->0.25, 0->1.0, +1->4.0
 
     float total = w0 + w1 + w2;
     float accum0 = w0 / total;
@@ -240,6 +246,12 @@ namespace stolmine
     return mpInternal->crossoverHz[band];
   }
 
+  void MultibandSaturator::setBandLevelBias(int band, od::Parameter *p)
+  {
+    if (band >= 0 && band < 3)
+      mBandLevelBias[band] = p;
+  }
+
   void MultibandSaturator::setBandBias(int band, int param, od::Parameter *p)
   {
     if (band >= 0 && band < 3 && param >= 0 && param < kBiasCount)
@@ -266,9 +278,10 @@ namespace stolmine
 
   float MultibandSaturator::getBandLevel(int band)
   {
-    if (band < 0 || band > 2) return 0.0f;
-    od::Parameter *p = mBandBias[band][0]; // amount is index 0, but we want level
-    // Read level directly from the parameter
+    if (band < 0 || band > 2) return 1.0f;
+    // Read from Bias ref if available (tied params may not be scheduled)
+    if (mBandLevelBias[band])
+      return mBandLevelBias[band]->value();
     switch (band)
     {
     case 0: return mBandLevel0.value();
@@ -276,6 +289,13 @@ namespace stolmine
     case 2: return mBandLevel2.value();
     }
     return 1.0f;
+  }
+
+  int MultibandSaturator::getCrossoverBin(int band)
+  {
+    if (band < 0 || band > 1) return 0;
+    float sr = globalConfig.sampleRate;
+    return (int)(mpInternal->crossoverHz[band] / (sr / 256.0f));
   }
 
   bool MultibandSaturator::getBandMuted(int band)
@@ -323,7 +343,9 @@ namespace stolmine
       bandBiasVal[b] = mBandBias[b][1] ? CLAMP(-1.0f, 1.0f, mBandBias[b][1]->value()) : 0.0f;
       bandType[b] = mBandBias[b][2] ? CLAMP(0, 6, (int)(mBandBias[b][2]->value() + 0.5f)) : 0;
       bandFilterFreq[b] = mBandBias[b][4] ? CLAMP(20.0f, 20000.0f, mBandBias[b][4]->value()) : 1000.0f;
-      bandFilterMorph[b] = mBandBias[b][5] ? CLAMP(0.0f, 1.0f, mBandBias[b][5]->value()) : 0.0f;
+      // Morph is 0-4 integer in UI, convert to 0-1 for DSP
+      float morphInt = mBandBias[b][5] ? mBandBias[b][5]->value() : 0.0f;
+      bandFilterMorph[b] = CLAMP(0.0f, 1.0f, morphInt * 0.25f);
       bandFilterQ[b] = mBandBias[b][6] ? CLAMP(0.5f, 20.0f, mBandBias[b][6]->value()) : 0.5f;
     }
 

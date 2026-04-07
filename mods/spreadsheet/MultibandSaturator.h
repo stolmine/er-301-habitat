@@ -66,7 +66,9 @@ namespace stolmine
     float getFFTRms(int bin);
     float getBandLevel(int band);
     bool getBandMuted(int band);
+    int getCrossoverBin(int band);
     void setBandBias(int band, int param, od::Parameter *p);
+    void setBandLevelBias(int band, od::Parameter *p);
 
   private:
     struct Internal;
@@ -76,6 +78,7 @@ namespace stolmine
     // [band][param]: 0=amount, 1=bias, 2=type, 3=weight, 4=filterFreq, 5=filterMorph, 6=filterQ
     static const int kBiasCount = 7;
     od::Parameter *mBandBias[3][7];
+    od::Parameter *mBandLevelBias[3];
 
     // Dirty-check
     float mLastWeight[3];
