@@ -92,6 +92,8 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Station X | Codescan FIR filter -- reads binary files as filter kernels - still cooking |
 | | Fade Mixer | 4-input crossfader with BranchMeter controls |
 | | Varishape Voice | Simple synth voice -- POLYBLEP oscillator (tri/saw/square), gate-triggered decay envelope |
+| | Pecto | Comb resonator -- 16 tap patterns, 4 resonator types (raw/guitar/clarinet/sitar), V/Oct, xform gate randomization |
+| | Transport | Gated clock generator -- BPM control, 4 ppqn (16th note) output, toggle run/stop with phase reset |
 | **spreadsheet** | Excel | 64-step CV tracker sequencer with math transforms |
 | | Ballot | 64-step gate sequencer with chaselight display and algorithmic transforms |
 | | Etcher | CV-addressed piecewise transfer function |

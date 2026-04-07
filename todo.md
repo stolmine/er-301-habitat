@@ -84,7 +84,8 @@ Refinements:
   - Envelope controls amplitude; gate triggers attack, release on gate off or decay end
   - Goal: drop in a voice, patch a gate and a pitch, hear sound immediately
 - [x] Bug: Bletchley Park loses file association when "moved to mixer" -- fixed, deserialize restores path
-- [ ] Transport -- simple clock generator with latching run/stop gate and rate control. Mute vs actual stop TBD (mute = clock keeps running but output is gated, stop = clock resets phase on restart).
+- [x] Transport -- gated clock generator. Toggle run/stop, BPM fader (1-300), 4 ppqn output (16th notes). Phase resets on start/stop.
+- [x] Pecto -- comb resonator. 16 tap patterns (uniform/fibonacci/early/late/middle/ess/flat/rev-fib + 8 randomized variants), 4 slopes, 4 resonator types (raw/guitar/clarinet/sitar), xform gate randomization, dual-instance stereo, 2s buffer, adaptive labels, MixControl + TransformGateControl reuse.
 
 ## Sequencer Suite
 
