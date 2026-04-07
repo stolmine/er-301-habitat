@@ -398,6 +398,7 @@ Input: GainBias branch (no inlet). Output: 10Vpp (-5V to +5V).
 - [ ] Consider: audio-rate input option (inlet mode) for true waveshaping
 - [ ] Transforms: adapt Excel transform pattern for segment data (rotate, reverse, random, etc.)
 - [ ] Additional presets: sine wave, triangle, custom user presets via save/restore
+- [ ] Fix skew asymmetry: same pow(accum, exponent) issue as Parfait -- positive/negative skew have unequal octave range
 
 ## Gridlock (Priority Gate Router)
 
@@ -457,8 +458,9 @@ N BPFs locked to harmonic ratios of a fundamental. Reshapes harmonic content -- 
 - [x] SpectrumGraphic replaces fader (setControlGraphic container pattern)
 
 ### Remaining
-- [ ] Safety limiter after band sum (~1.5x soft clip) -- sine and fractal shapers can blow up output level at high drive
-- [ ] Investigate per-shaper gain normalization -- some modes (sine, fractal) produce much higher output than others at equivalent drive
+- [x] Per-shaper gain management -- half rect (tanh soft clip), sine fold (decoupled 1-3x depth), fractal (decoupled 0.5-2x depth, clamped to stable region)
+- [x] Safety limiter after band sum (~1.5x soft clip, before comp/output chain)
+- [x] Symmetric skew -- replaced pow(accum, exponent) with linear shift in log-freq space, equal octave range both directions
 - [ ] Expansion views for bands (mute, amt, bias, type, wt, freq, morph, Q as individual faders)
 - [ ] Expansion views for drive (drive, tone amount, tone freq) and mix (mix, comp, output, tanh, SC HPF)
 - [ ] Filter morph adaptive labels (off/LP/L>B/BP/B>H/HP/H>N/ntch) -- needs firmware Readout API extension or custom control

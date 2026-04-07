@@ -266,17 +266,19 @@ namespace stolmine
     float w0 = CLAMP(0.1f, 4.0f, mBandWeight0.value());
     float w1 = CLAMP(0.1f, 4.0f, mBandWeight1.value());
     float w2 = CLAMP(0.1f, 4.0f, mBandWeight2.value());
-    // Fader is -1..+1, convert to power exponent: 0 = no skew (exponent 1.0)
-    // -1 = crossovers bunch high (exponent 0.25), +1 = bunch low (exponent 4.0)
     float skewParam = CLAMP(-1.0f, 1.0f, mSkew.value());
-    float skew = powf(4.0f, skewParam); // -1->0.25, 0->1.0, +1->4.0
 
     float total = w0 + w1 + w2;
     float accum0 = w0 / total;
     float accum1 = (w0 + w1) / total;
 
-    float b0 = (skew != 1.0f) ? powf(accum0, skew) : accum0;
-    float b1 = (skew != 1.0f) ? powf(accum1, skew) : accum1;
+    // Symmetric skew: shift boundaries in log-freq space by equal octaves
+    // in each direction, capped by distance to nearer edge of [0,1].
+    // Positive skew bunches crossovers low, negative bunches high.
+    float f0 = (accum0 < 1.0f - accum0) ? accum0 : 1.0f - accum0;
+    float f1 = (accum1 < 1.0f - accum1) ? accum1 : 1.0f - accum1;
+    float b0 = accum0 - skewParam * f0;
+    float b1 = accum1 - skewParam * f1;
 
     // Map 0-1 boundary to 20-20000 Hz (log scale)
     s.crossoverHz[0] = 20.0f * powf(1000.0f, b0);
@@ -290,7 +292,7 @@ namespace stolmine
     mLastWeight[0] = w0;
     mLastWeight[1] = w1;
     mLastWeight[2] = w2;
-    mLastSkew = skew;
+    mLastSkew = skewParam;
   }
 
   float MultibandSaturator::getCrossoverFreq(int band)
