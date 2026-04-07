@@ -112,9 +112,9 @@ namespace stolmine
     // Tilt EQ state
     float tiltLpState = 0.0f;
 
-    // Crossover (2 split points, 2-pole each for 12dB/oct)
+    // Crossover (2 split points, LR4 4-pole each for 24dB/oct)
     float crossoverHz[2];
-    float xoverState[2][2];  // [crossover][cascade stage]
+    float xoverState[2][4];  // [crossover][cascade stage]
 
     // Per-band post-shaper SVF filter (inline state, not stmlib::Svf)
     float svfState1[3];
@@ -155,7 +155,7 @@ namespace stolmine
       crossoverHz[0] = 200.0f;
       crossoverHz[1] = 2000.0f;
       for (int i = 0; i < 2; i++)
-        for (int j = 0; j < 2; j++)
+        for (int j = 0; j < 4; j++)
           xoverState[i][j] = 0.0f;
       for (int i = 0; i < 3; i++)
       {
@@ -419,7 +419,7 @@ namespace stolmine
     float tiltGain = powf(10.0f, toneAmt * 0.3f);
     float tiltLGain = 1.0f / tiltGain;
 
-    // Crossover coefficients (2-pole = two cascaded one-pole filters, 12dB/oct)
+    // Crossover coefficients (LR4 = four cascaded one-pole filters, 24dB/oct)
     float xCoeff[2];
     for (int c = 0; c < 2; c++)
     {
@@ -467,17 +467,21 @@ namespace stolmine
       s.tiltLpState += (x - s.tiltLpState) * tiltCoeff;
       x = s.tiltLpState * tiltLGain + (x - s.tiltLpState) * tiltGain;
 
-      // Band split: two 2-pole (cascaded one-pole) crossovers
+      // Band split: LR4 (4 cascaded one-pole) crossovers, 24dB/oct
       // Crossover 0: x -> lp0 (band0), hp0 (remainder)
       s.xoverState[0][0] += (x - s.xoverState[0][0]) * xCoeff[0];
       s.xoverState[0][1] += (s.xoverState[0][0] - s.xoverState[0][1]) * xCoeff[0];
-      float band0 = s.xoverState[0][1];
+      s.xoverState[0][2] += (s.xoverState[0][1] - s.xoverState[0][2]) * xCoeff[0];
+      s.xoverState[0][3] += (s.xoverState[0][2] - s.xoverState[0][3]) * xCoeff[0];
+      float band0 = s.xoverState[0][3];
       float hp0 = x - band0;
 
       // Crossover 1: hp0 -> lp1 (band1), hp1 (band2)
       s.xoverState[1][0] += (hp0 - s.xoverState[1][0]) * xCoeff[1];
       s.xoverState[1][1] += (s.xoverState[1][0] - s.xoverState[1][1]) * xCoeff[1];
-      float band1 = s.xoverState[1][1];
+      s.xoverState[1][2] += (s.xoverState[1][1] - s.xoverState[1][2]) * xCoeff[1];
+      s.xoverState[1][3] += (s.xoverState[1][2] - s.xoverState[1][3]) * xCoeff[1];
+      float band1 = s.xoverState[1][3];
       float band2 = hp0 - band1;
 
       // Per-band shaping + filtering
