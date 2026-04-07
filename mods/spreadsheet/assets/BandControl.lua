@@ -106,18 +106,12 @@ function BandControl:init(args)
   self.weightReadout = makeReadout(args.weight, weightMap, 2, col1)
   self.freqReadout = makeReadout(args.filterFreq, freqMap, 0, col2)
   local morphMap = (function()
-    local m = app.LinearDialMap(0, 4)
-    m:setSteps(1, 1, 1, 1)
-    m:setRounding(1)
+    local m = app.LinearDialMap(0, 1)
+    m:setSteps(0.1, 0.01, 0.001, 0.001)
     return m
   end)()
 
-  self.morphReadout = makeReadout(args.filterMorph, morphMap, 0, col3)
-  if self.morphReadout.addName then
-    for _, v in ipairs({"off", "LP", "BP", "HP", "ntch"}) do
-      self.morphReadout:addName(v)
-    end
-  end
+  self.morphReadout = makeReadout(args.filterMorph, morphMap, 2, col3)
 
   local filterDesc = app.Label("Wt / Freq / Morph", 10)
   filterDesc:fitToText(3)

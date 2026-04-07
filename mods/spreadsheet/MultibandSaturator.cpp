@@ -343,9 +343,7 @@ namespace stolmine
       bandBiasVal[b] = mBandBias[b][1] ? CLAMP(-1.0f, 1.0f, mBandBias[b][1]->value()) : 0.0f;
       bandType[b] = mBandBias[b][2] ? CLAMP(0, 6, (int)(mBandBias[b][2]->value() + 0.5f)) : 0;
       bandFilterFreq[b] = mBandBias[b][4] ? CLAMP(20.0f, 20000.0f, mBandBias[b][4]->value()) : 1000.0f;
-      // Morph is 0-4 integer in UI, convert to 0-1 for DSP
-      float morphInt = mBandBias[b][5] ? mBandBias[b][5]->value() : 0.0f;
-      bandFilterMorph[b] = CLAMP(0.0f, 1.0f, morphInt * 0.25f);
+      bandFilterMorph[b] = mBandBias[b][5] ? CLAMP(0.0f, 1.0f, mBandBias[b][5]->value()) : 0.0f;
       bandFilterQ[b] = mBandBias[b][6] ? CLAMP(0.5f, 20.0f, mBandBias[b][6]->value()) : 0.5f;
     }
 

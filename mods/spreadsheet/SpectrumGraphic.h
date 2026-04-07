@@ -84,7 +84,6 @@ namespace stolmine
       if (!mpSat)
         return;
 
-      float level = mpSat->getBandLevel(mBandIndex);
       bool muted = mpSat->getBandMuted(mBandIndex);
 
       if (muted)
@@ -190,38 +189,31 @@ namespace stolmine
         // Per-pixel RMS gradient fill
         if (rH > 0)
         {
-          // Per-bin brightness: scale max gray by this column's RMS relative to peak
+          // Per-bin brightness: louder bins glow brighter
           float colBright = (peakMagMax > 1e-10f)
                                 ? (rmsH[px] / (peakH[px] > 0.1f ? peakH[px] : 0.1f))
                                 : 0.5f;
           if (colBright > 1.0f) colBright = 1.0f;
-          // Scale brightness by band level (0=dark, 1=normal, 2=bright)
-          float levelBright = level > 2.0f ? 2.0f : level;
-          int maxGray = (int)((4.0f + colBright * 7.0f) * (levelBright * 0.5f));
-          if (maxGray < 2) maxGray = 2;
-          if (maxGray > 13) maxGray = 13;
-          int minGray = maxGray > 4 ? maxGray - 6 : 2;
+          int maxGray = 4 + (int)(colBright * 7.0f); // 4-11
+          if (maxGray > 11) maxGray = 11;
+          int minGray = 2;
 
           for (int y = 0; y < rH; y++)
           {
             float yt = (float)y / (float)(rH > 1 ? rH - 1 : 1);
             int gray = maxGray - (int)(yt * (float)(maxGray - minGray));
-            if (gray < 1) gray = 1;
+            if (gray < 2) gray = 2;
             fb.pixel(gray, x, bot + y);
           }
         }
-
-        // Peak contour (smooth line, brightness scaled by level)
-        int peakColor = (int)(level * 7.5f);
-        if (peakColor < 3) peakColor = 3;
-        if (peakColor > WHITE) peakColor = WHITE;
         int peakY = bot + pH;
         if (prevPeakY >= 0)
-          fb.line(peakColor, x - 1, prevPeakY, x, peakY);
+          fb.line(WHITE, x - 1, prevPeakY, x, peakY);
         prevPeakY = peakY;
       }
 
       // dB readout in top-right corner
+      float level = mpSat->getBandLevel(mBandIndex);
       float db = (level > 0.001f) ? 20.0f * log10f(level) : -60.0f;
       char buf[8];
       snprintf(buf, sizeof(buf), "%+.0f", db);
