@@ -86,6 +86,7 @@ Refinements:
 - [x] Bug: Bletchley Park loses file association when "moved to mixer" -- fixed, deserialize restores path
 - [x] Transport -- gated clock generator. Toggle run/stop, BPM fader (1-300), 4 ppqn output (16th notes). Phase resets on start/stop.
 - [x] Pecto -- comb resonator. 16 tap patterns (uniform/fibonacci/early/late/middle/ess/flat/rev-fib + 8 randomized variants), 4 slopes, 4 resonator types (raw/guitar/clarinet/sitar), xform gate randomization, dual-instance stereo, 2s buffer, adaptive labels, MixControl + TransformGateControl reuse.
+- [x] Pecto: density capped at 24 (CPU/UI), sorted tap reads for cache locality, xform randomization respects cap, TI ARM ICE workaround (O1 on recomputeTaps)
 
 ## Sequencer Suite
 
@@ -406,11 +407,27 @@ Input: GainBias branch (no inlet). Output: 10Vpp (-5V to +5V).
 
 ## Spectrogram
 
-FFT-based visual display unit, audio passthrough.
+Inline spectrum analyzer, adapted from Parfait's SpectrumGraphic. Stereo passthrough, mono mixdown for FFT analysis. 2-ply display.
 
-- [ ] FFT size: 256 / 512 / 1024
-- [ ] Display: scrolling waterfall or static spectrum
-- [ ] Diagnostic insert anywhere in a chain
+- [ ] C++ DSP: ring buffer + 256-point pffft FFT (extract from Parfait), stereo passthrough, L+R sum for analysis
+- [ ] Lua: 2-ply SpectrumGraphic (full 20-20kHz), adapt from Parfait (remove band indexing)
+- [ ] Scope package (alongside existing Scope units)
+
+## Varishape Oscillator
+
+Raw POLYBLEP oscillator extracted from VarishapeVoice. No envelope, no gate -- pure oscillator.
+
+- [ ] C++ DSP: stages::VariableShapeOscillator wrapper, V/Oct, f0, shape, sync, level
+- [ ] Lua: standard oscillator layout (f0, V/Oct, shape, level)
+- [ ] Biome package
+
+## Flakes (granular shimmer/freeze)
+
+C++ rewrite of Joe's Shards Lua preset. Feedback looper + delay + ladder LPF + noise/sine modulation.
+
+- [ ] C++ DSP: circular buffer (10s), freeze gate, variable delay with feedback, one-pole or ladder LPF, delay modulation (sine + noise), dry/wet mix
+- [ ] Controls: Freeze (gate), Depth, Delay, Warble, Noise, Dry/Wet
+- [ ] Biome package
 
 ## Spectral Envelope Follower
 
@@ -465,6 +482,9 @@ N BPFs locked to harmonic ratios of a fundamental. Reshapes harmonic content -- 
 - [x] Expansion views for drive (drive, tone amount, tone freq) and mix (mix, comp, SC HPF, output, tanh)
 - [ ] Filter morph adaptive labels (off/LP/L>B/BP/B>H/HP/H>N/ntch) -- needs firmware Readout API extension or custom control
 - [x] LR4 crossover (24dB/oct) -- 4 cascaded one-pole stages per split point
+- [x] Fast math: IEEE 754 fast_log2/fast_exp2 for compressor, fast_sinf for sine fold
+- [x] Shaper type 0 = Off (passthrough, default) -- shapers shifted to 1-7
+- [ ] Filter morph adaptive labels (off/LP/L>B/BP/B>H/HP/H>N/ntch) -- needs firmware Readout API extension or custom control
 - [ ] CPU profiling on am335x
 - [ ] Defaults tuning
 
