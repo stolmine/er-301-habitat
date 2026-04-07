@@ -1,12 +1,20 @@
 // Provide libc/libm symbols that pffft needs but the ER-301 ELF loader
 // doesn't export. These are only called during pffft_new_setup() (init).
+//
+// WARNING: malloc/free defined here override the global allocator for
+// the entire shared library. Only safe because pffft is the only code
+// that calls malloc/free directly (C++ new/delete use the firmware's
+// allocator via a different path on the ER-301).
 
 #include <stddef.h>
 
-// cosf/sinf — Bhaskara approximation, adequate for twiddle factor init
+// cosf/sinf — needed by pffft for twiddle factor init.
+// On ER-301 ARM, these aren't exported by the ELF loader.
+// Bhaskara approximation, adequate for init-time use only.
 static const float PI_F = 3.14159265358979323846f;
 
-float cosf(float x) {
+// Use weak attribute so firmware's real sinf/cosf take priority if available
+float __attribute__((weak)) cosf(float x) {
   float tp = 1.0f / (2.0f * PI_F);
   x *= tp;
   x -= 0.25f + (float)(int)(x + 0.25f);
@@ -15,26 +23,22 @@ float cosf(float x) {
   return x;
 }
 
-float sinf(float x) {
+float __attribute__((weak)) sinf(float x) {
   return cosf(x - PI_F * 0.5f);
 }
 
-// Bump allocator — resets each time pffft_new_setup runs via malloc(sizeof(PFFFT_Setup))
-// pffft calls: malloc(setup), pffft_aligned_malloc(data), and our shim adds 3 aligned bufs
-// Total per init cycle: ~80KB. Reset on each new setup creation.
-static char pffft_heap[131072] __attribute__((aligned(64)));
+// Bump allocator for pffft_new_setup and pffft_aligned_malloc.
+// Total per init cycle: ~4KB for 256-point FFT.
+static char pffft_heap[32768] __attribute__((aligned(64)));
 static size_t pffft_heap_pos = 0;
-static int pffft_setup_count = 0;
 
 void *malloc(size_t size) {
-  // Reset heap unconditionally on each setup allocation.
-  // STFT::Init is only called on mode switch, so all prior allocations
-  // are dead — safe to reclaim the entire heap.
+  // Reset heap on setup allocation (small size = PFFFT_Setup struct)
   if (size < 256) {
     pffft_heap_pos = 0;
   }
 
-  // 64-byte alignment for NEON cache line optimization
+  // 64-byte alignment
   pffft_heap_pos = (pffft_heap_pos + 63) & ~(size_t)63;
   if (pffft_heap_pos + size > sizeof(pffft_heap)) {
     return (void *)0;
@@ -46,5 +50,4 @@ void *malloc(size_t size) {
 
 void free(void *p) {
   (void)p;
-  // Bump allocator — no-op free
 }

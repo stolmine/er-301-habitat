@@ -84,6 +84,9 @@ namespace stolmine
     float compDetector = 0.0f;
     float scHpState = 0.0f;
 
+    // DC blocker state (one-pole highpass ~5Hz)
+    float dcState = 0.0f;
+
     // Per-band energy (for graphic)
     float bandEnergy[3];
 
@@ -91,12 +94,14 @@ namespace stolmine
     PFFFT_Setup *fftSetup;
     float *fftIn;
     float *fftOut;
+    float *fftWork;
     float hannWindow[256];
     float fftPeak[128];
     float fftRms[128];
     float ringBuf[256];
     int ringPos;
     int fftFrameCount;
+    bool fftReady;
 
     void Init()
     {
@@ -116,15 +121,16 @@ namespace stolmine
       }
       compDetector = 0.0f;
       scHpState = 0.0f;
+      dcState = 0.0f;
       for (int i = 0; i < 3; i++)
         bandEnergy[i] = 0.0f;
 
-      // FFT
-      fftSetup = pffft_new_setup(256, PFFFT_REAL);
-      fftIn = (float *)pffft_aligned_malloc(256 * sizeof(float));
-      fftOut = (float *)pffft_aligned_malloc(256 * sizeof(float));
-      for (int i = 0; i < 256; i++)
-        hannWindow[i] = 0.5f * (1.0f - cosf(2.0f * 3.14159f * (float)i / 255.0f));
+      // FFT (deferred init -- setup on first process() call)
+      fftSetup = 0;
+      fftIn = 0;
+      fftOut = 0;
+      fftWork = 0;
+      fftReady = false;
       memset(fftPeak, 0, sizeof(fftPeak));
       memset(fftRms, 0, sizeof(fftRms));
       memset(ringBuf, 0, sizeof(ringBuf));
@@ -137,6 +143,7 @@ namespace stolmine
       if (fftSetup) { pffft_destroy_setup(fftSetup); fftSetup = 0; }
       if (fftIn) { pffft_aligned_free(fftIn); fftIn = 0; }
       if (fftOut) { pffft_aligned_free(fftOut); fftOut = 0; }
+      if (fftWork) { pffft_aligned_free(fftWork); fftWork = 0; }
     }
   };
 
@@ -373,7 +380,11 @@ namespace stolmine
     // Set per-band SVF coefficients (ZDF topology)
     for (int b = 0; b < 3; b++)
     {
-      float g = tanf(3.14159f * bandFilterFreq[b] / sr);
+      // Avoid tanf (may not be available on ARM ELF loader)
+      float fNorm = 3.14159f * bandFilterFreq[b] / sr;
+      float sinVal = sinf(fNorm);
+      float cosVal = cosf(fNorm);
+      float g = (cosVal > 1e-10f) ? sinVal / cosVal : 100.0f;
       float r = 1.0f / bandFilterQ[b];
       s.svfG[b] = g;
       s.svfR[b] = r;
@@ -468,6 +479,10 @@ namespace stolmine
         }
       }
 
+      // DC blocker (~5Hz one-pole highpass)
+      s.dcState += (wet - s.dcState) * (5.0f / sr);
+      wet -= s.dcState;
+
       // FFT ring buffer (capture post-sum signal)
       s.ringBuf[s.ringPos] = wet;
       s.ringPos = (s.ringPos + 1) & 255;
@@ -517,15 +532,30 @@ namespace stolmine
       s.bandEnergy[b] += (rms - s.bandEnergy[b]) * energyCoeff;
     }
 
+    // Lazy FFT init (deferred from constructor)
+    if (!s.fftReady)
+    {
+      s.fftSetup = pffft_new_setup(256, PFFFT_REAL);
+      s.fftIn = (float *)pffft_aligned_malloc(256 * sizeof(float));
+      s.fftOut = (float *)pffft_aligned_malloc(256 * sizeof(float));
+      s.fftWork = (float *)pffft_aligned_malloc(256 * sizeof(float));
+      if (s.fftSetup && s.fftIn && s.fftOut && s.fftWork)
+      {
+        for (int k = 0; k < 256; k++)
+          s.hannWindow[k] = 0.5f * (1.0f - cosf(2.0f * 3.14159f * (float)k / 255.0f));
+        s.fftReady = true;
+      }
+    }
+
     // FFT: compute every 4 frames (~12 FFTs/sec at 48kHz/128)
     s.fftFrameCount++;
-    if (s.fftFrameCount >= 4 && s.fftSetup && s.fftIn && s.fftOut)
+    if (s.fftFrameCount >= 4 && s.fftReady)
     {
       s.fftFrameCount = 0;
       for (int k = 0; k < 256; k++)
         s.fftIn[k] = s.ringBuf[(s.ringPos + k) & 255] * s.hannWindow[k];
 
-      pffft_transform_ordered(s.fftSetup, s.fftIn, s.fftOut, NULL, PFFFT_FORWARD);
+      pffft_transform_ordered(s.fftSetup, s.fftIn, s.fftOut, s.fftWork, PFFFT_FORWARD);
 
       float peakDecay = 0.92f;
       float rmsSmooth = 0.3f;
