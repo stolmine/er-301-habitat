@@ -439,17 +439,38 @@ N BPFs locked to harmonic ratios of a fundamental. Reshapes harmonic content -- 
 - [ ] Global: fundamental (V/Oct), input gain, mix
 - [ ] Uses FFB filter code with freq = fundamental * harmonic number
 
+## Parfait (Multiband Saturation)
+
+3-band multiband saturation. Drive, tilt EQ, weight/skew crossover, 7 shapers, SVF morph filter, compressor, FFT spectrum display.
+
+### Implemented
+- [x] Drive + tilt EQ (one-pole split, variable freq)
+- [x] Weight/skew crossover (Etcher-style normalization, 12dB/oct one-pole)
+- [x] 7 shapers per band (soft/hard/fold/rectify/crush/sine/poly) with amount/bias
+- [x] SVF morph filter per band (off/LP/BP/HP/notch, freq, Q)
+- [x] Single-knob compressor (program-dependent envelope, SC HPF)
+- [x] FFT spectrum display (256-point pffft, peak hold + RMS, Catmull-Rom spline with adaptive tension, per-pixel gradient)
+- [x] BandControl with cycling shift sub-display (shaper + filter params)
+- [x] DriveControl with tone/freq sub-display
+- [x] ParfaitMixControl with comp/output/tanh sub-display
+- [x] Dual-instance stereo, all per-band params via Bias refs
+- [x] SpectrumGraphic replaces fader (setControlGraphic container pattern)
+
+### Remaining
+- [ ] Expansion views for bands (mute, amt, bias, type, wt, freq, morph, Q as individual faders)
+- [ ] Expansion views for drive (drive, tone amount, tone freq) and mix (mix, comp, output, tanh, SC HPF)
+- [ ] Filter morph adaptive labels (off/LP/L>B/BP/B>H/HP/H>N/ntch) -- needs firmware Readout API extension or custom control
+- [ ] Steeper crossover slopes (LR4) for better band isolation -- one-pole leaks low freqs
+- [ ] CPU profiling on am335x
+- [ ] Defaults tuning
+
 ## Crossover Engine Family (shared infrastructure)
 
-Multiband comp, multiband distortion, spectral gate all share crossover/band-splitting frontend. Build once, swap per-band processing.
+Multiband comp and spectral gate share crossover/band-splitting frontend with Parfait. Build once, swap per-band processing.
 
 ### Multiband Compressor
 - [ ] N bands (4-8), per-band: threshold, ratio, attack/decay
 - [ ] Global: crossover freqs (auto or manual), makeup gain, mix
-
-### Multiband Distortion
-- [ ] Same crossover, per-band: drive, type (tanh/fold/clip/asymmetric), level
-- [ ] Global: crossover freqs, input gain, mix
 
 ### Spectral Gate
 - [ ] Same crossover, per-band: threshold, attack/release, level
