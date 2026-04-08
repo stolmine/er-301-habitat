@@ -21,6 +21,7 @@
 #include "DelayInfoGraphic.h"
 #include "MultibandSaturator.h"
 #include "SpectrumGraphic.h"
+#include "Rauschen.h"
 #define SWIGLUA
 %}
 
@@ -42,3 +43,4 @@
 %include "DelayInfoGraphic.h"
 %include "MultibandSaturator.h"
 %include "SpectrumGraphic.h"
+%include "Rauschen.h"
