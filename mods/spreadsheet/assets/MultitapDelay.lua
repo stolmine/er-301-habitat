@@ -14,6 +14,8 @@ local TransformGateControl = require "spreadsheet.TransformGateControl"
 local DelayInfoControl = require "spreadsheet.DelayInfoControl"
 local ModeSelector = require "spreadsheet.ModeSelector"
 local Encoder = require "Encoder"
+local MenuHeader = require "Unit.MenuControl.Header"
+local Task = require "Unit.MenuControl.Task"
 
 local function floatMap(min, max)
   local map = app.LinearDialMap(min, max)
@@ -78,8 +80,9 @@ end
 function MultitapDelay:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.MultitapDelay())
 
-  -- Allocate 2 seconds of delay buffer
-  op:allocateTimeUpTo(20.0)
+  -- Allocate delay buffer (default 20s, configurable via menu)
+  self.bufferSeconds = self.bufferSeconds or 20.0
+  op:allocateTimeUpTo(self.bufferSeconds)
 
   connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
@@ -744,6 +747,25 @@ function MultitapDelay:onLoadViews()
   }
 end
 
+function MultitapDelay:onShowMenu(objects, branches)
+  local function setBuffer(secs)
+    return function()
+      self.bufferSeconds = secs
+      self.objects.op:allocateTimeUpTo(secs)
+      if self.objects.opR then
+        self.objects.opR:allocateTimeUpTo(secs)
+      end
+    end
+  end
+  return {
+    bufHeader = MenuHeader { description = "Buffer Size" },
+    buf2 = Task { description = "2 sec", task = setBuffer(2.0) },
+    buf5 = Task { description = "5 sec", task = setBuffer(5.0) },
+    buf10 = Task { description = "10 sec", task = setBuffer(10.0) },
+    buf20 = Task { description = "20 sec", task = setBuffer(20.0) }
+  }, { "bufHeader", "buf2", "buf5", "buf10", "buf20" }
+end
+
 function MultitapDelay:serialize()
   local t = Unit.serialize(self)
   local op = self.objects.op
@@ -760,10 +782,14 @@ function MultitapDelay:serialize()
     }
   end
   t.taps = taps
+  t.bufferSeconds = self.bufferSeconds
   return t
 end
 
 function MultitapDelay:deserialize(t)
+  if t.bufferSeconds then
+    self.bufferSeconds = t.bufferSeconds
+  end
   Unit.deserialize(self, t)
   if t.taps then
     local op = self.objects.op

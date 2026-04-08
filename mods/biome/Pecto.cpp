@@ -469,6 +469,13 @@ namespace stolmine
       float lastTapOut = 0.0f;
       for (int t = 0; t < density; t++)
       {
+        // Prefetch next tap's buffer position (hides memory latency)
+        if (t + 1 < density)
+        {
+          float nextPos = (float)s.writeIndex - mCachedDelaySamples[t + 1];
+          if (nextPos < 0.0f) nextPos += (float)maxDelay;
+          __builtin_prefetch(&buf[(int)nextPos], 0, 1);
+        }
         float readPos = (float)s.writeIndex - mCachedDelaySamples[t];
         if (readPos < 0.0f) readPos += (float)maxDelay;
         float tapOut = bufReadInterp(buf, readPos, maxDelay) * mCachedTapWeight[t];

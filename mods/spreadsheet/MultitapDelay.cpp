@@ -667,6 +667,14 @@ namespace stolmine
 
       for (int t = 0; t < tapCount; t++)
       {
+        // Prefetch next tap's buffer position (hides memory latency)
+        if (t + 1 < tapCount && s.tapLevel[t + 1] >= 0.001f)
+        {
+          float nextPos = (float)s.writeIndex - mCachedDelaySamples[t + 1];
+          if (nextPos < 0.0f) nextPos += (float)maxDelay;
+          __builtin_prefetch(&buf[(int)nextPos], 0, 1);
+        }
+
         if (s.tapLevel[t] < 0.001f)
           continue;
 
