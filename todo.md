@@ -555,8 +555,15 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [ ] Physical modeling: delay line + filter in feedback loop
 - [ ] Exciter input, tuned to V/Oct. Pair with comb bank for extended body modeling.
 
-### Parametric Noise
-- [ ] Continuously variable spectral tilt and bandpass (not just white/pink/brown)
+### Rauschen (Parametric Noise)
+- [x] 10-algorithm noise generator: White, Pink, Dust, Particle, Crackle, Logistic, Henon, Clocked, Velvet, Gendy
+- [x] X/Y params with log/quadratic curves on all algos, post-generator SVF morph filter with V/Oct
+- [x] Phase space viz (3D rotating x[n]/x[n-1]/x[n-2] with auto-scaling + phosphor decay)
+- [x] CutoffControl shift sub-display with addThresholdLabel morph labels
+- [x] ThresholdFader for expansion morph fader (reusable pattern)
+- [x] Spreadsheet package
+- [ ] Tune individual algorithm character (Pink resonance feedback, Gendy breakpoint count, etc.)
+- [ ] Consider additional algorithms (Rossler attractor, fractal Brownian motion)
 
 ### Z-Plane Filter (research)
 - [ ] Rossum Morpheus-style: morph between pole/zero configurations in z-plane
