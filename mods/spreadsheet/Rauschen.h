@@ -69,6 +69,13 @@ namespace stolmine
     uint8_t mPixels[kMaxW * kMaxH];
     bool mCleared = false;
 
+    // Auto-scaling state (smoothed min/max)
+    float mScaleMin = -1.0f;
+    float mScaleMax = 1.0f;
+
+    // 3D rotation angle (slow tumble)
+    float mRotAngle = 0.0f;
+
   public:
     virtual void draw(od::FrameBuffer &fb)
     {
@@ -88,17 +95,74 @@ namespace stolmine
           mPixels[i]--;
       }
 
-      // Plot new samples from ring buffer
       if (mpRauschen)
       {
-        for (int i = 0; i < 255; i++)
+        // Auto-scale: track min/max of ring buffer with smoothing
+        float curMin = 1e10f, curMax = -1e10f;
+        for (int i = 0; i < 256; i++)
+        {
+          float s = mpRauschen->getOutputSample(i);
+          if (s < curMin) curMin = s;
+          if (s > curMax) curMax = s;
+        }
+        // Smooth toward current range (fast expand, slow contract)
+        float expandRate = 0.5f;
+        float contractRate = 0.02f;
+        if (curMin < mScaleMin)
+          mScaleMin += (curMin - mScaleMin) * expandRate;
+        else
+          mScaleMin += (curMin - mScaleMin) * contractRate;
+        if (curMax > mScaleMax)
+          mScaleMax += (curMax - mScaleMax) * expandRate;
+        else
+          mScaleMax += (curMax - mScaleMax) * contractRate;
+
+        // Ensure minimum range
+        float range = mScaleMax - mScaleMin;
+        if (range < 0.01f)
+        {
+          mScaleMin = -0.005f;
+          mScaleMax = 0.005f;
+          range = 0.01f;
+        }
+        float invRange = 1.0f / range;
+
+        // Advance rotation (slow tumble, ~1 revolution per 10 seconds at 60fps)
+        mRotAngle += 0.01f;
+        if (mRotAngle > 6.2832f) mRotAngle -= 6.2832f;
+        float cosA = cosf(mRotAngle);
+        float sinA = sinf(mRotAngle);
+
+        // Plot: use 3 consecutive samples as 3D point, rotate and project
+        for (int i = 0; i < 254; i++)
         {
           float s0 = mpRauschen->getOutputSample(i);
           float s1 = mpRauschen->getOutputSample(i + 1);
+          float s2 = mpRauschen->getOutputSample(i + 2);
 
-          // Map [-1, 1] to pixel coordinates
-          int px = (int)((s0 * 0.5f + 0.5f) * (float)(w - 1));
-          int py = (int)((s1 * 0.5f + 0.5f) * (float)(h - 1));
+          // Normalize to [0, 1]
+          float nx = (s0 - mScaleMin) * invRange;
+          float ny = (s1 - mScaleMin) * invRange;
+          float nz = (s2 - mScaleMin) * invRange;
+
+          // Center to [-0.5, 0.5]
+          nx -= 0.5f; ny -= 0.5f; nz -= 0.5f;
+
+          // Rotate around Y axis (tumble)
+          float rx = nx * cosA + nz * sinA;
+          float ry = ny;
+          // float rz = -nx * sinA + nz * cosA; // depth (unused for now)
+
+          // Slight tilt around X axis for 2.5D feel
+          float tilt = 0.3f;
+          float costilt = 0.9553f; // cos(0.3)
+          float sintilt = 0.2955f; // sin(0.3)
+          float fy = ry * costilt - (-nx * sinA + nz * cosA) * sintilt;
+          float fx = rx;
+
+          // Project back to [0, 1]
+          int px = (int)((fx + 0.5f) * (float)(w - 1));
+          int py = (int)((fy + 0.5f) * (float)(h - 1));
           if (px < 0) px = 0;
           if (px >= w) px = w - 1;
           if (py < 0) py = 0;

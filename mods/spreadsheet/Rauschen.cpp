@@ -41,6 +41,10 @@ namespace stolmine
     // Henon map state
     float henX, henY;
 
+    // White noise decimation state
+    float whiteHeld = 0.0f;
+    int whiteDecCounter = 0;
+
     // Velvet noise state
     int velvetCounter;
     int velvetImpulsePos;
@@ -66,6 +70,8 @@ namespace stolmine
     void Init()
     {
       memset(pinkB, 0, sizeof(pinkB));
+      whiteHeld = 0.0f;
+      whiteDecCounter = 0;
       crackY1 = 0.1f;
       crackY2 = 0.0f;
       logX = 0.5f;
@@ -151,23 +157,43 @@ namespace stolmine
 
       switch (algo)
       {
-      case 0: // White
-        sample = lcgBipolar(s.rngSeed);
+      case 0: // White -- X: decimation (sample rate reduction), Y: bit crush
+      {
+        // Decimation: hold sample for N frames (X=0: full rate, X=1: /64)
+        int decFactor = 1 + (int)(px * 63.0f);
+        s.whiteDecCounter++;
+        if (s.whiteDecCounter >= decFactor)
+        {
+          s.whiteDecCounter = 0;
+          s.whiteHeld = lcgBipolar(s.rngSeed);
+        }
+        sample = s.whiteHeld;
+        // Bit crush: Y=0: full resolution, Y=1: 2 levels
+        if (py > 0.01f)
+        {
+          float levels = 256.0f * (1.0f - py) + 2.0f * py; // 256 down to 2
+          sample = floorf(sample * levels + 0.5f) / levels;
+        }
         break;
+      }
 
-      case 1: // Pink (Kellet, variable tilt via X)
+      case 1: // Pink -- X: tilt (white-to-brown), Y: resonance (feedback on integrators)
       {
         float white = lcgBipolar(s.rngSeed);
+        // Resonance: feed output back into input (Y=0: none, Y=1: strong)
+        float fbk = s.pinkB[5] * py * 0.8f;
+        float excited = white + fbk;
         // 3-pole pink (fixed coefficients)
-        s.pinkB[0] = 0.99765f * s.pinkB[0] + white * 0.0990460f;
-        s.pinkB[1] = 0.96300f * s.pinkB[1] + white * 0.2965164f;
-        s.pinkB[2] = 0.57000f * s.pinkB[2] + white * 1.0526913f;
-        float pink = (s.pinkB[0] + s.pinkB[1] + s.pinkB[2] + white * 0.1848f) * 0.22f;
+        s.pinkB[0] = 0.99765f * s.pinkB[0] + excited * 0.0990460f;
+        s.pinkB[1] = 0.96300f * s.pinkB[1] + excited * 0.2965164f;
+        s.pinkB[2] = 0.57000f * s.pinkB[2] + excited * 1.0526913f;
+        float pink = (s.pinkB[0] + s.pinkB[1] + s.pinkB[2] + excited * 0.1848f) * 0.22f;
         // Extra integration stages for brown (X blends pink -> brown)
         s.pinkB[3] += (pink - s.pinkB[3]) * 0.02f;
         s.pinkB[4] += (s.pinkB[3] - s.pinkB[4]) * 0.02f;
         float brown = s.pinkB[4] * 10.0f;
         sample = pink * (1.0f - px) + brown * px;
+        s.pinkB[5] = sample; // store for feedback
         break;
       }
 
@@ -225,25 +251,29 @@ namespace stolmine
         continue; // skip post-filter below
       }
 
-      case 4: // Crackle
+      case 4: // Crackle -- X: chaos (p), Y: damping (attractor shape)
       {
         float p = 1.0f + px; // 1.0 to 2.0
-        float y = p * s.crackY1 - s.crackY2 - 0.05f;
-        if (y > 1.0f) y = 1.0f;
-        if (y < -1.0f) y = -1.0f;
+        float damp = 0.05f * (1.0f - py * 0.95f); // Y=0: normal, Y=1: nearly undamped
+        float yy = p * s.crackY1 - s.crackY2 - damp;
+        if (yy > 1.0f) yy = 1.0f;
+        if (yy < -1.0f) yy = -1.0f;
         s.crackY2 = s.crackY1;
-        s.crackY1 = y;
-        sample = y;
+        s.crackY1 = yy;
+        sample = yy;
         break;
       }
 
-      case 5: // Logistic
+      case 5: // Logistic -- X: growth (r), Y: slew (smooths between iterations)
       {
         float rr = 3.0f + px; // 3.0 to 4.0
-        s.logX = rr * s.logX * (1.0f - s.logX);
+        float target = rr * s.logX * (1.0f - s.logX);
         // Reseed if escaped
-        if (s.logX <= 0.0f || s.logX >= 1.0f || s.logX != s.logX)
-          s.logX = 0.5f + lcgFloat(s.rngSeed) * 0.01f;
+        if (target <= 0.0f || target >= 1.0f || target != target)
+          target = 0.5f + lcgFloat(s.rngSeed) * 0.01f;
+        // Slew: Y=0 instant (raw map), Y=1 heavy smoothing
+        float slewCoeff = 1.0f - py * 0.99f;
+        s.logX += (target - s.logX) * slewCoeff;
         sample = s.logX * 2.0f - 1.0f;
         break;
       }
@@ -284,21 +314,29 @@ namespace stolmine
         break;
       }
 
-      case 8: // Velvet noise
+      case 8: // Velvet -- X: density, Y: width (single click to wider pulse)
       {
         float density = 10.0f + px * 9990.0f; // 10-10000 Hz
         int windowSize = (int)(sr / density);
         if (windowSize < 1) windowSize = 1;
+        // Pulse width: Y=0 single sample, Y=1 up to half the window
+        int pulseWidth = 1 + (int)(py * (float)(windowSize / 2));
 
         if (s.velvetCounter == 0)
         {
-          // Start new window: pick random impulse position and sign
-          s.velvetImpulsePos = (int)(lcgFloat(s.rngSeed) * (float)windowSize);
+          s.velvetImpulsePos = (int)(lcgFloat(s.rngSeed) * (float)(windowSize - pulseWidth));
           s.velvetImpulseSign = (lcgFloat(s.rngSeed) > 0.5f) ? 1.0f : -1.0f;
         }
 
-        if (s.velvetCounter == s.velvetImpulsePos)
-          sample = s.velvetImpulseSign;
+        int dist = s.velvetCounter - s.velvetImpulsePos;
+        if (dist >= 0 && dist < pulseWidth)
+        {
+          // Raised cosine pulse shape
+          float t = (float)dist / (float)(pulseWidth > 1 ? pulseWidth - 1 : 1);
+          float env = 0.5f * (1.0f - cosf(t * 2.0f * 3.14159f));
+          if (pulseWidth == 1) env = 1.0f;
+          sample = s.velvetImpulseSign * env;
+        }
         else
           sample = 0.0f;
 
