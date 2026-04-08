@@ -407,8 +407,9 @@ namespace stolmine
     auto rndBiasInt = [&](od::Parameter *p, float mn, float mx) {
       if (p) p->hardSet(floorf(randomizeValue(p->value(), mn, mx, depth, spread) + 0.5f));
     };
+    float maxBufTime = (float)mMaxDelayInSamples / globalConfig.sampleRate;
     auto rndAllTopLevel = [&]() {
-      rndBias(mBiasMasterTime, 0.01f, 20.0f);
+      rndBias(mBiasMasterTime, 0.01f, maxBufTime);
       rndBias(mBiasFeedback, 0.0f, 0.95f);
       rndBias(mBiasFeedbackTone, -1.0f, 1.0f);
       rndBias(mBiasSkew, -2.0f, 2.0f);
@@ -447,7 +448,7 @@ namespace stolmine
     case 7: rndCutoff(); break;
     case 8: rndQ(); break;
     case 9: rndType(); break;
-    case 10: rndBias(mBiasMasterTime, 0.01f, 20.0f); break;
+    case 10: rndBias(mBiasMasterTime, 0.01f, maxBufTime); break;
     case 11: rndBias(mBiasFeedback, 0.0f, 0.95f); break;
     case 12: rndBias(mBiasFeedbackTone, -1.0f, 1.0f); break;
     case 13: rndBias(mBiasSkew, -2.0f, 2.0f); break;
@@ -499,7 +500,8 @@ namespace stolmine
     int tapCount = CLAMP(1, kMaxTaps, (int)(mTapCount.value() + 0.5f));
     mCachedTapCount = tapCount;
 
-    float masterTimeRaw = CLAMP(0.001f, 20.0f, mMasterTime.value());
+    float maxBufferTime = (float)mMaxDelayInSamples / globalConfig.sampleRate;
+    float masterTimeRaw = CLAMP(0.001f, maxBufferTime, mMasterTime.value());
     float feedback = CLAMP(0.0f, 0.95f, mFeedback.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());

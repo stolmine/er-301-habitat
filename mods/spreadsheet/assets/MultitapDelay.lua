@@ -58,6 +58,7 @@ local xformTargetNames = {
 }
 
 local mixMap = floatMap(0, 1)
+-- Default timeMap; rebuilt in onLoadViews to match buffer size
 local timeMap = floatMap(0.01, 20.0)
 local feedbackMap = floatMap(0, 0.95)
 local feedbackToneMap = floatMap(-1, 1)
@@ -496,7 +497,7 @@ function MultitapDelay:onLoadViews()
       branch = self.branches.masterTime,
       gainbias = self.objects.masterTime,
       range = self.objects.masterTime,
-      biasMap = timeMap,
+      biasMap = floatMap(0.01, self.bufferSeconds or 20.0),
       biasUnits = app.unitSecs,
       biasPrecision = 2,
       initialBias = 0.5,
