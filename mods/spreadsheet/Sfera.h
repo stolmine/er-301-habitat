@@ -126,133 +126,95 @@ namespace stolmine
       int nSections = mpSfera->getActiveSections();
       if (nSections > 7) nSections = 7;
 
-      // --- 1. Draw sphere outline (thin equator ellipse) ---
-      {
-        int prevPx = -1, prevPy = -1;
-        for (int p = 0; p <= 24; p++)
-        {
-          float a = (float)p * 6.28318f / 24.0f;
-          float x3 = cosf(a);
-          float z3 = sinf(a);
-          float rx = x3 * cosR + z3 * sinR;
-          float rz = -x3 * sinR + z3 * cosR;
-          float ry = -rz * tiltSin;
-          int ppx = cx + (int)(rx * radX);
-          int ppy = cy + (int)(ry * radY);
-          if (prevPx >= 0)
-            safeLine(fb, GRAY3, prevPx, prevPy, ppx, ppy);
-          prevPx = ppx;
-          prevPy = ppy;
-        }
-        // Vertical meridian
-        prevPx = -1;
-        for (int p = 0; p <= 24; p++)
-        {
-          float a = (float)p * 6.28318f / 24.0f;
-          float y3 = cosf(a);
-          float z3 = sinf(a);
-          float rx = z3 * sinR;
-          float rz = z3 * cosR;
-          float ry = y3 * tiltCos - rz * tiltSin;
-          int ppx = cx + (int)(rx * radX);
-          int ppy = cy + (int)(ry * radY);
-          if (prevPx >= 0)
-            safeLine(fb, GRAY2, prevPx, prevPy, ppx, ppy);
-          prevPx = ppx;
-          prevPy = ppy;
-        }
-      }
-
-      // --- 2. Draw pole pom-poms (radial gradient spheres) ---
+      // --- Project pole/zero positions to screen ---
+      float poleSx[7], poleSy[7], poleDf[7]; // screen x, y, depth fade
+      float zeroSx[7], zeroSy[7];
       for (int i = 0; i < nSections; i++)
       {
         float pa = mpSfera->getPoleAngle(i);
-        float pr = mpSfera->getPoleRadius(i);
-        if (pr < 0.01f) continue;
-
-        // 3D position on equator at angle pa
-        float x3 = cosf(pa);
-        float z3 = sinf(pa);
+        float x3 = cosf(pa), z3 = sinf(pa);
         float rx = x3 * cosR + z3 * sinR;
         float rz = -x3 * sinR + z3 * cosR;
         float ry = -rz * tiltSin;
+        poleSx[i] = rx;
+        poleSy[i] = ry;
+        poleDf[i] = 0.4f + 0.6f * (0.5f + 0.5f * (rz * tiltCos)); // depth fade
 
-        // Depth for brightness attenuation (back-facing dimmer)
-        float depth = rz * tiltCos; // roughly how far "back" this point is
-        float depthFade = 0.5f + 0.5f * (1.0f - depth); // 0.5 at back, 1.0 at front
-        if (depthFade < 0.3f) depthFade = 0.3f;
-
-        int bx = cx + (int)(rx * radX);
-        int by = cy + (int)(ry * radY);
-
-        // Pom-pom size proportional to influence, scaled to viewport aspect
-        int pomRadX = 2 + (int)(pr * (float)w * 0.15f);
-        int pomRadY = 2 + (int)(pr * (float)h * 0.15f);
-        if (pomRadX > w / 2) pomRadX = w / 2;
-        if (pomRadY > h / 2) pomRadY = h / 2;
-
-        int peakBright = (int)(10.0f * depthFade);
-        if (peakBright > 13) peakBright = 13;
-
-        // Draw filled radial gradient (elliptical)
-        for (int dy = -pomRadY; dy <= pomRadY; dy++)
-        {
-          for (int dx = -pomRadX; dx <= pomRadX; dx++)
-          {
-            float nx = (float)dx / (float)(pomRadX > 0 ? pomRadX : 1);
-            float ny = (float)dy / (float)(pomRadY > 0 ? pomRadY : 1);
-            float d2 = nx * nx + ny * ny;
-            if (d2 > 1.0f) continue;
-
-            // Radial falloff: bright center, fades to edge
-            float t = 1.0f - d2; // 1 at center, 0 at edge (d2 already normalized)
-            t = t * t; // sharper falloff
-            int gray = (int)((float)peakBright * t);
-            if (gray < 1) continue;
-
-            safePixel(fb, gray, bx + dx, by + dy);
-          }
-        }
-      }
-
-      // --- 3. Draw zero dimples (dark spots with faint ring) ---
-      for (int i = 0; i < nSections; i++)
-      {
         float za = mpSfera->getZeroAngle(i);
         float zr = mpSfera->getZeroRadius(i);
-        if (zr < 0.01f) continue;
-
-        float x3 = cosf(za);
-        float z3 = sinf(za);
-        float rx = x3 * cosR + z3 * sinR;
-        float rz = -x3 * sinR + z3 * cosR;
-        float ry = -rz * tiltSin;
-
-        int bx = cx + (int)(rx * radX);
-        int by = cy + (int)(ry * radY);
-
-        int zRadX = 1 + (int)(zr * (float)w * 0.06f);
-        int zRadY = 1 + (int)(zr * (float)h * 0.06f);
-        if (zRadX > w / 4) zRadX = w / 4;
-        if (zRadY > h / 4) zRadY = h / 4;
-
-        // Dark center, faint ring at edge
-        for (int dy = -zRadY; dy <= zRadY; dy++)
+        if (zr > 0.01f)
         {
-          for (int dx = -zRadX; dx <= zRadX; dx++)
+          float zx3 = cosf(za), zz3 = sinf(za);
+          float zrx = zx3 * cosR + zz3 * sinR;
+          float zrz = -zx3 * sinR + zz3 * cosR;
+          zeroSx[i] = zrx;
+          zeroSy[i] = -zrz * tiltSin;
+        }
+        else { zeroSx[i] = 0; zeroSy[i] = 0; }
+      }
+
+      // --- Metaball field: for each pixel, evaluate field from all poles ---
+      // Field = sum(strength / distance^2) for each pole
+      // Pixels where field > threshold are "inside" the metaball
+      // Brightness = field intensity above threshold
+
+      float invRx = 1.0f / (radX > 1 ? radX : 1);
+      float invRy = 1.0f / (radY > 1 ? radY : 1);
+
+      for (int py = 0; py < h; py++)
+      {
+        // Normalized y in [-1, 1]
+        float ny = ((float)py - (float)h * 0.5f) * invRy;
+
+        for (int px = 0; px < w; px++)
+        {
+          float nx = ((float)px - (float)w * 0.5f) * invRx;
+
+          // Skip pixels outside sphere outline (with margin for escaping blobs)
+          float sphereDist2 = nx * nx + ny * ny;
+
+          // Metaball field: sum contributions from all active poles
+          float field = 0.0f;
+          for (int i = 0; i < nSections; i++)
           {
-            float nx = (float)dx / (float)(zRadX > 0 ? zRadX : 1);
-            float ny = (float)dy / (float)(zRadY > 0 ? zRadY : 1);
-            float d2 = nx * nx + ny * ny;
-            if (d2 > 1.0f) continue;
+            float pr = mpSfera->getPoleRadius(i);
+            if (pr < 0.01f) continue;
 
-            float t = d2; // 0 at center, 1 at edge
-            // Ring: bright at edge, dark at center
-            int gray = (int)(3.0f * t * t);
-            if (gray < 1) gray = 1;
-
-            safePixel(fb, gray, bx + dx, by + dy);
+            float dx = nx - poleSx[i];
+            float dy = ny - poleSy[i];
+            float d2 = dx * dx + dy * dy + 0.01f; // avoid div by zero
+            float strength = pr * 0.15f * poleDf[i];
+            field += strength / d2;
           }
+
+          // Subtract zero contributions (create holes)
+          for (int i = 0; i < nSections; i++)
+          {
+            float zr = mpSfera->getZeroRadius(i);
+            if (zr < 0.01f) continue;
+
+            float dx = nx - zeroSx[i];
+            float dy = ny - zeroSy[i];
+            float d2 = dx * dx + dy * dy + 0.02f;
+            field -= zr * 0.05f / d2;
+          }
+
+          if (field < 0.3f) continue; // below threshold, skip
+
+          // Sphere shell: faint outline at r~1
+          float shell = 0.0f;
+          if (sphereDist2 > 0.85f && sphereDist2 < 1.0f)
+            shell = (sphereDist2 - 0.85f) / 0.15f * 2.0f;
+
+          // Metaball brightness: field above threshold, capped
+          float blob = (field - 0.3f) * 8.0f;
+          if (blob > 12.0f) blob = 12.0f;
+
+          int gray = (int)(blob + shell);
+          if (gray > 13) gray = 13;
+          if (gray < 1) continue;
+
+          safePixel(fb, gray, mWorldLeft + px, mWorldBottom + py);
         }
       }
     }
