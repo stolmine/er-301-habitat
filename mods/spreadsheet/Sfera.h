@@ -127,7 +127,7 @@ namespace stolmine
       int nSections = mpSfera->getActiveSections();
       if (nSections > 7) nSections = 7;
 
-      // --- Init slew state on first frame ---
+      // --- Init slew state ---
       if (!mSlewInit)
       {
         for (int i = 0; i < 7; i++)
@@ -138,23 +138,24 @@ namespace stolmine
         mSlewInit = true;
       }
 
-      // --- Compute target pole/zero positions (interior, r=0.55) ---
-      float vizSlew = 0.12f; // visual transition speed
+      // --- Compute target pole/zero positions (interior, r=0.5) ---
+      // No tilt on attractor positions -- keeps blob centered in sphere
+      float vizSlew = 0.12f;
       for (int i = 0; i < nSections; i++)
       {
         float pa = mpSfera->getPoleAngle(i);
         float pr = mpSfera->getPoleRadius(i);
-        // Place attractors inside sphere at r=0.55 (not on surface)
-        float ir = 0.55f;
+        float ir = 0.5f;
         float x3 = ir * cosf(pa), z3 = ir * sinf(pa);
+        // Rotate only (no tilt) so blob stays centered vertically
         float rx = x3 * cosR + z3 * sinR;
-        float rz = -x3 * sinR + z3 * cosR;
-        float ry = -rz * tiltSin;
-        float df = 0.4f + 0.6f * (0.5f + 0.5f * rz);
+        float ry = 0.0f; // keep on equator for cleaner look
+        float depth = -x3 * sinR + z3 * cosR;
+        float df = 0.5f + 0.5f * depth; // 0=back, 1=front
 
         mPoleSxSlew[i] += (rx - mPoleSxSlew[i]) * vizSlew;
         mPoleSySlew[i] += (ry - mPoleSySlew[i]) * vizSlew;
-        mPoleStrSlew[i] += (pr * df - mPoleStrSlew[i]) * vizSlew;
+        mPoleStrSlew[i] += (pr * (0.3f + 0.7f * df) - mPoleStrSlew[i]) * vizSlew;
 
         float za = mpSfera->getZeroAngle(i);
         float zr = mpSfera->getZeroRadius(i);
@@ -162,26 +163,32 @@ namespace stolmine
         {
           float zx3 = ir * cosf(za), zz3 = ir * sinf(za);
           float zrx = zx3 * cosR + zz3 * sinR;
-          float zrz = -zx3 * sinR + zz3 * cosR;
           mZeroSxSlew[i] += (zrx - mZeroSxSlew[i]) * vizSlew;
-          mZeroSySlew[i] += (-zrz * tiltSin - mZeroSySlew[i]) * vizSlew;
+          mZeroSySlew[i] += (0.0f - mZeroSySlew[i]) * vizSlew;
           mZeroStrSlew[i] += (zr - mZeroStrSlew[i]) * vizSlew;
         }
         else
-        {
-          mZeroStrSlew[i] *= (1.0f - vizSlew); // fade out
-        }
+          mZeroStrSlew[i] *= (1.0f - vizSlew);
       }
-      // Fade out unused sections
       for (int i = nSections; i < 7; i++)
       {
         mPoleStrSlew[i] *= (1.0f - vizSlew);
         mZeroStrSlew[i] *= (1.0f - vizSlew);
       }
 
-      // --- Metaball field rendering (strictly bounded to sphere) ---
+      // --- Parallax: offset metaball evaluation origin relative to shell ---
+      // Shell is fixed at screen center. Blob origin shifts with rotation.
+      float parallaxX = sinR * 0.06f;  // small horizontal shift
+      float parallaxY = -cosR * 0.03f; // tiny vertical shift
+
+      // --- Metaball field (Wyvill function, compact support) ---
       float invRx = 1.0f / (radX > 1 ? radX : 1);
       float invRy = 1.0f / (radY > 1 ? radY : 1);
+
+      // Wyvill influence radius per blob
+      float blobR = 0.6f;
+      float blobR2 = blobR * blobR;
+      float invBlobR2 = 1.0f / blobR2;
 
       for (int py = 0; py < h; py++)
       {
@@ -195,37 +202,62 @@ namespace stolmine
           float sphereDist2 = nx * nx + ny * ny;
           if (sphereDist2 > 1.0f) continue;
 
-          // Sphere shell outline
+          // Sphere shell: faint ring at edge
           float shell = 0.0f;
-          if (sphereDist2 > 0.88f)
-            shell = (sphereDist2 - 0.88f) / 0.12f * 2.5f;
+          if (sphereDist2 > 0.85f)
+          {
+            float t = (sphereDist2 - 0.85f) / 0.15f;
+            shell = t * 3.0f;
+          }
 
-          // Metaball field from slewed pole positions
+          // Metaball evaluation point (with parallax offset from shell)
+          float mx = nx - parallaxX;
+          float my = ny - parallaxY;
+
+          // Wyvill field: sum (1 - d²/R²)³ for each pole
           float field = 0.0f;
           for (int i = 0; i < 7; i++)
           {
             if (mPoleStrSlew[i] < 0.005f) continue;
-            float dx = nx - mPoleSxSlew[i];
-            float dy = ny - mPoleSySlew[i];
-            float d2 = dx * dx + dy * dy + 0.02f;
-            field += mPoleStrSlew[i] * 0.12f / d2;
+            float dx = mx - mPoleSxSlew[i];
+            float dy = my - mPoleSySlew[i];
+            float d2 = dx * dx + dy * dy;
+            if (d2 >= blobR2) continue; // compact support: skip if outside R
+            float t = 1.0f - d2 * invBlobR2;
+            float w3 = t * t * t; // (1 - d²/R²)³
+            field += mPoleStrSlew[i] * w3;
           }
 
-          // Subtract zero contributions
+          // Subtract zero contributions (smaller influence radius)
+          float zeroR2 = 0.2f;
+          float invZeroR2 = 1.0f / zeroR2;
           for (int i = 0; i < 7; i++)
           {
             if (mZeroStrSlew[i] < 0.005f) continue;
-            float dx = nx - mZeroSxSlew[i];
-            float dy = ny - mZeroSySlew[i];
-            float d2 = dx * dx + dy * dy + 0.03f;
-            field -= mZeroStrSlew[i] * 0.04f / d2;
+            float dx = mx - mZeroSxSlew[i];
+            float dy = my - mZeroSySlew[i];
+            float d2 = dx * dx + dy * dy;
+            if (d2 >= zeroR2) continue;
+            float t = 1.0f - d2 * invZeroR2;
+            field -= mZeroStrSlew[i] * 0.3f * t * t * t;
           }
 
-          // Combine shell + metaball
+          // Containment: smooth falloff at sphere boundary
+          float contain = 1.0f;
+          if (sphereDist2 > 0.7f)
+          {
+            float t = (1.0f - sphereDist2) / 0.3f; // 1 at r=0.7, 0 at r=1.0
+            contain = t * t; // smooth rolloff
+          }
+          field *= contain;
+
+          // Threshold + brightness
           float blob = 0.0f;
-          if (field > 0.25f)
-            blob = (field - 0.25f) * 10.0f;
-          if (blob > 11.0f) blob = 11.0f;
+          if (field > 0.15f)
+          {
+            blob = (field - 0.15f) * 14.0f;
+            if (blob > 11.0f) blob = 11.0f;
+          }
 
           int gray = (int)(blob + shell);
           if (gray > 13) gray = 13;
