@@ -364,7 +364,11 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
 - [ ] Improve Petrichor engine: audio quality issues at higher tap counts, granular artifacts, investigate feedback path and grain overlap. Currently capped at 8 taps for CPU stability.
 - [x] Bug: tap distribution fixed -- formula was `(i+1)/grid` causing taps to pile up when grid < tapCount. Now `(i+1)/grid` with taps at multiples of masterTime when grid=1, packed tight at high grid.
 - [x] Bug: feedback fixed -- tanh was compressing every feedback cycle. Now linear with tanh safety limiter only above 1.5 amplitude.
-- [ ] Grain bypass for unity pitch (sample-accurate read when tap pitch is 0)
+- [x] Grain bypass for unity pitch (direct buffer read when tap pitch is 0)
+- [x] Fast math: LCG for inner loop rand(), fast_exp2 for pitch/skew, fast sine for drift, sqrt pan
+- [x] Read-ahead prefetch (__builtin_prefetch on next tap position)
+- [x] Buffer size tiers (2s/5s/10s/20s menu, time fader + xform clamped to buffer)
+- [ ] Stereo optimization: dual-instance pattern doubles CPU; investigate shared buffer or interleaved processing for Petrichor and Pecto on stereo chains
 - [ ] Macro filter cutoff offset: CV-modulatable continuous shift of all per-tap cutoffs. On feedback shift SD + expansion (feedback + tone + filterOffset).
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
 - [ ] Perlin noise LUT: RaindropGraphic has a working tileable 64x64 LUT approach (bake Perlin at init, bilinear sample at runtime). The firmware repo has Voronoi and Perlin screensavers that could adopt this pattern for efficient noise generation. See RaindropGraphic.h for the implementation.
