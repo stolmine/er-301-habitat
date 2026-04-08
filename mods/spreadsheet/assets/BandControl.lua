@@ -112,6 +112,16 @@ function BandControl:init(args)
   end)()
 
   self.morphReadout = makeReadout(args.filterMorph, morphMap, 2, col3)
+  if self.morphReadout.addThresholdLabel then
+    self.morphReadout:addThresholdLabel(0.0, "off")
+    self.morphReadout:addThresholdLabel(0.01, "LP")
+    self.morphReadout:addThresholdLabel(0.08, "L>B")
+    self.morphReadout:addThresholdLabel(0.17, "BP")
+    self.morphReadout:addThresholdLabel(0.33, "B>H")
+    self.morphReadout:addThresholdLabel(0.42, "HP")
+    self.morphReadout:addThresholdLabel(0.58, "H>N")
+    self.morphReadout:addThresholdLabel(0.67, "ntch")
+  end
 
   local filterDesc = app.Label("Wt / Freq / Morph", 10)
   filterDesc:fitToText(3)

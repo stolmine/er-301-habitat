@@ -33,6 +33,14 @@ function FeedbackControl:init(args)
     g:setAttributes(app.unitNone, toneMap)
     g:setPrecision(2)
     g:setCenter(col1, center4)
+    if g.addThresholdLabel then
+      g:addThresholdLabel(-1.0, "dark")
+      g:addThresholdLabel(-0.3, "warm")
+      g:addThresholdLabel(-0.1, "neut")
+      g:addThresholdLabel(0.1, "neut")
+      g:addThresholdLabel(0.3, "brt")
+      g:addThresholdLabel(0.7, "bright")
+    end
     return g
   end)()
 

@@ -7,6 +7,7 @@ local BandControl = require "spreadsheet.BandControl"
 local DriveControl = require "spreadsheet.DriveControl"
 local ParfaitMixControl = require "spreadsheet.ParfaitMixControl"
 local ModeSelector = require "spreadsheet.ModeSelector"
+local ThresholdFader = require "spreadsheet.ThresholdFader"
 local Encoder = require "Encoder"
 
 local shaperNames = {
@@ -385,7 +386,7 @@ function MultibandSaturator:onLoadViews()
       biasPrecision = 0,
       initialBias = 1000.0
     }
-    controls[bn .. "Morph"] = GainBias {
+    controls[bn .. "Morph"] = ThresholdFader {
       button = "morph",
       description = bandDescs[i + 1] .. " Filter Morph",
       branch = self.branches["bandFilterMorph" .. i],
@@ -394,7 +395,11 @@ function MultibandSaturator:onLoadViews()
       biasMap = morphMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.0
+      initialBias = 0.0,
+      thresholdLabels = {
+        {0.0, "off"}, {0.01, "LP"}, {0.08, "L>B"}, {0.17, "BP"},
+        {0.33, "B>H"}, {0.42, "HP"}, {0.58, "H>N"}, {0.67, "ntch"}
+      }
     }
     controls[bn .. "Q"] = GainBias {
       button = "Q",

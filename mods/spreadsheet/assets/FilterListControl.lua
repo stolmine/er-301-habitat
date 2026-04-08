@@ -89,6 +89,11 @@ function FilterListControl:init(args)
     g:setAttributes(app.unitNone, typeMap)
     g:setPrecision(0)
     g:setCenter(col3, center4)
+    if g.addName then
+      for _, v in ipairs({"off", "lp", "bp", "hp", "ntch"}) do
+        g:addName(v)
+      end
+    end
     return g
   end)()
 

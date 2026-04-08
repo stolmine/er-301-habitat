@@ -483,11 +483,10 @@ N BPFs locked to harmonic ratios of a fundamental. Reshapes harmonic content -- 
 - [x] Symmetric skew -- replaced pow(accum, exponent) with linear shift in log-freq space, equal octave range both directions
 - [x] Expansion views for bands (level, amt, bias, type w/ ModeSelector labels, wt, freq, morph, Q)
 - [x] Expansion views for drive (drive, tone amount, tone freq) and mix (mix, comp, SC HPF, output, tanh)
-- [ ] Filter morph adaptive labels (off/LP/L>B/BP/B>H/HP/H>N/ntch) -- needs firmware Readout API extension or custom control
+- [x] Filter morph adaptive labels via addThresholdLabel (off/LP/L>B/BP/B>H/HP/H>N/ntch) -- BandControl sub-display + expansion ThresholdFader
 - [x] LR4 crossover (24dB/oct) -- 4 cascaded one-pole stages per split point
 - [x] Fast math: IEEE 754 fast_log2/fast_exp2 for compressor, fast_sinf for sine fold
 - [x] Shaper type 0 = Off (passthrough, default) -- shapers shifted to 1-7
-- [ ] Filter morph adaptive labels (off/LP/L>B/BP/B>H/HP/H>N/ntch) -- needs firmware Readout API extension or custom control
 - [ ] CPU profiling on am335x
 - [ ] Defaults tuning
 
