@@ -16,6 +16,40 @@
 namespace stolmine
 {
 
+  static inline float lcgFloat(uint32_t &seed)
+  {
+    seed = seed * 1103515245u + 12345u;
+    return (float)((seed >> 8) & 0x7FFF) / 32767.0f;
+  }
+
+  // Fast log2 via IEEE 754 bit extraction
+  static inline float fast_log2(float x)
+  {
+    union { float f; int32_t i; } v;
+    v.f = x;
+    float exponent = (float)((v.i >> 23) - 127);
+    v.i = (v.i & 0x7FFFFF) | (127 << 23);
+    return exponent + v.f * (v.f * -0.3333f + 2.0f) - 1.667f;
+  }
+
+  // Fast exp2 via IEEE 754 bit packing
+  static inline float fast_exp2(float x)
+  {
+    float xi = floorf(x);
+    float xf = x - xi;
+    float m = 1.0f + xf * (0.6602f + xf * 0.3398f);
+    union { float f; int32_t i; } v;
+    v.i = ((int32_t)xi + 127) << 23;
+    return v.f * m;
+  }
+
+  // Fast powf approximation: x^y = exp2(y * log2(x))
+  static inline float fast_powf(float base, float exponent)
+  {
+    if (base <= 0.0f) return 0.0f;
+    return fast_exp2(exponent * fast_log2(base));
+  }
+
   // Fast tanh approximation (Pade 3/3, < 0.1% error for |x| < 4, clamps beyond)
   static inline float fast_tanh(float x)
   {
@@ -67,6 +101,9 @@ namespace stolmine
 
     // Sine LUT for grain envelope (avoid sinf in inner loop)
     float sineLUT[kSineLUTSize];
+
+    // Fast RNG (replaces rand() in inner loop)
+    uint32_t rngSeed = 42;
 
     // Feedback damping (one-pole filters on feedback path)
     float fbFilterState = 0.0f;
@@ -509,17 +546,24 @@ namespace stolmine
                       || drift > 0.0f);
     if (distDirty)
     {
-      float skewExp = powf(2.0f, skew);
+      float skewExp = fast_exp2(skew);
       for (int t = 0; t < tapCount; t++)
       {
         int groupIndex = t / stack;
         // Distribute taps: each at masterTime * (groupIndex+1) / grid
-        float pos = powf((float)(groupIndex + 1) / (float)grid, skewExp);
+        float pos = fast_powf((float)(groupIndex + 1) / (float)grid, skewExp);
         // Drift: per-tap slow sinusoidal offset
         if (drift > 0.001f)
         {
           s.driftPhase[t] += 0.0003f + 0.0001f * (float)t;
-          float offset = sinf(s.driftPhase[t]) * drift * 0.1f;
+          // Fast sine for drift LFO (range reduce + 5th order polynomial)
+          float dp = s.driftPhase[t];
+          float n = floorf(dp * 0.31831f + 0.5f); // 1/pi
+          float xr = dp - n * 3.14159f;
+          float x2 = xr * xr;
+          float sn = xr * (1.0f + x2 * (-0.16605f + x2 * 0.00761f));
+          if ((int)n & 1) sn = -sn;
+          float offset = sn * drift * 0.1f;
           pos += offset;
         }
         if (pos < 0.001f) pos = 0.001f;
@@ -529,13 +573,14 @@ namespace stolmine
         if (mCachedDelaySamples[t] > (float)(maxDelay - 1))
           mCachedDelaySamples[t] = (float)(maxDelay - 1);
       }
-      // Pre-cache pan coefficients (equal power)
+      // Pre-cache pan coefficients (sqrt equal power, no trig)
       for (int t = 0; t < tapCount; t++)
       {
-        float pan = s.tapPan[t];
-        float a = (pan + 1.0f) * 0.25f * 3.14159f;
-        mCachedPanL[t] = cosf(a);
-        mCachedPanR[t] = sinf(a);
+        float p = (s.tapPan[t] + 1.0f) * 0.5f; // 0=left, 1=right
+        if (p < 0.0f) p = 0.0f;
+        if (p > 1.0f) p = 1.0f;
+        mCachedPanL[t] = sqrtf(1.0f - p);
+        mCachedPanR[t] = sqrtf(p);
       }
       // Only reload edit buffer when discrete params change, not on drift frames
       bool paramsChanged = (tapCount != mLastTapCount || skew != mLastSkew || masterTime != mLastMasterTime || stack != mLastStack || grid != mLastGrid);
@@ -584,10 +629,15 @@ namespace stolmine
       }
     }
 
-    // Pre-compute per-tap grain speeds (avoid powf in inner loop)
+    // Pre-compute per-tap grain speeds (fast_exp2 replaces powf)
     float tapSpeeds[kMaxTaps];
+    bool tapNeedGrains[kMaxTaps];
     for (int t = 0; t < tapCount; t++)
-      tapSpeeds[t] = powf(2.0f, voctPitch + s.tapPitch[t] / 12.0f);
+    {
+      float pitch = voctPitch + s.tapPitch[t] / 12.0f;
+      tapNeedGrains[t] = (fabsf(pitch) > 0.001f) || (reverse > 0.001f);
+      tapSpeeds[t] = tapNeedGrains[t] ? fast_exp2(pitch) : 1.0f;
+    }
 
     // Feedback tone: -1 = dark (LP), 0 = flat, +1 = bright (HP)
     float tone = CLAMP(-1.0f, 1.0f, mFeedbackTone.value());
@@ -621,56 +671,62 @@ namespace stolmine
           continue;
 
         float delaySamples = mCachedDelaySamples[t];
-        float tapSpeed = tapSpeeds[t];
+        float tapOut = 0.0f;
 
-        // Spawn new grain if counter expired
-        s.grainSpawnCounter[t]--;
-        if (s.grainSpawnCounter[t] <= 0)
+        if (tapNeedGrains[t])
         {
-          // Find an inactive grain slot
+          // Granular pitch shift path
+          float tapSpeed = tapSpeeds[t];
+          s.grainSpawnCounter[t]--;
+          if (s.grainSpawnCounter[t] <= 0)
+          {
+            for (int g = 0; g < kGrainsPerTap; g++)
+            {
+              if (!s.grains[t][g].active)
+              {
+                s.grains[t][g].active = true;
+                s.grains[t][g].phase = 0.0f;
+                s.grains[t][g].phaseDelta = grainPhaseDelta;
+                s.grains[t][g].speed = tapSpeed;
+                bool rev = reverse > 0.001f && lcgFloat(s.rngSeed) < reverse;
+                s.grains[t][g].reverse = rev;
+                float startPos = (float)s.writeIndex - delaySamples;
+                while (startPos < 0.0f) startPos += (float)maxDelay;
+                s.grains[t][g].readPos = startPos;
+                break;
+              }
+            }
+            s.grainSpawnCounter[t] = grainPeriod;
+          }
           for (int g = 0; g < kGrainsPerTap; g++)
           {
-            if (!s.grains[t][g].active)
-            {
-              s.grains[t][g].active = true;
-              s.grains[t][g].phase = 0.0f;
-              s.grains[t][g].phaseDelta = grainPhaseDelta;
-              s.grains[t][g].speed = tapSpeed;
-              // Reverse: probability-based per grain
-              bool rev = reverse > 0.001f && ((float)rand() / (float)RAND_MAX) < reverse;
-              s.grains[t][g].reverse = rev;
-              // Start reading from the tap's delay position
-              float startPos = (float)s.writeIndex - delaySamples;
-              while (startPos < 0.0f) startPos += (float)maxDelay;
-              s.grains[t][g].readPos = startPos;
-              break;
-            }
+            Internal::TapGrain &gr = s.grains[t][g];
+            if (!gr.active) continue;
+            float env = s.lookupSine(gr.phase);
+            int idx = ((int)gr.readPos) % maxDelay;
+            if (idx < 0) idx += maxDelay;
+            float frac = gr.readPos - floorf(gr.readPos);
+            int idx2 = (idx + 1) % maxDelay;
+            float s0 = bufRead(buf, idx);
+            float s1 = bufRead(buf, idx2);
+            tapOut += (s0 + (s1 - s0) * frac) * env;
+            gr.readPos += gr.reverse ? -gr.speed : gr.speed;
+            if (gr.readPos < 0.0f) gr.readPos += (float)maxDelay;
+            gr.phase += gr.phaseDelta;
+            if (gr.phase >= 1.0f) gr.active = false;
           }
-          s.grainSpawnCounter[t] = grainPeriod;
         }
-
-        // Sum active grains for this tap
-        float tapOut = 0.0f;
-        for (int g = 0; g < kGrainsPerTap; g++)
+        else
         {
-          Internal::TapGrain &gr = s.grains[t][g];
-          if (!gr.active) continue;
-          // Sine envelope from LUT
-          float env = s.lookupSine(gr.phase);
-          // Read from buffer with linear interpolation
-          int idx = ((int)gr.readPos) % maxDelay;
-          if (idx < 0) idx += maxDelay;
-          float frac = gr.readPos - floorf(gr.readPos);
-          int idx2 = (idx + 1) % maxDelay;
-          float s0 = bufRead(buf, idx);
-          float s1 = bufRead(buf, idx2);
-          float sample = s0 + (s1 - s0) * frac;
-          tapOut += sample * env;
-          // Advance grain (forward or reverse)
-          gr.readPos += gr.reverse ? -gr.speed : gr.speed;
-          if (gr.readPos < 0.0f) gr.readPos += (float)maxDelay;
-          gr.phase += gr.phaseDelta;
-          if (gr.phase >= 1.0f) gr.active = false;
+          // Direct buffer read (no pitch shift, no grains -- much cheaper)
+          float readPos = (float)s.writeIndex - delaySamples;
+          if (readPos < 0.0f) readPos += (float)maxDelay;
+          int idx = (int)readPos;
+          float frac = readPos - (float)idx;
+          if (idx >= maxDelay) idx -= maxDelay;
+          int idx2 = idx + 1;
+          if (idx2 >= maxDelay) idx2 = 0;
+          tapOut = bufRead(buf, idx) + (bufRead(buf, idx2) - bufRead(buf, idx)) * frac;
         }
 
         // Apply per-tap filter
