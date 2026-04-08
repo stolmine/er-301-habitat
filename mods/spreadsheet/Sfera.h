@@ -103,200 +103,148 @@ namespace stolmine
       int h = mHeight;
       int cx = mWorldLeft + w / 2;
       int cy = mWorldBottom + h / 2;
-      float radius = (float)(w < h ? w : h) * 0.42f;
+      float rad = (float)(w < h ? w : h) * 0.42f;
 
       fb.fill(BLACK, mWorldLeft, mWorldBottom,
               mWorldLeft + w - 1, mWorldBottom + h - 1);
 
       if (!mpSfera) return;
 
-      // Smooth rotation toward target
+      // Smooth rotation
       mTargetAngle = mpSfera->getSphereRotation();
       float diff = mTargetAngle - mCurrentAngle;
-      // Wrap to [-pi, pi]
       while (diff > 3.14159f) diff -= 6.28318f;
       while (diff < -3.14159f) diff += 6.28318f;
       mCurrentAngle += diff * 0.08f;
 
       float cosR = cosf(mCurrentAngle);
       float sinR = sinf(mCurrentAngle);
+      float tiltCos = 0.9659f;
+      float tiltSin = 0.2588f;
 
-      // Slight tilt for 3D feel
-      float tiltCos = 0.9659f; // cos(15 deg)
-      float tiltSin = 0.2588f; // sin(15 deg)
-
-      // Get active pole/zero state
       int nSections = mpSfera->getActiveSections();
-      float poleAng[7], poleRad[7], zeroAng[7], zeroRad[7];
-      for (int i = 0; i < nSections; i++)
-      {
-        poleAng[i] = mpSfera->getPoleAngle(i);
-        poleRad[i] = mpSfera->getPoleRadius(i);
-        zeroAng[i] = mpSfera->getZeroAngle(i);
-        zeroRad[i] = mpSfera->getZeroRadius(i);
-      }
+      if (nSections > 7) nSections = 7;
 
-      // Draw longitude lines (meridians)
-      for (int lon = 0; lon < kLonLines; lon++)
+      // --- 1. Draw sphere outline (thin equator ellipse) ---
       {
-        float lonAngle = (float)lon * 6.28318f / (float)kLonLines;
         int prevPx = -1, prevPy = -1;
-        for (int p = 0; p <= kPointsPerLine; p++)
+        for (int p = 0; p <= 24; p++)
         {
-          float lat = -1.5708f + (float)p * 3.14159f / (float)kPointsPerLine;
-          float r = 1.0f;
-
-          // Deform by poles (push out) and zeros (pull in)
-          float sx = cosf(lat) * cosf(lonAngle);
-          float sy = sinf(lat);
-          float sz = cosf(lat) * sinf(lonAngle);
-          for (int i = 0; i < nSections; i++)
-          {
-            // Map pole angle to sphere position
-            float pa = poleAng[i];
-            float px3 = cosf(0) * cosf(pa); // pole on equator at angle pa
-            float pz3 = cosf(0) * sinf(pa);
-            float dist = (sx - px3) * (sx - px3) + sy * sy + (sz - pz3) * (sz - pz3);
-            float influence = poleRad[i] * 0.3f / (dist + 0.1f);
-            r += influence;
-
-            if (zeroRad[i] > 0.01f)
-            {
-              float za = zeroAng[i];
-              float zx3 = cosf(0) * cosf(za);
-              float zz3 = cosf(0) * sinf(za);
-              float zdist = (sx - zx3) * (sx - zx3) + sy * sy + (sz - zz3) * (sz - zz3);
-              float zinfluence = zeroRad[i] * 0.2f / (zdist + 0.1f);
-              r -= zinfluence;
-            }
-          }
-          if (r < 0.3f) r = 0.3f;
-          if (r > 2.0f) r = 2.0f;
-
-          // 3D point on deformed sphere
-          float x3 = r * cosf(lat) * cosf(lonAngle);
-          float y3 = r * sinf(lat);
-          float z3 = r * cosf(lat) * sinf(lonAngle);
-
-          // Rotate around Y
+          float a = (float)p * 6.28318f / 24.0f;
+          float x3 = cosf(a);
+          float z3 = sinf(a);
           float rx = x3 * cosR + z3 * sinR;
           float rz = -x3 * sinR + z3 * cosR;
-          // Tilt around X
-          float ry = y3 * tiltCos - rz * tiltSin;
-
-          // Project
-          int ppx = cx + (int)(rx * radius * 0.9f);
-          int ppy = cy + (int)(ry * radius * 0.9f);
-
+          float ry = -rz * tiltSin;
+          int ppx = cx + (int)(rx * rad);
+          int ppy = cy + (int)(ry * rad);
           if (prevPx >= 0)
-          {
-            int gray = 3 + (int)((r - 1.0f) * 4.0f);
-            if (gray < 2) gray = 2;
-            if (gray > 8) gray = 8;
-            safeLine(fb, gray, prevPx, prevPy, ppx, ppy);
-          }
+            safeLine(fb, GRAY3, prevPx, prevPy, ppx, ppy);
+          prevPx = ppx;
+          prevPy = ppy;
+        }
+        // Vertical meridian
+        prevPx = -1;
+        for (int p = 0; p <= 24; p++)
+        {
+          float a = (float)p * 6.28318f / 24.0f;
+          float y3 = cosf(a);
+          float z3 = sinf(a);
+          float rx = z3 * sinR;
+          float rz = z3 * cosR;
+          float ry = y3 * tiltCos - rz * tiltSin;
+          int ppx = cx + (int)(rx * rad);
+          int ppy = cy + (int)(ry * rad);
+          if (prevPx >= 0)
+            safeLine(fb, GRAY2, prevPx, prevPy, ppx, ppy);
           prevPx = ppx;
           prevPy = ppy;
         }
       }
 
-      // Draw latitude lines
-      for (int lat = 1; lat < kLatLines; lat++)
+      // --- 2. Draw pole pom-poms (radial gradient spheres) ---
+      for (int i = 0; i < nSections; i++)
       {
-        float latAngle = -1.5708f + (float)lat * 3.14159f / (float)kLatLines;
-        int prevPx = -1, prevPy = -1;
-        for (int p = 0; p <= kPointsPerLine; p++)
+        float pa = mpSfera->getPoleAngle(i);
+        float pr = mpSfera->getPoleRadius(i);
+        if (pr < 0.01f) continue;
+
+        // 3D position on equator at angle pa
+        float x3 = cosf(pa);
+        float z3 = sinf(pa);
+        float rx = x3 * cosR + z3 * sinR;
+        float rz = -x3 * sinR + z3 * cosR;
+        float ry = -rz * tiltSin;
+
+        // Depth for brightness attenuation (back-facing dimmer)
+        float depth = rz * tiltCos; // roughly how far "back" this point is
+        float depthFade = 0.5f + 0.5f * (1.0f - depth); // 0.5 at back, 1.0 at front
+        if (depthFade < 0.3f) depthFade = 0.3f;
+
+        int bx = cx + (int)(rx * rad);
+        int by = cy + (int)(ry * rad);
+
+        // Pom-pom radius: proportional to pole influence, 3-12 pixels
+        int pomRad = 3 + (int)(pr * 10.0f);
+        if (pomRad > 14) pomRad = 14;
+
+        int peakBright = (int)(10.0f * depthFade);
+        if (peakBright > 13) peakBright = 13;
+
+        // Draw filled radial gradient
+        for (int dy = -pomRad; dy <= pomRad; dy++)
         {
-          float lonAngle = (float)p * 6.28318f / (float)kPointsPerLine;
-          float r = 1.0f;
-
-          float sx = cosf(latAngle) * cosf(lonAngle);
-          float sy = sinf(latAngle);
-          float sz = cosf(latAngle) * sinf(lonAngle);
-          for (int i = 0; i < nSections; i++)
+          for (int dx = -pomRad; dx <= pomRad; dx++)
           {
-            float pa = poleAng[i];
-            float px3 = cosf(pa);
-            float pz3 = sinf(pa);
-            float dist = (sx - px3) * (sx - px3) + sy * sy + (sz - pz3) * (sz - pz3);
-            r += poleRad[i] * 0.3f / (dist + 0.1f);
-            if (zeroRad[i] > 0.01f)
-            {
-              float zx3 = cosf(zeroAng[i]);
-              float zz3 = sinf(zeroAng[i]);
-              float zdist = (sx - zx3) * (sx - zx3) + sy * sy + (sz - zz3) * (sz - zz3);
-              r -= zeroRad[i] * 0.2f / (zdist + 0.1f);
-            }
+            float d2 = (float)(dx * dx + dy * dy);
+            float r2 = (float)(pomRad * pomRad);
+            if (d2 > r2) continue;
+
+            // Radial falloff: bright center, fades to edge
+            float t = 1.0f - d2 / r2; // 1 at center, 0 at edge
+            t = t * t; // sharper falloff
+            int gray = (int)((float)peakBright * t);
+            if (gray < 1) continue;
+
+            safePixel(fb, gray, bx + dx, by + dy);
           }
-          if (r < 0.3f) r = 0.3f;
-          if (r > 2.0f) r = 2.0f;
-
-          float x3 = r * cosf(latAngle) * cosf(lonAngle);
-          float y3 = r * sinf(latAngle);
-          float z3 = r * cosf(latAngle) * sinf(lonAngle);
-
-          float rx = x3 * cosR + z3 * sinR;
-          float rz = -x3 * sinR + z3 * cosR;
-          float ry = y3 * tiltCos - rz * tiltSin;
-
-          int ppx = cx + (int)(rx * radius * 0.9f);
-          int ppy = cy + (int)(ry * radius * 0.9f);
-
-          if (prevPx >= 0)
-          {
-            int gray = 3 + (int)((r - 1.0f) * 4.0f);
-            if (gray < 2) gray = 2;
-            if (gray > 8) gray = 8;
-            safeLine(fb, gray, prevPx, prevPy, ppx, ppy);
-          }
-          prevPx = ppx;
-          prevPy = ppy;
         }
       }
 
-      // Draw pole/zero gradient blobs
+      // --- 3. Draw zero dimples (dark spots with faint ring) ---
       for (int i = 0; i < nSections; i++)
       {
-        // Pole blob (bright)
-        float pa = poleAng[i];
-        float px3 = cosf(pa) * cosR + sinf(pa) * sinR;
-        float pz3 = -cosf(pa) * sinR + sinf(pa) * cosR;
-        float py3 = -pz3 * tiltSin;
-        if (-cosf(pa) * sinR + sinf(pa) * cosR > -0.3f) // front-facing check
-        {
-          int bx = cx + (int)(px3 * radius * 0.9f);
-          int by = cy + (int)(py3 * radius * 0.9f);
-          int bright = 8 + (int)(poleRad[i] * 7.0f);
-          if (bright > 15) bright = 15;
-          for (int dy = -2; dy <= 2; dy++)
-            for (int dx = -2; dx <= 2; dx++)
-            {
-              int d = dx * dx + dy * dy;
-              if (d > 5) continue;
-              int g = bright - d * 2;
-              if (g > 1)
-                safePixel(fb, g, bx + dx, by + dy);
-            }
-        }
+        float za = mpSfera->getZeroAngle(i);
+        float zr = mpSfera->getZeroRadius(i);
+        if (zr < 0.01f) continue;
 
-        // Zero blob (dim)
-        if (zeroRad[i] > 0.01f)
+        float x3 = cosf(za);
+        float z3 = sinf(za);
+        float rx = x3 * cosR + z3 * sinR;
+        float rz = -x3 * sinR + z3 * cosR;
+        float ry = -rz * tiltSin;
+
+        int bx = cx + (int)(rx * rad);
+        int by = cy + (int)(ry * rad);
+
+        int zRad = 2 + (int)(zr * 4.0f);
+        if (zRad > 6) zRad = 6;
+
+        // Dark center, faint ring at edge
+        for (int dy = -zRad; dy <= zRad; dy++)
         {
-          float za = zeroAng[i];
-          float zx3 = cosf(za) * cosR + sinf(za) * sinR;
-          float zz3 = -cosf(za) * sinR + sinf(za) * cosR;
-          float zy3 = -zz3 * tiltSin;
-          if (zz3 > -0.3f)
+          for (int dx = -zRad; dx <= zRad; dx++)
           {
-            int bx = cx + (int)(zx3 * radius * 0.9f);
-            int by = cy + (int)(zy3 * radius * 0.9f);
-            for (int dy = -1; dy <= 1; dy++)
-              for (int dx = -1; dx <= 1; dx++)
-              {
-                int d = dx * dx + dy * dy;
-                if (d > 2) continue;
-                safePixel(fb, 4 - d, bx + dx, by + dy);
-              }
+            float d2 = (float)(dx * dx + dy * dy);
+            float r2 = (float)(zRad * zRad);
+            if (d2 > r2) continue;
+
+            float t = d2 / r2; // 0 at center, 1 at edge
+            // Ring: bright at edge, dark at center
+            int gray = (int)(3.0f * t * t);
+            if (gray < 1) gray = 1;
+
+            safePixel(fb, gray, bx + dx, by + dy);
           }
         }
       }
