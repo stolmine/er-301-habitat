@@ -67,6 +67,9 @@ namespace stolmine
     // RNG
     uint32_t rngSeed;
 
+    // Current algorithm (for graphic to detect switches)
+    int currentAlgo;
+
     void Init()
     {
       memset(pinkB, 0, sizeof(pinkB));
@@ -92,6 +95,7 @@ namespace stolmine
       memset(outputRing, 0, sizeof(outputRing));
       ringPos = 0;
       rngSeed = 42;
+      currentAlgo = -1;
     }
   };
 
@@ -122,6 +126,11 @@ namespace stolmine
     return mpInternal->outputRing[(mpInternal->ringPos + idx) & 255];
   }
 
+  int Rauschen::getCurrentAlgorithm()
+  {
+    return mpInternal->currentAlgo;
+  }
+
   void Rauschen::process()
   {
     Internal &s = *mpInternal;
@@ -129,6 +138,7 @@ namespace stolmine
     float *out = mOut.buffer();
 
     int algo = CLAMP(0, 9, (int)(mAlgorithm.value() + 0.5f));
+    s.currentAlgo = algo;
     float px = CLAMP(0.0f, 1.0f, mParamX.value());
     float py = CLAMP(0.0f, 1.0f, mParamY.value());
     float filterFreq = CLAMP(20.0f, 20000.0f, mFilterFreq.value());
@@ -159,8 +169,8 @@ namespace stolmine
       {
       case 0: // White -- X: decimation (sample rate reduction), Y: bit crush
       {
-        // Decimation: hold sample for N frames (X=0: full rate, X=1: /64)
-        int decFactor = 1 + (int)(px * 63.0f);
+        // Decimation: exponential curve so midrange X is already audible
+        int decFactor = 1 + (int)(px * px * 63.0f);
         s.whiteDecCounter++;
         if (s.whiteDecCounter >= decFactor)
         {
@@ -168,10 +178,11 @@ namespace stolmine
           s.whiteHeld = lcgBipolar(s.rngSeed);
         }
         sample = s.whiteHeld;
-        // Bit crush: Y=0: full resolution, Y=1: 2 levels
+        // Bit crush: exponential curve (Y=0: full, Y=0.5: ~16 levels, Y=1: 2 levels)
         if (py > 0.01f)
         {
-          float levels = 256.0f * (1.0f - py) + 2.0f * py; // 256 down to 2
+          float crush = py * py; // quadratic for more usable midrange
+          float levels = 256.0f * (1.0f - crush) + 2.0f * crush;
           sample = floorf(sample * levels + 0.5f) / levels;
         }
         break;
@@ -181,25 +192,31 @@ namespace stolmine
       {
         float white = lcgBipolar(s.rngSeed);
         // Resonance: feed output back into input (Y=0: none, Y=1: strong)
-        float fbk = s.pinkB[5] * py * 0.8f;
+        float fbk = s.pinkB[5] * py * py * 0.9f; // quadratic for more usable range
         float excited = white + fbk;
         // 3-pole pink (fixed coefficients)
         s.pinkB[0] = 0.99765f * s.pinkB[0] + excited * 0.0990460f;
         s.pinkB[1] = 0.96300f * s.pinkB[1] + excited * 0.2965164f;
         s.pinkB[2] = 0.57000f * s.pinkB[2] + excited * 1.0526913f;
-        float pink = (s.pinkB[0] + s.pinkB[1] + s.pinkB[2] + excited * 0.1848f) * 0.22f;
-        // Extra integration stages for brown (X blends pink -> brown)
-        s.pinkB[3] += (pink - s.pinkB[3]) * 0.02f;
-        s.pinkB[4] += (s.pinkB[3] - s.pinkB[4]) * 0.02f;
-        float brown = s.pinkB[4] * 10.0f;
+        float pink = (s.pinkB[0] + s.pinkB[1] + s.pinkB[2] + excited * 0.1848f);
+        // Extra integration for brown tilt (X=0: pink, X=1: brown)
+        // Use exponential tilt coeff so midrange X is already noticeably darker
+        float tiltCoeff = 0.02f + px * px * 0.18f;
+        s.pinkB[3] += (pink - s.pinkB[3]) * tiltCoeff;
+        s.pinkB[4] += (s.pinkB[3] - s.pinkB[4]) * tiltCoeff;
+        float brown = s.pinkB[4] * 5.0f;
         sample = pink * (1.0f - px) + brown * px;
-        s.pinkB[5] = sample; // store for feedback
+        // Clamp feedback to prevent runaway
+        if (sample > 2.0f) sample = 2.0f;
+        if (sample < -2.0f) sample = -2.0f;
+        s.pinkB[5] = sample;
         break;
       }
 
       case 2: // Dust
       {
-        float density = 1.0f + px * 9999.0f; // 1-10000 Hz
+        // Log-scaled density: X=0 -> 1 Hz, X=0.5 -> 100 Hz, X=1 -> 10000 Hz
+        float density = powf(10.0f, px * 4.0f); // 1 to 10000
         float amp = 0.1f + py * 0.9f;
         if (lcgFloat(s.rngSeed) < density / sr)
           sample = lcgBipolar(s.rngSeed) * amp;
@@ -210,8 +227,9 @@ namespace stolmine
 
       case 3: // Particle (dust -> resonant bandpass)
       {
-        float density = 0.001f + px * 0.3f;
-        float spread = py * 48.0f; // 0-48 semitones
+        // Log-scaled density: X=0 sparse pings, X=1 dense cloud
+        float density = 0.001f + px * px * 0.3f;
+        float spread = py * py * 48.0f; // quadratic: more resolution at low spread
         float pFreq = freqMod / sr;
         if (pFreq > 0.49f) pFreq = 0.49f;
         float pQ = filterQ;
@@ -253,8 +271,9 @@ namespace stolmine
 
       case 4: // Crackle -- X: chaos (p), Y: damping (attractor shape)
       {
-        float p = 1.0f + px; // 1.0 to 2.0
-        float damp = 0.05f * (1.0f - py * 0.95f); // Y=0: normal, Y=1: nearly undamped
+        // Power curve: X=0->1.0, X=0.5->1.75, X=1->2.0 (sweet spot spread across midrange)
+        float p = 1.0f + px * (2.0f - px); // concave curve, more resolution near chaos onset
+        float damp = 0.05f * (1.0f - py * py * 0.95f); // quadratic Y for more usable range
         float yy = p * s.crackY1 - s.crackY2 - damp;
         if (yy > 1.0f) yy = 1.0f;
         if (yy < -1.0f) yy = -1.0f;
@@ -266,7 +285,9 @@ namespace stolmine
 
       case 5: // Logistic -- X: growth (r), Y: slew (smooths between iterations)
       {
-        float rr = 3.0f + px; // 3.0 to 4.0
+        // Quadratic curve: X=0->3.0, X=0.5->3.25, X=1->4.0
+        // More fader travel in the bifurcation region (3.0-3.57)
+        float rr = 3.0f + px * px;
         float target = rr * s.logX * (1.0f - s.logX);
         // Reseed if escaped
         if (target <= 0.0f || target >= 1.0f || target != target)
@@ -280,8 +301,9 @@ namespace stolmine
 
       case 6: // Henon
       {
-        float a = 1.0f + px * 0.4f;  // 1.0 to 1.4
-        float b = 0.1f + py * 0.3f;  // 0.1 to 0.4
+        // Quadratic curves: more resolution near the periodic/chaotic boundary
+        float a = 1.0f + px * px * 0.4f;  // 1.0 to 1.4 (sweet spot ~1.2-1.4)
+        float b = 0.1f + py * py * 0.3f;  // 0.1 to 0.4
         float xn = 1.0f - a * s.henX * s.henX + s.henY;
         float yn = b * s.henX;
         s.henX = xn;
@@ -298,8 +320,8 @@ namespace stolmine
 
       case 7: // Clocked noise (S&H with interpolation)
       {
-        // Simple clocked S&H: X = frequency, no polyBLEP for simplicity
-        float freq = (0.5f + px * 999.5f) / sr; // 0.5-1000 Hz normalized
+        // Log-scaled frequency: X=0 -> 0.5 Hz, X=0.5 -> ~22 Hz, X=1 -> 1000 Hz
+        float freq = (0.5f * powf(2000.0f, px)) / sr;
         s.gendyPhase += freq;
         if (s.gendyPhase >= 1.0f)
         {
@@ -316,7 +338,8 @@ namespace stolmine
 
       case 8: // Velvet -- X: density, Y: width (single click to wider pulse)
       {
-        float density = 10.0f + px * 9990.0f; // 10-10000 Hz
+        // Log-scaled density: X=0 -> 10 Hz, X=0.5 -> 316 Hz, X=1 -> 10000 Hz
+        float density = 10.0f * powf(1000.0f, px);
         int windowSize = (int)(sr / density);
         if (windowSize < 1) windowSize = 1;
         // Pulse width: Y=0 single sample, Y=1 up to half the window
@@ -348,8 +371,9 @@ namespace stolmine
 
       case 9: // Gendy (Xenakis stochastic synthesis)
       {
-        float ampScale = px;
-        float durScale = py;
+        // Quadratic: subtle at low settings, wild at high
+        float ampScale = px * px;
+        float durScale = py * py;
         int N = Internal::kGendyPoints;
 
         // Interpolate between current and next breakpoint
@@ -383,33 +407,56 @@ namespace stolmine
       }
 
       // Post-generator SVF morph filter
-      if (morph > 0.01f)
+      // 0=off, 0.01-0.08=LP, 0.08-0.17=LP>BP, 0.17-0.33=BP,
+      // 0.33-0.42=BP>HP, 0.42-0.58=HP, 0.58-0.67=HP>NT, 0.67-1.0=Notch
+      if (morph > 0.005f)
       {
-        float hp = (sample - r * s.svfS1 - g * s.svfS1 - s.svfS2) * h;
-        float bp = g * hp + s.svfS1;
-        s.svfS1 = g * hp + bp;
-        float lp = g * bp + s.svfS2;
-        s.svfS2 = g * bp + lp;
+        float hp_out = (sample - r * s.svfS1 - g * s.svfS1 - s.svfS2) * h;
+        float bp_out = g * hp_out + s.svfS1;
+        s.svfS1 = g * hp_out + bp_out;
+        float lp_out = g * bp_out + s.svfS2;
+        s.svfS2 = g * bp_out + lp_out;
+        float notch = lp_out + hp_out;
 
-        // Morph: 0.01-0.25=LP, 0.25-0.50=BP, 0.50-0.75=HP, 0.75-1.0=notch
-        float m = (morph - 0.01f) / 0.99f;
-        float lp_g, bp_g, hp_g;
-        if (m < 0.333f)
+        float m = morph;
+        if (m < 0.08f)
         {
-          float t = m * 3.0f;
-          lp_g = 1.0f - t; bp_g = t; hp_g = 0.0f;
+          // Pure LP
+          sample = lp_out;
         }
-        else if (m < 0.666f)
+        else if (m < 0.17f)
         {
-          float t = (m - 0.333f) * 3.0f;
-          lp_g = 0.0f; bp_g = 1.0f - t; hp_g = t;
+          // LP -> BP transition
+          float t = (m - 0.08f) / 0.09f;
+          sample = lp_out * (1.0f - t) + bp_out * t;
+        }
+        else if (m < 0.33f)
+        {
+          // Pure BP
+          sample = bp_out;
+        }
+        else if (m < 0.42f)
+        {
+          // BP -> HP transition
+          float t = (m - 0.33f) / 0.09f;
+          sample = bp_out * (1.0f - t) + hp_out * t;
+        }
+        else if (m < 0.58f)
+        {
+          // Pure HP
+          sample = hp_out;
+        }
+        else if (m < 0.67f)
+        {
+          // HP -> Notch transition
+          float t = (m - 0.58f) / 0.09f;
+          sample = hp_out * (1.0f - t) + notch * t;
         }
         else
         {
-          float t = (m - 0.666f) * 3.0f;
-          lp_g = t; bp_g = 0.0f; hp_g = 1.0f;
+          // Pure Notch
+          sample = notch;
         }
-        sample = lp * lp_g + bp * bp_g + hp * hp_g;
       }
 
       sample *= level;

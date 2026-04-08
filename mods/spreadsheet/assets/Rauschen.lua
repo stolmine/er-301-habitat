@@ -7,6 +7,7 @@ local GainBias = require "Unit.ViewControl.GainBias"
 local ViewControl = require "Unit.ViewControl"
 local ModeSelector = require "spreadsheet.ModeSelector"
 local RauschenCutoffControl = require "spreadsheet.RauschenCutoffControl"
+local ThresholdFader = require "spreadsheet.ThresholdFader"
 local Encoder = require "Encoder"
 
 local ply = app.SECTION_PLY
@@ -43,6 +44,13 @@ local levelMap = floatMap(0, 1)
 local cutoffMap = (function()
   local m = app.LinearDialMap(20, 20000)
   m:setSteps(1000, 100, 10, 1)
+  return m
+end)()
+
+local morphMap = floatMap(0, 1)
+local qMap = (function()
+  local m = app.LinearDialMap(0.5, 20)
+  m:setSteps(1, 0.1, 0.01, 0.01)
   return m
 end)()
 
@@ -95,7 +103,7 @@ function Rauschen:onLoadGraph(channelCount)
 
   -- Filter Freq
   local filterFreq = self:addObject("filterFreq", app.ParameterAdapter())
-  filterFreq:hardSet("Bias", 1000.0)
+  filterFreq:hardSet("Bias", 10000.0)
   tie(op, "FilterFreq", filterFreq, "Out")
   self:addMonoBranch("filterFreq", filterFreq, "In", filterFreq, "Out")
 
@@ -107,7 +115,7 @@ function Rauschen:onLoadGraph(channelCount)
 
   -- Filter Morph
   local filterMorph = self:addObject("filterMorph", app.ParameterAdapter())
-  filterMorph:hardSet("Bias", 0.0)
+  filterMorph:hardSet("Bias", 0.1)
   tie(op, "FilterMorph", filterMorph, "Out")
   self:addMonoBranch("filterMorph", filterMorph, "In", filterMorph, "Out")
 
@@ -186,7 +194,7 @@ function Rauschen:onLoadViews(objects, branches)
       biasMap = cutoffMap,
       biasUnits = app.unitHertz,
       biasPrecision = 0,
-      initialBias = 1000.0,
+      initialBias = 10000.0,
       filterMorph = objects.filterMorph:getParameter("Bias"),
       filterQ = objects.filterQ:getParameter("Bias")
     },
@@ -200,10 +208,37 @@ function Rauschen:onLoadViews(objects, branches)
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.5
+    },
+    morph = ThresholdFader {
+      button = "morph",
+      description = "Filter Morph",
+      branch = branches.filterMorph,
+      gainbias = objects.filterMorph,
+      range = objects.filterMorph,
+      biasMap = morphMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.1,
+      thresholdLabels = {
+        {0.0, "off"}, {0.005, "LP"}, {0.08, "L>B"}, {0.17, "BP"},
+        {0.33, "B>H"}, {0.42, "HP"}, {0.58, "H>N"}, {0.67, "ntch"}
+      }
+    },
+    filterQ = GainBias {
+      button = "Q",
+      description = "Filter Q",
+      branch = branches.filterQ,
+      gainbias = objects.filterQ,
+      range = objects.filterQ,
+      biasMap = qMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.5
     }
   }, {
     expanded = { "algo", "viz", "paramX", "paramY", "cutoff", "level" },
-    collapsed = {}
+    collapsed = {},
+    cutoff = { "cutoff", "morph", "filterQ" }
   }
 end
 

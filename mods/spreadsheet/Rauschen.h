@@ -17,6 +17,7 @@ namespace stolmine
 
     // SWIG-visible
     float getOutputSample(int idx);
+    int getCurrentAlgorithm();
 
 #ifndef SWIGLUA
     virtual void process();
@@ -27,9 +28,9 @@ namespace stolmine
     od::Parameter mAlgorithm{"Algorithm", 0.0f};
     od::Parameter mParamX{"ParamX", 0.5f};
     od::Parameter mParamY{"ParamY", 0.5f};
-    od::Parameter mFilterFreq{"FilterFreq", 1000.0f};
+    od::Parameter mFilterFreq{"FilterFreq", 10000.0f};
     od::Parameter mFilterQ{"FilterQ", 0.5f};
-    od::Parameter mFilterMorph{"FilterMorph", 0.0f};
+    od::Parameter mFilterMorph{"FilterMorph", 0.1f};
     od::Parameter mLevel{"Level", 0.5f};
 
   private:
@@ -76,6 +77,9 @@ namespace stolmine
     // 3D rotation angle (slow tumble)
     float mRotAngle = 0.0f;
 
+    // Algorithm change detection
+    int mLastAlgo = -1;
+
   public:
     virtual void draw(od::FrameBuffer &fb)
     {
@@ -97,13 +101,31 @@ namespace stolmine
 
       if (mpRauschen)
       {
+        // Detect algorithm change: clear persistence and reset scaling
+        int curAlgo = mpRauschen->getCurrentAlgorithm();
+        if (curAlgo != mLastAlgo)
+        {
+          memset(mPixels, 0, w * h);
+          mScaleMin = -1.0f;
+          mScaleMax = 1.0f;
+          mLastAlgo = curAlgo;
+        }
+
         // Auto-scale: track min/max of ring buffer with smoothing
         float curMin = 1e10f, curMax = -1e10f;
         for (int i = 0; i < 256; i++)
         {
           float s = mpRauschen->getOutputSample(i);
+          // Guard against NaN/Inf
+          if (!(s == s) || s > 1e6f || s < -1e6f) continue;
           if (s < curMin) curMin = s;
           if (s > curMax) curMax = s;
+        }
+        // If no valid samples found, reset to defaults
+        if (curMin > curMax)
+        {
+          curMin = -1.0f;
+          curMax = 1.0f;
         }
         // Smooth toward current range (fast expand, slow contract)
         float expandRate = 0.5f;
@@ -117,12 +139,18 @@ namespace stolmine
         else
           mScaleMax += (curMax - mScaleMax) * contractRate;
 
-        // Ensure minimum range
+        // NaN recovery
+        if (!(mScaleMin == mScaleMin)) mScaleMin = -1.0f;
+        if (!(mScaleMax == mScaleMax)) mScaleMax = 1.0f;
+
+        // Ensure minimum range and sane bounds
+        if (mScaleMax <= mScaleMin) mScaleMax = mScaleMin + 0.01f;
         float range = mScaleMax - mScaleMin;
         if (range < 0.01f)
         {
-          mScaleMin = -0.005f;
-          mScaleMax = 0.005f;
+          float mid = (mScaleMin + mScaleMax) * 0.5f;
+          mScaleMin = mid - 0.005f;
+          mScaleMax = mid + 0.005f;
           range = 0.01f;
         }
         float invRange = 1.0f / range;
@@ -139,6 +167,8 @@ namespace stolmine
           float s0 = mpRauschen->getOutputSample(i);
           float s1 = mpRauschen->getOutputSample(i + 1);
           float s2 = mpRauschen->getOutputSample(i + 2);
+          // Skip NaN/Inf samples
+          if (!(s0 == s0) || !(s1 == s1) || !(s2 == s2)) continue;
 
           // Normalize to [0, 1]
           float nx = (s0 - mScaleMin) * invRange;

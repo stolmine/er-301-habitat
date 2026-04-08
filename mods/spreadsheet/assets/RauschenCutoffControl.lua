@@ -46,10 +46,13 @@ function RauschenCutoffControl:init(args)
   self.morphReadout = makeReadout(args.filterMorph, morphMap, 2, col1)
   if self.morphReadout.addThresholdLabel then
     self.morphReadout:addThresholdLabel(0.0, "off")
-    self.morphReadout:addThresholdLabel(0.02, "LP")
-    self.morphReadout:addThresholdLabel(0.25, "BP")
-    self.morphReadout:addThresholdLabel(0.50, "HP")
-    self.morphReadout:addThresholdLabel(0.75, "ntch")
+    self.morphReadout:addThresholdLabel(0.005, "LP")
+    self.morphReadout:addThresholdLabel(0.08, "L>B")
+    self.morphReadout:addThresholdLabel(0.17, "BP")
+    self.morphReadout:addThresholdLabel(0.33, "B>H")
+    self.morphReadout:addThresholdLabel(0.42, "HP")
+    self.morphReadout:addThresholdLabel(0.58, "H>N")
+    self.morphReadout:addThresholdLabel(0.67, "ntch")
   end
 
   self.qReadout = makeReadout(args.filterQ, qMap, 2, col2)
