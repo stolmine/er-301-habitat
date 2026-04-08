@@ -103,7 +103,8 @@ namespace stolmine
       int h = mHeight;
       int cx = mWorldLeft + w / 2;
       int cy = mWorldBottom + h / 2;
-      float rad = (float)(w < h ? w : h) * 0.42f;
+      float radX = (float)w * 0.40f;
+      float radY = (float)h * 0.40f;
 
       fb.fill(BLACK, mWorldLeft, mWorldBottom,
               mWorldLeft + w - 1, mWorldBottom + h - 1);
@@ -136,8 +137,8 @@ namespace stolmine
           float rx = x3 * cosR + z3 * sinR;
           float rz = -x3 * sinR + z3 * cosR;
           float ry = -rz * tiltSin;
-          int ppx = cx + (int)(rx * rad);
-          int ppy = cy + (int)(ry * rad);
+          int ppx = cx + (int)(rx * radX);
+          int ppy = cy + (int)(ry * radY);
           if (prevPx >= 0)
             safeLine(fb, GRAY3, prevPx, prevPy, ppx, ppy);
           prevPx = ppx;
@@ -153,8 +154,8 @@ namespace stolmine
           float rx = z3 * sinR;
           float rz = z3 * cosR;
           float ry = y3 * tiltCos - rz * tiltSin;
-          int ppx = cx + (int)(rx * rad);
-          int ppy = cy + (int)(ry * rad);
+          int ppx = cx + (int)(rx * radX);
+          int ppy = cy + (int)(ry * radY);
           if (prevPx >= 0)
             safeLine(fb, GRAY2, prevPx, prevPy, ppx, ppy);
           prevPx = ppx;
@@ -181,27 +182,30 @@ namespace stolmine
         float depthFade = 0.5f + 0.5f * (1.0f - depth); // 0.5 at back, 1.0 at front
         if (depthFade < 0.3f) depthFade = 0.3f;
 
-        int bx = cx + (int)(rx * rad);
-        int by = cy + (int)(ry * rad);
+        int bx = cx + (int)(rx * radX);
+        int by = cy + (int)(ry * radY);
 
-        // Pom-pom radius: proportional to pole influence, 3-12 pixels
-        int pomRad = 3 + (int)(pr * 10.0f);
-        if (pomRad > 14) pomRad = 14;
+        // Pom-pom size proportional to influence, scaled to viewport aspect
+        int pomRadX = 2 + (int)(pr * (float)w * 0.15f);
+        int pomRadY = 2 + (int)(pr * (float)h * 0.15f);
+        if (pomRadX > w / 2) pomRadX = w / 2;
+        if (pomRadY > h / 2) pomRadY = h / 2;
 
         int peakBright = (int)(10.0f * depthFade);
         if (peakBright > 13) peakBright = 13;
 
-        // Draw filled radial gradient
-        for (int dy = -pomRad; dy <= pomRad; dy++)
+        // Draw filled radial gradient (elliptical)
+        for (int dy = -pomRadY; dy <= pomRadY; dy++)
         {
-          for (int dx = -pomRad; dx <= pomRad; dx++)
+          for (int dx = -pomRadX; dx <= pomRadX; dx++)
           {
-            float d2 = (float)(dx * dx + dy * dy);
-            float r2 = (float)(pomRad * pomRad);
-            if (d2 > r2) continue;
+            float nx = (float)dx / (float)(pomRadX > 0 ? pomRadX : 1);
+            float ny = (float)dy / (float)(pomRadY > 0 ? pomRadY : 1);
+            float d2 = nx * nx + ny * ny;
+            if (d2 > 1.0f) continue;
 
             // Radial falloff: bright center, fades to edge
-            float t = 1.0f - d2 / r2; // 1 at center, 0 at edge
+            float t = 1.0f - d2; // 1 at center, 0 at edge (d2 already normalized)
             t = t * t; // sharper falloff
             int gray = (int)((float)peakBright * t);
             if (gray < 1) continue;
@@ -224,22 +228,25 @@ namespace stolmine
         float rz = -x3 * sinR + z3 * cosR;
         float ry = -rz * tiltSin;
 
-        int bx = cx + (int)(rx * rad);
-        int by = cy + (int)(ry * rad);
+        int bx = cx + (int)(rx * radX);
+        int by = cy + (int)(ry * radY);
 
-        int zRad = 2 + (int)(zr * 4.0f);
-        if (zRad > 6) zRad = 6;
+        int zRadX = 1 + (int)(zr * (float)w * 0.06f);
+        int zRadY = 1 + (int)(zr * (float)h * 0.06f);
+        if (zRadX > w / 4) zRadX = w / 4;
+        if (zRadY > h / 4) zRadY = h / 4;
 
         // Dark center, faint ring at edge
-        for (int dy = -zRad; dy <= zRad; dy++)
+        for (int dy = -zRadY; dy <= zRadY; dy++)
         {
-          for (int dx = -zRad; dx <= zRad; dx++)
+          for (int dx = -zRadX; dx <= zRadX; dx++)
           {
-            float d2 = (float)(dx * dx + dy * dy);
-            float r2 = (float)(zRad * zRad);
-            if (d2 > r2) continue;
+            float nx = (float)dx / (float)(zRadX > 0 ? zRadX : 1);
+            float ny = (float)dy / (float)(zRadY > 0 ? zRadY : 1);
+            float d2 = nx * nx + ny * ny;
+            if (d2 > 1.0f) continue;
 
-            float t = d2 / r2; // 0 at center, 1 at edge
+            float t = d2; // 0 at center, 1 at edge
             // Ring: bright at edge, dark at center
             int gray = (int)(3.0f * t * t);
             if (gray < 1) gray = 1;
