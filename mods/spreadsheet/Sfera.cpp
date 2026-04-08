@@ -8,94 +8,173 @@
 namespace stolmine
 {
 
-  static inline float softClip(float x)
+  // Cytomic SVF section -- stable under fast modulation
+  struct SvfSection
   {
-    if (x > 4.0f) return 4.0f;
-    if (x < -4.0f) return -4.0f;
-    return x;
-  }
+    float ic1eq, ic2eq; // state
 
-  struct BiquadSection
-  {
-    float s1, s2;
-    // Current coefficients (slewed per-sample toward target)
-    float b0, b1, b2, a1, a2;
-    // Target coefficients (set per-frame from interpolation)
-    float tb0, tb1, tb2, ta1, ta2;
+    // Current parameters (slewed per-sample)
+    float g, k;         // freq/Q coefficients
+    float m0, m1, m2;   // output mix (LP/BP/HP blend)
+
+    // Target parameters (set per-frame)
+    float tg, tk, tm0, tm1, tm2;
 
     void reset()
     {
-      s1 = s2 = 0.0f;
-      b0 = tb0 = 1.0f;
-      b1 = tb1 = 0.0f;
-      b2 = tb2 = 0.0f;
-      a1 = ta1 = 0.0f;
-      a2 = ta2 = 0.0f;
+      ic1eq = ic2eq = 0.0f;
+      g = tg = 0.1f;
+      k = tk = 1.0f;
+      m0 = tm0 = 0.0f;
+      m1 = tm1 = 0.0f;
+      m2 = tm2 = 1.0f; // default: lowpass
     }
 
-    // Slew current coefficients toward target
     inline void slew(float rate)
     {
-      b0 += (tb0 - b0) * rate;
-      b1 += (tb1 - b1) * rate;
-      b2 += (tb2 - b2) * rate;
-      a1 += (ta1 - a1) * rate;
-      a2 += (ta2 - a2) * rate;
+      g += (tg - g) * rate;
+      k += (tk - k) * rate;
+      m0 += (tm0 - m0) * rate;
+      m1 += (tm1 - m1) * rate;
+      m2 += (tm2 - m2) * rate;
     }
 
-    inline float process(float x)
+    inline float process(float v0)
     {
-      float y = b0 * x + s1;
-      s1 = softClip(b1 * x - a1 * y + s2);
-      s2 = softClip(b2 * x - a2 * y);
-      return y;
+      float a1 = 1.0f / (1.0f + g * (g + k));
+      float a2 = g * a1;
+      float a3 = g * a2;
+
+      float v3 = v0 - ic2eq;
+      float v1 = a1 * ic1eq + a2 * v3;
+      float v2 = ic2eq + a2 * ic1eq + a3 * v3;
+
+      ic1eq = 2.0f * v1 - ic1eq;
+      ic2eq = 2.0f * v2 - ic2eq;
+
+      // Soft-limit state to prevent blowup
+      if (ic1eq > 4.0f) ic1eq = 4.0f;
+      if (ic1eq < -4.0f) ic1eq = -4.0f;
+      if (ic2eq > 4.0f) ic2eq = 4.0f;
+      if (ic2eq < -4.0f) ic2eq = -4.0f;
+
+      return m0 * v0 + m1 * v1 + m2 * v2;
+    }
+
+    void setFromPoleZero(float pAngle, float pRadius, float zAngle, float zRadius, float sr)
+    {
+      // Convert pole angle to frequency
+      float freq = pAngle * sr / (2.0f * 3.14159f);
+      if (freq < 20.0f) freq = 20.0f;
+      if (freq > sr * 0.45f) freq = sr * 0.45f;
+
+      // g = tan(pi * freq / sr)
+      float w = 3.14159f * freq / sr;
+      g = tg = w / (1.0f + w * w * 0.333f); // tan approx
+
+      // Q from pole radius: Q ~ 1 / (2 * (1 - r))
+      float q = 0.5f / (1.001f - pRadius);
+      if (q < 0.5f) q = 0.5f;
+      if (q > 20.0f) q = 20.0f;
+      k = tk = 1.0f / q;
+
+      // Determine output mix from zero position
+      if (zRadius < 0.01f)
+      {
+        // No zeros: allpole (lowpass-ish)
+        m0 = tm0 = 0.0f;
+        m1 = tm1 = 0.0f;
+        m2 = tm2 = 1.0f;
+      }
+      else if (zAngle > 2.5f) // zeros near Nyquist -> lowpass
+      {
+        m0 = tm0 = 0.0f;
+        m1 = tm1 = 0.0f;
+        m2 = tm2 = 1.0f;
+      }
+      else if (zAngle < 0.1f) // zeros near DC -> highpass
+      {
+        m0 = tm0 = 1.0f;
+        m1 = tm1 = -k;
+        m2 = tm2 = -1.0f;
+      }
+      else // zeros at mid frequency -> notch or bandpass
+      {
+        // Blend based on zero angle relative to pole angle
+        float ratio = zAngle / (pAngle + 0.001f);
+        if (ratio > 0.8f && ratio < 1.2f) // zeros near pole = notch
+        {
+          m0 = tm0 = 1.0f;
+          m1 = tm1 = -k;
+          m2 = tm2 = 0.0f;
+        }
+        else // bandpass
+        {
+          m0 = tm0 = 0.0f;
+          m1 = tm1 = 1.0f;
+          m2 = tm2 = 0.0f;
+        }
+      }
     }
   };
 
   struct Sfera::Internal
   {
-    BiquadSection biquads[kSferaMaxSections];
+    SvfSection svfs[kSferaMaxSections];
     int activeSections = 0;
 
-    // Pre-baked configs (coefficients computed at init from pole/zero specs)
+    // Pre-baked SVF params per config
+    struct SvfParams
+    {
+      float g, k, m0, m1, m2;
+    };
+
+    struct BakedConfig
+    {
+      SvfParams sections[kSferaMaxSections];
+      int numSections;
+      float gain;
+      float poleAngle[kSferaMaxSections];
+      float poleRadius[kSferaMaxSections];
+      float zeroAngle[kSferaMaxSections];
+      float zeroRadius[kSferaMaxSections];
+    };
+
     static const int kMaxConfigs = 256;
-    FilterConfig configs[kMaxConfigs];
+    BakedConfig configs[kMaxConfigs];
     int numConfigs = 0;
 
-    // Cube table
     static const int kMaxCubes = 128;
     MorphCube cubes[kMaxCubes];
     int numCubes = 0;
 
-    // Current interpolated state (for viz)
     float curPoleAngle[kSferaMaxSections];
     float curPoleRadius[kSferaMaxSections];
     float curZeroAngle[kSferaMaxSections];
     float curZeroRadius[kSferaMaxSections];
 
     float sphereRotation = 0.0f;
-
-    // Slew rate: controls how fast coefficients approach target
-    // Higher = faster (1.0 = instant, 0.01 = very slow)
-    float slewRate = 0.05f; // ~20ms at 48kHz
+    float slewRate = 0.02f; // ~50ms transition
 
     void Init()
     {
+      float sr = globalConfig.sampleRate;
+
       for (int i = 0; i < kSferaMaxSections; i++)
       {
-        biquads[i].reset();
+        svfs[i].reset();
         curPoleAngle[i] = curPoleRadius[i] = 0;
         curZeroAngle[i] = curZeroRadius[i] = 0;
       }
 
-      // Pre-bake coefficients from pole/zero specs
+      // Bake configs from pole/zero specs into SVF parameters
       numConfigs = 0;
       for (int c = 0; c < kNumConfigSpecs && numConfigs < kMaxConfigs; c++)
       {
-        FilterConfig &fc = configs[numConfigs];
+        BakedConfig &bc = configs[numConfigs];
         const ConfigSpec &spec = kConfigSpecs[c];
-        fc.numSections = spec.numSections;
-        fc.gain = spec.gain;
+        bc.numSections = spec.numSections;
+        bc.gain = spec.gain;
 
         for (int s = 0; s < kSferaMaxSections; s++)
         {
@@ -104,43 +183,44 @@ namespace stolmine
           float za = spec.zeros[s].angle;
           float zr = spec.zeros[s].radius;
 
-          fc.poleAngle[s] = pa;
-          fc.poleRadius[s] = pr;
-          fc.zeroAngle[s] = za;
-          fc.zeroRadius[s] = zr;
+          bc.poleAngle[s] = pa;
+          bc.poleRadius[s] = pr;
+          bc.zeroAngle[s] = za;
+          bc.zeroRadius[s] = zr;
 
           if (s < spec.numSections)
-            fc.sections[s] = pzToCoeffs(pa, pr, za, zr);
+          {
+            SvfSection tmp;
+            tmp.setFromPoleZero(pa, pr, za, zr, sr);
+            bc.sections[s] = {tmp.g, tmp.k, tmp.m0, tmp.m1, tmp.m2};
+          }
           else
-            fc.sections[s] = bypassCoeffs();
+          {
+            // Bypass: unity gain
+            bc.sections[s] = {0.1f, 2.0f, 1.0f, 0.0f, 0.0f};
+          }
         }
         numConfigs++;
       }
 
-      // Copy hand-curated cubes
+      // Cubes
       numCubes = 0;
       for (int i = 0; i < kNumCubeSpecs && numCubes < kMaxCubes; i++)
       {
         cubes[numCubes] = kCubes[i];
         numCubes++;
       }
-
-      // Generate remaining cubes
       int genSeed = 7919;
       while (numCubes < kMaxCubes)
       {
         genSeed = genSeed * 1103515245 + 12345;
-        int c0 = ((genSeed >> 8) & 0x7FFF) % numConfigs;
+        cubes[numCubes].config[0] = ((genSeed >> 8) & 0x7FFF) % numConfigs;
         genSeed = genSeed * 1103515245 + 12345;
-        int c1 = ((genSeed >> 8) & 0x7FFF) % numConfigs;
+        cubes[numCubes].config[1] = ((genSeed >> 8) & 0x7FFF) % numConfigs;
         genSeed = genSeed * 1103515245 + 12345;
-        int c2 = ((genSeed >> 8) & 0x7FFF) % numConfigs;
+        cubes[numCubes].config[2] = ((genSeed >> 8) & 0x7FFF) % numConfigs;
         genSeed = genSeed * 1103515245 + 12345;
-        int c3 = ((genSeed >> 8) & 0x7FFF) % numConfigs;
-        cubes[numCubes].config[0] = c0;
-        cubes[numCubes].config[1] = c1;
-        cubes[numCubes].config[2] = c2;
-        cubes[numCubes].config[3] = c3;
+        cubes[numCubes].config[3] = ((genSeed >> 8) & 0x7FFF) % numConfigs;
         cubes[numCubes].name = "gen";
         numCubes++;
       }
@@ -220,18 +300,16 @@ namespace stolmine
     float qScale = CLAMP(0.5f, 1.5f, mQScale.value());
     float level = CLAMP(0.0f, 2.0f, mLevel.value());
 
-    // Cutoff ratio (1.0 = no shift from config's designed frequency)
+    float sr = globalConfig.sampleRate;
     float voctPitch = voct[0] * 10.0f;
     float cutoffRatio = cutoff / 1000.0f * powf(2.0f, voctPitch);
 
-    // Look up cube corners
-    const MorphCube &cube = s.cubes[config];
-    const FilterConfig &c00 = s.configs[CLAMP(0, s.numConfigs - 1, cube.config[0])];
-    const FilterConfig &c10 = s.configs[CLAMP(0, s.numConfigs - 1, cube.config[1])];
-    const FilterConfig &c01 = s.configs[CLAMP(0, s.numConfigs - 1, cube.config[2])];
-    const FilterConfig &c11 = s.configs[CLAMP(0, s.numConfigs - 1, cube.config[3])];
+    // Look up corners
+    const Internal::BakedConfig &c00 = s.configs[CLAMP(0, s.numConfigs - 1, s.cubes[config].config[0])];
+    const Internal::BakedConfig &c10 = s.configs[CLAMP(0, s.numConfigs - 1, s.cubes[config].config[1])];
+    const Internal::BakedConfig &c01 = s.configs[CLAMP(0, s.numConfigs - 1, s.cubes[config].config[2])];
+    const Internal::BakedConfig &c11 = s.configs[CLAMP(0, s.numConfigs - 1, s.cubes[config].config[3])];
 
-    // Max sections across corners
     int nSections = c00.numSections;
     if (c10.numSections > nSections) nSections = c10.numSections;
     if (c01.numSections > nSections) nSections = c01.numSections;
@@ -241,43 +319,43 @@ namespace stolmine
 
     float gain = lerp2d(c00.gain, c10.gain, c01.gain, c11.gain, px, py);
 
-    // Interpolate biquad COEFFICIENTS directly (not pole/zero positions)
-    // Then apply cutoff scaling to the interpolated a1 coefficients
+    // Set SVF target parameters from interpolated configs
     for (int i = 0; i < kSferaMaxSections; i++)
     {
       if (i < nSections)
       {
-        // Bilinear interpolate each coefficient
-        float ib0 = lerp2d(c00.sections[i].b0, c10.sections[i].b0, c01.sections[i].b0, c11.sections[i].b0, px, py);
-        float ib1 = lerp2d(c00.sections[i].b1, c10.sections[i].b1, c01.sections[i].b1, c11.sections[i].b1, px, py);
-        float ib2 = lerp2d(c00.sections[i].b2, c10.sections[i].b2, c01.sections[i].b2, c11.sections[i].b2, px, py);
-        float ia1 = lerp2d(c00.sections[i].a1, c10.sections[i].a1, c01.sections[i].a1, c11.sections[i].a1, px, py);
-        float ia2 = lerp2d(c00.sections[i].a2, c10.sections[i].a2, c01.sections[i].a2, c11.sections[i].a2, px, py);
+        float ig = lerp2d(c00.sections[i].g, c10.sections[i].g, c01.sections[i].g, c11.sections[i].g, px, py);
+        float ik = lerp2d(c00.sections[i].k, c10.sections[i].k, c01.sections[i].k, c11.sections[i].k, px, py);
+        float im0 = lerp2d(c00.sections[i].m0, c10.sections[i].m0, c01.sections[i].m0, c11.sections[i].m0, px, py);
+        float im1 = lerp2d(c00.sections[i].m1, c10.sections[i].m1, c01.sections[i].m1, c11.sections[i].m1, px, py);
+        float im2 = lerp2d(c00.sections[i].m2, c10.sections[i].m2, c01.sections[i].m2, c11.sections[i].m2, px, py);
 
-        // Apply Q scale to pole radius (a2 = r^2, so scale a2; a1 = -2r*cos, scale by sqrt)
-        ia2 *= qScale * qScale;
-        ia1 *= qScale;
-        // Stability: ensure a2 < 1
-        if (ia2 > 0.998f) ia2 = 0.998f;
+        // Apply cutoff scaling to g (frequency)
+        ig *= cutoffRatio;
+        if (ig > 10.0f) ig = 10.0f; // stability limit
 
-        s.biquads[i].tb0 = ib0;
-        s.biquads[i].tb1 = ib1;
-        s.biquads[i].tb2 = ib2;
-        s.biquads[i].ta1 = ia1;
-        s.biquads[i].ta2 = ia2;
+        // Apply Q scale to k (damping = 1/Q)
+        ik /= qScale;
+        if (ik < 0.05f) ik = 0.05f; // don't let Q go infinite
+
+        s.svfs[i].tg = ig;
+        s.svfs[i].tk = ik;
+        s.svfs[i].tm0 = im0;
+        s.svfs[i].tm1 = im1;
+        s.svfs[i].tm2 = im2;
       }
       else
       {
-        // Bypass
-        s.biquads[i].tb0 = 1.0f;
-        s.biquads[i].tb1 = 0.0f;
-        s.biquads[i].tb2 = 0.0f;
-        s.biquads[i].ta1 = 0.0f;
-        s.biquads[i].ta2 = 0.0f;
+        // Bypass section
+        s.svfs[i].tg = 0.1f;
+        s.svfs[i].tk = 2.0f;
+        s.svfs[i].tm0 = 1.0f;
+        s.svfs[i].tm1 = 0.0f;
+        s.svfs[i].tm2 = 0.0f;
       }
     }
 
-    // Update viz pole/zero data (interpolate positions for display)
+    // Update viz
     for (int i = 0; i < nSections; i++)
     {
       s.curPoleAngle[i] = lerp2d(c00.poleAngle[i], c10.poleAngle[i], c01.poleAngle[i], c11.poleAngle[i], px, py);
@@ -286,29 +364,26 @@ namespace stolmine
       s.curZeroRadius[i] = lerp2d(c00.zeroRadius[i], c10.zeroRadius[i], c01.zeroRadius[i], c11.zeroRadius[i], px, py);
     }
     for (int i = nSections; i < kSferaMaxSections; i++)
-    {
-      s.curPoleAngle[i] = s.curPoleRadius[i] = 0;
-      s.curZeroAngle[i] = s.curZeroRadius[i] = 0;
-    }
+      s.curPoleAngle[i] = s.curPoleRadius[i] = s.curZeroAngle[i] = s.curZeroRadius[i] = 0;
 
     s.sphereRotation = (float)config * 6.28318f / (float)s.numCubes + px * 0.26f - py * 0.26f;
 
-    // Process audio with per-sample coefficient slew
+    // Process audio
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float x = in[i];
 
       for (int j = 0; j < nSections; j++)
       {
-        s.biquads[j].slew(s.slewRate);
-        x = s.biquads[j].process(x);
+        s.svfs[j].slew(s.slewRate);
+        x = s.svfs[j].process(x);
       }
 
       // Emergency recovery
       if (x != x || x > 8.0f || x < -8.0f)
       {
         for (int j = 0; j < kSferaMaxSections; j++)
-          s.biquads[j].s1 = s.biquads[j].s2 = 0.0f;
+          s.svfs[j].ic1eq = s.svfs[j].ic2eq = 0.0f;
         x = 0.0f;
       }
 

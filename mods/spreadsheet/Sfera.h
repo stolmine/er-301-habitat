@@ -78,6 +78,24 @@ namespace stolmine
     static const int kLonLines = 8;
     static const int kPointsPerLine = 16;
 
+    // Bounds-safe drawing helpers
+    inline void safePixel(od::FrameBuffer &fb, int gray, int x, int y)
+    {
+      if (x >= mWorldLeft && x < mWorldLeft + mWidth &&
+          y >= mWorldBottom && y < mWorldBottom + mHeight)
+        fb.pixel(gray, x, y);
+    }
+
+    inline void safeLine(od::FrameBuffer &fb, int gray, int x0, int y0, int x1, int y1)
+    {
+      // Simple clip: skip if both endpoints are far out of bounds
+      int left = mWorldLeft, right = mWorldLeft + mWidth - 1;
+      int bot = mWorldBottom, top = mWorldBottom + mHeight - 1;
+      if ((x0 < left - 10 && x1 < left - 10) || (x0 > right + 10 && x1 > right + 10)) return;
+      if ((y0 < bot - 10 && y1 < bot - 10) || (y0 > top + 10 && y1 > top + 10)) return;
+      fb.line(gray, x0, y0, x1, y1);
+    }
+
   public:
     virtual void draw(od::FrameBuffer &fb)
     {
@@ -175,7 +193,7 @@ namespace stolmine
             int gray = 3 + (int)((r - 1.0f) * 4.0f);
             if (gray < 2) gray = 2;
             if (gray > 8) gray = 8;
-            fb.line(gray, prevPx, prevPy, ppx, ppy);
+            safeLine(fb, gray, prevPx, prevPy, ppx, ppy);
           }
           prevPx = ppx;
           prevPy = ppy;
@@ -229,7 +247,7 @@ namespace stolmine
             int gray = 3 + (int)((r - 1.0f) * 4.0f);
             if (gray < 2) gray = 2;
             if (gray > 8) gray = 8;
-            fb.line(gray, prevPx, prevPy, ppx, ppy);
+            safeLine(fb, gray, prevPx, prevPy, ppx, ppy);
           }
           prevPx = ppx;
           prevPy = ppy;
@@ -257,7 +275,7 @@ namespace stolmine
               if (d > 5) continue;
               int g = bright - d * 2;
               if (g > 1)
-                fb.pixel(g, bx + dx, by + dy);
+                safePixel(fb, g, bx + dx, by + dy);
             }
         }
 
@@ -277,7 +295,7 @@ namespace stolmine
               {
                 int d = dx * dx + dy * dy;
                 if (d > 2) continue;
-                fb.pixel(4 - d, bx + dx, by + dy);
+                safePixel(fb, 4 - d, bx + dx, by + dy);
               }
           }
         }
