@@ -280,6 +280,14 @@ namespace stolmine
   {
     return mpInternal->numCubes;
   }
+  float Sfera::getParamX()
+  {
+    return CLAMP(0.0f, 1.0f, mParamX.value());
+  }
+  float Sfera::getParamY()
+  {
+    return CLAMP(0.0f, 1.0f, mParamY.value());
+  }
 
   static inline float lerp2d(float v00, float v10, float v01, float v11, float x, float y)
   {

@@ -25,6 +25,8 @@ namespace stolmine
     int getActiveSections();
     float getSphereRotation();
     int getNumCubes();
+    float getParamX();
+    float getParamY();
 
 #ifndef SWIGLUA
     virtual void process();
@@ -78,6 +80,7 @@ namespace stolmine
     float mPoleSxSlew[7], mPoleSySlew[7], mPoleStrSlew[7];
     float mZeroSxSlew[7], mZeroSySlew[7], mZeroStrSlew[7];
     bool mSlewInit = false;
+    uint32_t mNoiseState = 12345;
 
     // Bounds-safe drawing helpers
     inline void safePixel(od::FrameBuffer &fb, int gray, int x, int y)
@@ -138,43 +141,52 @@ namespace stolmine
         mSlewInit = true;
       }
 
-      // --- Compute target pole/zero positions ---
-      // Spread poles in 2D using golden angle spiral for even distribution
-      // This creates distinct attractor points that pull the ferrofluid blob
-      // into separate lobes/protrusions
+      // --- Read X/Y params for pole modulation ---
+      float paramX = mpSfera->getParamX();
+      float paramY = mpSfera->getParamY();
+
+      // --- Noise for organic movement ---
+      auto vizNoise = [&]() -> float {
+        mNoiseState = mNoiseState * 1103515245u + 12345u;
+        return ((float)((mNoiseState >> 8) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
+      };
+
+      // --- Compute pole/zero positions ---
       float vizSlew = 0.10f;
-      float goldenAngle = 2.399963f; // pi * (3 - sqrt(5))
+      float goldenAngle = 2.399963f;
       for (int i = 0; i < nSections; i++)
       {
         float pa = mpSfera->getPoleAngle(i);
         float pr = mpSfera->getPoleRadius(i);
 
-        // Golden spiral placement: each pole gets a unique (x,y) inside the sphere
-        // pa controls the radial distance from center, index controls angular position
+        // Golden spiral placement with param modulation
         float spiralAngle = (float)i * goldenAngle + mCurrentAngle;
-        float spiralR = 0.15f + pr * 0.35f; // 0.15 to 0.50 from center
-        // Modulate by pole angle to create movement with filter changes
         spiralAngle += pa * 0.5f;
-        float tx = spiralR * cosf(spiralAngle);
-        float ty = spiralR * sinf(spiralAngle);
+        // X/Y modulate the spiral: X rotates, Y pushes outward
+        spiralAngle += paramX * 1.5f;
+        float spiralR = 0.12f + pr * 0.30f + paramY * 0.08f;
+        // Add subtle noise drift
+        float noiseX = vizNoise() * 0.015f;
+        float noiseY = vizNoise() * 0.015f;
+        float tx = spiralR * cosf(spiralAngle) + noiseX;
+        float ty = spiralR * sinf(spiralAngle) + noiseY;
 
-        // Depth fade: poles with higher angle (higher freq) are "deeper"
-        float df = 0.5f + 0.5f * cosf(pa * 0.5f);
+        // Strength modulated by params: X boosts even poles, Y boosts odd
+        float paramBoost = (i & 1) ? (0.7f + paramY * 0.6f) : (0.7f + paramX * 0.6f);
 
         mPoleSxSlew[i] += (tx - mPoleSxSlew[i]) * vizSlew;
         mPoleSySlew[i] += (ty - mPoleSySlew[i]) * vizSlew;
-        mPoleStrSlew[i] += (pr * (0.4f + 0.6f * df) - mPoleStrSlew[i]) * vizSlew;
+        mPoleStrSlew[i] += (pr * paramBoost - mPoleStrSlew[i]) * vizSlew;
 
         float za = mpSfera->getZeroAngle(i);
         float zr = mpSfera->getZeroRadius(i);
         if (zr > 0.01f)
         {
-          // Zeros placed opposite to corresponding pole
           float zAngle = spiralAngle + 3.14159f;
-          float zSpiralR = 0.2f + zr * 0.2f;
+          float zSpiralR = 0.15f + zr * 0.15f;
           mZeroSxSlew[i] += (zSpiralR * cosf(zAngle) - mZeroSxSlew[i]) * vizSlew;
           mZeroSySlew[i] += (zSpiralR * sinf(zAngle) - mZeroSySlew[i]) * vizSlew;
-          mZeroStrSlew[i] += (zr - mZeroStrSlew[i]) * vizSlew;
+          mZeroStrSlew[i] += (zr * 0.5f - mZeroStrSlew[i]) * vizSlew;
         }
         else
           mZeroStrSlew[i] *= (1.0f - vizSlew);
@@ -210,11 +222,11 @@ namespace stolmine
       float zeroR2 = 0.09f;
       float invZeroR2 = 1.0f / zeroR2;
 
-      // Sum total pole strength for body size scaling
+      // Body always visible -- high base strength even with no poles
       float totalStr = 0.0f;
       for (int i = 0; i < 7; i++) totalStr += mPoleStrSlew[i];
-      float bodyStr = 0.4f + totalStr * 0.3f; // body grows with more active poles
-      if (bodyStr > 1.2f) bodyStr = 1.2f;
+      float bodyStr = 0.8f + totalStr * 0.3f; // always visible, grows with poles
+      if (bodyStr > 1.5f) bodyStr = 1.5f;
 
       for (int py = 0; py < h; py++)
       {
@@ -228,15 +240,20 @@ namespace stolmine
           float sphereDist2 = nx * nx + ny * ny;
           if (sphereDist2 > 1.0f) continue;
 
+          // Z-depth for 3D shading: z = sqrt(1 - x² - y²)
+          // Diffuse lighting: brighter facing viewer, dimmer at edges
+          float zDepth = 1.0f - sphereDist2; // 1 at center, 0 at edge (skip sqrt)
+          float lighting = 0.3f + 0.7f * zDepth; // never fully dark
+
           // Shell outline
           float shell = 0.0f;
           if (sphereDist2 > 0.88f)
           {
             float t = (sphereDist2 - 0.88f) / 0.12f;
-            shell = t * 2.5f;
+            shell = t * 2.5f * lighting;
           }
 
-          // Parallax offset for metaball evaluation
+          // Parallax offset
           float mx = nx - parallaxX;
           float my = ny - parallaxY;
 
@@ -249,7 +266,7 @@ namespace stolmine
             field += bodyStr * t * t * t;
           }
 
-          // Pole protrusions: arms stretching outward from body
+          // Pole protrusions
           for (int i = 0; i < 7; i++)
           {
             if (mPoleStrSlew[i] < 0.005f) continue;
@@ -258,10 +275,10 @@ namespace stolmine
             float d2 = dx * dx + dy * dy;
             if (d2 >= armR2) continue;
             float t = 1.0f - d2 * invArmR2;
-            field += mPoleStrSlew[i] * 1.5f * t * t * t;
+            field += mPoleStrSlew[i] * 1.8f * t * t * t;
           }
 
-          // Zero dimples: subtract from field
+          // Zero dimples
           for (int i = 0; i < 7; i++)
           {
             if (mZeroStrSlew[i] < 0.005f) continue;
@@ -273,7 +290,7 @@ namespace stolmine
             field -= mZeroStrSlew[i] * 0.5f * t * t * t;
           }
 
-          // Containment falloff at sphere edge
+          // Containment falloff
           if (sphereDist2 > 0.65f)
           {
             float t = (1.0f - sphereDist2) / 0.35f;
@@ -281,11 +298,11 @@ namespace stolmine
             field *= t * t;
           }
 
-          // Threshold and shade
+          // Threshold, z-depth shaded
           float blob = 0.0f;
-          if (field > 0.15f)
+          if (field > 0.12f)
           {
-            blob = (field - 0.15f) * 12.0f;
+            blob = (field - 0.12f) * 12.0f * lighting;
             if (blob > 12.0f) blob = 12.0f;
           }
 
