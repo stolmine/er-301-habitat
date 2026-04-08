@@ -3,6 +3,7 @@
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
+#include <string.h>
 
 namespace stolmine
 {
@@ -14,28 +15,32 @@ namespace stolmine
     return x;
   }
 
-  // Fast cosine (5th order, same as Rauschen fast_sinf shifted by pi/2)
-  static inline float fast_cosf(float x)
-  {
-    x += 1.5708f; // shift by pi/2
-    float n = floorf(x * 0.31831f + 0.5f);
-    float xr = x - n * 3.14159f;
-    float x2 = xr * xr;
-    float r = xr * (1.0f + x2 * (-0.16605f + x2 * 0.00761f));
-    return ((int)n & 1) ? -r : r;
-  }
-
   struct BiquadSection
   {
-    float s1, s2;           // transposed direct form II state
-    float b0, b1, b2, a1, a2; // coefficients
+    float s1, s2;
+    // Current coefficients (slewed per-sample toward target)
+    float b0, b1, b2, a1, a2;
+    // Target coefficients (set per-frame from interpolation)
+    float tb0, tb1, tb2, ta1, ta2;
 
     void reset()
     {
-      s1 = 0.0f;
-      s2 = 0.0f;
-      b0 = 1.0f; b1 = 0.0f; b2 = 0.0f;
-      a1 = 0.0f; a2 = 0.0f;
+      s1 = s2 = 0.0f;
+      b0 = tb0 = 1.0f;
+      b1 = tb1 = 0.0f;
+      b2 = tb2 = 0.0f;
+      a1 = ta1 = 0.0f;
+      a2 = ta2 = 0.0f;
+    }
+
+    // Slew current coefficients toward target
+    inline void slew(float rate)
+    {
+      b0 += (tb0 - b0) * rate;
+      b1 += (tb1 - b1) * rate;
+      b2 += (tb2 - b2) * rate;
+      a1 += (ta1 - a1) * rate;
+      a2 += (ta2 - a2) * rate;
     }
 
     inline float process(float x)
@@ -45,83 +50,93 @@ namespace stolmine
       s2 = softClip(b2 * x - a2 * y);
       return y;
     }
-
-    void setFromPoleZero(float pAngle, float pRadius, float zAngle, float zRadius)
-    {
-      // Pole pair -> denominator
-      a1 = -2.0f * pRadius * fast_cosf(pAngle);
-      a2 = pRadius * pRadius;
-      // Zero pair -> numerator
-      if (zRadius > 0.001f)
-      {
-        b0 = 1.0f;
-        b1 = -2.0f * zRadius * fast_cosf(zAngle);
-        b2 = zRadius * zRadius;
-      }
-      else
-      {
-        // No zeros: allpole
-        b0 = 1.0f;
-        b1 = 0.0f;
-        b2 = 0.0f;
-      }
-    }
   };
 
   struct Sfera::Internal
   {
-    BiquadSection biquads[kMaxBiquads];
+    BiquadSection biquads[kSferaMaxSections];
     int activeSections = 0;
 
-    // Current interpolated state (for graphic to read)
-    float curPoleAngle[kMaxBiquads];
-    float curPoleRadius[kMaxBiquads];
-    float curZeroAngle[kMaxBiquads];
-    float curZeroRadius[kMaxBiquads];
+    // Pre-baked configs (coefficients computed at init from pole/zero specs)
+    static const int kMaxConfigs = 256;
+    FilterConfig configs[kMaxConfigs];
+    int numConfigs = 0;
 
-    // Sphere rotation
-    float sphereRotation = 0.0f;
-
-    // Runtime cube table (hand-curated + generated)
+    // Cube table
     static const int kMaxCubes = 128;
     MorphCube cubes[kMaxCubes];
     int numCubes = 0;
 
+    // Current interpolated state (for viz)
+    float curPoleAngle[kSferaMaxSections];
+    float curPoleRadius[kSferaMaxSections];
+    float curZeroAngle[kSferaMaxSections];
+    float curZeroRadius[kSferaMaxSections];
+
+    float sphereRotation = 0.0f;
+
+    // Slew rate: controls how fast coefficients approach target
+    // Higher = faster (1.0 = instant, 0.01 = very slow)
+    float slewRate = 0.05f; // ~20ms at 48kHz
+
     void Init()
     {
-      for (int i = 0; i < kMaxBiquads; i++)
+      for (int i = 0; i < kSferaMaxSections; i++)
       {
         biquads[i].reset();
-        curPoleAngle[i] = 0.0f;
-        curPoleRadius[i] = 0.0f;
-        curZeroAngle[i] = 0.0f;
-        curZeroRadius[i] = 0.0f;
+        curPoleAngle[i] = curPoleRadius[i] = 0;
+        curZeroAngle[i] = curZeroRadius[i] = 0;
       }
-      activeSections = 0;
-      sphereRotation = 0.0f;
+
+      // Pre-bake coefficients from pole/zero specs
+      numConfigs = 0;
+      for (int c = 0; c < kNumConfigSpecs && numConfigs < kMaxConfigs; c++)
+      {
+        FilterConfig &fc = configs[numConfigs];
+        const ConfigSpec &spec = kConfigSpecs[c];
+        fc.numSections = spec.numSections;
+        fc.gain = spec.gain;
+
+        for (int s = 0; s < kSferaMaxSections; s++)
+        {
+          float pa = spec.poles[s].angle;
+          float pr = spec.poles[s].radius;
+          float za = spec.zeros[s].angle;
+          float zr = spec.zeros[s].radius;
+
+          fc.poleAngle[s] = pa;
+          fc.poleRadius[s] = pr;
+          fc.zeroAngle[s] = za;
+          fc.zeroRadius[s] = zr;
+
+          if (s < spec.numSections)
+            fc.sections[s] = pzToCoeffs(pa, pr, za, zr);
+          else
+            fc.sections[s] = bypassCoeffs();
+        }
+        numConfigs++;
+      }
 
       // Copy hand-curated cubes
       numCubes = 0;
-      for (int i = 0; i < kNumCubes && numCubes < kMaxCubes; i++)
+      for (int i = 0; i < kNumCubeSpecs && numCubes < kMaxCubes; i++)
       {
         cubes[numCubes] = kCubes[i];
         numCubes++;
       }
 
-      // Generate remaining cubes by permuting configs at different frequency offsets
-      // Each generated cube takes two existing configs and morphs between them
+      // Generate remaining cubes
       int genSeed = 7919;
       while (numCubes < kMaxCubes)
       {
         genSeed = genSeed * 1103515245 + 12345;
-        int c0 = (genSeed >> 8) % kNumConfigs;
+        int c0 = ((genSeed >> 8) & 0x7FFF) % numConfigs;
         genSeed = genSeed * 1103515245 + 12345;
-        int c1 = (genSeed >> 8) % kNumConfigs;
+        int c1 = ((genSeed >> 8) & 0x7FFF) % numConfigs;
         genSeed = genSeed * 1103515245 + 12345;
-        int c2 = (genSeed >> 8) % kNumConfigs;
+        int c2 = ((genSeed >> 8) & 0x7FFF) % numConfigs;
         genSeed = genSeed * 1103515245 + 12345;
-        int c3 = (genSeed >> 8) % kNumConfigs;
-
+        int c3 = ((genSeed >> 8) & 0x7FFF) % numConfigs;
         cubes[numCubes].config[0] = c0;
         cubes[numCubes].config[1] = c1;
         cubes[numCubes].config[2] = c2;
@@ -155,49 +170,40 @@ namespace stolmine
 
   float Sfera::getPoleAngle(int idx)
   {
-    if (idx < 0 || idx >= kMaxBiquads) return 0;
+    if (idx < 0 || idx >= kSferaMaxSections) return 0;
     return mpInternal->curPoleAngle[idx];
   }
-
   float Sfera::getPoleRadius(int idx)
   {
-    if (idx < 0 || idx >= kMaxBiquads) return 0;
+    if (idx < 0 || idx >= kSferaMaxSections) return 0;
     return mpInternal->curPoleRadius[idx];
   }
-
   float Sfera::getZeroAngle(int idx)
   {
-    if (idx < 0 || idx >= kMaxBiquads) return 0;
+    if (idx < 0 || idx >= kSferaMaxSections) return 0;
     return mpInternal->curZeroAngle[idx];
   }
-
   float Sfera::getZeroRadius(int idx)
   {
-    if (idx < 0 || idx >= kMaxBiquads) return 0;
+    if (idx < 0 || idx >= kSferaMaxSections) return 0;
     return mpInternal->curZeroRadius[idx];
   }
-
   int Sfera::getActiveSections()
   {
     return mpInternal->activeSections;
   }
-
   float Sfera::getSphereRotation()
   {
     return mpInternal->sphereRotation;
   }
-
   int Sfera::getNumCubes()
   {
     return mpInternal->numCubes;
   }
 
-  // Bilinear interpolation
   static inline float lerp2d(float v00, float v10, float v01, float v11, float x, float y)
   {
-    float a = v00 + (v10 - v00) * x;
-    float b = v01 + (v11 - v01) * x;
-    return a + (b - a) * y;
+    return v00 + (v10 - v00) * x + (v01 - v00) * y + (v00 - v10 - v01 + v11) * x * y;
   }
 
   void Sfera::process()
@@ -214,98 +220,95 @@ namespace stolmine
     float qScale = CLAMP(0.5f, 1.5f, mQScale.value());
     float level = CLAMP(0.0f, 2.0f, mLevel.value());
 
-    float sr = globalConfig.sampleRate;
-
-    // V/Oct
+    // Cutoff ratio (1.0 = no shift from config's designed frequency)
     float voctPitch = voct[0] * 10.0f;
     float cutoffRatio = cutoff / 1000.0f * powf(2.0f, voctPitch);
 
-    // Look up the 4 corner configs
+    // Look up cube corners
     const MorphCube &cube = s.cubes[config];
-    const FilterConfig &c00 = kConfigs[CLAMP(0, kNumConfigs - 1, cube.config[0])];
-    const FilterConfig &c10 = kConfigs[CLAMP(0, kNumConfigs - 1, cube.config[1])];
-    const FilterConfig &c01 = kConfigs[CLAMP(0, kNumConfigs - 1, cube.config[2])];
-    const FilterConfig &c11 = kConfigs[CLAMP(0, kNumConfigs - 1, cube.config[3])];
+    const FilterConfig &c00 = s.configs[CLAMP(0, s.numConfigs - 1, cube.config[0])];
+    const FilterConfig &c10 = s.configs[CLAMP(0, s.numConfigs - 1, cube.config[1])];
+    const FilterConfig &c01 = s.configs[CLAMP(0, s.numConfigs - 1, cube.config[2])];
+    const FilterConfig &c11 = s.configs[CLAMP(0, s.numConfigs - 1, cube.config[3])];
 
-    // Determine active section count (max of all 4 corners)
+    // Max sections across corners
     int nSections = c00.numSections;
     if (c10.numSections > nSections) nSections = c10.numSections;
     if (c01.numSections > nSections) nSections = c01.numSections;
     if (c11.numSections > nSections) nSections = c11.numSections;
-    if (nSections > kMaxBiquads) nSections = kMaxBiquads;
+    if (nSections > kSferaMaxSections) nSections = kSferaMaxSections;
     s.activeSections = nSections;
 
-    // Interpolated gain
     float gain = lerp2d(c00.gain, c10.gain, c01.gain, c11.gain, px, py);
 
-    // Interpolate pole/zero positions and compute biquad coefficients
+    // Interpolate biquad COEFFICIENTS directly (not pole/zero positions)
+    // Then apply cutoff scaling to the interpolated a1 coefficients
+    for (int i = 0; i < kSferaMaxSections; i++)
+    {
+      if (i < nSections)
+      {
+        // Bilinear interpolate each coefficient
+        float ib0 = lerp2d(c00.sections[i].b0, c10.sections[i].b0, c01.sections[i].b0, c11.sections[i].b0, px, py);
+        float ib1 = lerp2d(c00.sections[i].b1, c10.sections[i].b1, c01.sections[i].b1, c11.sections[i].b1, px, py);
+        float ib2 = lerp2d(c00.sections[i].b2, c10.sections[i].b2, c01.sections[i].b2, c11.sections[i].b2, px, py);
+        float ia1 = lerp2d(c00.sections[i].a1, c10.sections[i].a1, c01.sections[i].a1, c11.sections[i].a1, px, py);
+        float ia2 = lerp2d(c00.sections[i].a2, c10.sections[i].a2, c01.sections[i].a2, c11.sections[i].a2, px, py);
+
+        // Apply Q scale to pole radius (a2 = r^2, so scale a2; a1 = -2r*cos, scale by sqrt)
+        ia2 *= qScale * qScale;
+        ia1 *= qScale;
+        // Stability: ensure a2 < 1
+        if (ia2 > 0.998f) ia2 = 0.998f;
+
+        s.biquads[i].tb0 = ib0;
+        s.biquads[i].tb1 = ib1;
+        s.biquads[i].tb2 = ib2;
+        s.biquads[i].ta1 = ia1;
+        s.biquads[i].ta2 = ia2;
+      }
+      else
+      {
+        // Bypass
+        s.biquads[i].tb0 = 1.0f;
+        s.biquads[i].tb1 = 0.0f;
+        s.biquads[i].tb2 = 0.0f;
+        s.biquads[i].ta1 = 0.0f;
+        s.biquads[i].ta2 = 0.0f;
+      }
+    }
+
+    // Update viz pole/zero data (interpolate positions for display)
     for (int i = 0; i < nSections; i++)
     {
-      float pAngle = lerp2d(c00.poles[i].angle, c10.poles[i].angle,
-                             c01.poles[i].angle, c11.poles[i].angle, px, py);
-      float pRadius = lerp2d(c00.poles[i].radius, c10.poles[i].radius,
-                              c01.poles[i].radius, c11.poles[i].radius, px, py);
-      float zAngle = lerp2d(c00.zeros[i].angle, c10.zeros[i].angle,
-                             c01.zeros[i].angle, c11.zeros[i].angle, px, py);
-      float zRadius = lerp2d(c00.zeros[i].radius, c10.zeros[i].radius,
-                              c01.zeros[i].radius, c11.zeros[i].radius, px, py);
-
-      // Apply cutoff offset (scale angles)
-      pAngle *= cutoffRatio;
-      zAngle *= cutoffRatio;
-
-      // Clamp angles to valid range
-      float maxAngle = kPi * 0.99f;
-      if (pAngle > maxAngle) pAngle = maxAngle;
-      if (pAngle < 0.001f) pAngle = 0.001f;
-      if (zAngle > maxAngle) zAngle = maxAngle;
-      if (zAngle < 0.001f) zAngle = 0.001f;
-
-      // Apply Q scale to pole radius
-      pRadius *= qScale;
-      if (pRadius > 0.999f) pRadius = 0.999f;
-      if (pRadius < 0.0f) pRadius = 0.0f;
-
-      // Store for graphic
-      s.curPoleAngle[i] = pAngle;
-      s.curPoleRadius[i] = pRadius;
-      s.curZeroAngle[i] = zAngle;
-      s.curZeroRadius[i] = zRadius;
-
-      s.biquads[i].setFromPoleZero(pAngle, pRadius, zAngle, zRadius);
+      s.curPoleAngle[i] = lerp2d(c00.poleAngle[i], c10.poleAngle[i], c01.poleAngle[i], c11.poleAngle[i], px, py);
+      s.curPoleRadius[i] = lerp2d(c00.poleRadius[i], c10.poleRadius[i], c01.poleRadius[i], c11.poleRadius[i], px, py);
+      s.curZeroAngle[i] = lerp2d(c00.zeroAngle[i], c10.zeroAngle[i], c01.zeroAngle[i], c11.zeroAngle[i], px, py);
+      s.curZeroRadius[i] = lerp2d(c00.zeroRadius[i], c10.zeroRadius[i], c01.zeroRadius[i], c11.zeroRadius[i], px, py);
     }
-
-    // Reset inactive sections
-    for (int i = nSections; i < kMaxBiquads; i++)
+    for (int i = nSections; i < kSferaMaxSections; i++)
     {
-      s.biquads[i].reset();
-      s.curPoleAngle[i] = 0;
-      s.curPoleRadius[i] = 0;
-      s.curZeroAngle[i] = 0;
-      s.curZeroRadius[i] = 0;
+      s.curPoleAngle[i] = s.curPoleRadius[i] = 0;
+      s.curZeroAngle[i] = s.curZeroRadius[i] = 0;
     }
 
-    // Update sphere rotation
-    s.sphereRotation = (float)config * 6.28318f / (float)s.numCubes
-                      + px * 0.26f - py * 0.26f;
+    s.sphereRotation = (float)config * 6.28318f / (float)s.numCubes + px * 0.26f - py * 0.26f;
 
-    // Process audio
+    // Process audio with per-sample coefficient slew
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float x = in[i];
 
-      // Cascade biquad sections
       for (int j = 0; j < nSections; j++)
+      {
+        s.biquads[j].slew(s.slewRate);
         x = s.biquads[j].process(x);
+      }
 
-      // Emergency recovery: if output explodes, reset all states
+      // Emergency recovery
       if (x != x || x > 8.0f || x < -8.0f)
       {
-        for (int j = 0; j < nSections; j++)
-        {
-          s.biquads[j].s1 = 0.0f;
-          s.biquads[j].s2 = 0.0f;
-        }
+        for (int j = 0; j < kSferaMaxSections; j++)
+          s.biquads[j].s1 = s.biquads[j].s2 = 0.0f;
         x = 0.0f;
       }
 
