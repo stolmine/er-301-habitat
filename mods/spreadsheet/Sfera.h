@@ -138,33 +138,42 @@ namespace stolmine
         mSlewInit = true;
       }
 
-      // --- Compute target pole/zero positions (interior, r=0.5) ---
-      // No tilt on attractor positions -- keeps blob centered in sphere
-      float vizSlew = 0.12f;
+      // --- Compute target pole/zero positions ---
+      // Spread poles in 2D using golden angle spiral for even distribution
+      // This creates distinct attractor points that pull the ferrofluid blob
+      // into separate lobes/protrusions
+      float vizSlew = 0.10f;
+      float goldenAngle = 2.399963f; // pi * (3 - sqrt(5))
       for (int i = 0; i < nSections; i++)
       {
         float pa = mpSfera->getPoleAngle(i);
         float pr = mpSfera->getPoleRadius(i);
-        float ir = 0.5f;
-        float x3 = ir * cosf(pa), z3 = ir * sinf(pa);
-        // Rotate only (no tilt) so blob stays centered vertically
-        float rx = x3 * cosR + z3 * sinR;
-        float ry = 0.0f; // keep on equator for cleaner look
-        float depth = -x3 * sinR + z3 * cosR;
-        float df = 0.5f + 0.5f * depth; // 0=back, 1=front
 
-        mPoleSxSlew[i] += (rx - mPoleSxSlew[i]) * vizSlew;
-        mPoleSySlew[i] += (ry - mPoleSySlew[i]) * vizSlew;
-        mPoleStrSlew[i] += (pr * (0.3f + 0.7f * df) - mPoleStrSlew[i]) * vizSlew;
+        // Golden spiral placement: each pole gets a unique (x,y) inside the sphere
+        // pa controls the radial distance from center, index controls angular position
+        float spiralAngle = (float)i * goldenAngle + mCurrentAngle;
+        float spiralR = 0.15f + pr * 0.35f; // 0.15 to 0.50 from center
+        // Modulate by pole angle to create movement with filter changes
+        spiralAngle += pa * 0.5f;
+        float tx = spiralR * cosf(spiralAngle);
+        float ty = spiralR * sinf(spiralAngle);
+
+        // Depth fade: poles with higher angle (higher freq) are "deeper"
+        float df = 0.5f + 0.5f * cosf(pa * 0.5f);
+
+        mPoleSxSlew[i] += (tx - mPoleSxSlew[i]) * vizSlew;
+        mPoleSySlew[i] += (ty - mPoleSySlew[i]) * vizSlew;
+        mPoleStrSlew[i] += (pr * (0.4f + 0.6f * df) - mPoleStrSlew[i]) * vizSlew;
 
         float za = mpSfera->getZeroAngle(i);
         float zr = mpSfera->getZeroRadius(i);
         if (zr > 0.01f)
         {
-          float zx3 = ir * cosf(za), zz3 = ir * sinf(za);
-          float zrx = zx3 * cosR + zz3 * sinR;
-          mZeroSxSlew[i] += (zrx - mZeroSxSlew[i]) * vizSlew;
-          mZeroSySlew[i] += (0.0f - mZeroSySlew[i]) * vizSlew;
+          // Zeros placed opposite to corresponding pole
+          float zAngle = spiralAngle + 3.14159f;
+          float zSpiralR = 0.2f + zr * 0.2f;
+          mZeroSxSlew[i] += (zSpiralR * cosf(zAngle) - mZeroSxSlew[i]) * vizSlew;
+          mZeroSySlew[i] += (zSpiralR * sinf(zAngle) - mZeroSySlew[i]) * vizSlew;
           mZeroStrSlew[i] += (zr - mZeroStrSlew[i]) * vizSlew;
         }
         else
@@ -181,14 +190,31 @@ namespace stolmine
       float parallaxX = sinR * 0.06f;  // small horizontal shift
       float parallaxY = -cosR * 0.03f; // tiny vertical shift
 
-      // --- Metaball field (Wyvill function, compact support) ---
+      // --- Wyvill ferrofluid field ---
+      // Base blob at center provides cohesive body.
+      // Individual poles pull protrusions outward from the body.
+      // Compact support keeps everything contained.
+
       float invRx = 1.0f / (radX > 1 ? radX : 1);
       float invRy = 1.0f / (radY > 1 ? radY : 1);
 
-      // Wyvill influence radius per blob
-      float blobR = 0.6f;
-      float blobR2 = blobR * blobR;
-      float invBlobR2 = 1.0f / blobR2;
+      // Base body: large Wyvill blob at center
+      float bodyR2 = 0.25f; // R=0.5, body fills inner half of sphere
+      float invBodyR2 = 1.0f / bodyR2;
+
+      // Pole protrusion influence radius (each pole's arm)
+      float armR2 = 0.20f; // R~0.45
+      float invArmR2 = 1.0f / armR2;
+
+      // Zero dimple radius
+      float zeroR2 = 0.09f;
+      float invZeroR2 = 1.0f / zeroR2;
+
+      // Sum total pole strength for body size scaling
+      float totalStr = 0.0f;
+      for (int i = 0; i < 7; i++) totalStr += mPoleStrSlew[i];
+      float bodyStr = 0.4f + totalStr * 0.3f; // body grows with more active poles
+      if (bodyStr > 1.2f) bodyStr = 1.2f;
 
       for (int py = 0; py < h; py++)
       {
@@ -198,39 +224,44 @@ namespace stolmine
         {
           float nx = ((float)px - (float)w * 0.5f) * invRx;
 
-          // Hard clip to sphere boundary
+          // Hard clip to sphere
           float sphereDist2 = nx * nx + ny * ny;
           if (sphereDist2 > 1.0f) continue;
 
-          // Sphere shell: faint ring at edge
+          // Shell outline
           float shell = 0.0f;
-          if (sphereDist2 > 0.85f)
+          if (sphereDist2 > 0.88f)
           {
-            float t = (sphereDist2 - 0.85f) / 0.15f;
-            shell = t * 3.0f;
+            float t = (sphereDist2 - 0.88f) / 0.12f;
+            shell = t * 2.5f;
           }
 
-          // Metaball evaluation point (with parallax offset from shell)
+          // Parallax offset for metaball evaluation
           float mx = nx - parallaxX;
           float my = ny - parallaxY;
 
-          // Wyvill field: sum (1 - d²/R²)³ for each pole
+          // Central body blob
+          float bodyD2 = mx * mx + my * my;
           float field = 0.0f;
+          if (bodyD2 < bodyR2)
+          {
+            float t = 1.0f - bodyD2 * invBodyR2;
+            field += bodyStr * t * t * t;
+          }
+
+          // Pole protrusions: arms stretching outward from body
           for (int i = 0; i < 7; i++)
           {
             if (mPoleStrSlew[i] < 0.005f) continue;
             float dx = mx - mPoleSxSlew[i];
             float dy = my - mPoleSySlew[i];
             float d2 = dx * dx + dy * dy;
-            if (d2 >= blobR2) continue; // compact support: skip if outside R
-            float t = 1.0f - d2 * invBlobR2;
-            float w3 = t * t * t; // (1 - d²/R²)³
-            field += mPoleStrSlew[i] * w3;
+            if (d2 >= armR2) continue;
+            float t = 1.0f - d2 * invArmR2;
+            field += mPoleStrSlew[i] * 1.5f * t * t * t;
           }
 
-          // Subtract zero contributions (smaller influence radius)
-          float zeroR2 = 0.2f;
-          float invZeroR2 = 1.0f / zeroR2;
+          // Zero dimples: subtract from field
           for (int i = 0; i < 7; i++)
           {
             if (mZeroStrSlew[i] < 0.005f) continue;
@@ -239,24 +270,23 @@ namespace stolmine
             float d2 = dx * dx + dy * dy;
             if (d2 >= zeroR2) continue;
             float t = 1.0f - d2 * invZeroR2;
-            field -= mZeroStrSlew[i] * 0.3f * t * t * t;
+            field -= mZeroStrSlew[i] * 0.5f * t * t * t;
           }
 
-          // Containment: smooth falloff at sphere boundary
-          float contain = 1.0f;
-          if (sphereDist2 > 0.7f)
+          // Containment falloff at sphere edge
+          if (sphereDist2 > 0.65f)
           {
-            float t = (1.0f - sphereDist2) / 0.3f; // 1 at r=0.7, 0 at r=1.0
-            contain = t * t; // smooth rolloff
+            float t = (1.0f - sphereDist2) / 0.35f;
+            if (t < 0.0f) t = 0.0f;
+            field *= t * t;
           }
-          field *= contain;
 
-          // Threshold + brightness
+          // Threshold and shade
           float blob = 0.0f;
           if (field > 0.15f)
           {
-            blob = (field - 0.15f) * 14.0f;
-            if (blob > 11.0f) blob = 11.0f;
+            blob = (field - 0.15f) * 12.0f;
+            if (blob > 12.0f) blob = 12.0f;
           }
 
           int gray = (int)(blob + shell);
