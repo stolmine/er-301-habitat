@@ -22,8 +22,8 @@ function SferaCutoffControl:init(args)
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
   local qMap = (function()
-    local m = app.LinearDialMap(0.5, 1.5)
-    m:setSteps(0.1, 0.01, 0.001, 0.001)
+    local m = app.LinearDialMap(0.25, 4.0)
+    m:setSteps(0.25, 0.05, 0.01, 0.01)
     return m
   end)()
 

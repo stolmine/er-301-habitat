@@ -19,6 +19,11 @@ end
 
 local paramMap = floatMap(0, 1)
 local levelMap = floatMap(0, 2)
+local spinMap = (function()
+  local m = app.LinearDialMap(-2, 2)
+  m:setSteps(0.1, 0.01, 0.001, 0.001)
+  return m
+end)()
 
 local cutoffMap = (function()
   local m = app.LinearDialMap(20, 20000)
@@ -96,6 +101,12 @@ function Sfera:onLoadGraph(channelCount)
   level:hardSet("Bias", 1.0)
   tieParam("Level", level)
   self:addMonoBranch("level", level, "In", level, "Out")
+
+  -- Spin
+  local spin = self:addObject("spin", app.ParameterAdapter())
+  spin:hardSet("Bias", 0.0)
+  tieParam("Spin", spin)
+  self:addMonoBranch("spin", spin, "In", spin, "Out")
 
   -- V/Oct branch
   self:addMonoBranch("tune", tune, "In", tune, "Out")
@@ -206,9 +217,20 @@ function Sfera:onLoadViews(objects, branches)
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 1.0
+    },
+    spin = GainBias {
+      button = "spin",
+      description = "Spin",
+      branch = branches.spin,
+      gainbias = objects.spin,
+      range = objects.spin,
+      biasMap = spinMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
     }
   }, {
-    expanded = { "config", "viz", "paramX", "paramY", "cutoff", "level" },
+    expanded = { "config", "viz", "paramX", "paramY", "cutoff", "spin", "level" },
     collapsed = {}
   }
 end

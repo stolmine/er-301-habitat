@@ -155,6 +155,7 @@ namespace stolmine
 
     float sphereRotation = 0.0f;
     float slewRate = 0.02f; // ~50ms transition
+    float envelope = 0.0f;  // RMS envelope for graphic
 
     void Init()
     {
@@ -238,6 +239,7 @@ namespace stolmine
     addParameter(mCutoff);
     addParameter(mQScale);
     addParameter(mLevel);
+    addParameter(mSpin);
 
     mpInternal = new Internal();
     mpInternal->Init();
@@ -288,6 +290,14 @@ namespace stolmine
   {
     return CLAMP(0.0f, 1.0f, mParamY.value());
   }
+  float Sfera::getEnvelope()
+  {
+    return mpInternal->envelope;
+  }
+  float Sfera::getSpin()
+  {
+    return mSpin.value();
+  }
 
   static inline float lerp2d(float v00, float v10, float v01, float v11, float x, float y)
   {
@@ -305,7 +315,7 @@ namespace stolmine
     float px = CLAMP(0.0f, 1.0f, mParamX.value());
     float py = CLAMP(0.0f, 1.0f, mParamY.value());
     float cutoff = CLAMP(20.0f, 20000.0f, mCutoff.value());
-    float qScale = CLAMP(0.5f, 1.5f, mQScale.value());
+    float qScale = CLAMP(0.25f, 4.0f, mQScale.value());
     float level = CLAMP(0.0f, 2.0f, mLevel.value());
 
     float sr = globalConfig.sampleRate;
@@ -376,6 +386,11 @@ namespace stolmine
 
     s.sphereRotation = (float)config * 6.28318f / (float)s.numCubes + px * 0.26f - py * 0.26f;
 
+    // Envelope follower coefficients (fast attack ~1ms, slow release ~150ms)
+    float envAttack = 1.0f - expf(-1.0f / (sr * 0.001f));
+    float envRelease = 1.0f - expf(-1.0f / (sr * 0.150f));
+    float env = s.envelope;
+
     // Process audio
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -395,8 +410,15 @@ namespace stolmine
         x = 0.0f;
       }
 
-      out[i] = x * gain * level;
+      float y = x * gain * level;
+      out[i] = y;
+
+      // RMS envelope on output
+      float abs_y = y < 0 ? -y : y;
+      float coeff = abs_y > env ? envAttack : envRelease;
+      env += (abs_y - env) * coeff;
     }
+    s.envelope = env;
   }
 
 } // namespace stolmine
