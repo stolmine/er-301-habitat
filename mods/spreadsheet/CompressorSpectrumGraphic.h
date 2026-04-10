@@ -153,10 +153,21 @@ namespace stolmine
 
         rmsH[px] = rmsNorm * h;
 
-        // GR ceiling: base from actual GR, subtle spectral articulation
-        float grBase = 1.0f - bandGR;
-        float articulation = rmsNorm * bandGR * 0.15f;
-        float grTarget = grBase - articulation;
+        // GR ceiling: Catmull-Rom interpolated spectral contour scaled by GR
+        // The contour follows the spectrum shape -- where signal is loud,
+        // the ceiling dips; where quiet, it stays high. Actual GR sets the depth.
+        float grContour = catmullRom(
+            getRms(b0 - 1), getRms(b0), getRms(b0 + 1), getRms(b0 + 2),
+            frac, tau);
+        if (grContour < 0.0f) grContour = 0.0f;
+        float grContourNorm = dbNorm(grContour);
+        if (grContourNorm < 0.0f) grContourNorm = 0.0f;
+        if (grContourNorm > 1.0f) grContourNorm = 1.0f;
+
+        // GR base sets the floor, contour shapes it above that
+        float grFloor = 1.0f - bandGR; // 0 = full squash, 1 = no compression
+        float grTarget = grFloor + (1.0f - grFloor) * (1.0f - grContourNorm);
+        if (grTarget > 1.0f) grTarget = 1.0f;
         if (grTarget < 0.0f) grTarget = 0.0f;
         float grCoeff = grTarget < mGrSlew[px] ? 0.6f : 0.08f;
         mGrSlew[px] += (grTarget - mGrSlew[px]) * grCoeff;
