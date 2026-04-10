@@ -38,6 +38,7 @@ namespace stolmine
     int mBandIndex;
     MultibandCompressor *mpComp;
     float mGrSlew[kMaxCompSpecWidth]; // per-pixel GR ceiling (slewed)
+    float mGrPeakHold;
     bool mSlewInit = false;
 
     static inline float catmullRom(float p0, float p1, float p2, float p3,
@@ -78,6 +79,7 @@ namespace stolmine
       {
         for (int i = 0; i < kMaxCompSpecWidth; i++)
           mGrSlew[i] = 1.0f;
+        mGrPeakHold = 0.0f;
         mSlewInit = true;
       }
 
@@ -115,6 +117,12 @@ namespace stolmine
       // Current band GR (0 = no reduction, 1 = full reduction)
       float bandGR = mpComp->getBandGainReduction(mBandIndex);
 
+      // Peak-hold GR for readout (~1s decay)
+      if (bandGR > mGrPeakHold)
+        mGrPeakHold = bandGR;
+      else
+        mGrPeakHold *= 0.97f;
+
       // --- Pass 1: interpolate RMS heights and GR ceiling per pixel ---
       float rmsH[kMaxCompSpecWidth];
 
@@ -145,9 +153,12 @@ namespace stolmine
 
         rmsH[px] = rmsNorm * h;
 
-        // GR ceiling: fast attack (1 frame), slower release
-        float grTarget = 1.0f - bandGR; // 1 = full height (no reduction), 0 = fully squashed
-        float grCoeff = grTarget < mGrSlew[px] ? 0.6f : 0.08f; // fast down, slow up
+        // GR ceiling: base from actual GR, subtle spectral articulation
+        float grBase = 1.0f - bandGR;
+        float articulation = rmsNorm * bandGR * 0.15f;
+        float grTarget = grBase - articulation;
+        if (grTarget < 0.0f) grTarget = 0.0f;
+        float grCoeff = grTarget < mGrSlew[px] ? 0.6f : 0.08f;
         mGrSlew[px] += (grTarget - mGrSlew[px]) * grCoeff;
       }
 
@@ -161,36 +172,36 @@ namespace stolmine
         int rH = (int)rmsH[px];
         if (rH > mHeight - 1) rH = mHeight - 1;
 
-        // GR ceiling height
         int grH = (int)(mGrSlew[px] * h);
         if (grH > mHeight - 1) grH = mHeight - 1;
 
-        // RMS gradient fill (capped at GR ceiling)
-        int drawH = rH < grH ? rH : grH;
-        if (drawH > 0)
+        // Full RMS spectrum, dim above GR ceiling
+        if (rH > 0)
         {
-          int maxGray = 4 + (int)((float)drawH / (h > 1 ? h : 1) * 7.0f);
+          int maxGray = 4 + (int)((float)rH / (h > 1 ? h : 1) * 7.0f);
           if (maxGray > 11) maxGray = 11;
           int minGray = 2;
 
-          for (int y = 0; y < drawH; y++)
+          for (int y = 0; y < rH; y++)
           {
-            float yt = (float)y / (float)(drawH > 1 ? drawH - 1 : 1);
+            float yt = (float)y / (float)(rH > 1 ? rH - 1 : 1);
             int gray = maxGray - (int)(yt * (float)(maxGray - minGray));
             if (gray < 2) gray = 2;
+            if (y > grH)
+              gray = (gray + 1) / 3;
             fb.pixel(gray, x, bot + y);
           }
         }
 
-        // GR ceiling line (connected segments, like Parfait's peak line)
+        // GR ceiling line
         int grY = bot + grH;
         if (prevGrY >= 0)
-          fb.line(10, x - 1, prevGrY, x, grY); // gray 10 = bright but not WHITE
+          fb.line(10, x - 1, prevGrY, x, grY);
         prevGrY = grY;
       }
 
-      // GR readout in top-right corner
-      float grDb = bandGR > 0.001f ? 20.0f * log10f(1.0f - bandGR + 1e-10f) : 0.0f;
+      // GR readout (peak-hold)
+      float grDb = mGrPeakHold > 0.001f ? 20.0f * log10f(1.0f - mGrPeakHold + 1e-10f) : 0.0f;
       char buf[8];
       snprintf(buf, sizeof(buf), "%.0f", grDb);
       fb.text(WHITE, mWorldLeft + mWidth - 20, mWorldBottom + mHeight - 10, buf, 10);
