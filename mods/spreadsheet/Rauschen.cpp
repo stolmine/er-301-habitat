@@ -57,6 +57,10 @@ namespace stolmine
     int gendyIndex;
     float gendyPhase;
 
+    // Lorenz state
+    float lorX, lorY, lorZ;
+
+
     // SVF state (post-generator filter)
     float svfS1, svfS2;
 
@@ -90,6 +94,7 @@ namespace stolmine
         gendyAmp[i] = 0.0f;
         gendyDur[i] = 0.002f; // ~2ms per segment default
       }
+      lorX = 0.1f; lorY = 0.0f; lorZ = 0.0f;
       svfS1 = 0.0f;
       svfS2 = 0.0f;
       memset(outputRing, 0, sizeof(outputRing));
@@ -137,7 +142,7 @@ namespace stolmine
     float *voct = mVOct.buffer();
     float *out = mOut.buffer();
 
-    int algo = CLAMP(0, 9, (int)(mAlgorithm.value() + 0.5f));
+    int algo = CLAMP(0, 10, (int)(mAlgorithm.value() + 0.5f));
     s.currentAlgo = algo;
     float px = CLAMP(0.0f, 1.0f, mParamX.value());
     float py = CLAMP(0.0f, 1.0f, mParamY.value());
@@ -386,9 +391,9 @@ namespace stolmine
 
       case 9: // Gendy (Xenakis stochastic synthesis)
       {
-        // Quadratic: subtle at low settings, wild at high
-        float ampScale = px * px;
-        float durScale = py * py;
+        // X: amplitude chaos, Y: duration chaos
+        float ampScale = px;
+        float durScale = py;
         int N = Internal::kGendyPoints;
 
         // Interpolate between current and next breakpoint
@@ -406,19 +411,58 @@ namespace stolmine
           s.gendyPhase -= 1.0f;
           s.gendyIndex = nextIdx;
 
-          // Perturb the NEXT breakpoint
-          int pertIdx = (s.gendyIndex + 1) % N;
-          s.gendyAmp[pertIdx] += lcgBipolar(s.rngSeed) * ampScale * 0.3f;
-          // Mirror at boundaries
-          if (s.gendyAmp[pertIdx] > 1.0f) s.gendyAmp[pertIdx] = 2.0f - s.gendyAmp[pertIdx];
-          if (s.gendyAmp[pertIdx] < -1.0f) s.gendyAmp[pertIdx] = -2.0f - s.gendyAmp[pertIdx];
+          // Perturb multiple breakpoints ahead for less periodicity
+          for (int k = 1; k <= 3; k++)
+          {
+            int pertIdx = (s.gendyIndex + k) % N;
 
-          s.gendyDur[pertIdx] += lcgBipolar(s.rngSeed) * durScale * 0.001f;
-          if (s.gendyDur[pertIdx] < 0.0002f) s.gendyDur[pertIdx] = 0.0002f;
-          if (s.gendyDur[pertIdx] > 0.05f) s.gendyDur[pertIdx] = 0.05f;
+            // Amplitude: large steps, mirror-fold at boundaries
+            float ampStep = lcgBipolar(s.rngSeed) * ampScale * 0.7f;
+            // Occasional large jump (1 in 4 chance, Levy-like)
+            if ((lcgNext(s.rngSeed) & 3) == 0)
+              ampStep *= 2.5f;
+            s.gendyAmp[pertIdx] += ampStep;
+            if (s.gendyAmp[pertIdx] > 1.0f) s.gendyAmp[pertIdx] = 2.0f - s.gendyAmp[pertIdx];
+            if (s.gendyAmp[pertIdx] < -1.0f) s.gendyAmp[pertIdx] = -2.0f - s.gendyAmp[pertIdx];
+
+            // Duration: proportional perturbation (short stays short-ish, long stays long-ish)
+            float durStep = s.gendyDur[pertIdx] * lcgBipolar(s.rngSeed) * durScale * 0.6f;
+            s.gendyDur[pertIdx] += durStep;
+            if (s.gendyDur[pertIdx] < 0.00005f) s.gendyDur[pertIdx] = 0.00005f; // ~20kHz
+            if (s.gendyDur[pertIdx] > 0.1f) s.gendyDur[pertIdx] = 0.1f;         // ~10Hz
+          }
         }
         break;
       }
+
+      case 10: // Lorenz attractor
+      {
+        float sigma = 10.0f;
+        float beta = 2.6667f; // 8/3
+        // X: chaos -- rho 22-100, onset ~24.7
+        float rho = 22.0f + px * 78.0f;
+        // Y: speed via sub-stepping. Fixed small dt keeps integration accurate.
+        // 1-20 sub-steps per sample: ~50Hz to ~1kHz at 48kHz
+        float dt = 0.002f;
+        int steps = 1 + (int)(py * 19.0f);
+        for (int k = 0; k < steps; k++)
+        {
+          float dx = sigma * (s.lorY - s.lorX);
+          float dy = s.lorX * (rho - s.lorZ) - s.lorY;
+          float dz = s.lorX * s.lorY - beta * s.lorZ;
+          s.lorX += dx * dt;
+          s.lorY += dy * dt;
+          s.lorZ += dz * dt;
+        }
+        if (s.lorX != s.lorX || s.lorX > 100.0f || s.lorX < -100.0f)
+        {
+          s.lorX = 0.1f + lcgFloat(s.rngSeed) * 0.01f;
+          s.lorY = 0.0f; s.lorZ = 25.0f;
+        }
+        sample = s.lorX * 0.05f;
+        break;
+      }
+
       }
 
       // Post-generator SVF morph filter
