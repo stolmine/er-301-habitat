@@ -278,15 +278,21 @@ namespace stolmine
       threshold[b] = threshFader * threshFader * threshFader;
       if (threshold[b] < 0.001f) threshold[b] = 0.001f;
       ratio[b] = mBandBias[b][1] ? CLAMP(1.0f, 20.0f, mBandBias[b][1]->value()) : 2.0f;
-      // Speed maps to attack/release unless overridden by expansion
+      // Speed: G-Bus style breakpoints, interpolated
+      // 0.0=30ms/1.2s  0.2=10ms/0.6s  0.4=3ms/0.3s  0.6=1ms/0.1s  0.8=0.3ms/0.1s  1.0=0.1ms/0.1s
+      static const float kSpeedBP[] =   { 0.0f,   0.2f,  0.4f,  0.6f,  0.8f,   1.0f };
+      static const float kAttackBP[] =  { 0.030f, 0.010f, 0.003f, 0.001f, 0.0003f, 0.0001f };
+      static const float kReleaseBP[] = { 1.2f,   0.6f,  0.3f,  0.1f,  0.1f,   0.1f };
       float speed = mBandBias[b][2] ? CLAMP(0.0f, 1.0f, mBandBias[b][2]->value()) : 0.3f;
-      float speedAttack = 0.0001f + (1.0f - speed) * (1.0f - speed) * (1.0f - speed) * 0.1f;
-      float speedRelease = speedAttack * 10.0f;
-
-      float expAttack = mBandBias[b][3] ? mBandBias[b][3]->value() : -1.0f;
-      float expRelease = mBandBias[b][4] ? mBandBias[b][4]->value() : -1.0f;
-      attack[b] = (expAttack > 0.0f) ? CLAMP(0.0001f, 0.1f, expAttack) : speedAttack;
-      release[b] = (expRelease > 0.0f) ? CLAMP(0.001f, 1.0f, expRelease) : speedRelease;
+      // Find segment and interpolate
+      int seg = 4;
+      for (int k = 0; k < 5; k++)
+      {
+        if (speed < kSpeedBP[k + 1]) { seg = k; break; }
+      }
+      float segT = (speed - kSpeedBP[seg]) / (kSpeedBP[seg + 1] - kSpeedBP[seg]);
+      attack[b] = kAttackBP[seg] + (kAttackBP[seg + 1] - kAttackBP[seg]) * segT;
+      release[b] = kReleaseBP[seg] + (kReleaseBP[seg + 1] - kReleaseBP[seg]) * segT;
     }
 
     // Dirty-check crossovers

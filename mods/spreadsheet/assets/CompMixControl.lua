@@ -34,6 +34,8 @@ function CompMixControl:init(args)
   self.paramSubGraphic:addChild(desc)
 
   -- Auto makeup toggle indicator
+  local autoOption = args.compressor:getOption("AutoMakeup")
+  autoOption:enableSerialization()
   self.autoIndicator = app.BinaryIndicator(0, 24, ply, 32)
   self.autoIndicator:setCenter(col1, center3)
   self.paramSubGraphic:addChild(self.autoIndicator)

@@ -57,6 +57,8 @@ function CompSidechainControl:init(args)
   self.subGraphic:addChild(self.scope)
 
   -- Enable indicator
+  local scOption = args.compressor:getOption("EnableSidechain")
+  scOption:enableSerialization()
   self.enableIndicator = app.BinaryIndicator(0, 24, ply, 32)
   self.enableIndicator:setCenter(col2, center3)
   self.subGraphic:addChild(self.enableIndicator)
