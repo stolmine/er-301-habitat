@@ -136,6 +136,7 @@ namespace stolmine
     addParameter(mBandAttack0); addParameter(mBandAttack1); addParameter(mBandAttack2);
     addParameter(mBandRelease0); addParameter(mBandRelease1); addParameter(mBandRelease2);
     addParameter(mBandWeight0); addParameter(mBandWeight1); addParameter(mBandWeight2);
+    addParameter(mBandLevel0); addParameter(mBandLevel1); addParameter(mBandLevel2);
 
     addOption(mAutoMakeup);
     addOption(mEnableSidechain);
@@ -144,8 +145,11 @@ namespace stolmine
     mpInternal->Init();
 
     for (int b = 0; b < 3; b++)
+    {
       for (int p = 0; p < kCompBiasCount; p++)
         mBandBias[b][p] = 0;
+      mBandLevelBias[b] = 0;
+    }
 
     for (int i = 0; i < 3; i++)
       mLastWeight[i] = -1.0f;
@@ -164,6 +168,12 @@ namespace stolmine
   {
     if (band < 0 || band >= 3 || param < 0 || param >= kCompBiasCount) return;
     mBandBias[band][param] = p;
+  }
+
+  void MultibandCompressor::setBandLevelBias(int band, od::Parameter *p)
+  {
+    if (band < 0 || band >= 3) return;
+    mBandLevelBias[band] = p;
   }
 
   float MultibandCompressor::getCrossoverFreq(int band)
@@ -415,8 +425,9 @@ namespace stolmine
         float gr = fast_fromDb(-reductionDb);
         s.comp[b].gainReduction = gr;
 
-        // Apply GR + makeup to audio band
-        float compressed = aBands[b] * gr * makeupGain[b];
+        // Apply GR + makeup + band level to audio band
+        float bandLevel = mBandLevelBias[b] ? CLAMP(0.0f, 2.0f, mBandLevelBias[b]->value()) : 1.0f;
+        float compressed = aBands[b] * gr * makeupGain[b] * bandLevel;
         sum += compressed;
 
         // Metering accumulators

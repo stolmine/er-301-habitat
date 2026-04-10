@@ -175,6 +175,10 @@ function MultibandCompressor:onLoadGraph(channelCount)
     tieParam("BandWeight" .. i, weight)
     self:addMonoBranch("bandWeight" .. i, weight, "In", weight, "Out")
 
+    local bandLevel = self:addObject("bandLevel" .. i, app.ParameterAdapter())
+    bandLevel:hardSet("Bias", 1.0)
+    tieParam("BandLevel" .. i, bandLevel)
+    self:addMonoBranch("bandLevel" .. i, bandLevel, "In", bandLevel, "Out")
   end
 
   -- Set Bias refs for per-band params
@@ -186,6 +190,7 @@ function MultibandCompressor:onLoadGraph(channelCount)
     op:setBandBias(i, 3, self.objects["bandAttack" .. i]:getParameter("Bias"))
     op:setBandBias(i, 4, self.objects["bandRelease" .. i]:getParameter("Bias"))
     op:setBandBias(i, 5, self.objects["bandWeight" .. i]:getParameter("Bias"))
+    op:setBandLevelBias(i, self.objects["bandLevel" .. i]:getParameter("Bias"))
     if stereo then
       self.objects.opR:setBandBias(i, 0, self.objects["bandThreshold" .. i]:getParameter("Bias"))
       self.objects.opR:setBandBias(i, 1, self.objects["bandRatio" .. i]:getParameter("Bias"))
@@ -193,6 +198,7 @@ function MultibandCompressor:onLoadGraph(channelCount)
       self.objects.opR:setBandBias(i, 3, self.objects["bandAttack" .. i]:getParameter("Bias"))
       self.objects.opR:setBandBias(i, 4, self.objects["bandRelease" .. i]:getParameter("Bias"))
       self.objects.opR:setBandBias(i, 5, self.objects["bandWeight" .. i]:getParameter("Bias"))
+      self.objects.opR:setBandLevelBias(i, self.objects["bandLevel" .. i]:getParameter("Bias"))
     end
   end
 end
@@ -231,9 +237,22 @@ function MultibandCompressor:onLoadViews()
 
   for i = 0, 2 do
     local name = bandNames[i + 1]
+    local bandLevelMap = (function()
+      local m = app.LinearDialMap(0, 2)
+      m:setSteps(0.1, 0.01, 0.001, 0.001)
+      return m
+    end)()
+
     controls[name] = CompBandControl {
       button = name,
       description = name:upper() .. " Band",
+      branch = self.branches["bandLevel" .. i],
+      gainbias = self.objects["bandLevel" .. i],
+      range = self.objects["bandLevel" .. i],
+      biasMap = bandLevelMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 1.0,
       compressor = self.objects.op,
       bandIndex = i,
       thresholdParam = self.objects["bandThreshold" .. i]:getParameter("Bias"),

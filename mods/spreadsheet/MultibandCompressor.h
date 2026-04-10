@@ -47,6 +47,9 @@ namespace stolmine
     od::Parameter mBandWeight0{"BandWeight0", 1.0f};
     od::Parameter mBandWeight1{"BandWeight1", 1.0f};
     od::Parameter mBandWeight2{"BandWeight2", 1.0f};
+    od::Parameter mBandLevel0{"BandLevel0", 1.0f};
+    od::Parameter mBandLevel1{"BandLevel1", 1.0f};
+    od::Parameter mBandLevel2{"BandLevel2", 1.0f};
     od::Option mAutoMakeup{"AutoMakeup", 2};       // 1=on, 2=off
     od::Option mEnableSidechain{"EnableSidechain", 2}; // 1=on, 2=off
 #endif
@@ -58,6 +61,7 @@ namespace stolmine
     float getBandLevel(int band);
     int getCrossoverBin(int band);
     void setBandBias(int band, int param, od::Parameter *p);
+    void setBandLevelBias(int band, od::Parameter *p);
 
     bool isAutoMakeupEnabled();
     void toggleAutoMakeup();
@@ -71,6 +75,7 @@ namespace stolmine
     // Bias refs: [band][param]: 0=threshold, 1=ratio, 2=speed, 3=attack, 4=release, 5=weight
     static const int kCompBiasCount = 6;
     od::Parameter *mBandBias[3][6];
+    od::Parameter *mBandLevelBias[3];
 
     float mLastWeight[3];
     float mLastSkew;
