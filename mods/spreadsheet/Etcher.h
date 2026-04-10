@@ -49,9 +49,17 @@ namespace stolmine
     od::Parameter mEditOffset{"EditOffset", 0.0f};
     od::Parameter mEditCurve{"EditCurve", 1.0f};
     od::Parameter mEditWeight{"EditWeight", 1.0f};
+
+    // Transform
+    od::Inlet mTransform{"Transform"};
+    od::Parameter mTransformFunc{"TransformFunc", 0.0f};
+    od::Parameter mTransformDepth{"TransformDepth", 0.5f};
 #endif
 
-    // SWIG-visible: segment data accessors
+    // SWIG-visible
+    void fireTransform();
+
+    // Segment data accessors
     float getSegmentOffset(int i);
     void setSegmentOffset(int i, float v);
     int getSegmentCurve(int i);
@@ -93,11 +101,15 @@ namespace stolmine
     int mDevCurveSnap;
     float mDevWeightSnap;
 
+    bool mTransformWasHigh;
+    bool mManualFire;
+
 #ifndef SWIGLUA
     void recomputeBoundaries();
     void checkBoundariesDirty();
     float interpolateSegment(int seg, float frac);
     void rollDeviation(int seg);
+    void applyTransform();
 #endif
   };
 

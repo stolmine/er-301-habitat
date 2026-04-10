@@ -23,6 +23,11 @@ namespace stolmine
     int curve[kMaxSegments];
     float weight[kMaxSegments];
 
+    // Transform work buffers (heap, not stack)
+    float tmpOffset[kMaxSegments];
+    int tmpCurve[kMaxSegments];
+    float tmpWeight[kMaxSegments];
+
     void Init()
     {
       for (int i = 0; i < kMaxSegments; i++)
@@ -46,10 +51,15 @@ namespace stolmine
     addParameter(mEditOffset);
     addParameter(mEditCurve);
     addParameter(mEditWeight);
+    addInput(mTransform);
+    addParameter(mTransformFunc);
+    addParameter(mTransformDepth);
 
     mpInternal = new Internal();
     mpInternal->Init();
 
+    mTransformWasHigh = false;
+    mManualFire = false;
     mActiveSegment = 0;
     mCachedSegmentCount = 16;
     mCurrentInput = 0.0f;
@@ -314,14 +324,167 @@ namespace stolmine
     }
   }
 
+  // --- Transform ---
+
+  void Etcher::fireTransform()
+  {
+    mManualFire = true;
+  }
+
+  void Etcher::applyTransform()
+  {
+    Internal &s = *mpInternal;
+    int func = CLAMP(0, 7, (int)(mTransformFunc.value() + 0.5f));
+    float depth = CLAMP(0.0f, 1.0f, mTransformDepth.value());
+    int segCount = mCachedSegmentCount;
+
+    switch (func)
+    {
+    case 0: // Random: lerp toward random values
+      for (int i = 0; i < segCount; i++)
+      {
+        float oTarget = randFloat(); // -1 to 1
+        s.offset[i] += (oTarget - s.offset[i]) * depth;
+        float wTarget = 0.1f + (randFloat() + 1.0f) * 0.5f * 3.9f;
+        s.weight[i] += (wTarget - s.weight[i]) * depth;
+      }
+      break;
+
+    case 1: // Rotate: shift segments by depth-scaled positions
+    {
+      int rot = 1 + (int)(depth * (float)(segCount - 1));
+      rot = rot % segCount;
+      if (rot == 0) rot = 1;
+      for (int i = 0; i < segCount; i++)
+      {
+        int src = (i + rot) % segCount;
+        s.tmpOffset[i] = s.offset[src];
+        s.tmpCurve[i] = s.curve[src];
+        s.tmpWeight[i] = s.weight[src];
+      }
+      memcpy(s.offset, s.tmpOffset, segCount * sizeof(float));
+      memcpy(s.curve, s.tmpCurve, segCount * sizeof(int));
+      memcpy(s.weight, s.tmpWeight, segCount * sizeof(float));
+      break;
+    }
+
+    case 2: // Invert: flip offsets
+      for (int i = 0; i < segCount; i++)
+      {
+        float target = -s.offset[i];
+        s.offset[i] += (target - s.offset[i]) * depth;
+      }
+      break;
+
+    case 3: // Reverse: swap segment order
+      for (int i = 0; i < segCount / 2; i++)
+      {
+        int j = segCount - 1 - i;
+        float oA = s.offset[i], oB = s.offset[j];
+        s.offset[i] += (oB - oA) * depth;
+        s.offset[j] += (oA - oB) * depth;
+        float wA = s.weight[i], wB = s.weight[j];
+        s.weight[i] += (wB - wA) * depth;
+        s.weight[j] += (wA - wB) * depth;
+        if (depth > 0.99f)
+        {
+          int cTmp = s.curve[i];
+          s.curve[i] = s.curve[j];
+          s.curve[j] = cTmp;
+        }
+      }
+      break;
+
+    case 4: // Smooth: average with neighbors
+    {
+      for (int i = 0; i < segCount; i++)
+      {
+        int prev = (i > 0) ? i - 1 : segCount - 1;
+        int next = (i < segCount - 1) ? i + 1 : 0;
+        float avg = (s.offset[prev] + s.offset[i] + s.offset[next]) / 3.0f;
+        s.tmpOffset[i] = s.offset[i] + (avg - s.offset[i]) * depth;
+      }
+      memcpy(s.offset, s.tmpOffset, segCount * sizeof(float));
+      break;
+    }
+
+    case 5: // Quantize: snap to N levels
+    {
+      float levels = 2.0f + depth * 14.0f; // 2-16 levels
+      for (int i = 0; i < segCount; i++)
+      {
+        // Map -1..1 to 0..1, quantize, map back
+        float norm = (s.offset[i] + 1.0f) * 0.5f;
+        float q = floorf(norm * levels + 0.5f) / levels;
+        float target = q * 2.0f - 1.0f;
+        s.offset[i] += (target - s.offset[i]) * depth;
+      }
+      break;
+    }
+
+    case 6: // Spread: normalize to full range
+    {
+      float mn = s.offset[0], mx = s.offset[0];
+      for (int i = 1; i < segCount; i++)
+      {
+        if (s.offset[i] < mn) mn = s.offset[i];
+        if (s.offset[i] > mx) mx = s.offset[i];
+      }
+      float range = mx - mn;
+      if (range > 0.001f)
+      {
+        for (int i = 0; i < segCount; i++)
+        {
+          float norm = (s.offset[i] - mn) / range * 2.0f - 1.0f;
+          s.offset[i] += (norm - s.offset[i]) * depth;
+        }
+      }
+      break;
+    }
+
+    case 7: // Fold: wrap values back into range
+      for (int i = 0; i < segCount; i++)
+      {
+        float v = s.offset[i] * (1.0f + depth * 2.0f); // amplify then fold
+        while (v > 1.0f) v = 2.0f - v;
+        while (v < -1.0f) v = -2.0f - v;
+        s.offset[i] += (v - s.offset[i]) * depth;
+      }
+      break;
+    }
+
+    // Clamp to valid ranges
+    for (int i = 0; i < segCount; i++)
+    {
+      s.offset[i] = CLAMP(-1.0f, 1.0f, s.offset[i]);
+      s.weight[i] = CLAMP(0.1f, 4.0f, s.weight[i]);
+    }
+
+    mBoundariesDirty = true;
+    loadSegment(mActiveSegment);
+  }
+
   // --- Process ---
 
   void Etcher::process()
   {
     float *in = mInput.buffer();
     float *out = mOut.buffer();
+    float *xform = mTransform.buffer();
 
     float level = mLevel.value();
+
+    // Transform gate (block-rate check)
+    for (int i = 0; i < FRAMELENGTH; i++)
+    {
+      bool xformHigh = xform[i] > 0.0f;
+      if ((xformHigh && !mTransformWasHigh) || mManualFire)
+      {
+        applyTransform();
+        mManualFire = false;
+      }
+      mTransformWasHigh = xformHigh;
+    }
 
     checkBoundariesDirty();
 

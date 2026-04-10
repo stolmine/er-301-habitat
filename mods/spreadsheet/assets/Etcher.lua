@@ -6,6 +6,7 @@ local GainBias = require "Unit.ViewControl.GainBias"
 local SegmentListControl = require "spreadsheet.SegmentListControl"
 local TransferCurveControl = require "spreadsheet.TransferCurveControl"
 local ModeSelector = require "spreadsheet.ModeSelector"
+local TransformGateControl = require "spreadsheet.TransformGateControl"
 local Encoder = require "Encoder"
 
 local MenuHeader = require "Unit.MenuControl.Header"
@@ -25,7 +26,7 @@ local function intMap(min, max)
 end
 
 local inputMap = floatMap(-1, 1)
-local skewMap = floatMap(0.1, 4.0)
+local skewMap = floatMap(-1, 1)
 local segCountMap = intMap(4, 32)
 local levelMap = floatMap(-1, 1)
 local deviationMap = floatMap(0, 1)
@@ -57,7 +58,7 @@ function Etcher:onLoadGraph(channelCount)
 
   -- Skew
   local skew = self:addObject("skew", app.ParameterAdapter())
-  skew:hardSet("Bias", 1.0)
+  skew:hardSet("Bias", 0.0)
   tie(op, "Skew", skew, "Out")
   self:addMonoBranch("skew", skew, "In", skew, "Out")
 
@@ -84,6 +85,22 @@ function Etcher:onLoadGraph(channelCount)
   devScope:hardSet("Bias", 0)
   tie(op, "DeviationScope", devScope, "Out")
   self:addMonoBranch("devScope", devScope, "In", devScope, "Out")
+
+  -- Transform gate
+  local xformGate = self:addObject("xformGate", app.Comparator())
+  xformGate:setGateMode()
+  connect(xformGate, "Out", op, "Transform")
+  self:addMonoBranch("xform", xformGate, "In", xformGate, "Out")
+
+  -- Transform function
+  local xformFunc = self:addObject("xformFunc", app.ParameterAdapter())
+  xformFunc:hardSet("Bias", 0)
+  tie(op, "TransformFunc", xformFunc, "Out")
+
+  -- Transform depth
+  local xformDepth = self:addObject("xformDepth", app.ParameterAdapter())
+  xformDepth:hardSet("Bias", 0.5)
+  tie(op, "TransformDepth", xformDepth, "Out")
 
   -- Output
   connect(op, "Out", self, "Out1")
@@ -281,9 +298,32 @@ function Etcher:onLoadViews()
       biasPrecision = 0,
       initialBias = 0,
       modeNames = { [0] = "ofst", "crv", "wgt", "all" }
+    },
+    xform = TransformGateControl {
+      button = "xform",
+      description = "Transform",
+      seq = self.objects.op,
+      comparator = self.objects.xformGate,
+      branch = self.branches.xform,
+      funcParam = self.objects.xformFunc:getParameter("Bias"),
+      factorParam = self.objects.xformDepth:getParameter("Bias"),
+      funcNames = { [0] = "rnd", "rot", "inv", "rev", "smo", "qnt", "sprd", "fold" },
+      funcMap = (function()
+        local m = app.LinearDialMap(0, 7)
+        m:setSteps(1, 1, 1, 1)
+        m:setRounding(1)
+        return m
+      end)(),
+      factorMap = (function()
+        local m = app.LinearDialMap(0, 1)
+        m:setSteps(0.1, 0.01, 0.001, 0.001)
+        return m
+      end)(),
+      factorPrecision = 2,
+      paramALabel = "depth"
     }
   }, {
-    expanded = { "input", "segments", "curve", "skew", "level" },
+    expanded = { "input", "segments", "curve", "skew", "xform", "level" },
     collapsed = {},
     curve = { "curve", "deviation", "devScope", "segCount" }
   }
@@ -306,6 +346,8 @@ function Etcher:serialize()
   t.segCount = self.objects.segCount:getParameter("Bias"):target()
   t.deviation = self.objects.deviation:getParameter("Bias"):target()
   t.devScope = self.objects.devScope:getParameter("Bias"):target()
+  t.xformFunc = self.objects.xformFunc:getParameter("Bias"):target()
+  t.xformDepth = self.objects.xformDepth:getParameter("Bias"):target()
   return t
 end
 
@@ -336,6 +378,12 @@ function Etcher:deserialize(t)
   end
   if t.devScope ~= nil then
     self.objects.devScope:hardSet("Bias", t.devScope)
+  end
+  if t.xformFunc ~= nil then
+    self.objects.xformFunc:hardSet("Bias", t.xformFunc)
+  end
+  if t.xformDepth ~= nil then
+    self.objects.xformDepth:hardSet("Bias", t.xformDepth)
   end
   -- Sync edit buffer after framework restores stale edit params
   self.objects.op:loadSegment(0)
