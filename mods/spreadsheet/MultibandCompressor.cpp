@@ -200,6 +200,12 @@ namespace stolmine
     return mpInternal->bandEnergy[band];
   }
 
+  float MultibandCompressor::getBandLevelSetting(int band)
+  {
+    if (band < 0 || band >= 3) return 1.0f;
+    return mBandLevelBias[band] ? mBandLevelBias[band]->value() : 1.0f;
+  }
+
   int MultibandCompressor::getCrossoverBin(int band)
   {
     if (band < 0 || band >= 2) return 0;

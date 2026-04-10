@@ -199,7 +199,7 @@ namespace stolmine
             int gray = maxGray - (int)(yt * (float)(maxGray - minGray));
             if (gray < 2) gray = 2;
             if (y > grH)
-              gray = (gray + 1) / 3;
+              gray = (gray + 2) / 3; // dimmed but still visible
             fb.pixel(gray, x, bot + y);
           }
         }
@@ -210,6 +210,14 @@ namespace stolmine
           fb.line(10, x - 1, prevGrY, x, grY);
         prevGrY = grY;
       }
+
+      // Band level dotted line: 0=bottom, 1=middle, 2=top
+      float levelSetting = mpComp->getBandLevelSetting(mBandIndex);
+      int levelY = bot + (int)(levelSetting * 0.5f * h); // 0->bot, 1->mid, 2->top
+      if (levelY > bot + (int)h - 1) levelY = bot + (int)h - 1;
+      if (levelY < bot) levelY = bot;
+      for (int px = 0; px < w; px += 3) // dotted: every 3rd pixel
+        fb.pixel(GRAY7, mWorldLeft + px, levelY);
 
       // GR readout (peak-hold)
       float grDb = mGrPeakHold > 0.001f ? 20.0f * log10f(1.0f - mGrPeakHold + 1e-10f) : 0.0f;

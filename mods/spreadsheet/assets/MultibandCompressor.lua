@@ -75,8 +75,8 @@ local MultibandCompressor = Class {}
 MultibandCompressor:include(Unit)
 
 function MultibandCompressor:init(args)
-  args.title = "Presse"
-  args.mnemonic = "Pr"
+  args.title = "Impasto"
+  args.mnemonic = "Im"
   Unit.init(self, args)
 end
 

@@ -59,6 +59,7 @@ namespace stolmine
     float getBandGainReduction(int band);
     float getFFTRms(int bin);
     float getBandLevel(int band);
+    float getBandLevelSetting(int band);
     int getCrossoverBin(int band);
     void setBandBias(int band, int param, od::Parameter *p);
     void setBandLevelBias(int band, od::Parameter *p);
