@@ -21,11 +21,11 @@ namespace stolmine
     od::Outlet mOutput{"Out"};
     od::Parameter mShape{"Shape", 0.0f};
     od::Parameter mFundamental{"Fundamental", 110.0f};
+#endif
 
   private:
-    stages::VariableShapeOscillator *mpOsc = nullptr;
-    float *mpWorkBuffer = nullptr;
-#endif
+    stages::VariableShapeOscillator *mpOsc;
+    float *mpWorkBuffer;
   };
 
 } // namespace stolmine
