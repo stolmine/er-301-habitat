@@ -1,5 +1,5 @@
 local app = app
-local libbiome = require "biome.libbiome"
+local libcatchall = require "biome.libcatchall"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
@@ -28,14 +28,14 @@ function Flakes:init(args)
 end
 
 function Flakes:onLoadGraph(channelCount)
-  local op = self:addObject("op", libbiome.Flakes())
+  local op = self:addObject("op", libcatchall.Flakes())
   op:allocateTimeUpTo(10.0)
 
   connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
 
   if channelCount > 1 then
-    local opR = self:addObject("opR", libbiome.Flakes())
+    local opR = self:addObject("opR", libcatchall.Flakes())
     opR:allocateTimeUpTo(10.0)
     connect(self, "In2", opR, "In")
     connect(opR, "Out", self, "Out2")

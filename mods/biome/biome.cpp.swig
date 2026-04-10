@@ -25,7 +25,6 @@
 #include "VarishapeOsc.h"
 #include "Pecto.h"
 #include "Transport.h"
-#include "Flakes.h"
 #define SWIGLUA
 %}
 
@@ -51,4 +50,3 @@
 %include "VarishapeOsc.h"
 %include "Pecto.h"
 %include "Transport.h"
-%include "Flakes.h"

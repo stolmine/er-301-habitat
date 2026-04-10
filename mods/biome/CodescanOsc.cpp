@@ -92,6 +92,21 @@ namespace stolmine
     }
     fclose(f);
 #endif
+
+    // Randomize scan region within loaded data
+    if (mData && mDataSize > 4096 + 256)
+    {
+      // Use address of this instance + phase as entropy (different each insert)
+      uint32_t seed = (uint32_t)(uintptr_t)this;
+      seed ^= seed >> 16;
+      seed *= 2654435761u;
+      int maxStart = mDataSize - 4096 - 256;
+      mRegionStart = (int)(seed % (uint32_t)maxStart);
+    }
+    else
+    {
+      mRegionStart = 0;
+    }
   }
 
   const char *CodescanOsc::getFilePath()
@@ -124,11 +139,12 @@ namespace stolmine
     // DC blocker coefficient: ~20Hz highpass at any sample rate
     float dcCoeff = 6.2832f * 20.0f / sr; // 2*pi*fc/sr
 
-    // Scan position: where in the data to read the waveform cycle
-    // Use a 256-byte window as one waveform cycle
+    // Scan position: 4096-byte region, randomized on each file load
     int windowSize = 256;
     int maxOffset = mDataSize - windowSize;
-    int scanOffset = (int)(scan * (float)maxOffset);
+    int scanRange = 4096;
+    if (scanRange > maxOffset) scanRange = maxOffset;
+    int scanOffset = mRegionStart + (int)(scan * (float)scanRange);
     if (scanOffset < 0) scanOffset = 0;
     if (scanOffset > maxOffset) scanOffset = maxOffset;
 

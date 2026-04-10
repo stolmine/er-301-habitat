@@ -491,8 +491,8 @@ N BPFs locked to harmonic ratios of a fundamental. Reshapes harmonic content -- 
 - [x] LR4 crossover (24dB/oct) -- 4 cascaded one-pole stages per split point
 - [x] Fast math: IEEE 754 fast_log2/fast_exp2 for compressor, fast_sinf for sine fold
 - [x] Shaper type 0 = Off (passthrough, default) -- shapers shifted to 1-7
-- [ ] CPU profiling on am335x
-- [ ] Defaults tuning
+- [x] CPU profiling on am335x -- 13% idle, 25% with filters and saturation active
+- [x] Defaults tuning -- current defaults are good
 
 ## Crossover Engine Family (shared infrastructure)
 
@@ -541,6 +541,17 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 
 ### Station X (Codescan FIR)
 - [x] Reads libstolmine.so as FIR kernel (4-64 taps, normalized). Scan position, dry/wet mix. On reserve -- random kernels mostly produce noise-like filtering.
+
+### Lambda (Seeded Procedural Synth)
+- [ ] PRNG-seeded DSP: generates oscillator waveform + filter coefficients on load/reseed
+- [ ] Oscillator: weighted harmonic sum or procedural waveshaper, seeded amplitudes/phases
+- [ ] Filter: random pole/zero placement (Cytomic SVF cascade, like Sfera but generated)
+- [ ] Scan parameter: morphs through coefficient banks like a wavetable position
+- [ ] Behind VCA for amplitude control
+- [ ] V/Oct tracking on oscillator
+- [ ] Reseed: menu task or gate input, each seed = unique repeatable instrument
+- [ ] Seed is serialized so patches recall the same sound
+- [ ] Spreadsheet package (procedural generation + scan = complex UI)
 
 ### Varishape Oscillator
 - [ ] Continuously variable waveshape: sine > triangle > saw > square > pulse

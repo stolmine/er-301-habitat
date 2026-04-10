@@ -1,4 +1,4 @@
-PROJECTS = plaits grids stratos clouds kryos warps rings commotio peaks scope spreadsheet biome marbles
+PROJECTS = plaits grids stratos clouds kryos warps rings commotio peaks scope spreadsheet biome marbles catchall
 
 all: $(PROJECTS)
 

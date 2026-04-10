@@ -188,28 +188,30 @@ namespace stolmine
         break;
       }
 
-      case 1: // Pink -- X: tilt (white-to-brown), Y: resonance (feedback on integrators)
+      case 1: // Pink -- X: tilt (white-to-brown), Y: color (spectral thinning)
       {
         float white = lcgBipolar(s.rngSeed);
-        // Resonance: feed output back into input (Y=0: none, Y=1: strong)
-        float fbk = s.pinkB[5] * py * py * 0.9f; // quadratic for more usable range
-        float excited = white + fbk;
-        // 3-pole pink (fixed coefficients)
-        s.pinkB[0] = 0.99765f * s.pinkB[0] + excited * 0.0990460f;
-        s.pinkB[1] = 0.96300f * s.pinkB[1] + excited * 0.2965164f;
-        s.pinkB[2] = 0.57000f * s.pinkB[2] + excited * 1.0526913f;
-        float pink = (s.pinkB[0] + s.pinkB[1] + s.pinkB[2] + excited * 0.1848f);
+        // 3-pole pink (Kellet method)
+        s.pinkB[0] = 0.99765f * s.pinkB[0] + white * 0.0990460f;
+        s.pinkB[1] = 0.96300f * s.pinkB[1] + white * 0.2965164f;
+        s.pinkB[2] = 0.57000f * s.pinkB[2] + white * 1.0526913f;
+        float pink = (s.pinkB[0] + s.pinkB[1] + s.pinkB[2] + white * 0.1848f) * 0.25f;
         // Extra integration for brown tilt (X=0: pink, X=1: brown)
-        // Use exponential tilt coeff so midrange X is already noticeably darker
         float tiltCoeff = 0.02f + px * px * 0.18f;
         s.pinkB[3] += (pink - s.pinkB[3]) * tiltCoeff;
         s.pinkB[4] += (s.pinkB[3] - s.pinkB[4]) * tiltCoeff;
-        float brown = s.pinkB[4] * 5.0f;
-        sample = pink * (1.0f - px) + brown * px;
-        // Clamp feedback to prevent runaway
-        if (sample > 2.0f) sample = 2.0f;
-        if (sample < -2.0f) sample = -2.0f;
-        s.pinkB[5] = sample;
+        float brown = s.pinkB[4] * 4.0f;
+        float base = pink * (1.0f - px) + brown * px;
+        // Y: spectral thinning via sample-and-hold decimation
+        // Y=0: full bandwidth, Y=1: hold for up to 64 samples
+        int holdLen = 1 + (int)(py * py * 63.0f);
+        s.whiteDecCounter++;
+        if (s.whiteDecCounter >= holdLen)
+        {
+          s.whiteDecCounter = 0;
+          s.pinkB[5] = base;
+        }
+        sample = s.pinkB[5];
         break;
       }
 
@@ -269,52 +271,65 @@ namespace stolmine
         continue; // skip post-filter below
       }
 
-      case 4: // Crackle -- X: chaos (p), Y: damping (attractor shape)
+      case 4: // Crackle -- X: chaos (p), Y: energy injection
       {
-        // Power curve: X=0->1.0, X=0.5->1.75, X=1->2.0 (sweet spot spread across midrange)
-        float p = 1.0f + px * (2.0f - px); // concave curve, more resolution near chaos onset
-        float damp = 0.05f * (1.0f - py * py * 0.95f); // quadratic Y for more usable range
-        float yy = p * s.crackY1 - s.crackY2 - damp;
-        if (yy > 1.0f) yy = 1.0f;
-        if (yy < -1.0f) yy = -1.0f;
+        // X: 1.0 to 2.0 -- chaos parameter
+        float p = 1.0f + px;
+        // Y: energy constant (0.01 gentle to 0.3 aggressive)
+        float energy = 0.01f + py * 0.29f;
+        // SC-style crackle: abs() in state creates chaotic attractor
+        float yy = fabsf(p * s.crackY1 - s.crackY2 - energy);
+        // NaN/divergence recovery
+        if (yy > 2.0f || yy != yy)
+        {
+          yy = 0.1f + lcgFloat(s.rngSeed) * 0.01f;
+          s.crackY2 = 0.0f;
+        }
         s.crackY2 = s.crackY1;
         s.crackY1 = yy;
-        sample = yy;
+        // Output centered around zero
+        sample = yy * 2.0f - 1.0f;
         break;
       }
 
-      case 5: // Logistic -- X: growth (r), Y: slew (smooths between iterations)
+      case 5: // Logistic -- X: growth (r), Y: iteration rate (pitch)
       {
-        // Quadratic curve: X=0->3.0, X=0.5->3.25, X=1->4.0
-        // More fader travel in the bifurcation region (3.0-3.57)
-        float rr = 3.0f + px * px;
-        float target = rr * s.logX * (1.0f - s.logX);
-        // Reseed if escaped
-        if (target <= 0.0f || target >= 1.0f || target != target)
-          target = 0.5f + lcgFloat(s.rngSeed) * 0.01f;
-        // Slew: Y=0 instant (raw map), Y=1 heavy smoothing
-        float slewCoeff = 1.0f - py * 0.99f;
-        s.logX += (target - s.logX) * slewCoeff;
+        // X=0 -> r=3.45 (onset of chaos), X=1 -> r=4.0 (full chaos)
+        float rr = 3.45f + px * 0.55f;
+        // Y: hold length. Y=0 every sample (noise), Y=1 hold ~512 samples (pitched)
+        int holdLen = 1 + (int)(py * py * 511.0f);
+        s.whiteDecCounter++;
+        if (s.whiteDecCounter >= holdLen)
+        {
+          s.whiteDecCounter = 0;
+          float target = rr * s.logX * (1.0f - s.logX);
+          if (target <= 0.0f || target >= 1.0f || target != target)
+            target = 0.5f + lcgFloat(s.rngSeed) * 0.01f;
+          s.logX = target;
+        }
         sample = s.logX * 2.0f - 1.0f;
         break;
       }
 
-      case 6: // Henon
+      case 6: // Henon -- X: chaos (a), Y: coupling (b)
       {
-        // Quadratic curves: more resolution near the periodic/chaotic boundary
-        float a = 1.0f + px * px * 0.4f;  // 1.0 to 1.4 (sweet spot ~1.2-1.4)
-        float b = 0.1f + py * py * 0.3f;  // 0.1 to 0.4
+        // X: a = 1.15 to 1.45, linear -- spans periodic islands through full chaos
+        float a = 1.15f + px * 0.30f;
+        // Y: b = 0.0 to 0.6 -- wider range, 0 = 1D map, higher = stronger 2D coupling
+        float b = py * 0.6f;
         float xn = 1.0f - a * s.henX * s.henX + s.henY;
         float yn = b * s.henX;
         s.henX = xn;
         s.henY = yn;
-        // Clamp if diverged
-        if (s.henX > 2.0f || s.henX < -2.0f || s.henX != s.henX)
+        // Fold if diverged (keeps energy, doesn't just reset)
+        if (s.henX > 1.5f) s.henX = 3.0f - s.henX;
+        if (s.henX < -1.5f) s.henX = -3.0f - s.henX;
+        if (s.henX != s.henX)
         {
           s.henX = 0.1f + lcgFloat(s.rngSeed) * 0.01f;
           s.henY = 0.1f;
         }
-        sample = s.henX * 0.5f; // scale to ~[-1,1]
+        sample = s.henX * 0.65f;
         break;
       }
 

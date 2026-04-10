@@ -1,12 +1,12 @@
 local app = app
-local libspreadsheet = require "spreadsheet.libspreadsheet"
+local libcatchall = require "catchall.libcatchall"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local Pitch = require "Unit.ViewControl.Pitch"
 local GainBias = require "Unit.ViewControl.GainBias"
 local ViewControl = require "Unit.ViewControl"
-local ModeSelector = require "spreadsheet.ModeSelector"
-local SferaCutoffControl = require "spreadsheet.SferaCutoffControl"
+local ModeSelector = require "catchall.ModeSelector"
+local SferaCutoffControl = require "catchall.SferaCutoffControl"
 local Encoder = require "Encoder"
 
 local ply = app.SECTION_PLY
@@ -41,13 +41,13 @@ function Sfera:init(args)
 end
 
 function Sfera:onLoadGraph(channelCount)
-  local op = self:addObject("op", libspreadsheet.Sfera())
+  local op = self:addObject("op", libcatchall.Sfera())
 
   connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
 
   if channelCount > 1 then
-    local opR = self:addObject("opR", libspreadsheet.Sfera())
+    local opR = self:addObject("opR", libcatchall.Sfera())
     connect(self, "In2", opR, "In")
     connect(opR, "Out", self, "Out2")
   end
@@ -152,7 +152,7 @@ function Sfera:onLoadViews(objects, branches)
     self:setControlGraphic(graphic)
     self:addSpotDescriptor{center = ply * 0.5}
 
-    local sphere = libspreadsheet.SferaGraphic(0, 0, ply, 64)
+    local sphere = libcatchall.SferaGraphic(0, 0, ply, 64)
     sphere:follow(args.dspObject)
     graphic:addChild(sphere)
   end

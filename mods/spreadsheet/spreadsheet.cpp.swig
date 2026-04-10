@@ -22,7 +22,6 @@
 #include "MultibandSaturator.h"
 #include "SpectrumGraphic.h"
 #include "Rauschen.h"
-#include "Sfera.h"
 #define SWIGLUA
 %}
 
@@ -45,4 +44,3 @@
 %include "MultibandSaturator.h"
 %include "SpectrumGraphic.h"
 %include "Rauschen.h"
-%include "Sfera.h"

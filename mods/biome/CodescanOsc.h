@@ -32,6 +32,7 @@ namespace stolmine
     float mPhase = 0.0f;
     bool mSyncWasHigh = false;
     float mDCState = 0.0f;
+    int mRegionStart = 0;
     char mFilePath[kMaxPathLen];
   };
 
