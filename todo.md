@@ -400,10 +400,11 @@ Input: GainBias branch (no inlet). Output: 10Vpp (-5V to +5V).
 
 - [ ] Change input and output ranges to +/-1V. Most 301 controls are scaled for -1/1 or 0/1, so this ensures broader compatibility within the system. Users can scale externally if needed.
 - [ ] Verify deviation behavior on hardware across all scopes
-- [ ] Consider: audio-rate input option (inlet mode) for true waveshaping
-- [ ] Transforms: adapt Excel transform pattern for segment data (rotate, reverse, random, etc.)
+- [x] Audio-rate input works fine as-is
+- [x] Transforms: 8 depth-controlled ops (random, rotate, invert, reverse, smooth, quantize, spread, fold) via TransformGateControl with CV gate input
 - [ ] Additional presets: sine wave, triangle, custom user presets via save/restore
-- [ ] Fix skew asymmetry: same pow(accum, exponent) issue as Parfait -- positive/negative skew have unequal octave range
+- [x] Fix skew asymmetry: symmetric linear shift (same approach as Parfait), bipolar -1 to +1
+- [x] Fix SWIG crash on delete: private members were inside #ifndef SWIGLUA, moved outside
 
 ## Gridlock (Priority Gate Router)
 
@@ -424,6 +425,8 @@ Raw POLYBLEP oscillator extracted from VarishapeVoice. No envelope, no gate -- p
 - [x] C++ DSP: stages::VariableShapeOscillator wrapper, V/Oct, f0, shape, sync, level
 - [x] Lua: shape, V/Oct, f0, level (matches VarishapeVoice control order)
 - [x] Biome package
+- [x] Fix crash on delete: SWIG class size mismatch (private pointers inside #ifndef SWIGLUA)
+- [x] VarishapeVoice: same SWIG fix applied
 
 ## Flakes (granular shimmer/freeze)
 
@@ -538,13 +541,17 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 
 ### Bletchley Park (Codescan Oscillator)
 - [x] Reads libstolmine.so as wavetable. 256-byte windows, scan position, V/Oct, sync. Timbres unique per build/platform.
+- [x] Scan restricted to random 4096-byte region per insert for finer timbral control
+- [x] Working on hardware
 
 ### Station X (Codescan FIR)
-- [x] Reads libstolmine.so as FIR kernel (4-64 taps, normalized). Scan position, dry/wet mix. On reserve -- random kernels mostly produce noise-like filtering.
+- [x] Reads libstolmine.so as FIR kernel (4-64 taps, normalized). Scan position, dry/wet mix.
+- [x] Working on hardware
+- [ ] Needs attention on output character (mostly noise-like filtering)
 
-### Lambda (Seeded Procedural Synth)
-- [ ] PRNG-seeded DSP: generates oscillator waveform + filter coefficients on load/reseed
-- [ ] Oscillator: weighted harmonic sum or procedural waveshaper, seeded amplitudes/phases
+### Lambda (Seeded Procedural Synth) -- catchall package, WIP
+- [x] PRNG-seeded DSP: generates oscillator waveform + filter coefficients on load/reseed
+- [x] Oscillator: weighted harmonic sum, seeded amplitudes/phases
 - [ ] Filter: random pole/zero placement (Cytomic SVF cascade, like Sfera but generated)
 - [ ] Scan parameter: morphs through coefficient banks like a wavetable position
 - [ ] Behind VCA for amplitude control
@@ -566,18 +573,14 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [ ] Physical modeling: delay line + filter in feedback loop
 - [ ] Exciter input, tuned to V/Oct. Pair with comb bank for extended body modeling.
 
-### Rauschen (Parametric Noise)
-- [x] 10-algorithm noise generator: White, Pink, Dust, Particle, Crackle, Logistic, Henon, Clocked, Velvet, Gendy
+### Rauschen (Parametric Noise) -- COMPLETE
+- [x] 11 algorithms: White, Pink, Dust, Particle, Crackle, Logistic, Henon, Clocked, Velvet, Gendy, Lorenz
 - [x] X/Y params with log/quadratic curves on all algos, post-generator SVF morph filter with V/Oct
 - [x] Phase space viz (3D rotating x[n]/x[n-1]/x[n-2] with auto-scaling + phosphor decay)
 - [x] CutoffControl shift sub-display with addThresholdLabel morph labels
 - [x] ThresholdFader for expansion morph fader (reusable pattern)
 - [x] Spreadsheet package
-- [ ] Tune individual algorithm character (Pink resonance feedback, Gendy breakpoint count, etc.)
-- [ ] Consider additional algorithms (Rossler attractor, fractal Brownian motion)
-
-### Z-Plane Filter (research)
-- [ ] Rossum Morpheus-style: morph between pole/zero configurations in z-plane
+- [x] Algorithm tuning: Pink gain normalization + spectral thinning Y, Crackle SC-style abs() fold, Logistic focused on chaotic region with iteration rate Y, Henon wider param ranges with fold, Gendy tripled perturbation with Levy jumps and multi-breakpoint updates, Lorenz sub-stepping for accurate integration
 
 ### TZFM Complex Oscillator
 - [ ] Carrier + modulator with through-zero FM, wavefolding, sync
