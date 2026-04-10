@@ -10,6 +10,7 @@ return {
     { title = "Tomograph",   moduleName = "Filterbank",    category = "Spreadsheet", keywords = "filter, bank, resonator, EQ, spectral, effect, tomograph" },
     { title = "Petrichor",   moduleName = "MultitapDelay", category = "Spreadsheet", keywords = "delay, multitap, echo, feedback, filter, pitch, petrichor" },
     { title = "Parfait",    moduleName = "MultibandSaturator", category = "Spreadsheet", keywords = "distortion, saturation, multiband, shaper, effect, parfait" },
-    { title = "Rauschen",  moduleName = "Rauschen",           category = "Spreadsheet", keywords = "noise, generator, chaos, particle, dust, crackle, gendy, source" }
+    { title = "Rauschen",  moduleName = "Rauschen",           category = "Spreadsheet", keywords = "noise, generator, chaos, particle, dust, crackle, gendy, source" },
+    { title = "Presse",   moduleName = "MultibandCompressor", category = "Spreadsheet", keywords = "compressor, multiband, dynamics, sidechain, effect" }
   }
 }

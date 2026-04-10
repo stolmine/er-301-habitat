@@ -22,6 +22,8 @@
 #include "MultibandSaturator.h"
 #include "SpectrumGraphic.h"
 #include "Rauschen.h"
+#include "MultibandCompressor.h"
+#include "CompressorSpectrumGraphic.h"
 #define SWIGLUA
 %}
 
@@ -44,3 +46,5 @@
 %include "MultibandSaturator.h"
 %include "SpectrumGraphic.h"
 %include "Rauschen.h"
+%include "MultibandCompressor.h"
+%include "CompressorSpectrumGraphic.h"
