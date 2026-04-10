@@ -27,6 +27,7 @@ namespace stolmine
     mpEnv = new plaits::DecayEnvelope();
     mpEnv->Init();
     mpWorkBuffer = new float[FRAMELENGTH];
+    mGateWasHigh = false;
   }
 
   VarishapeVoice::~VarishapeVoice()

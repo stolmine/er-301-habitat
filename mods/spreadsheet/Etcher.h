@@ -39,7 +39,7 @@ namespace stolmine
     od::Inlet mInput{"Input"};
     od::Outlet mOut{"Out"};
 
-    od::Parameter mSkew{"Skew", 1.0f};
+    od::Parameter mSkew{"Skew", 0.0f};
     od::Parameter mLevel{"Level", 1.0f};
     od::Parameter mSegmentCount{"SegmentCount", 16.0f};
     od::Parameter mDeviation{"Deviation", 0.0f};
@@ -74,31 +74,29 @@ namespace stolmine
     // Evaluate transfer function at normalized input (0-1), for curve drawing
     float evaluate(float normalizedInput);
 
-#ifndef SWIGLUA
   private:
     struct Internal;
     Internal *mpInternal;
 
-    int mActiveSegment = 0;
-    int mCachedSegmentCount = 16;
-    float mCurrentInput = 0.0f;
-    float mCurrentOutput = 0.0f;
+    int mActiveSegment;
+    int mCachedSegmentCount;
+    float mCurrentInput;
+    float mCurrentOutput;
 
     float mBoundaries[kMaxSegments + 1];
-    bool mBoundariesDirty = true;
-    float mLastSkew = 1.0f;
-    int mLastSegCount = 16;
+    bool mBoundariesDirty;
+    float mLastSkew;
+    int mLastSegCount;
 
+    int mLastActiveSegment;
+    float mDevOffsetSnap;
+    int mDevCurveSnap;
+    float mDevWeightSnap;
+
+#ifndef SWIGLUA
     void recomputeBoundaries();
     void checkBoundariesDirty();
     float interpolateSegment(int seg, float frac);
-
-    // Deviation: snapshot on segment transition
-    int mLastActiveSegment = -1;
-    float mDevOffsetSnap = 0.0f;
-    int mDevCurveSnap = -1;    // -1 = no override
-    float mDevWeightSnap = 0.0f;
-
     void rollDeviation(int seg);
 #endif
   };

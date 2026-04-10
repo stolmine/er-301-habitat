@@ -24,13 +24,13 @@ namespace stolmine
     od::Parameter mShape{"Shape", 0.0f};
     od::Parameter mFundamental{"Fundamental", 110.0f};
     od::Parameter mDecay{"Decay", 0.5f};
+#endif
 
   private:
-    stages::VariableShapeOscillator *mpOsc = nullptr;
-    plaits::DecayEnvelope *mpEnv = nullptr;
-    float *mpWorkBuffer = nullptr;
-    bool mGateWasHigh = false;
-#endif
+    stages::VariableShapeOscillator *mpOsc;
+    plaits::DecayEnvelope *mpEnv;
+    float *mpWorkBuffer;
+    bool mGateWasHigh;
   };
 
 } // namespace stolmine

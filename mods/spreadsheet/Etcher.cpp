@@ -50,6 +50,18 @@ namespace stolmine
     mpInternal = new Internal();
     mpInternal->Init();
 
+    mActiveSegment = 0;
+    mCachedSegmentCount = 16;
+    mCurrentInput = 0.0f;
+    mCurrentOutput = 0.0f;
+    mBoundariesDirty = true;
+    mLastSkew = 0.0f;
+    mLastSegCount = 16;
+    mLastActiveSegment = -1;
+    mDevOffsetSnap = 0.0f;
+    mDevCurveSnap = -1;
+    mDevWeightSnap = 0.0f;
+
     recomputeBoundaries();
   }
 
@@ -118,7 +130,7 @@ namespace stolmine
   {
     Internal &s = *mpInternal;
     int segCount = mCachedSegmentCount;
-    float skew = CLAMP(0.1f, 4.0f, mSkew.value());
+    float skew = CLAMP(-1.0f, 1.0f, mSkew.value());
 
     // Sum active weights
     float totalWeight = 0.0f;
@@ -127,14 +139,18 @@ namespace stolmine
     if (totalWeight < 0.001f)
       totalWeight = 1.0f;
 
-    // Accumulate normalized boundaries
+    // Accumulate normalized boundaries, then apply symmetric skew
     mBoundaries[0] = 0.0f;
     float accum = 0.0f;
     for (int i = 0; i < segCount; i++)
     {
       accum += s.weight[i] / totalWeight;
       float raw = accum;
-      mBoundaries[i + 1] = (skew != 1.0f) ? powf(raw, skew) : raw;
+      // Symmetric skew: shift proportional to distance from nearer edge
+      // Positive skew bunches boundaries low, negative bunches high
+      float margin = (raw < 1.0f - raw) ? raw : 1.0f - raw;
+      float shifted = raw - skew * margin;
+      mBoundaries[i + 1] = shifted;
     }
     mBoundaries[segCount] = 1.0f;
 
@@ -146,7 +162,7 @@ namespace stolmine
   // Check if boundaries need recomputing (callable from any thread)
   void Etcher::checkBoundariesDirty()
   {
-    float skew = CLAMP(0.1f, 4.0f, mSkew.value());
+    float skew = CLAMP(-1.0f, 1.0f, mSkew.value());
     int segCount = CLAMP(2, kMaxSegments, (int)(mSegmentCount.value() + 0.5f));
 
     if (skew != mLastSkew || segCount != mLastSegCount)
