@@ -3,6 +3,7 @@
 ## Release
 
 - [x] Version bump biome and spreadsheet packages to v1.0.1 for hotfix released 2026-04-05. Rebuild and reupload.
+- [x] v2.0.0 released 2026-04-09. biome 2.0.0, spreadsheet 2.0.0, catchall 0.1.0. Full rebuild against current firmware.
 
 ## Mutable Instruments Ports
 
@@ -501,9 +502,16 @@ N BPFs locked to harmonic ratios of a fundamental. Reshapes harmonic content -- 
 
 Multiband comp and spectral gate share crossover/band-splitting frontend with Parfait. Build once, swap per-band processing.
 
-### Multiband Compressor
-- [ ] N bands (4-8), per-band: threshold, ratio, attack/decay
-- [ ] Global: crossover freqs (auto or manual), makeup gain, mix
+### Impasto (Multiband Compressor) -- COMPLETE
+- [x] 3-band LR4 crossover (shared from Parfait), per-band feedforward compression (CPR algorithm)
+- [x] Per-band: threshold (cubic-scaled), ratio, speed (G-Bus breakpoints), band level
+- [x] Sidechain input split through same crossover for frequency-aware detection
+- [x] FFT spectrum per band with Catmull-Rom GR ceiling contour, peak-hold GR readout
+- [x] Band level dotted line indicator, dimmed excess RMS above GR ceiling
+- [x] CompBandControl (GainBias + shift-toggle comp params), CompMixControl (auto makeup + output)
+- [x] CompSidechainControl (adapted from tomf's SidechainMeter)
+- [x] Drive/tone EQ, skew, auto makeup, dry/wet mix
+- [x] Dual-instance stereo, option serialization
 
 ### Spectral Gate
 - [ ] Same crossover, per-band: threshold, attack/release, level
