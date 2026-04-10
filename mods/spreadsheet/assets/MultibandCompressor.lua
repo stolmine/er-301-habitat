@@ -40,7 +40,7 @@ local weightMap = (function()
 end)()
 
 local thresholdMap = (function()
-  local m = app.LinearDialMap(0.01, 1)
+  local m = app.LinearDialMap(0, 1)
   m:setSteps(0.1, 0.01, 0.001, 0.001)
   return m
 end)()

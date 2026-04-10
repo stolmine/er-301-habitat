@@ -272,7 +272,11 @@ namespace stolmine
     float threshold[3], ratio[3], attack[3], release[3];
     for (int b = 0; b < 3; b++)
     {
-      threshold[b] = mBandBias[b][0] ? CLAMP(0.01f, 1.0f, mBandBias[b][0]->value()) : 0.5f;
+      // Fader is 0-1 linear; cube it for perceptual scaling
+      // Fader 1.0 = thresh 1.0 (0dB), 0.5 = 0.125 (-18dB), 0.0 = 0.0 (-inf)
+      float threshFader = mBandBias[b][0] ? CLAMP(0.0f, 1.0f, mBandBias[b][0]->value()) : 0.5f;
+      threshold[b] = threshFader * threshFader * threshFader;
+      if (threshold[b] < 0.001f) threshold[b] = 0.001f;
       ratio[b] = mBandBias[b][1] ? CLAMP(1.0f, 20.0f, mBandBias[b][1]->value()) : 2.0f;
       // Speed maps to attack/release unless overridden by expansion
       float speed = mBandBias[b][2] ? CLAMP(0.0f, 1.0f, mBandBias[b][2]->value()) : 0.3f;
