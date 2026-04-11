@@ -22,7 +22,7 @@ namespace mi
     stmlib::BufferAllocator allocator;
 
     // Arena for engine allocations (~32KB should be generous)
-    static const size_t kArenaSize = 32768;
+    static const size_t kArenaSize = 65536;
     uint8_t arena[kArenaSize];
 
     void Init()
