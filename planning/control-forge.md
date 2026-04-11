@@ -31,9 +31,9 @@ Offset steps define the level skeleton. Transitional steps (ramp/sinus/noise) de
 
 ## Playback
 
-- **Default: one-shot with reset.** Sequence plays through, output returns to 0, waits for reset.
-- **Loop mode:** menu option. End wraps to start. Trailing ramp targeting first step's value gives seamless cycling.
+- Loops continuously. End wraps to start — trailing ramp targeting first step's value gives seamless cycling.
 - Reset input snaps to 0 and resets playhead to step 1.
+- One-shot variant can be derived later if needed.
 
 ## Plies (7)
 
