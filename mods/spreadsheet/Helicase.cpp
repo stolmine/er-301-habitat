@@ -162,7 +162,9 @@ namespace stolmine
     bool linFM = mLinExpo.value() > 0.5f;
 
     // V/Oct (block-rate)
-    float pitch = voct[0] * 10.0f;
+    // V/Oct: Lua applies 10x ConstantGain (FULLSCALE_IN_VOLTS = 10),
+    // so voct arrives as 1.0 per octave. No additional scaling needed.
+    float pitch = voct[0];
     float carrierFreq = f0 * powf(2.0f, pitch + fine / 1200.0f);
     if (carrierFreq > sr * 0.49f) carrierFreq = sr * 0.49f;
     float modFreq = carrierFreq * ratio;

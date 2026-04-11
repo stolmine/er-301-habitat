@@ -31,12 +31,26 @@ namespace stolmine
   private:
     Helicase *mpHelicase;
     float mRotAngle = 0.0f;
-    float mSlewShape[128]; // slewed waveform points for smooth transitions
+    float mSlewShape[128];
     bool mSlewInit = false;
     int mUpdateCounter = 0;
-    float mSnapshot[256]; // captured ring buffer snapshot
+    float mSnapshot[256];
+    float mDcState = 0.0f; // DC blocker for feedback offset
 
     static const int kPoints = 128;
+
+    // Catmull-Rom with tension for smooth interpolation between points
+    static inline float catmullRom(float p0, float p1, float p2, float p3,
+                                   float t, float tau)
+    {
+      float t2 = t * t;
+      float t3 = t2 * t;
+      float a = -tau * p0 + (2.0f - tau) * p1 + (tau - 2.0f) * p2 + tau * p3;
+      float b = 2.0f * tau * p0 + (tau - 3.0f) * p1 + (3.0f - 2.0f * tau) * p2 - tau * p3;
+      float c = -tau * p0 + tau * p2;
+      float d = p1;
+      return a * t3 + b * t2 + c * t + d;
+    }
     static const float kTwoPi;
 
     // OPL3 waveform (matches Helicase.cpp)
@@ -96,17 +110,24 @@ namespace stolmine
       float cx = (float)w * 0.5f;
       float cy = (float)h * 0.5f;
       float minDim = (float)(w < h ? w : h);
-      float baseRadius = minDim * 0.35f;  // wider ring
-      float ampScale = minDim * 0.28f;
+      float baseRadius = minDim * 0.42f;
+      float ampScale = minDim * 0.51f;    // 1.35x taller
 
-      // Isometric tilt
-      float tiltAngle = 0.45f;
+      // Oblique tilt: slanting down and to the left
+      float tiltAngle = 0.6f;  // ~34 degrees, more oblique
       float cosTilt = cosf(tiltAngle);
       float sinTilt = sinf(tiltAngle);
       float cosRot = cosf(mRotAngle);
       float sinRot = sinf(mRotAngle);
 
-      // Downsample snapshot to kPoints with averaging, heavy slew
+      // DC blocker on snapshot: remove feedback offset
+      float dcSum = 0.0f;
+      for (int i = 0; i < 256; i++)
+        dcSum += mSnapshot[i];
+      float dcTarget = dcSum / 256.0f;
+      mDcState += (dcTarget - mDcState) * 0.1f;
+
+      // Downsample snapshot to kPoints with averaging, DC removal, heavy slew
       for (int i = 0; i < kPoints; i++)
       {
         int s0 = (i * 256) / kPoints;
@@ -116,39 +137,52 @@ namespace stolmine
         int count = s1 - s0;
         if (count < 1) count = 1;
         for (int j = s0; j < s1; j++)
-          avg += mSnapshot[j];
+          avg += mSnapshot[j] - mDcState;
         avg /= (float)count;
         mSlewShape[i] += (avg - mSlewShape[i]) * 0.08f;
       }
 
-      // Project points around circle, apply waveform as radial displacement
+      // Project points with Catmull-Rom interpolation between slewed shape points.
+      // At each of the kPoints base positions, subdivide into sub-segments for
+      // smooth curves that preserve detail at high ratios.
       int prevSx = -1, prevSy = -1;
-      int firstSx = -1, firstSy = -1;
+      static const int kSubdiv = 3; // 3 sub-segments per point = 384 total segments
 
-      for (int i = 0; i <= kPoints; i++)
+      for (int i = 0; i < kPoints * kSubdiv; i++)
       {
-        int idx = i % kPoints;
-        float angle = (float)idx / (float)kPoints * 6.28318f;
+        int baseIdx = i / kSubdiv;
+        float subFrac = (float)(i % kSubdiv) / (float)kSubdiv;
 
-        // Circle in XZ plane, waveform displaces along Y (vertical)
+        // Catmull-Rom across 4 neighboring points
+        int i0 = (baseIdx - 1 + kPoints) % kPoints;
+        int i1 = baseIdx % kPoints;
+        int i2 = (baseIdx + 1) % kPoints;
+        int i3 = (baseIdx + 2) % kPoints;
+
+        float tau = 0.5f; // standard tension
+        float val = catmullRom(mSlewShape[i0], mSlewShape[i1],
+                               mSlewShape[i2], mSlewShape[i3],
+                               subFrac, tau);
+
+        float angle = ((float)baseIdx + subFrac) / (float)kPoints * 6.28318f;
+
         float r = baseRadius;
         float px = r * cosf(angle);
         float pz = r * sinf(angle);
-        float py = mSlewShape[idx] * ampScale;
+        float py = val * ampScale;
 
         // Rotate around Y axis
         float rx = px * cosRot - pz * sinRot;
         float rz = px * sinRot + pz * cosRot;
 
-        // Isometric tilt around X axis
+        // Isometric tilt
         float ty = py * cosTilt - rz * sinTilt;
         float tz = py * sinTilt + rz * cosTilt;
 
-        // Project to screen
         int sx = left + (int)(cx + rx);
         int sy = bot + (int)(cy + ty);
 
-        // Depth shading: points facing viewer are bright, away are dim
+        // Depth shading
         float depth = (tz + baseRadius + ampScale) / (2.0f * (baseRadius + ampScale));
         if (depth < 0.0f) depth = 0.0f;
         if (depth > 1.0f) depth = 1.0f;
@@ -157,17 +191,11 @@ namespace stolmine
 
         if (prevSx >= 0)
         {
-          // Clip to bounds
           if (sx >= left && sx < left + w && sy >= bot && sy < bot + h &&
               prevSx >= left && prevSx < left + w && prevSy >= bot && prevSy < bot + h)
           {
             fb.line(gray, prevSx, prevSy, sx, sy);
           }
-        }
-        else
-        {
-          firstSx = sx;
-          firstSy = sy;
         }
         prevSx = sx;
         prevSy = sy;

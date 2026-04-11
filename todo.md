@@ -600,9 +600,14 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [x] Spreadsheet package
 - [x] Algorithm tuning: Pink gain normalization + spectral thinning Y, Crackle SC-style abs() fold, Logistic focused on chaotic region with iteration rate Y, Henon wider param ranges with fold, Gendy tripled perturbation with Levy jumps and multi-breakpoint updates, Lorenz sub-stepping for accurate integration
 
-### TZFM Complex Oscillator
-- [ ] Carrier + modulator with through-zero FM, wavefolding, sync
-- [ ] Buchla-inspired territory
+### Helicase (2-Op FM Oscillator) -- in progress
+- [x] Carrier + modulator with OPL3 waveforms, self-feedback, discontinuity folder
+- [x] 3 custom visualizations: phase space, transfer curve, circular ribbon
+- [x] V/Oct fix (was 100x scaling), FM scaling fix (use modInc not carrierInc)
+- [ ] Overview viz needs more visual identity
+- [ ] Modulator ribbon viz: tuning vertical throw, angle, flicker
+- [ ] Lo-fi config menu options (OPL bit-depth, alias mode, mod shape switching)
+- [ ] Carrier shape: consider wider selection beyond OPL3 set
 
 ## Buffer Shuffler / Groovebox
 
