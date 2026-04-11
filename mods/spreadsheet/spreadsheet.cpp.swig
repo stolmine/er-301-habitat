@@ -24,6 +24,10 @@
 #include "Rauschen.h"
 #include "MultibandCompressor.h"
 #include "CompressorSpectrumGraphic.h"
+#include "Helicase.h"
+#include "HelicasePhaseGraphic.h"
+#include "HelicaseCurveGraphic.h"
+#include "HelicaseOrbitalGraphic.h"
 #define SWIGLUA
 %}
 
@@ -48,3 +52,7 @@
 %include "Rauschen.h"
 %include "MultibandCompressor.h"
 %include "CompressorSpectrumGraphic.h"
+%include "Helicase.h"
+%include "HelicasePhaseGraphic.h"
+%include "HelicaseCurveGraphic.h"
+%include "HelicaseOrbitalGraphic.h"

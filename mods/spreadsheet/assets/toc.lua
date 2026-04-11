@@ -11,6 +11,7 @@ return {
     { title = "Petrichor",   moduleName = "MultitapDelay", category = "Spreadsheet", keywords = "delay, multitap, echo, feedback, filter, pitch, petrichor" },
     { title = "Parfait",    moduleName = "MultibandSaturator", category = "Spreadsheet", keywords = "distortion, saturation, multiband, shaper, effect, parfait" },
     { title = "Rauschen",  moduleName = "Rauschen",           category = "Spreadsheet", keywords = "noise, generator, chaos, particle, dust, crackle, gendy, source" },
-    { title = "Impasto",  moduleName = "MultibandCompressor", category = "Spreadsheet", keywords = "compressor, multiband, dynamics, sidechain, effect, impasto" }
+    { title = "Impasto",  moduleName = "MultibandCompressor", category = "Spreadsheet", keywords = "compressor, multiband, dynamics, sidechain, effect, impasto" },
+    { title = "Helicase", moduleName = "Helicase",           category = "Synthesizers", keywords = "oscillator, FM, synthesis, OPL3, generator, source, helicase" }
   }
 }
