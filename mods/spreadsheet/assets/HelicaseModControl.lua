@@ -62,8 +62,7 @@ function HelicaseModControl:init(args)
   end)()
   local shapeMap = (function()
     local m = app.LinearDialMap(0, 7)
-    m:setSteps(1, 1, 1, 1)
-    m:setRounding(1)
+    m:setSteps(1, 0.1, 0.01, 0.001)
     return m
   end)()
 

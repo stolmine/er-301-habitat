@@ -78,6 +78,28 @@ namespace stolmine
     return x;
   }
 
+  // Morphable OPL3 waveform (hi-fi mode): interpolate between adjacent shapes
+  static inline float opl3WaveMorph(float phase, float shapeF)
+  {
+    int s0 = (int)shapeF;
+    int s1 = s0 + 1;
+    if (s0 < 0) s0 = 0;
+    if (s1 > 7) s1 = 7;
+    if (s0 > 7) s0 = 7;
+    float frac = shapeF - (float)s0;
+    float w0 = opl3Wave(phase, s0);
+    float w1 = opl3Wave(phase, s1);
+    return w0 + (w1 - w0) * frac;
+  }
+
+  // OPL3 bit-depth emulation: 10-bit phase, log-encoded amplitude
+  static inline float opl3Quantize(float sample)
+  {
+    // Quantize to ~256 levels (8-bit effective amplitude, log-style)
+    float q = floorf(sample * 127.5f + 0.5f) / 127.5f;
+    return q;
+  }
+
   // Discontinuity folder: morph between adjacent transfer functions (0-15)
   // 0-7: OPL3 operations (phase-mapped), 8-15: wavefolders (direct)
   static inline float discFold(float input, float typeF)
@@ -165,6 +187,7 @@ namespace stolmine
     addParameter(mCarrierShape);
     addParameter(mSyncThreshold);
     addOption(mLinExpo);
+    addOption(mHiFi);
 
     mpInternal = new Internal();
     mpInternal->Init();
@@ -232,12 +255,17 @@ namespace stolmine
     float discTypeF = CLAMP(0.0f, 15.0f, mDiscType.value());
     float ratio = CLAMP(0.5f, 16.0f, mRatio.value());
     float feedback = CLAMP(0.0f, 1.0f, mFeedback.value());
-    int modShape = CLAMP(0, 7, (int)(mModShape.value() + 0.5f));
     float fine = CLAMP(-100.0f, 100.0f, mFine.value());
     float level = CLAMP(0.0f, 1.0f, mLevel.value());
-    int carrierShape = CLAMP(0, 7, (int)(mCarrierShape.value() + 0.5f));
     float syncThreshold = CLAMP(0.0f, 1.0f, mSyncThreshold.value());
     bool linFM = mLinExpo.value() == 1;
+    bool hifi = mHiFi.value() == 2;
+
+    // Shape params: integer (hard-switched) in lofi, float (morphable) in hifi
+    float modShapeF = CLAMP(0.0f, 7.0f, mModShape.value());
+    float carrierShapeF = CLAMP(0.0f, 7.0f, mCarrierShape.value());
+    int modShape = (int)(modShapeF + 0.5f);
+    int carrierShape = (int)(carrierShapeF + 0.5f);
 
     // V/Oct: Lua applies 10x ConstantGain, arrives as 1.0 per octave
     float pitch = voct[0];
@@ -308,7 +336,8 @@ namespace stolmine
       // Self-feedback: modulator output feeds back into its own phase
       float fb = tanhf(s.modFeedbackState) * feedback * 0.5f;
       float modPhaseFB = s.modPhase + fb;
-      float modOut = opl3Wave(modPhaseFB, modShape);
+      float modOut = hifi ? opl3WaveMorph(modPhaseFB, modShapeF)
+                          : opl3Wave(modPhaseFB, modShape);
       s.modFeedbackState = modOut;
 
       // FM: modulator modulates carrier phase increment
@@ -325,7 +354,8 @@ namespace stolmine
       s.carrierPhase -= floorf(s.carrierPhase);
 
       // Carrier (always FM'd)
-      float carrSig = opl3Wave(s.carrierPhase, carrierShape);
+      float carrSig = hifi ? opl3WaveMorph(s.carrierPhase, carrierShapeF)
+                           : opl3Wave(s.carrierPhase, carrierShape);
 
       // Discontinuity folder
       float folded = carrSig;
@@ -333,6 +363,13 @@ namespace stolmine
       {
         float f = discFold(carrSig, discTypeF);
         folded = carrSig * (1.0f - discIndex) + f * discIndex;
+      }
+
+      // Lo-fi: OPL3 bit-depth quantization on oscillators before mix
+      if (!hifi)
+      {
+        folded = opl3Quantize(folded);
+        modOut = opl3Quantize(modOut);
       }
 
       // Mix: carrier always present, modulator added on top

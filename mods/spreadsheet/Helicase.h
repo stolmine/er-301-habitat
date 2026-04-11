@@ -44,6 +44,7 @@ namespace stolmine
     od::Parameter mCarrierShape{"CarrierShape", 0.0f};
     od::Parameter mSyncThreshold{"SyncThreshold", 0.0f};
     od::Option mLinExpo{"LinExpo", 2}; // 1=lin, 2=expo
+    od::Option mHiFi{"HiFi", 1};      // 1=lofi (default), 2=hifi
 #endif
 
   private:

@@ -11,6 +11,8 @@ local HelicaseModControl = require "spreadsheet.HelicaseModControl"
 local HelicaseSyncControl = require "spreadsheet.HelicaseSyncControl"
 local OptionControl = require "Unit.ViewControl.OptionControl"
 local Encoder = require "Encoder"
+local MenuHeader = require "Unit.MenuControl.Header"
+local OptionMenu = require "Unit.MenuControl.OptionControl"
 
 local ply = app.SECTION_PLY
 
@@ -199,8 +201,7 @@ function Helicase:onLoadViews()
   }
   local carrShapeMap = (function()
     local m = app.LinearDialMap(0, 7)
-    m:setSteps(1, 1, 1, 1)
-    m:setRounding(1)
+    m:setSteps(1, 0.1, 0.01, 0.001)
     return m
   end)()
   controls.overCarrierShape = GainBias {
@@ -285,8 +286,7 @@ function Helicase:onLoadViews()
 
   local shapeMap = (function()
     local m = app.LinearDialMap(0, 7)
-    m:setSteps(1, 1, 1, 1)
-    m:setRounding(1)
+    m:setSteps(1, 0.1, 0.01, 0.001)
     return m
   end)()
   controls.modShape = GainBias {
@@ -364,8 +364,7 @@ function Helicase:onLoadViews()
   }
   local discTypeMap = (function()
     local m = app.LinearDialMap(0, 15)
-    m:setSteps(1, 1, 1, 1)
-    m:setRounding(1)
+    m:setSteps(1, 0.1, 0.01, 0.001)
     return m
   end)()
   controls.shapDiscType = GainBias {
@@ -381,6 +380,17 @@ function Helicase:onLoadViews()
   }
 
   return controls, views
+end
+
+function Helicase:onShowMenu(objects, branches)
+  return {
+    modeHeader = MenuHeader { description = "Mode" },
+    hifi = OptionMenu {
+      description = "Quality",
+      option = objects.op:getOption("HiFi"),
+      choices = { "lo-fi", "hi-fi" }
+    }
+  }, { "modeHeader", "hifi" }
 end
 
 return Helicase
