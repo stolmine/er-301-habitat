@@ -620,6 +620,7 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [ ] Move to Spreadsheet category (currently Synthesizers)
 - [ ] Sync ply: implement soft sync switch alongside hard sync
 - [ ] Research Just Friends run modes for dynamic sync paradigm
+- [ ] Discontinuity folder: add fold shapes to upper half of type control (current 0-7 are OPL3 operations, 8-15 would be actual wavefolders -- triangle fold, sine fold, hard fold, etc.)
 - [ ] Lo-fi config menu options (OPL bit-depth, alias mode, mod shape switching)
 - [ ] Carrier shape: consider wider selection beyond OPL3 set
 - [ ] CPU profiling on am335x
