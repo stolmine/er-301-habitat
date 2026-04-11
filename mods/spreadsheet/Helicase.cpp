@@ -103,7 +103,7 @@ namespace stolmine
     addParameter(mFine);
     addParameter(mLevel);
     addParameter(mCarrierShape);
-    addParameter(mLinExpo);
+    addOption(mLinExpo);
 
     mpInternal = new Internal();
     mpInternal->Init();
@@ -141,6 +141,16 @@ namespace stolmine
     return CLAMP(0.0f, 1.0f, mDiscIndex.value());
   }
 
+  bool Helicase::isLinFM()
+  {
+    return mLinExpo.value() == 1;
+  }
+
+  void Helicase::toggleLinFM()
+  {
+    mLinExpo.set(isLinFM() ? 2 : 1);
+  }
+
   float Helicase::getDiscType()
   {
     return CLAMP(0.0f, 7.0f, mDiscType.value());
@@ -165,7 +175,7 @@ namespace stolmine
     float fine = CLAMP(-100.0f, 100.0f, mFine.value());
     float level = CLAMP(0.0f, 1.0f, mLevel.value());
     int carrierShape = CLAMP(0, 7, (int)(mCarrierShape.value() + 0.5f));
-    bool linFM = mLinExpo.value() > 0.5f;
+    bool linFM = mLinExpo.value() == 1;
 
     // V/Oct (block-rate)
     // V/Oct: Lua applies 10x ConstantGain (FULLSCALE_IN_VOLTS = 10),

@@ -46,13 +46,20 @@ namespace stolmine
     float mNoiseFreq[kMaxClusters];
     float mNoiseScale[kMaxClusters];
 
+    // Work buffers (heap, not stack -- GUI thread has small stack on ARM)
+    float mPts[256][3];
+    float mSumX[kMaxClusters], mSumY[kMaxClusters], mSumZ[kMaxClusters];
+    float mCount[kMaxClusters];
+    float mScreenX[kMaxClusters], mScreenY[kMaxClusters], mScreenZ[kMaxClusters];
+    float mProjStr[kMaxClusters];
+
     // Spectral complexity (zero-crossing rate) for brightness
     float mSpectralBright = 0.5f;
     // Spectral centroid proxy for shell radius
     float mCentroidSlew = 0.5f;
 
     // Frame skip: evaluate field every other frame, blit cache otherwise
-    int mFrameToggle = 0;
+    int mFrameToggle = 1; // start with eval frame, not blit
     uint8_t mCache[64 * 64]; // cached pixel values at full res
 
   public:
@@ -65,6 +72,7 @@ namespace stolmine
 
       if (!mInitialized)
       {
+        memset(mCache, 0, sizeof(mCache));
         // Seed clusters in a ring
         for (int i = 0; i < kMaxClusters; i++)
         {
@@ -99,7 +107,7 @@ namespace stolmine
       float contractRate = 0.01f;
 
       // Collect normalized 3D points from ring buffer
-      float pts[256][3];
+      float (&pts)[256][3] = mPts;
       int nPts = 0;
       for (int i = 2; i < 256; i++)
       {
@@ -128,8 +136,10 @@ namespace stolmine
       }
 
       // One iteration of k-means: assign points, compute new centroids
-      float sumX[kMaxClusters], sumY[kMaxClusters], sumZ[kMaxClusters];
-      float count[kMaxClusters];
+      float (&sumX)[kMaxClusters] = mSumX;
+      float (&sumY)[kMaxClusters] = mSumY;
+      float (&sumZ)[kMaxClusters] = mSumZ;
+      float (&count)[kMaxClusters] = mCount;
       for (int c = 0; c < mActiveClusters; c++)
       {
         sumX[c] = sumY[c] = sumZ[c] = 0.0f;
@@ -186,8 +196,10 @@ namespace stolmine
       }
 
       // Project cluster centers to screen with 3D rotation
-      float screenX[kMaxClusters], screenY[kMaxClusters], screenZ[kMaxClusters];
-      float projStr[kMaxClusters];
+      float (&screenX)[kMaxClusters] = mScreenX;
+      float (&screenY)[kMaxClusters] = mScreenY;
+      float (&screenZ)[kMaxClusters] = mScreenZ;
+      float (&projStr)[kMaxClusters] = mProjStr;
       for (int c = 0; c < mActiveClusters; c++)
       {
         // Rotate around Y

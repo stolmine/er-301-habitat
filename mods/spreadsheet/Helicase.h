@@ -21,6 +21,8 @@ namespace stolmine
     float getCarrierOutput();
     float getDiscIndex();
     float getDiscType();
+    bool isLinFM();
+    void toggleLinFM();
 
 #ifndef SWIGLUA
     virtual void process();
@@ -40,7 +42,7 @@ namespace stolmine
     od::Parameter mFine{"Fine", 0.0f};
     od::Parameter mLevel{"Level", 0.5f};
     od::Parameter mCarrierShape{"CarrierShape", 0.0f};
-    od::Parameter mLinExpo{"LinExpo", 0.0f};
+    od::Option mLinExpo{"LinExpo", 2}; // 1=lin, 2=expo
 #endif
 
   private:

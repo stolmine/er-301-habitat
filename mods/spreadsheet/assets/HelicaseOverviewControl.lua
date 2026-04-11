@@ -59,7 +59,9 @@ function HelicaseOverviewControl:init(args)
   self.paramSubGraphic:addChild(self.mixReadout)
 
   -- Lin/Expo indicator
-  self.linExpoParam = args.linExpoParam
+  self.helicase = args.helicase
+  local linOption = args.helicase:getOption("LinExpo")
+  linOption:enableSerialization()
   self.linExpoIndicator = app.BinaryIndicator(0, 24, ply, 32)
   self.linExpoIndicator:setCenter(col2, center3)
   self.paramSubGraphic:addChild(self.linExpoIndicator)
@@ -90,7 +92,7 @@ function HelicaseOverviewControl:init(args)
 end
 
 function HelicaseOverviewControl:updateLinExpo()
-  if self.linExpoParam and self.linExpoParam:target() > 0.5 then
+  if self.helicase:isLinFM() then
     self.linExpoIndicator:on()
   else
     self.linExpoIndicator:off()
@@ -151,11 +153,8 @@ function HelicaseOverviewControl:subReleased(i, shifted)
       if not self:hasFocus("encoder") then self:focus() end
     elseif i == 2 then
       -- Toggle lin/expo
-      if self.linExpoParam then
-        local cur = self.linExpoParam:target()
-        self.linExpoParam:hardSet(cur > 0.5 and 0.0 or 1.0)
-        self:updateLinExpo()
-      end
+      self.helicase:toggleLinFM()
+      self:updateLinExpo()
     elseif i == 3 then
       self.shapeReadout:save()
       self.paramFocusedReadout = self.shapeReadout
