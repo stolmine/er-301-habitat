@@ -37,19 +37,23 @@ namespace stolmine
     bool mInitialized = false;
 
     // Cluster centroids in 3D (slewed)
-    static const int kClusters = 6;
-    float mCx[kClusters], mCy[kClusters], mCz[kClusters];
-    float mCstr[kClusters]; // cluster strength (number of assigned points)
+    static const int kMaxClusters = 24;
+    int mActiveClusters = 8;
+    float mCx[kMaxClusters], mCy[kMaxClusters], mCz[kMaxClusters];
+    float mCstr[kMaxClusters];
 
-    // Per-cluster noise LFO for size variation
-    float mNoisePhase[kClusters];
-    float mNoiseFreq[kClusters];
-    float mNoiseScale[kClusters]; // slewed noise output per cluster
+    float mNoisePhase[kMaxClusters];
+    float mNoiseFreq[kMaxClusters];
+    float mNoiseScale[kMaxClusters];
 
     // Spectral complexity (zero-crossing rate) for brightness
     float mSpectralBright = 0.5f;
     // Spectral centroid proxy for shell radius
     float mCentroidSlew = 0.5f;
+
+    // Frame skip: evaluate field every other frame, blit cache otherwise
+    int mFrameToggle = 0;
+    uint8_t mCache[64 * 64]; // cached pixel values at full res
 
   public:
     virtual void draw(od::FrameBuffer &fb)
@@ -62,16 +66,15 @@ namespace stolmine
       if (!mInitialized)
       {
         // Seed clusters in a ring
-        for (int i = 0; i < kClusters; i++)
+        for (int i = 0; i < kMaxClusters; i++)
         {
-          float angle = (float)i / (float)kClusters * 6.28318f;
+          float angle = (float)i / (float)kMaxClusters * 6.28318f;
           mCx[i] = cosf(angle) * 0.3f;
           mCy[i] = sinf(angle) * 0.3f;
-          mCz[i] = 0.0f;
+          mCz[i] = sinf(angle * 1.7f) * 0.2f;
           mCstr[i] = 0.5f;
-          // Each cluster gets a different LFO rate (0.3-1.5 Hz range)
-          mNoisePhase[i] = angle; // stagger phases
-          mNoiseFreq[i] = 0.06f + (float)i * 0.04f;
+          mNoisePhase[i] = angle;
+          mNoiseFreq[i] = 0.03f + (float)i * 0.012f;
           mNoiseScale[i] = 1.0f;
         }
         mInitialized = true;
@@ -125,9 +128,9 @@ namespace stolmine
       }
 
       // One iteration of k-means: assign points, compute new centroids
-      float sumX[kClusters], sumY[kClusters], sumZ[kClusters];
-      float count[kClusters];
-      for (int c = 0; c < kClusters; c++)
+      float sumX[kMaxClusters], sumY[kMaxClusters], sumZ[kMaxClusters];
+      float count[kMaxClusters];
+      for (int c = 0; c < mActiveClusters; c++)
       {
         sumX[c] = sumY[c] = sumZ[c] = 0.0f;
         count[c] = 0.0f;
@@ -138,7 +141,7 @@ namespace stolmine
         // Find nearest cluster
         int best = 0;
         float bestD = 1e10f;
-        for (int c = 0; c < kClusters; c++)
+        for (int c = 0; c < mActiveClusters; c++)
         {
           float dx = pts[p][0] - mCx[c];
           float dy = pts[p][1] - mCy[c];
@@ -153,20 +156,20 @@ namespace stolmine
       }
 
       // Slew centroids toward new means
-      for (int c = 0; c < kClusters; c++)
+      for (int c = 0; c < mActiveClusters; c++)
       {
         if (count[c] > 0.5f)
         {
           float nx = sumX[c] / count[c];
           float ny = sumY[c] / count[c];
           float nz = sumZ[c] / count[c];
-          mCx[c] += (nx - mCx[c]) * 0.15f;
-          mCy[c] += (ny - mCy[c]) * 0.15f;
-          mCz[c] += (nz - mCz[c]) * 0.15f;
+          mCx[c] += (nx - mCx[c]) * 0.10f;
+          mCy[c] += (ny - mCy[c]) * 0.10f;
+          mCz[c] += (nz - mCz[c]) * 0.10f;
         }
         // Slew strength
         float targetStr = count[c] / (float)(nPts > 1 ? nPts : 1);
-        mCstr[c] += (targetStr - mCstr[c]) * 0.12f;
+        mCstr[c] += (targetStr - mCstr[c]) * 0.08f;
 
         // Per-cluster noise LFO: advance phase, slew scale
         // ~30fps draw rate, so phase inc = freq / 30
@@ -179,13 +182,13 @@ namespace stolmine
         float spikyness = 1.5f - mNoiseFreq[c];
         if (spikyness < 0.3f) spikyness = 0.3f;
         noiseTarget = 1.0f + (noiseTarget - 1.0f) * spikyness;
-        mNoiseScale[c] += (noiseTarget - mNoiseScale[c]) * 0.06f;
+        mNoiseScale[c] += (noiseTarget - mNoiseScale[c]) * 0.04f;
       }
 
       // Project cluster centers to screen with 3D rotation
-      float screenX[kClusters], screenY[kClusters], screenZ[kClusters];
-      float projStr[kClusters];
-      for (int c = 0; c < kClusters; c++)
+      float screenX[kMaxClusters], screenY[kMaxClusters], screenZ[kMaxClusters];
+      float projStr[kMaxClusters];
+      for (int c = 0; c < mActiveClusters; c++)
       {
         // Rotate around Y
         float rx = mCx[c] * cosR - mCz[c] * sinR;
@@ -215,6 +218,11 @@ namespace stolmine
       if (spectralTarget > 1.0f) spectralTarget = 1.0f;
       mSpectralBright += (spectralTarget - mSpectralBright) * 0.1f;
 
+      // Active cluster count from spectral complexity: 6 (clean) to 24 (rich)
+      mActiveClusters = 6 + (int)(mSpectralBright * 18.0f);
+      if (mActiveClusters > kMaxClusters) mActiveClusters = kMaxClusters;
+      if (mActiveClusters < 6) mActiveClusters = 6;
+
       // Spectral centroid proxy: mean absolute first difference / RMS
       // Higher ratio = brighter sound = tighter shell
       float sumDiff = 0.0f, sumSq = 0.0f;
@@ -234,13 +242,31 @@ namespace stolmine
       if (centroidTarget > 0.95f) centroidTarget = 0.95f;
       mCentroidSlew += (centroidTarget - mCentroidSlew) * 0.08f;
 
-      // Render Sfera-style metaball field
+      // Frame skip: expensive field eval every other frame, blit cache otherwise
+      mFrameToggle ^= 1;
+      if (mFrameToggle == 0)
+      {
+        // Fast blit from cache at full res
+        for (int py = 0; py < h && py < 64; py++)
+          for (int px = 0; px < w && px < 64; px++)
+          {
+            int gray = mCache[py * 64 + px];
+            if (gray > 0)
+              fb.pixel(gray, left + px, bot + py);
+          }
+        return;
+      }
+
+      // Full field evaluation frame
       float radX = (float)w * 0.5f;
       float radY = (float)h * 0.5f;
       float invRx = 1.0f / (radX > 1.0f ? radX : 1.0f);
       float invRy = 1.0f / (radY > 1.0f ? radY : 1.0f);
       float blobR2 = 0.04f;  // tight radius, distinct blobs
       float invBlobR2 = 1.0f / blobR2;
+
+      // Render at full resolution, cache result
+      memset(mCache, 0, sizeof(mCache));
 
       for (int py = 0; py < h; py++)
       {
@@ -250,110 +276,116 @@ namespace stolmine
         {
           float nx = (float)px / (float)(w - 1);
 
+          // Per-blob field contributions (track top two for voronoi)
           float field = 0.0f;
-          for (int c = 0; c < kClusters; c++)
+          float contrib[kMaxClusters];
+          for (int c = 0; c < mActiveClusters; c++)
+            contrib[c] = 0.0f;
+
+          for (int c = 0; c < mActiveClusters; c++)
           {
             if (projStr[c] < 0.005f) continue;
             float dx = nx - screenX[c];
             float dy = ny - screenY[c];
             float d2 = dx * dx + dy * dy;
-            if (d2 >= blobR2) continue;
+            if (d2 >= blobR2 * 1.6f) continue; // wider check for voronoi halo
             float t = 1.0f - d2 * invBlobR2;
-            // Depth lighting: distant light source, range compressed
-            // Far blobs dim but visible, near blobs bright but not blown out
-            float depthRaw = 0.5f + 0.5f * (1.0f - screenZ[c]); // 0=far, 1=near
-            float depthFade = 0.25f + 0.75f * depthRaw * depthRaw; // quadratic, floor 0.25
-            field += projStr[c] * 5.0f * t * t * t * depthFade;
+            if (t < 0.0f) t = 0.0f;
+            float depthRaw = 0.5f + 0.5f * (1.0f - screenZ[c]);
+            float depthFade = 0.25f + 0.75f * depthRaw * depthRaw;
+            float f = projStr[c] * 5.0f * t * t * t * depthFade;
+            contrib[c] = f;
+            field += f;
           }
 
-          // Steepen transition: square the field before thresholding
+          // Find top two contributors
+          float top1 = 0.0f, top2 = 0.0f;
+          for (int c = 0; c < mActiveClusters; c++)
+          {
+            if (contrib[c] > top1) { top2 = top1; top1 = contrib[c]; }
+            else if (contrib[c] > top2) { top2 = contrib[c]; }
+          }
+
           float sharp = field * field;
-          if (sharp > 0.04f)
+          int cellGray = 0;
+          int blobGray = 0;
+          bool isBlob = sharp > 0.04f;
+
+          if (isBlob)
           {
             float blob = (sharp - 0.04f) * 30.0f;
             if (blob > 13.0f) blob = 13.0f;
-            int gray = (int)(blob * mSpectralBright);
-            if (gray > 13) gray = 13;
-            if (gray > 0)
-              fb.pixel(gray, left + px, bot + py);
+            blobGray = (int)(blob * mSpectralBright);
+            if (blobGray > 13) blobGray = 13;
+            cellGray = blobGray;
           }
-        }
-      }
 
-      // 3D voronoi shell: sphere with radius from spectral centroid
-      // Sample points on the sphere surface, project with same rotation as blobs
-      // Voronoi edges where nearest blob center (in 3D) switches
-      float shellR = mCentroidSlew * 0.7f; // in normalized coordinates
-      static const int kLatSteps = 16;
-      static const int kLonSteps = 32;
-
-      for (int lat = 1; lat < kLatSteps; lat++)
-      {
-        float phi = (float)lat / (float)kLatSteps * 3.14159f; // 0 to pi
-        float sinPhi = sinf(phi);
-        float cosPhi = cosf(phi);
-
-        for (int lon = 0; lon < kLonSteps; lon++)
-        {
-          float theta = (float)lon / (float)kLonSteps * 6.28318f;
-
-          // Point on unit sphere
-          float spx = sinPhi * cosf(theta) * shellR;
-          float spy = cosPhi * shellR;
-          float spz = sinPhi * sinf(theta) * shellR;
-
-          // Rotate with same transform as blobs
-          float rx = spx * cosR - spz * sinR;
-          float rz = spx * sinR + spz * cosR;
-          float ty = spy * tiltCos - rz * tiltSin;
-          float tz = spy * tiltSin + rz * tiltCos;
-
-          // Back-face cull: skip points facing away
-          if (tz < -shellR * 0.3f) continue;
-
-          // Screen position
-          float snx = rx * 0.58f + 0.5f;
-          float sny = ty * 0.58f + 0.5f;
-
-          // Find nearest and second-nearest blob (in 3D, pre-projection)
-          float nearest = 1e10f, secondNearest = 1e10f;
-          for (int c = 0; c < kClusters; c++)
+          // Voronoi edge: thin seam floating just outside blob surface
+          // Only draw where two blobs have nearly equal influence (tight ratio)
+          if (top1 > 0.01f && top2 > 0.01f)
           {
-            if (mCstr[c] < 0.01f) continue;
-            float dx = spx - mCx[c];
-            float dy = spy - mCy[c];
-            float dz = spz - mCz[c];
-            float d = dx * dx + dy * dy + dz * dz;
-            if (d < nearest)
+            float ratio = top2 / top1; // 0=dominated, 1=equal
+            // Very narrow edge band: ratio must be close to 1.0
+            // and we must be near (slightly outside) the surface
+            bool nearSurface = (field > 0.03f && sharp <= 0.10f) ||
+                               (sharp > 0.04f && ratio > 0.80f);
+            if (ratio > 0.70f && nearSurface)
             {
-              secondNearest = nearest;
-              nearest = d;
-            }
-            else if (d < secondNearest)
-            {
-              secondNearest = d;
+              float edgeBright = (ratio - 0.70f) / 0.30f;
+              edgeBright = edgeBright * edgeBright;
+
+              // Depth from the two contributing blobs
+              float edgeDepth = 0.5f;
+              int best1 = 0, best2 = 0;
+              float b1 = 0, b2 = 0;
+              for (int c = 0; c < mActiveClusters; c++)
+              {
+                if (contrib[c] > b1) { b2 = b1; best2 = best1; b1 = contrib[c]; best1 = c; }
+                else if (contrib[c] > b2) { b2 = contrib[c]; best2 = c; }
+              }
+              edgeDepth = 0.7f + 0.3f * (0.5f * (
+                (0.5f + 0.5f * (1.0f - screenZ[best1])) +
+                (0.5f + 0.5f * (1.0f - screenZ[best2]))));
+              if (edgeDepth > 1.0f) edgeDepth = 1.0f;
+
+              // Bead stipple: brightness pulses along edge for texture
+              float bead = 0.6f + 0.4f * sinf((nx + ny) * 120.0f);
+
+              // Edge Z: average of two parent blob Z positions
+              float edgeZ = (screenZ[best1] + screenZ[best2]) * 0.5f;
+
+              if (isBlob)
+              {
+                // Find the dominant blob's Z at this pixel
+                float blobZ = screenZ[best1]; // strongest contributor
+                // Only carve dark line if edge is in front of blob surface
+                if (edgeZ <= blobZ + 0.1f)
+                {
+                  // Dark line: scales down toward black as blob gets brighter
+                  int darkTarget = 0;
+                  cellGray = darkTarget + (int)((float)(blobGray - darkTarget) * (1.0f - edgeBright * bead));
+                  if (cellGray < darkTarget) cellGray = darkTarget;
+                  if (cellGray > blobGray) cellGray = blobGray;
+                }
+                // else: blob occludes edge, keep blob gray
+              }
+              else
+              {
+                // Void: bright structural edge, high floor
+                cellGray = 3 + (int)(edgeBright * 7.0f * mSpectralBright * edgeDepth * bead);
+                if (cellGray > 9) cellGray = 9;
+              }
             }
           }
 
-          // Voronoi edge brightness
-          float edgeRatio = (secondNearest > 0.0001f) ? nearest / secondNearest : 0.0f;
-          if (edgeRatio < 0.75f) continue; // skip deep cell interiors
-
-          // Depth shading on shell
-          float depth = 0.3f + 0.7f * ((tz + shellR) / (2.0f * shellR));
-          if (depth < 0.15f) depth = 0.15f;
-          if (depth > 1.0f) depth = 1.0f;
-
-          float edgeBright = (edgeRatio - 0.75f) / 0.25f; // 0-1
-          int gray = 2 + (int)(edgeBright * 6.0f * depth);
-          if (gray > 10) gray = 10;
-
-          int px = left + (int)(snx * (float)w);
-          int py = bot + (int)(sny * (float)h);
-          if (px >= left && px < left + w && py >= bot && py < bot + h)
-            fb.pixel(gray, px, py);
+          // Write to cache and screen
+          if (px < 64 && py < 64)
+            mCache[py * 64 + px] = (uint8_t)cellGray;
+          if (cellGray > 0)
+            fb.pixel(cellGray, left + px, bot + py);
         }
       }
+
     }
   };
 
