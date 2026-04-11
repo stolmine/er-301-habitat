@@ -205,9 +205,11 @@ namespace stolmine
             field += projStr[c] * 5.0f * t * t * t * depthFade;
           }
 
-          if (field > 0.15f)
+          // Steepen transition: square the field before thresholding
+          float sharp = field * field;
+          if (sharp > 0.04f)
           {
-            float blob = (field - 0.15f) * 20.0f;
+            float blob = (sharp - 0.04f) * 30.0f;
             if (blob > 13.0f) blob = 13.0f;
             int gray = (int)blob;
             if (gray > 0)
