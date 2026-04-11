@@ -602,12 +602,21 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 
 ### Helicase (2-Op FM Oscillator) -- in progress
 - [x] Carrier + modulator with OPL3 waveforms, self-feedback, discontinuity folder
-- [x] 3 custom visualizations: phase space, transfer curve, circular ribbon
+- [x] 3 custom visualizations: k-means metaball overview, transfer curve, circular ribbon
 - [x] V/Oct fix (was 100x scaling), FM scaling fix (use modInc not carrierInc)
-- [ ] Overview viz needs more visual identity
-- [ ] Modulator ribbon viz: tuning vertical throw, angle, flicker
+- [x] ModMix: additive carrier+modulator blend (not crossfade)
+- [x] Carrier shape parameter (OPL3 waveform 0-7) on overview sub-display
+- [x] Decimated ring buffer for full attractor capture regardless of pitch
+- [x] Overview viz: k-means clustered metaballs from phase space, 6-24 dynamic clusters
+- [x] Overview viz: voronoi edges with Z-occlusion, inverted contrast, bead stipple, depth shading
+- [x] Overview viz: spectral brightness (zero-crossing rate) and per-cluster noise LFOs
+- [x] Overview viz: frame-skip rendering (every other frame cached) for encoder responsiveness
+- [x] Modulator ribbon: Catmull-Rom interpolation (384 segments), DC blocker, snapshot+slew
+- [x] Transfer curve: reads discIndex/discType live from C++ for CV modulation reactivity
 - [ ] Lo-fi config menu options (OPL bit-depth, alias mode, mod shape switching)
 - [ ] Carrier shape: consider wider selection beyond OPL3 set
+- [ ] Lin/expo toggle may not respond (ParameterAdapter scheduling issue)
+- [ ] CPU profiling on am335x
 
 ## Buffer Shuffler / Groovebox
 
