@@ -167,8 +167,8 @@ namespace stolmine
         float ty = mCy[c] * tiltCos - rz * tiltSin;
         float tz = mCy[c] * tiltSin + rz * tiltCos;
 
-        screenX[c] = rx * 0.68f + 0.5f;
-        screenY[c] = ty * 0.68f + 0.5f;
+        screenX[c] = rx * 0.58f + 0.5f;
+        screenY[c] = ty * 0.58f + 0.5f;
         screenZ[c] = tz;
         projStr[c] = mCstr[c];
       }
@@ -178,7 +178,7 @@ namespace stolmine
       float radY = (float)h * 0.5f;
       float invRx = 1.0f / (radX > 1.0f ? radX : 1.0f);
       float invRy = 1.0f / (radY > 1.0f ? radY : 1.0f);
-      float blobR2 = 0.06f;  // smaller radius, less merging
+      float blobR2 = 0.04f;  // tight radius, distinct blobs
       float invBlobR2 = 1.0f / blobR2;
 
       for (int py = 0; py < h; py++)
@@ -198,11 +198,11 @@ namespace stolmine
             float d2 = dx * dx + dy * dy;
             if (d2 >= blobR2) continue;
             float t = 1.0f - d2 * invBlobR2;
-            // Depth shading: near blobs brighter
-            float depthFade = 0.5f + 0.5f * (1.0f - screenZ[c]);
-            if (depthFade < 0.3f) depthFade = 0.3f;
-            if (depthFade > 1.0f) depthFade = 1.0f;
-            field += projStr[c] * 6.0f * t * t * t * depthFade;
+            // Depth lighting: distant light source, range compressed
+            // Far blobs dim but visible, near blobs bright but not blown out
+            float depthRaw = 0.5f + 0.5f * (1.0f - screenZ[c]); // 0=far, 1=near
+            float depthFade = 0.25f + 0.75f * depthRaw * depthRaw; // quadratic, floor 0.25
+            field += projStr[c] * 5.0f * t * t * t * depthFade;
           }
 
           if (field > 0.15f)
