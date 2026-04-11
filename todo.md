@@ -613,9 +613,15 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [x] Overview viz: frame-skip rendering (every other frame cached) for encoder responsiveness
 - [x] Modulator ribbon: Catmull-Rom interpolation (384 segments), DC blocker, snapshot+slew
 - [x] Transfer curve: reads discIndex/discType live from C++ for CV modulation reactivity
+- [x] Lin/expo toggle: replaced ParameterAdapter with od::Option, TZFM at +-100Hz*modIndex
+- [x] Per-sample linear freq ramp for clean TZFM pitch tracking
+- [x] Overview expansion view: modMix, carrier shape, lin/expo OptionControl
+- [x] GUI stack overflow fix: work arrays moved to heap members
+- [ ] Move to Spreadsheet category (currently Synthesizers)
+- [ ] Sync ply: implement soft sync switch alongside hard sync
+- [ ] Research Just Friends run modes for dynamic sync paradigm
 - [ ] Lo-fi config menu options (OPL bit-depth, alias mode, mod shape switching)
 - [ ] Carrier shape: consider wider selection beyond OPL3 set
-- [ ] Lin/expo toggle may not respond (ParameterAdapter scheduling issue)
 - [ ] CPU profiling on am335x
 
 ## Buffer Shuffler / Groovebox
