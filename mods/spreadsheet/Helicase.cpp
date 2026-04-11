@@ -130,6 +130,16 @@ namespace stolmine
     return mpInternal->curCarrierOutput;
   }
 
+  float Helicase::getDiscIndex()
+  {
+    return CLAMP(0.0f, 1.0f, mDiscIndex.value());
+  }
+
+  float Helicase::getDiscType()
+  {
+    return CLAMP(0.0f, 7.0f, mDiscType.value());
+  }
+
   void Helicase::process()
   {
     Internal &s = *mpInternal;

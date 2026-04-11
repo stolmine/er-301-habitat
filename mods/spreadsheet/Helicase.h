@@ -19,6 +19,8 @@ namespace stolmine
     float getModulatorSample(int idx);
     float getCarrierPhase();
     float getCarrierOutput();
+    float getDiscIndex();
+    float getDiscType();
 
 #ifndef SWIGLUA
     virtual void process();

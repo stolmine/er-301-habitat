@@ -28,16 +28,8 @@ namespace stolmine
         mpHelicase->attach();
     }
 
-    void setDiscParams(float index, float type)
-    {
-      mDiscIndex = index;
-      mDiscType = type;
-    }
-
   private:
     Helicase *mpHelicase;
-    float mDiscIndex = 0.0f;
-    float mDiscType = 0.0f;
 
     // Inline disc folder for curve evaluation (matches Helicase.cpp)
     static inline float opl3Wave(float phase, int shape)
@@ -58,19 +50,19 @@ namespace stolmine
       return s;
     }
 
-    float evalFolder(float input)
+    float evalFolder(float input, float discIndex, float discType)
     {
-      int t0 = (int)mDiscType;
+      int t0 = (int)discType;
       int t1 = t0 + 1;
       if (t0 < 0) t0 = 0;
       if (t1 > 7) t1 = 7;
       if (t0 > 7) t0 = 7;
-      float frac = mDiscType - (float)t0;
+      float frac = discType - (float)t0;
       float p = (input + 1.0f) * 0.5f;
       float w0 = opl3Wave(p, t0);
       float w1 = opl3Wave(p, t1);
       float folded = w0 + (w1 - w0) * frac;
-      return input * (1.0f - mDiscIndex) + folded * mDiscIndex;
+      return input * (1.0f - discIndex) + folded * discIndex;
     }
 
   public:
@@ -89,6 +81,10 @@ namespace stolmine
       int cx = left + w / 2;
       int cy = bot + h / 2;
 
+      // Read live params from DSP object
+      float discIndex = mpHelicase->getDiscIndex();
+      float discType = mpHelicase->getDiscType();
+
       // Identity line (dim diagonal)
       fb.line(GRAY3, left, bot, left + w - 1, bot + h - 1);
 
@@ -98,7 +94,7 @@ namespace stolmine
       {
         // Map pixel to input range -1..1
         float input = (float)px / (float)(w - 1) * 2.0f - 1.0f;
-        float output = evalFolder(input);
+        float output = evalFolder(input, discIndex, discType);
 
         // Map output to screen Y
         int py = bot + (int)((output + 1.0f) * 0.5f * (float)(h - 1));

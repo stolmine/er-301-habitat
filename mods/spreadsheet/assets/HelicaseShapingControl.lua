@@ -100,8 +100,7 @@ end
 function HelicaseShapingControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
-  self:updateCurveParams()
-end
+  end
 
 function HelicaseShapingControl:onCursorLeave(spot)
   if not self.paramMode then
@@ -111,12 +110,6 @@ function HelicaseShapingControl:onCursorLeave(spot)
   end
   self:releaseFocus("shiftPressed", "shiftReleased")
   GainBias.onCursorLeave(self, spot)
-end
-
-function HelicaseShapingControl:updateCurveParams()
-  if self.curveGraphic and self.discIndexParam and self.discTypeParam then
-    self.curveGraphic:setDiscParams(self.discIndexParam:target(), self.discTypeParam:target())
-  end
 end
 
 function HelicaseShapingControl:shiftPressed()
@@ -156,19 +149,16 @@ function HelicaseShapingControl:encoder(change, shifted)
   if shifted and self.shiftHeld then self.shiftUsed = true end
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
-    self:updateCurveParams()
-    return true
+        return true
   end
   local result = GainBias.encoder(self, change, shifted)
-  self:updateCurveParams()
-  return result
+    return result
 end
 
 function HelicaseShapingControl:zeroPressed()
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:zero()
-    self:updateCurveParams()
-    return true
+        return true
   end
   return GainBias.zeroPressed(self)
 end
@@ -176,8 +166,7 @@ end
 function HelicaseShapingControl:cancelReleased(shifted)
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:restore()
-    self:updateCurveParams()
-    return true
+        return true
   end
   return GainBias.cancelReleased(self, shifted)
 end
