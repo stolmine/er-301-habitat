@@ -96,6 +96,7 @@ namespace stolmine
     addParameter(mModShape);
     addParameter(mFine);
     addParameter(mLevel);
+    addParameter(mCarrierShape);
     addParameter(mLinExpo);
 
     mpInternal = new Internal();
@@ -139,7 +140,7 @@ namespace stolmine
     float sr = globalConfig.sampleRate;
     float f0 = CLAMP(0.1f, sr * 0.49f, mFundamental.value());
     float modMix = CLAMP(0.0f, 1.0f, mModMix.value());
-    float modIndex = CLAMP(0.0f, 10.0f, mModIndex.value()) * modMix;
+    float modIndex = CLAMP(0.0f, 10.0f, mModIndex.value());
     float discIndex = CLAMP(0.0f, 1.0f, mDiscIndex.value());
     float discTypeF = CLAMP(0.0f, 7.0f, mDiscType.value());
     float ratio = CLAMP(0.5f, 16.0f, mRatio.value());
@@ -147,6 +148,7 @@ namespace stolmine
     int modShape = CLAMP(0, 7, (int)(mModShape.value() + 0.5f));
     float fine = CLAMP(-100.0f, 100.0f, mFine.value());
     float level = CLAMP(0.0f, 1.0f, mLevel.value());
+    int carrierShape = CLAMP(0, 7, (int)(mCarrierShape.value() + 0.5f));
     bool linFM = mLinExpo.value() > 0.5f;
 
     // V/Oct (block-rate)
@@ -175,18 +177,16 @@ namespace stolmine
       float modOut = opl3Wave(modPhaseFB, modShape);
       s.modFeedbackState = modOut;
 
-      // FM: modulator modulates carrier phase
-      float fmAmount;
-      if (linFM)
-        fmAmount = modOut * modIndex / sr; // linear FM
-      else
-        fmAmount = modOut * modIndex * carrierInc; // exponential FM (ratio-preserving)
+      // FM: modulator modulates carrier phase increment
+      // Standard FM: phase += (fc + modOut * fm * index) / sr
+      // modIndex scales the frequency deviation by the modulator frequency
+      float fmAmount = modOut * modIndex * modInc;
 
       s.carrierPhase += carrierInc + fmAmount;
       s.carrierPhase -= floorf(s.carrierPhase);
 
-      // Carrier: sine
-      float carrSig = sinf(s.carrierPhase * kTwoPi);
+      // Carrier (always FM'd)
+      float carrSig = opl3Wave(s.carrierPhase, carrierShape);
 
       // Discontinuity folder
       float folded = carrSig;
@@ -196,7 +196,9 @@ namespace stolmine
         folded = carrSig * (1.0f - discIndex) + f * discIndex;
       }
 
-      float finalOut = folded * level;
+      // Mix carrier and modulator at output
+      float mixed = folded * (1.0f - modMix) + modOut * modMix;
+      float finalOut = mixed * level;
 
       // Clamp output
       if (finalOut > 1.5f) finalOut = 1.5f;

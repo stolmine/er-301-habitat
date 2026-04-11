@@ -37,6 +37,7 @@ namespace stolmine
     od::Parameter mModShape{"ModShape", 0.0f};
     od::Parameter mFine{"Fine", 0.0f};
     od::Parameter mLevel{"Level", 0.5f};
+    od::Parameter mCarrierShape{"CarrierShape", 0.0f};
     od::Parameter mLinExpo{"LinExpo", 0.0f};
 #endif
 

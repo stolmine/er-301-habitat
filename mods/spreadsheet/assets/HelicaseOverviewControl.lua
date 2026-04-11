@@ -64,8 +64,27 @@ function HelicaseOverviewControl:init(args)
   self.linExpoIndicator:setCenter(col2, center3)
   self.paramSubGraphic:addChild(self.linExpoIndicator)
 
+  -- Carrier shape readout
+  local shapeMap = (function()
+    local m = app.LinearDialMap(0, 7)
+    m:setSteps(1, 1, 1, 1)
+    m:setRounding(1)
+    return m
+  end)()
+  self.carrierShapeParam = args.carrierShapeParam
+  self.shapeReadout = (function()
+    local g = app.Readout(0, 0, ply, 10)
+    g:setParameter(args.carrierShapeParam)
+    g:setAttributes(app.unitNone, shapeMap)
+    g:setPrecision(0)
+    g:setCenter(col3, center4)
+    return g
+  end)()
+  self.paramSubGraphic:addChild(self.shapeReadout)
+
   self.paramSubGraphic:addChild(app.SubButton("mix", 1))
   self.paramSubGraphic:addChild(app.SubButton("l/e", 2))
+  self.paramSubGraphic:addChild(app.SubButton("carr", 3))
 
   self:setParamMode(true)
 end
@@ -137,6 +156,11 @@ function HelicaseOverviewControl:subReleased(i, shifted)
         self.linExpoParam:hardSet(cur > 0.5 and 0.0 or 1.0)
         self:updateLinExpo()
       end
+    elseif i == 3 then
+      self.shapeReadout:save()
+      self.paramFocusedReadout = self.shapeReadout
+      self:setSubCursorController(self.shapeReadout)
+      if not self:hasFocus("encoder") then self:focus() end
     end
     return true
   end

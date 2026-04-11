@@ -81,6 +81,12 @@ function Helicase:onLoadGraph(channelCount)
   linExpo:hardSet("Bias", 0.0)
   tie(op, "LinExpo", linExpo, "Out")
 
+  -- Carrier Shape
+  local carrierShape = self:addObject("carrierShape", app.ParameterAdapter())
+  carrierShape:hardSet("Bias", 0.0)
+  tie(op, "CarrierShape", carrierShape, "Out")
+  self:addMonoBranch("carrierShape", carrierShape, "In", carrierShape, "Out")
+
   -- Mod Index (shaping ply hidden fader)
   local modIndex = self:addObject("modIndex", app.ParameterAdapter())
   modIndex:hardSet("Bias", 1.0)
@@ -172,7 +178,8 @@ function Helicase:onLoadViews()
     biasPrecision = 2,
     initialBias = 0.5,
     helicase = self.objects.op,
-    linExpoParam = self.objects.linExpo:getParameter("Bias")
+    linExpoParam = self.objects.linExpo:getParameter("Bias"),
+    carrierShapeParam = self.objects.carrierShape:getParameter("Bias")
   }
 
   local modIndexMap = floatMap(0, 10)
