@@ -41,6 +41,11 @@ namespace stolmine
     float mCx[kClusters], mCy[kClusters], mCz[kClusters];
     float mCstr[kClusters]; // cluster strength (number of assigned points)
 
+    // Per-cluster noise LFO for size variation
+    float mNoisePhase[kClusters];
+    float mNoiseFreq[kClusters];
+    float mNoiseScale[kClusters]; // slewed noise output per cluster
+
   public:
     virtual void draw(od::FrameBuffer &fb)
     {
@@ -59,6 +64,10 @@ namespace stolmine
           mCy[i] = sinf(angle) * 0.3f;
           mCz[i] = 0.0f;
           mCstr[i] = 0.5f;
+          // Each cluster gets a different LFO rate (0.3-1.5 Hz range)
+          mNoisePhase[i] = angle; // stagger phases
+          mNoiseFreq[i] = 0.06f + (float)i * 0.04f;
+          mNoiseScale[i] = 1.0f;
         }
         mInitialized = true;
       }
@@ -153,6 +162,19 @@ namespace stolmine
         // Slew strength
         float targetStr = count[c] / (float)(nPts > 1 ? nPts : 1);
         mCstr[c] += (targetStr - mCstr[c]) * 0.12f;
+
+        // Per-cluster noise LFO: advance phase, slew scale
+        // ~30fps draw rate, so phase inc = freq / 30
+        mNoisePhase[c] += mNoiseFreq[c] / 30.0f;
+        if (mNoisePhase[c] > 1.0f) mNoisePhase[c] -= 1.0f;
+        // Sine LFO mapped to 0.2-2.5 scale range
+        float noiseTarget = 1.0f + sinf(mNoisePhase[c] * 6.28318f) * 0.8f;
+        // At low frequencies: spikier distribution (wider range)
+        // noiseFreq[c] is 0.3-1.3, lower = slower = more extreme
+        float spikyness = 1.5f - mNoiseFreq[c];
+        if (spikyness < 0.3f) spikyness = 0.3f;
+        noiseTarget = 1.0f + (noiseTarget - 1.0f) * spikyness;
+        mNoiseScale[c] += (noiseTarget - mNoiseScale[c]) * 0.06f;
       }
 
       // Project cluster centers to screen with 3D rotation
@@ -170,7 +192,7 @@ namespace stolmine
         screenX[c] = rx * 0.58f + 0.5f;
         screenY[c] = ty * 0.58f + 0.5f;
         screenZ[c] = tz;
-        projStr[c] = mCstr[c];
+        projStr[c] = mCstr[c] * mNoiseScale[c];
       }
 
       // Render Sfera-style metaball field
