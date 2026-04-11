@@ -64,7 +64,7 @@ function HelicaseShapingControl:init(args)
     return m
   end)()
   local typeMap = (function()
-    local m = app.LinearDialMap(0, 7)
+    local m = app.LinearDialMap(0, 15)
     m:setSteps(1, 0.5, 0.1, 0.01)
     return m
   end)()

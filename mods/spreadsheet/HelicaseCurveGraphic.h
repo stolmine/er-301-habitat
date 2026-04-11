@@ -50,17 +50,42 @@ namespace stolmine
       return s;
     }
 
+    static inline float foldShape(float x, int shape)
+    {
+      switch (shape)
+      {
+      case 8: { float y = fmodf(fabsf(x + 1.0f), 4.0f); return (y < 2.0f) ? y - 1.0f : 3.0f - y; }
+      case 9: return sinf(x * (float)M_PI);
+      case 10: { float y = fmodf(fabsf(x + 1.0f), 2.0f); return y < 1.0f ? y * 2.0f - 1.0f : 1.0f - (y - 1.0f) * 2.0f; }
+      case 11: { float steps = 6.0f; return floorf(x * steps + 0.5f) / steps; }
+      case 12: { float y = fmodf(x + 1.0f, 2.0f); if (y < 0.0f) y += 2.0f; return y - 1.0f; }
+      case 13: { float y = fmodf(fabsf(x * 1.5f + 1.0f), 4.0f); return (y < 2.0f) ? y - 1.0f : 3.0f - y; }
+      case 14: { float x2 = x * x; return x * (4.0f * x2 - 3.0f); }
+      case 15: return fabsf(sinf(x * (float)M_PI * 2.0f)) * 2.0f - 1.0f;
+      }
+      return x;
+    }
+
     float evalFolder(float input, float discIndex, float discType)
     {
       int t0 = (int)discType;
       int t1 = t0 + 1;
       if (t0 < 0) t0 = 0;
-      if (t1 > 7) t1 = 7;
-      if (t0 > 7) t0 = 7;
+      if (t1 > 15) t1 = 15;
+      if (t0 > 15) t0 = 15;
       float frac = discType - (float)t0;
-      float p = (input + 1.0f) * 0.5f;
-      float w0 = opl3Wave(p, t0);
-      float w1 = opl3Wave(p, t1);
+
+      auto evalShape = [](float inp, int t) -> float {
+        if (t <= 7)
+        {
+          float p = (inp + 1.0f) * 0.5f;
+          return opl3Wave(p, t);
+        }
+        return foldShape(inp, t);
+      };
+
+      float w0 = evalShape(input, t0);
+      float w1 = evalShape(input, t1);
       float folded = w0 + (w1 - w0) * frac;
       return input * (1.0f - discIndex) + folded * discIndex;
     }

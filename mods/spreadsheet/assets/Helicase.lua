@@ -362,13 +362,19 @@ function Helicase:onLoadViews()
     biasPrecision = 2,
     initialBias = 0.0
   }
+  local discTypeMap = (function()
+    local m = app.LinearDialMap(0, 15)
+    m:setSteps(1, 1, 1, 1)
+    m:setRounding(1)
+    return m
+  end)()
   controls.shapDiscType = GainBias {
     button = "type",
     description = "Disc Type",
     branch = self.branches.discType,
     gainbias = self.objects.discType,
     range = self.objects.discType,
-    biasMap = shapeMap,
+    biasMap = discTypeMap,
     biasUnits = app.unitNone,
     biasPrecision = 0,
     initialBias = 0.0
