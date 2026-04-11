@@ -67,6 +67,10 @@ namespace stolmine
     float curCarrierPhase;
     float curCarrierOutput;
 
+    // Decimation counter for ring buffer (capture full attractor shape)
+    int ringDecimCounter;
+    int ringDecimRate;
+
     void Init()
     {
       carrierPhase = 0.0f;
@@ -76,6 +80,8 @@ namespace stolmine
       memset(outputRing, 0, sizeof(outputRing));
       memset(modRing, 0, sizeof(modRing));
       ringPos = 0;
+      ringDecimCounter = 0;
+      ringDecimRate = 8;
       curCarrierPhase = 0.0f;
       curCarrierOutput = 0.0f;
     }
@@ -172,6 +178,13 @@ namespace stolmine
     float carrierInc = carrierFreq / sr;
     float modInc = modFreq / sr;
 
+    // Adapt ring buffer decimation so 256 entries cover ~8 carrier cycles
+    float samplesPerCycle = sr / (carrierFreq > 0.1f ? carrierFreq : 0.1f);
+    int targetDecim = (int)(samplesPerCycle * 8.0f / 256.0f);
+    if (targetDecim < 1) targetDecim = 1;
+    if (targetDecim > 64) targetDecim = 64;
+    s.ringDecimRate = targetDecim;
+
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       // Sync: reset carrier phase on rising edge
@@ -208,8 +221,8 @@ namespace stolmine
         folded = carrSig * (1.0f - discIndex) + f * discIndex;
       }
 
-      // Mix carrier and modulator at output
-      float mixed = folded * (1.0f - modMix) + modOut * modMix;
+      // Mix: carrier always present, modulator added on top
+      float mixed = folded + modOut * modMix;
       float finalOut = mixed * level;
 
       // Clamp output
@@ -218,10 +231,15 @@ namespace stolmine
 
       out[i] = finalOut;
 
-      // Ring buffers for viz
-      s.outputRing[s.ringPos] = finalOut;
-      s.modRing[s.ringPos] = modOut;
-      s.ringPos = (s.ringPos + 1) & 255;
+      // Ring buffers for viz -- decimated to capture full attractor shape
+      s.ringDecimCounter++;
+      if (s.ringDecimCounter >= s.ringDecimRate)
+      {
+        s.ringDecimCounter = 0;
+        s.outputRing[s.ringPos] = finalOut;
+        s.modRing[s.ringPos] = modOut;
+        s.ringPos = (s.ringPos + 1) & 255;
+      }
     }
 
     // Store current state for curve viz (last sample)
