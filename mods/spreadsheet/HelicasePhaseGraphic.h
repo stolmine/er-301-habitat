@@ -46,6 +46,11 @@ namespace stolmine
     float mNoiseFreq[kClusters];
     float mNoiseScale[kClusters]; // slewed noise output per cluster
 
+    // Spectral complexity (zero-crossing rate) for brightness
+    float mSpectralBright = 0.5f;
+    // Spectral centroid proxy for shell radius
+    float mCentroidSlew = 0.5f;
+
   public:
     virtual void draw(od::FrameBuffer &fb)
     {
@@ -195,6 +200,40 @@ namespace stolmine
         projStr[c] = mCstr[c] * mNoiseScale[c];
       }
 
+      // Spectral complexity: zero-crossing rate on output ring buffer
+      int crossings = 0;
+      for (int i = 1; i < 256; i++)
+      {
+        float s0 = mpHelicase->getOutputSample(i - 1);
+        float s1 = mpHelicase->getOutputSample(i);
+        if ((s0 >= 0.0f && s1 < 0.0f) || (s0 < 0.0f && s1 >= 0.0f))
+          crossings++;
+      }
+      // Normalize: pure sine ~2 crossings per cycle, rich FM = many more
+      // Map to brightness: 0.3 (clean) to 1.0 (complex)
+      float spectralTarget = 0.15f + (float)crossings / 60.0f * 0.85f;
+      if (spectralTarget > 1.0f) spectralTarget = 1.0f;
+      mSpectralBright += (spectralTarget - mSpectralBright) * 0.1f;
+
+      // Spectral centroid proxy: mean absolute first difference / RMS
+      // Higher ratio = brighter sound = tighter shell
+      float sumDiff = 0.0f, sumSq = 0.0f;
+      for (int i = 1; i < 256; i++)
+      {
+        float s0 = mpHelicase->getOutputSample(i - 1);
+        float s1 = mpHelicase->getOutputSample(i);
+        float d = s1 - s0;
+        sumDiff += (d < 0 ? -d : d);
+        sumSq += s1 * s1;
+      }
+      float rms = sqrtf(sumSq / 255.0f) + 0.001f;
+      float centroidRaw = sumDiff / (255.0f * rms);
+      // Map: low centroid (~0.5) = wide shell, high centroid (~3.0) = tight
+      float centroidTarget = 1.0f - (centroidRaw - 0.5f) / 3.0f;
+      if (centroidTarget < 0.3f) centroidTarget = 0.3f;
+      if (centroidTarget > 0.95f) centroidTarget = 0.95f;
+      mCentroidSlew += (centroidTarget - mCentroidSlew) * 0.08f;
+
       // Render Sfera-style metaball field
       float radX = (float)w * 0.5f;
       float radY = (float)h * 0.5f;
@@ -233,10 +272,86 @@ namespace stolmine
           {
             float blob = (sharp - 0.04f) * 30.0f;
             if (blob > 13.0f) blob = 13.0f;
-            int gray = (int)blob;
+            int gray = (int)(blob * mSpectralBright);
+            if (gray > 13) gray = 13;
             if (gray > 0)
               fb.pixel(gray, left + px, bot + py);
           }
+        }
+      }
+
+      // 3D voronoi shell: sphere with radius from spectral centroid
+      // Sample points on the sphere surface, project with same rotation as blobs
+      // Voronoi edges where nearest blob center (in 3D) switches
+      float shellR = mCentroidSlew * 0.7f; // in normalized coordinates
+      static const int kLatSteps = 16;
+      static const int kLonSteps = 32;
+
+      for (int lat = 1; lat < kLatSteps; lat++)
+      {
+        float phi = (float)lat / (float)kLatSteps * 3.14159f; // 0 to pi
+        float sinPhi = sinf(phi);
+        float cosPhi = cosf(phi);
+
+        for (int lon = 0; lon < kLonSteps; lon++)
+        {
+          float theta = (float)lon / (float)kLonSteps * 6.28318f;
+
+          // Point on unit sphere
+          float spx = sinPhi * cosf(theta) * shellR;
+          float spy = cosPhi * shellR;
+          float spz = sinPhi * sinf(theta) * shellR;
+
+          // Rotate with same transform as blobs
+          float rx = spx * cosR - spz * sinR;
+          float rz = spx * sinR + spz * cosR;
+          float ty = spy * tiltCos - rz * tiltSin;
+          float tz = spy * tiltSin + rz * tiltCos;
+
+          // Back-face cull: skip points facing away
+          if (tz < -shellR * 0.3f) continue;
+
+          // Screen position
+          float snx = rx * 0.58f + 0.5f;
+          float sny = ty * 0.58f + 0.5f;
+
+          // Find nearest and second-nearest blob (in 3D, pre-projection)
+          float nearest = 1e10f, secondNearest = 1e10f;
+          for (int c = 0; c < kClusters; c++)
+          {
+            if (mCstr[c] < 0.01f) continue;
+            float dx = spx - mCx[c];
+            float dy = spy - mCy[c];
+            float dz = spz - mCz[c];
+            float d = dx * dx + dy * dy + dz * dz;
+            if (d < nearest)
+            {
+              secondNearest = nearest;
+              nearest = d;
+            }
+            else if (d < secondNearest)
+            {
+              secondNearest = d;
+            }
+          }
+
+          // Voronoi edge brightness
+          float edgeRatio = (secondNearest > 0.0001f) ? nearest / secondNearest : 0.0f;
+          if (edgeRatio < 0.75f) continue; // skip deep cell interiors
+
+          // Depth shading on shell
+          float depth = 0.3f + 0.7f * ((tz + shellR) / (2.0f * shellR));
+          if (depth < 0.15f) depth = 0.15f;
+          if (depth > 1.0f) depth = 1.0f;
+
+          float edgeBright = (edgeRatio - 0.75f) / 0.25f; // 0-1
+          int gray = 2 + (int)(edgeBright * 6.0f * depth);
+          if (gray > 10) gray = 10;
+
+          int px = left + (int)(snx * (float)w);
+          int py = bot + (int)(sny * (float)h);
+          if (px >= left && px < left + w && py >= bot && py < bot + h)
+            fb.pixel(gray, px, py);
         }
       }
     }
