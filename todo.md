@@ -517,6 +517,16 @@ Multiband comp and spectral gate share crossover/band-splitting frontend with Pa
 - [ ] Same crossover, per-band: threshold, attack/release, level
 - [ ] Global: crossover freqs, input gain, mix
 
+### Stepwise Multi-Effect (dblue Glitch / Infiltrator-style)
+- [ ] Sequenced effect chain: each step applies a different effect to the audio
+- [ ] Effect types: stutter/repeat, reverse, bitcrush, downsample, filter sweep, pitch shift, tape stop, gate, distortion, buffer shuffle
+- [ ] Per-step: effect type, depth/amount, probability, duration (or sync to clock)
+- [ ] Global: step count, clock/rate, dry/wet, randomize
+- [ ] Spreadsheet paradigm: step list with per-step params, list graphic showing effect sequence
+- [ ] Clock input for tempo sync, gate input for trigger/reset
+- [ ] Buffer capture for stutter/reverse/shuffle effects (short circular buffer, ~1s)
+- [ ] Could share some infrastructure with Ballot (step sequencer) and Petrichor (buffer management)
+
 ## Grain Cloud
 
 N grains (8-16) reading from a single sample buffer. Extends builtin manual grains x N.
