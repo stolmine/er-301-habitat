@@ -26,7 +26,7 @@ make
 make ARCH=am335x
 ```
 
-Output: `testing/<arch>/<package>-1.0.0.pkg`
+Output: `testing/<arch>/<package>-<version>.pkg`
 
 ## Install
 
@@ -48,7 +48,7 @@ Based on code by Émilie Gillet (MIT License).
 | **grids** | Grids | Topographic drum pattern generator |
 | **commotio** | Commotio | Elements exciter section (bow/blow/strike) at native 48kHz |
 | **marbles** | Marbles T, Marbles X | Random sampler -- probabilistic gate generator (7 models) and random CV generator (beta distribution, deja vu looping, 3 control modes) |
-| **kryos** | Kryos | Spectral freeze (WIP) — WILL CRASH, DO NOT INSTALL |
+| **kryos** | Kryos | Spectral freeze (WIP) -- do not install |
 
 ### Peaks / Dead Man's Catch
 
@@ -78,7 +78,7 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | **biome** | NR | Gate sequencer inspired by the Noise Engineering Numeric Repetitor |
 | | 94 Discont | 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush) |
 | | Latch Filter | Switched-capacitor S&H into SVF with V/Oct tracking |
-| | Canals | Linked resonant filter inspired by Three Sisters -- crossover/formant modes - still cooking |
+| | Canals | Linked resonant filter inspired by Three Sisters -- crossover/formant modes |
 | | Gesture | Continuous gesture recorder/looper -- 5/10/20s buffer, movement-detected auto-write |
 | | Gated Slew | Slew limiter with gate-controlled activation |
 | | Tilt EQ | One-knob spectral tilt filter |
@@ -89,19 +89,41 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Quantoffset | Quantizer with CV offset |
 | | PSR | Pingable scaled random |
 | | Bletchley Park | Codescan wavetable oscillator -- reads arbitrary binary files as waveforms |
-| | Station X | Codescan FIR filter -- reads binary files as filter kernels - still cooking |
+| | Station X | Codescan FIR filter -- reads binary files as filter kernels |
 | | Fade Mixer | 4-input crossfader with BranchMeter controls |
 | | Varishape Voice | Simple synth voice -- POLYBLEP oscillator (tri/saw/square), gate-triggered decay envelope |
+| | Varishape Osc | Raw POLYBLEP oscillator -- continuously variable sine/tri/saw/square/pulse, V/Oct, sync |
 | | Pecto | Comb resonator -- 16 tap patterns, 4 resonator types (raw/guitar/clarinet/sitar), V/Oct, xform gate randomization |
 | | Transport | Gated clock generator -- BPM control, 4 ppqn (16th note) output, toggle run/stop with phase reset |
 | **spreadsheet** | Excel | 64-step CV tracker sequencer with math transforms |
 | | Ballot | 64-step gate sequencer with chaselight display and algorithmic transforms |
-| | Etcher | CV-addressed piecewise transfer function |
+| | Etcher | CV-addressed piecewise transfer function -- 8 depth-controlled transforms, CV gate input |
 | | Tomograph | Parallel resonant filter bank with scale distribution |
-| | Petrichor | Multitap delay -- 8 taps, per-tap SVF/pitch, granular reverse, macro presets - still cooking |
+| | Petrichor | Multitap delay -- 8 taps, per-tap SVF/pitch, granular reverse, drift, grid/stack distribution, macro presets, gate-triggered randomization |
+| | Parfait | 3-band multiband saturator -- 7 shapers per band, SVF morph filter, compressor, per-band FFT spectrum display |
+| | Rauschen | Parametric noise and chaos generator -- 11 algorithms (White, Pink, Dust, Particle, Crackle, Logistic, Henon, Clocked, Velvet, Gendy, Lorenz), post-generator SVF morph filter with V/Oct, 3D phase space visualization |
+| | Impasto | 3-band multiband compressor -- per-band FFT spectrum with GR ceiling contour, sidechain input, G-Bus speed control, auto makeup |
 | **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization -- stereo-aware passthrough with waveform display |
+| | Spectrogram | Inline FFT spectrum analyzer -- 256-point pffft, stereo passthrough, peak hold + RMS gradient |
+| **catchall** | Sfera | Z-plane morphing filter -- 32 configs, audio-reactive ferrofluid visualization (experimental) |
+| | Lambda | Seeded procedural synth -- PRNG wavetable + filter bank generation (experimental) |
+| | Flakes | Granular shimmer/freeze -- feedback looper with self-modulating delay (experimental) |
 
 ## Changelog
+
+### v2.0.1
+
+**Plaits v1.4.0** -- fixed hard crash on engine switch above index 7-10. Shared arena allocator re-initialized on engine change (same fix as Clouds mode switch).
+
+### v2.0.0
+
+**10 new units, major updates.** See [RELEASE-2.0.0.md](RELEASE-2.0.0.md) for full details.
+
+New units: Impasto (multiband compressor), Parfait (multiband saturator), Rauschen (11-algorithm noise/chaos generator), Pecto (comb resonator), Transport (gated clock), Varishape Osc (POLYBLEP), Spectrogram (FFT analyzer), Flakes (granular shimmer), Lambda (seeded procedural synth), Sfera (z-plane morphing filter).
+
+Major updates: Petrichor (granular pitch, grid/stack, macros, xform gate), Etcher (8 transforms + CV gate), Bletchley Park (restricted scan range).
+
+New catchall package for experimental/WIP units. Bug fixes for SWIG class layout crashes (VarishapeOsc, VarishapeVoice, Etcher). biome v2.0.0, spreadsheet v2.0.0, scope v1.1.0.
 
 ### v1.4.0
 
