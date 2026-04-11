@@ -618,8 +618,8 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [x] Overview expansion view: modMix, carrier shape, lin/expo OptionControl
 - [x] GUI stack overflow fix: work arrays moved to heap members
 - [ ] Move to Spreadsheet category (currently Synthesizers)
-- [ ] Sync ply: implement soft sync switch alongside hard sync
-- [ ] Research Just Friends run modes for dynamic sync paradigm
+- [x] Research Just Friends run modes for dynamic sync paradigm
+- [ ] Sync ply: phase-receptivity sync (JF-inspired). Custom SyncControl reusing SDK comparator for edge detection, threshold fader controls modulator phase-position (0.0=hard sync, 0.5=soft sync, 1.0=subharmonic lock). PolyBLEP at reset discontinuity.
 - [ ] Discontinuity folder: add fold shapes to upper half of type control (current 0-7 are OPL3 operations, 8-15 would be actual wavefolders -- triangle fold, sine fold, hard fold, etc.)
 - [ ] Lo-fi config menu options (OPL bit-depth, alias mode, mod shape switching)
 - [ ] Carrier shape: consider wider selection beyond OPL3 set

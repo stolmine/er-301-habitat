@@ -57,6 +57,7 @@ namespace stolmine
     float modPhase;
     float modFeedbackState;
     bool syncWasHigh;
+    bool syncPending;
 
     // Ring buffers for viz
     float outputRing[256];
@@ -81,6 +82,7 @@ namespace stolmine
       modPhase = 0.0f;
       modFeedbackState = 0.0f;
       syncWasHigh = false;
+      syncPending = false;
       memset(outputRing, 0, sizeof(outputRing));
       memset(modRing, 0, sizeof(modRing));
       ringPos = 0;
@@ -109,6 +111,7 @@ namespace stolmine
     addParameter(mFine);
     addParameter(mLevel);
     addParameter(mCarrierShape);
+    addParameter(mSyncThreshold);
     addOption(mLinExpo);
 
     mpInternal = new Internal();
@@ -181,6 +184,7 @@ namespace stolmine
     float fine = CLAMP(-100.0f, 100.0f, mFine.value());
     float level = CLAMP(0.0f, 1.0f, mLevel.value());
     int carrierShape = CLAMP(0, 7, (int)(mCarrierShape.value() + 0.5f));
+    float syncThreshold = CLAMP(0.0f, 1.0f, mSyncThreshold.value());
     bool linFM = mLinExpo.value() == 1;
 
     // V/Oct: Lua applies 10x ConstantGain, arrives as 1.0 per octave
@@ -222,15 +226,32 @@ namespace stolmine
       }
       float carrierInc = carrierFreq / sr;
       float modInc = modFreq / sr;
-      // Sync: reset carrier phase on rising edge
+      // Sync: phase-receptivity check (JF-inspired)
+      // Latch rising edge as pending, fire when modulator reaches threshold
       bool syncHigh = sync[i] > 0.5f;
       if (syncHigh && !s.syncWasHigh)
-        s.carrierPhase = 0.0f;
+        s.syncPending = true;
       s.syncWasHigh = syncHigh;
+
+      float prevModPhase = s.modPhase;
 
       // Modulator
       s.modPhase += modInc;
       s.modPhase -= floorf(s.modPhase);
+
+      // Phase-receptivity: fire pending sync when modulator crosses threshold
+      if (s.syncPending)
+      {
+        // Clear pending if modulator wrapped (missed this cycle)
+        if (s.modPhase < prevModPhase)
+          s.syncPending = false;
+
+        if (s.modPhase >= syncThreshold)
+        {
+          s.carrierPhase = 0.0f;
+          s.syncPending = false;
+        }
+      }
 
       // Self-feedback: modulator output feeds back into its own phase
       float modPhaseFB = s.modPhase + feedback * s.modFeedbackState * 0.5f;

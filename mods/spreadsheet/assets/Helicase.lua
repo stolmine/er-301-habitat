@@ -8,6 +8,7 @@ local Gate = require "Unit.ViewControl.Gate"
 local HelicaseOverviewControl = require "spreadsheet.HelicaseOverviewControl"
 local HelicaseShapingControl = require "spreadsheet.HelicaseShapingControl"
 local HelicaseModControl = require "spreadsheet.HelicaseModControl"
+local HelicaseSyncControl = require "spreadsheet.HelicaseSyncControl"
 local OptionControl = require "Unit.ViewControl.OptionControl"
 local Encoder = require "Encoder"
 
@@ -58,6 +59,12 @@ function Helicase:onLoadGraph(channelCount)
   syncComparator:setTriggerMode()
   connect(syncComparator, "Out", op, "Sync")
   self:addMonoBranch("sync", syncComparator, "In", syncComparator, "Out")
+
+  -- Sync phase threshold
+  local syncThreshold = self:addObject("syncThreshold", app.ParameterAdapter())
+  syncThreshold:hardSet("Bias", 0.0)
+  tie(op, "SyncThreshold", syncThreshold, "Out")
+  self:addMonoBranch("syncThreshold", syncThreshold, "In", syncThreshold, "Out")
 
   -- Output
   connect(op, "Out", self, "Out1")
@@ -311,11 +318,12 @@ function Helicase:onLoadViews()
     initialBias = 0.0
   }
 
-  controls.sync = Gate {
+  controls.sync = HelicaseSyncControl {
     button = "sync",
     description = "Sync",
     branch = self.branches.sync,
-    comparator = self.objects.syncComparator
+    comparator = self.objects.syncComparator,
+    phaseThresholdParam = self.objects.syncThreshold:getParameter("Bias")
   }
 
   controls.level = GainBias {

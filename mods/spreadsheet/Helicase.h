@@ -42,6 +42,7 @@ namespace stolmine
     od::Parameter mFine{"Fine", 0.0f};
     od::Parameter mLevel{"Level", 0.5f};
     od::Parameter mCarrierShape{"CarrierShape", 0.0f};
+    od::Parameter mSyncThreshold{"SyncThreshold", 0.0f};
     od::Option mLinExpo{"LinExpo", 2}; // 1=lin, 2=expo
 #endif
 

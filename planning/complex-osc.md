@@ -26,7 +26,14 @@ Modulator (OPL3 waveform set) → FM → Carrier (primary shape) → Discontinui
    - Feedback (modulator self-feedback depth)
    - Shape (hard-switched through OPL3 wavetable: sine, half-sine, abs-sine, quarter-sine, alternating-sine, camel-sine, square, log-saw)
    - Fine (expansion-only — set-once detune, no fader slot needed)
-6. **Sync** — hard sync input
+6. **Sync** — phase-receptivity sync input (Just Friends-inspired)
+   - Uses default SDK input comparator for edge detection
+   - Threshold fader controls modulator phase-position detection, not voltage height
+   - Threshold = 0.0: always accept reset (hard sync / chaos)
+   - Threshold = 0.5: accept reset past peak (soft sync equivalent)
+   - Threshold = 1.0: accept only at natural cycle completion (subharmonic lock)
+   - Split-tone region (0.5-1.0) creates beating patterns from alternating accept/reject
+   - Interesting behavior emerges when modulator is slower than carrier (subharmonic ratios)
 7. **Level** — output level
 
 ## OPL3 Waveform Set
