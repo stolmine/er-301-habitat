@@ -254,7 +254,8 @@ namespace stolmine
       }
 
       // Self-feedback: modulator output feeds back into its own phase
-      float modPhaseFB = s.modPhase + feedback * s.modFeedbackState * 0.5f;
+      float fb = tanhf(s.modFeedbackState) * feedback * 0.5f;
+      float modPhaseFB = s.modPhase + fb;
       float modOut = opl3Wave(modPhaseFB, modShape);
       s.modFeedbackState = modOut;
 
