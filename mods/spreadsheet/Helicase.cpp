@@ -207,16 +207,16 @@ namespace stolmine
     if (targetDecim > 64) targetDecim = 64;
     s.ringDecimRate = targetDecim;
 
-    // Per-sample slew rate for lin FM (reach target in one block)
-    float freqSlewRate = 1.0f / (float)FRAMELENGTH;
+    // Linear ramp: constant step per sample to reach target by end of block
+    float carrierStep = (targetCarrierFreq - s.slewCarrierFreq) / (float)FRAMELENGTH;
+    float modStep = (targetModFreq - s.slewModFreq) / (float)FRAMELENGTH;
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       if (linFM)
       {
-        // Smooth linear interpolation toward target frequency
-        s.slewCarrierFreq += (targetCarrierFreq - s.slewCarrierFreq) * freqSlewRate;
-        s.slewModFreq += (targetModFreq - s.slewModFreq) * freqSlewRate;
+        s.slewCarrierFreq += carrierStep;
+        s.slewModFreq += modStep;
         carrierFreq = s.slewCarrierFreq;
         modFreq = s.slewModFreq;
       }
