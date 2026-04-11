@@ -58,13 +58,14 @@ function HelicaseOverviewControl:init(args)
   end)()
   self.paramSubGraphic:addChild(self.mixReadout)
 
-  -- Lin/Expo indicator
+  -- Lin/Expo label
   self.helicase = args.helicase
   local linOption = args.helicase:getOption("LinExpo")
   linOption:enableSerialization()
-  self.linExpoIndicator = app.BinaryIndicator(0, 24, ply, 32)
-  self.linExpoIndicator:setCenter(col2, center3)
-  self.paramSubGraphic:addChild(self.linExpoIndicator)
+  self.linExpoLabel = app.Label("exp", 10)
+  self.linExpoLabel:fitToText(0)
+  self.linExpoLabel:setCenter(col2, center3 + 1)
+  self.paramSubGraphic:addChild(self.linExpoLabel)
 
   -- Carrier shape readout
   local shapeMap = (function()
@@ -93,9 +94,9 @@ end
 
 function HelicaseOverviewControl:updateLinExpo()
   if self.helicase:isLinFM() then
-    self.linExpoIndicator:on()
+    self.linExpoLabel:setText("lin")
   else
-    self.linExpoIndicator:off()
+    self.linExpoLabel:setText("exp")
   end
 end
 

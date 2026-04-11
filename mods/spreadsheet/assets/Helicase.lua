@@ -8,6 +8,7 @@ local Gate = require "Unit.ViewControl.Gate"
 local HelicaseOverviewControl = require "spreadsheet.HelicaseOverviewControl"
 local HelicaseShapingControl = require "spreadsheet.HelicaseShapingControl"
 local HelicaseModControl = require "spreadsheet.HelicaseModControl"
+local OptionControl = require "Unit.ViewControl.OptionControl"
 local Encoder = require "Encoder"
 
 local ply = app.SECTION_PLY
@@ -174,6 +175,44 @@ function Helicase:onLoadViews()
     initialBias = 0.5,
     helicase = self.objects.op,
     carrierShapeParam = self.objects.carrierShape:getParameter("Bias")
+  }
+
+  -- Overview expansion: modMix + carrierShape + lin/expo
+  views.overview = { "overview", "overModMix", "overCarrierShape", "overLinExpo" }
+  controls.overModMix = GainBias {
+    button = "mix",
+    description = "Mod Mix",
+    branch = self.branches.modMix,
+    gainbias = self.objects.modMix,
+    range = self.objects.modMix,
+    biasMap = modMixMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 2,
+    initialBias = 0.5
+  }
+  local carrShapeMap = (function()
+    local m = app.LinearDialMap(0, 7)
+    m:setSteps(1, 1, 1, 1)
+    m:setRounding(1)
+    return m
+  end)()
+  controls.overCarrierShape = GainBias {
+    button = "carr",
+    description = "Carrier Shape",
+    branch = self.branches.carrierShape,
+    gainbias = self.objects.carrierShape,
+    range = self.objects.carrierShape,
+    biasMap = carrShapeMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 0,
+    initialBias = 0.0
+  }
+
+  controls.overLinExpo = OptionControl {
+    button = "FM",
+    description = "FM Mode",
+    option = self.objects.op:getOption("LinExpo"),
+    choices = { "lin", "exp" }
   }
 
   local modIndexMap = floatMap(0, 10)

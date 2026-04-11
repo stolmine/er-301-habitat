@@ -67,6 +67,10 @@ namespace stolmine
     float curCarrierPhase;
     float curCarrierOutput;
 
+    // Slewed frequency for smooth lin FM pitch tracking
+    float slewCarrierFreq;
+    float slewModFreq;
+
     // Decimation counter for ring buffer (capture full attractor shape)
     int ringDecimCounter;
     int ringDecimRate;
@@ -84,6 +88,8 @@ namespace stolmine
       ringDecimRate = 8;
       curCarrierPhase = 0.0f;
       curCarrierOutput = 0.0f;
+      slewCarrierFreq = 110.0f;
+      slewModFreq = 220.0f;
     }
   };
 
@@ -177,26 +183,45 @@ namespace stolmine
     int carrierShape = CLAMP(0, 7, (int)(mCarrierShape.value() + 0.5f));
     bool linFM = mLinExpo.value() == 1;
 
-    // V/Oct (block-rate)
-    // V/Oct: Lua applies 10x ConstantGain (FULLSCALE_IN_VOLTS = 10),
-    // so voct arrives as 1.0 per octave. No additional scaling needed.
+    // V/Oct: Lua applies 10x ConstantGain, arrives as 1.0 per octave
     float pitch = voct[0];
-    float carrierFreq = f0 * powf(2.0f, pitch + fine / 1200.0f);
-    if (carrierFreq > sr * 0.49f) carrierFreq = sr * 0.49f;
-    float modFreq = carrierFreq * ratio;
+    float targetCarrierFreq = f0 * powf(2.0f, pitch + fine / 1200.0f);
+    if (targetCarrierFreq > sr * 0.49f) targetCarrierFreq = sr * 0.49f;
+    float targetModFreq = targetCarrierFreq * ratio;
 
-    float carrierInc = carrierFreq / sr;
-    float modInc = modFreq / sr;
+    // For expo FM, use block-rate frequency directly
+    // For lin FM, slew per-sample for clean pitch tracking
+    float carrierFreq, modFreq;
+    if (!linFM)
+    {
+      carrierFreq = targetCarrierFreq;
+      modFreq = targetModFreq;
+      s.slewCarrierFreq = carrierFreq;
+      s.slewModFreq = modFreq;
+    }
 
-    // Adapt ring buffer decimation so 256 entries cover ~8 carrier cycles
-    float samplesPerCycle = sr / (carrierFreq > 0.1f ? carrierFreq : 0.1f);
+    // Adapt ring buffer decimation
+    float samplesPerCycle = sr / (targetCarrierFreq > 0.1f ? targetCarrierFreq : 0.1f);
     int targetDecim = (int)(samplesPerCycle * 8.0f / 256.0f);
     if (targetDecim < 1) targetDecim = 1;
     if (targetDecim > 64) targetDecim = 64;
     s.ringDecimRate = targetDecim;
 
+    // Per-sample slew rate for lin FM (reach target in one block)
+    float freqSlewRate = 1.0f / (float)FRAMELENGTH;
+
     for (int i = 0; i < FRAMELENGTH; i++)
     {
+      if (linFM)
+      {
+        // Smooth linear interpolation toward target frequency
+        s.slewCarrierFreq += (targetCarrierFreq - s.slewCarrierFreq) * freqSlewRate;
+        s.slewModFreq += (targetModFreq - s.slewModFreq) * freqSlewRate;
+        carrierFreq = s.slewCarrierFreq;
+        modFreq = s.slewModFreq;
+      }
+      float carrierInc = carrierFreq / sr;
+      float modInc = modFreq / sr;
       // Sync: reset carrier phase on rising edge
       bool syncHigh = sync[i] > 0.5f;
       if (syncHigh && !s.syncWasHigh)
@@ -213,9 +238,14 @@ namespace stolmine
       s.modFeedbackState = modOut;
 
       // FM: modulator modulates carrier phase increment
-      // Standard FM: phase += (fc + modOut * fm * index) / sr
-      // modIndex scales the frequency deviation by the modulator frequency
-      float fmAmount = modOut * modIndex * modInc;
+      float fmAmount;
+      if (linFM)
+        // Linear through-zero FM: deviation in Hz = modIndex * 100Hz
+        // Independent of carrier frequency, allows negative frequencies (TZFM)
+        fmAmount = modOut * modIndex * 100.0f / sr;
+      else
+        // Exponential FM: ratio-preserving, deviation scales with modulator freq
+        fmAmount = modOut * modIndex * modInc;
 
       s.carrierPhase += carrierInc + fmAmount;
       s.carrierPhase -= floorf(s.carrierPhase);
