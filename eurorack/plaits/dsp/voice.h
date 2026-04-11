@@ -246,7 +246,8 @@ class Voice {
   ChannelPostProcessor aux_post_processor_;
   
   EngineRegistry<kMaxEngines> engines_;
-  
+  stmlib::BufferAllocator* allocator_;
+
   float out_buffer_[kMaxBlockSize];
   float aux_buffer_[kMaxBlockSize];
   

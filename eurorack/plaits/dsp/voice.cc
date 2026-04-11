@@ -35,6 +35,7 @@ using namespace std;
 using namespace stmlib;
 
 void Voice::Init(BufferAllocator* allocator) {
+  allocator_ = allocator;
   engines_.Init();
 
   engines_.RegisterInstance(&virtual_analog_vcf_engine_, false, 1.0f, 1.0f);
@@ -126,6 +127,11 @@ void Voice::Render(
   Engine* e = engines_.get(engine_index);
   
   if (engine_index != previous_engine_index_ || reload_user_data_) {
+    // Re-init allocator and engine on switch (Cortex-A8 safety:
+    // shared arena means only the last-init'd engine's buffers are valid)
+    allocator_->Free();
+    e->Init(allocator_);
+
     UserData user_data;
     const uint8_t* data = user_data.ptr(engine_index);
     if (!data && engine_index >= 2 && engine_index <= 4) {
