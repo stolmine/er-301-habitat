@@ -600,7 +600,7 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [x] Spreadsheet package
 - [x] Algorithm tuning: Pink gain normalization + spectral thinning Y, Crackle SC-style abs() fold, Logistic focused on chaotic region with iteration rate Y, Henon wider param ranges with fold, Gendy tripled perturbation with Levy jumps and multi-breakpoint updates, Lorenz sub-stepping for accurate integration
 
-### Helicase (2-Op FM Oscillator) -- in progress
+### Helicase (2-Op FM Oscillator) -- COMPLETE
 - [x] Carrier + modulator with OPL3 waveforms, self-feedback, discontinuity folder
 - [x] 3 custom visualizations: k-means metaball overview, transfer curve, circular ribbon
 - [x] V/Oct fix (was 100x scaling), FM scaling fix (use modInc not carrierInc)
@@ -617,11 +617,13 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [x] Per-sample linear freq ramp for clean TZFM pitch tracking
 - [x] Overview expansion view: modMix, carrier shape, lin/expo OptionControl
 - [x] GUI stack overflow fix: work arrays moved to heap members
-- [ ] Move to Spreadsheet category (currently Synthesizers)
+- [x] Move to Spreadsheet category
 - [x] Research Just Friends run modes for dynamic sync paradigm
-- [ ] Sync ply: phase-receptivity sync (JF-inspired). Custom SyncControl reusing SDK comparator for edge detection, threshold fader controls modulator phase-position (0.0=hard sync, 0.5=soft sync, 1.0=subharmonic lock). PolyBLEP at reset discontinuity.
-- [ ] Discontinuity folder: add fold shapes to upper half of type control (current 0-7 are OPL3 operations, 8-15 would be actual wavefolders -- triangle fold, sine fold, hard fold, etc.)
-- [ ] Lo-fi config menu options (OPL bit-depth, alias mode, mod shape switching)
+- [x] Sync ply: phase-receptivity sync (JF-inspired). Custom HelicaseSyncControl, latched pending edges fire when modulator crosses phase threshold (0.0=hard sync, 0.5=soft sync, 1.0=subharmonic lock)
+- [x] Modulator feedback: tanh soft clip to tame runaway at high feedback
+- [ ] Sync: PolyBLEP at carrier reset discontinuity
+- [x] Discontinuity folder: fold shapes 8-15 (triangle fold, sine fold, hard fold, staircase, wrap, asymmetric fold, Chebyshev T3, ring fold)
+- [x] Lo-fi/hi-fi config menu toggle (OPL bit-depth quantization, hard/morphable shapes, fine fader steps)
 - [ ] Carrier shape: consider wider selection beyond OPL3 set
 - [ ] CPU profiling on am335x
 
