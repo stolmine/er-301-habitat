@@ -1,5 +1,5 @@
 PKGNAME ?= plaits
-PKGVERSION ?= 1.3.0
+PKGVERSION ?= 1.4.0
 
 include scripts/env.mk
 
