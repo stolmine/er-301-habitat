@@ -233,18 +233,7 @@ namespace stolmine
           break;
         }
 
-        case 7: // Gate: pulsing brightness
-        {
-          float pulse = 0.5f + 0.5f * sinf(mVizPhase * 3.0f);
-          int fillGray = (int)(pulse * 5.0f);
-          int dotGray = 3 + (int)(pulse * 10.0f);
-          if (fillGray < 1) fillGray = 1;
-          fb.vline(fillGray, x, yLo, yHi);
-          fb.pixel(dotGray, x, py);
-          break;
-        }
-
-        case 8: // Distortion: jittered Y fill
+        case 7: // Distortion: jittered Y fill
         {
           uint32_t hash = (px * 374761393u + (uint32_t)(mVizPhase * 50.0f)) ^ 0x85ebca6bu;
           float jitter = (float)((int32_t)(hash >> 16) & 0xFF) / 255.0f - 0.5f;
@@ -258,7 +247,7 @@ namespace stolmine
           break;
         }
 
-        case 9: // Shuffle: segment swaps
+        case 8: // Shuffle: segment swaps
         {
           int segs = 4;
           int segLen = nPts / segs;
@@ -281,7 +270,7 @@ namespace stolmine
           break;
         }
 
-        case 10: // Delay: layered chains
+        case 9: // Delay: layered chains
         {
           int offset1 = nPts / 4;
           int offset2 = nPts / 2;
@@ -296,7 +285,7 @@ namespace stolmine
           break;
         }
 
-        case 11: // Comb: envelope contour + concentric inner waveform copies.
+        case 10: // Comb: envelope contour + concentric inner waveform copies.
         {        // Tight comb = many shrinking inner rings, long comb = single contour.
           fb.vline(GRAY3, x, yLo, yHi);
           int numRings = (int)((1.0f - fxParam) * 7.0f);

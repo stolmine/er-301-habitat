@@ -13,7 +13,7 @@ local col2 = app.BUTTON2_CENTER
 local col3 = app.BUTTON3_CENTER
 
 local typeMap = (function()
-  local m = app.LinearDialMap(0, 11)
+  local m = app.LinearDialMap(0, 10)
   m:setSteps(1, 1, 1, 1)
   m:setRounding(1)
   return m
@@ -73,8 +73,8 @@ function LaretStepListControl:init(args)
     if g.useHardSet then g:useHardSet() end
     if g.addName then
       g:addName("off"); g:addName("stt"); g:addName("rev"); g:addName("bit")
-      g:addName("dec"); g:addName("flt"); g:addName("pch"); g:addName("gat")
-      g:addName("drv"); g:addName("shf"); g:addName("dly"); g:addName("cmb")
+      g:addName("dec"); g:addName("flt"); g:addName("pch"); g:addName("drv")
+      g:addName("shf"); g:addName("dly"); g:addName("cmb")
     end
     return g
   end)()

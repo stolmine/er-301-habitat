@@ -41,7 +41,7 @@ namespace stolmine
 
       static const char *kTypeAbbrev[] = {
           "off", "stt", "rev", "bit", "dec",
-          "flt", "pch", "gat", "drv", "shf", "dly", "cmb"};
+          "flt", "pch", "drv", "shf", "dly", "cmb"};
 
       for (int r = 0; r < visibleRows; r++)
       {
@@ -67,7 +67,7 @@ namespace stolmine
 
         int type = mpLarets->getStepType(step);
         if (type < 0) type = 0;
-        if (type > 11) type = 11;
+        if (type > 10) type = 10;
         fb.text(WHITE, mWorldLeft + 18, y + 1, kTypeAbbrev[type], 10);
       }
 

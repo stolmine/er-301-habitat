@@ -38,7 +38,7 @@ namespace stolmine
   {
     FX_OFF = 0, FX_STUTTER, FX_REVERSE, FX_BITCRUSH,
     FX_DOWNSAMPLE, FX_FILTER, FX_PITCHSHIFT,
-    FX_GATE, FX_DISTORTION, FX_SHUFFLE, FX_DELAY, FX_COMB, FX_COUNT
+    FX_DISTORTION, FX_SHUFFLE, FX_DELAY, FX_COMB, FX_COUNT
   };
 
   static uint32_t lRandState = 98765;
@@ -316,12 +316,6 @@ namespace stolmine
       float wB = sinf(3.14159265f * phB); wB *= wB;
 
       return s.buffer[posA] * wA + s.buffer[posB] * wB;
-    }
-
-    case FX_GATE:
-    {
-      float env = (param < 0.5f) ? ((sp < 0.5f) ? 1.0f : 0.0f) : fmaxf(0.0f, 1.0f - sp * 2.0f * (param + 0.5f));
-      return input * env;
     }
 
     case FX_DISTORTION:
