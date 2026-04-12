@@ -68,6 +68,7 @@ namespace stolmine
     int tmpTicks[kMaxSteps];
     float stepProgress;
     float compDetector;
+    float pitchPhase;
     float vizRing[128];
     int vizPos;
     int vizDecimCounter;
@@ -83,6 +84,7 @@ namespace stolmine
       cachedPitchRate = 1.0f; cachedBaseFreq = 40.0f;
       stepProgress = 0.0f;
       compDetector = 0.0f;
+      pitchPhase = 0.0f;
       memset(vizRing, 0, sizeof(vizRing));
       vizPos = 0;
       vizDecimCounter = 0;
@@ -282,14 +284,31 @@ namespace stolmine
 
     case FX_PITCHSHIFT:
     {
+      // Two-grain overlap pitch shifter (Dattorro-style): two delay reads
+      // move through a grain window 180 deg out of phase, windowed with
+      // sin^2 so their sum is constant-amplitude. Adapted from the SDK's
+      // MonoGrainDelay idea with period tracking live buffer writes.
       float rate = s.cachedPitchRate;
-      int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.5f);
-      int len = MAX(1, period / 2);
-      if (len > kBufferSize / 2) len = kBufferSize / 2;
-      int head = ((s.writePos - len) + kBufferSize) % kBufferSize;
-      float o = s.buffer[(head + (int)s.readPos) % kBufferSize];
-      s.readPos += rate; if ((int)s.readPos >= len) s.readPos -= (float)len;
-      return o;
+      int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.1f);
+      int D = MAX(1024, period / 4);
+      if (D > kBufferSize / 2) D = kBufferSize / 2;
+
+      s.pitchPhase += (1.0f - rate) / (float)D;
+      if (s.pitchPhase >= 1.0f) s.pitchPhase -= 1.0f;
+      else if (s.pitchPhase < 0.0f) s.pitchPhase += 1.0f;
+
+      float phA = s.pitchPhase;
+      float phB = phA + 0.5f; if (phB >= 1.0f) phB -= 1.0f;
+
+      int dA = (int)(phA * (float)D);
+      int dB = (int)(phB * (float)D);
+      int posA = (s.writePos - dA - 1 + 2 * kBufferSize) % kBufferSize;
+      int posB = (s.writePos - dB - 1 + 2 * kBufferSize) % kBufferSize;
+
+      float wA = sinf(3.14159265f * phA); wA *= wA;
+      float wB = sinf(3.14159265f * phB); wB *= wB;
+
+      return s.buffer[posA] * wA + s.buffer[posB] * wB;
     }
 
     case FX_TAPESTOP:
@@ -311,7 +330,13 @@ namespace stolmine
     }
 
     case FX_DISTORTION:
-      return tanhf(input * (1.0f + param * 9.0f));
+    {
+      float drive = 1.0f + param * 9.0f;
+      // Normalize loudness against drive: 1/sqrt(drive) keeps perceived
+      // level close to other effects across the range.
+      float makeup = 1.0f / sqrtf(drive);
+      return tanhf(input * drive) * makeup;
+    }
 
     case FX_SHUFFLE:
     {
@@ -361,10 +386,11 @@ namespace stolmine
     bool autoMakeup = mAutoMakeup.value() == 1;
     bool compActive = compAmt > 0.001f;
 
-    // CPR single-band: threshold -24 dB..0, ratio 1:1..8:1
-    float compThresholdDb = -compAmt * 24.0f;
-    float compRatioI = 1.0f / (1.0f + compAmt * 7.0f);
-    float compAttackSec = 0.010f;
+    // CPR single-band: 0 -> no-op, 1 -> aggressive limiter
+    // threshold -40 dB, ratio 20:1, 1 ms attack -- enough to clamp peaks
+    float compThresholdDb = -compAmt * 40.0f;
+    float compRatioI = 1.0f / (1.0f + compAmt * 19.0f);
+    float compAttackSec = 0.010f - compAmt * 0.009f;
     float compReleaseSec = 0.200f;
     float compRiseCoeff = expf(-1.0f / (compAttackSec * sr));
     float compFallCoeff = expf(-1.0f / (compReleaseSec * sr));

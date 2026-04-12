@@ -529,12 +529,15 @@ Multiband comp and spectral gate share crossover/band-splitting frontend with Pa
 
 ### Larets Polish
 
-- [ ] Overview viz: scale Y by 2x. Huge amount of vertical resolution unused -- waveform/metaball layer is compressed into ~half the available height.
-- [ ] Effect differentiation -- pitch shift, shuffle, and stutter sound nearly identical right now. Needs distinct character per effect:
-  - Stutter should feel like a beat repeat / short loop capture, not a buffer smear. Lock loop length to a musical fraction of the clock period (e.g. 1/2, 1/4, 1/8 tick) instead of free-length.
-  - Shuffle needs larger minimum chunk sizes with clock-awareness -- quantize segment boundaries to clock subdivisions, not arbitrary sample counts.
-  - Pitch shift needs to stay distinct from the buffer-read-based effects (consider granular or OLA resynthesis instead of just variable read rate).
+- [x] Overview viz: scale Y by 2x, then auto-normalize (0.9 / peak) with 8%/frame smoothing so waveform always fills the frame.
+- [x] Pitch shift: two-grain Dattorro-style overlap pitch shifter (sin^2 windows, 180 deg phase offset). Adapted idea from SDK MonoGrainDelay.
+- [x] Distortion makeup: 1/sqrt(drive) to level-match other effects.
+- [x] Compressor at full: -40 dB threshold, 20:1 ratio, 1 ms attack. Actual limiter territory.
+- [x] Bitcrush viz: quantize in display-pixel space (min 3 px step), segments always visible.
+- [ ] Stutter should feel like a beat repeat / short loop capture, not a buffer smear. Lock loop length to a musical fraction of the clock period (e.g. 1/2, 1/4, 1/8 tick) instead of free-length.
+- [ ] Shuffle needs larger minimum chunk sizes with clock-awareness -- quantize segment boundaries to clock subdivisions, not arbitrary sample counts.
 - [ ] Type readout parallax: integer and mode labels on the step-list type readout drift out of alignment in the sub-display. Audit how other spreadsheet units align labels with readouts (Excel TrackerSeq step list, Ballot GateSeq, Helicase ModControl). Look for shared label/readout positioning utilities before rolling our own.
+- [ ] Global param offset control: top-level ply to the left of xform. Non-destructive (does not rewrite stored step params); adds an offset to every step's param when read at playback. Clamp final value to [0,1]. Main fader with CV input like other GainBias controls.
 
 ## Grain Cloud
 

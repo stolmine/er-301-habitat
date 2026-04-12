@@ -58,10 +58,21 @@ namespace stolmine
         mSlewShape[i] += (s - mSlewShape[i]) * 0.15f;
       }
 
+      // Auto-normalize vertical scale so waveform fills the frame
+      float peak = 0.0f;
+      for (int i = 0; i < 128; i++)
+      {
+        float a = mSlewShape[i]; if (a < 0.0f) a = -a;
+        if (a > peak) peak = a;
+      }
+      float target = (peak > 0.01f) ? (0.9f / peak) : 1.0f;
+      if (target > 10.0f) target = 10.0f;
+      mAutoGain += (target - mAutoGain) * 0.08f;
+
       // Downsample 128 → w screen positions with min/max envelope
       int nPts = w;
       float screenMin[128], screenMax[128], screenAvg[128];
-      float ampScale = (float)(h / 2 - 2);
+      float ampScale = (float)(h / 2 - 2) * mAutoGain;
       for (int px = 0; px < nPts && px < 128; px++)
       {
         int s0 = (px * 128) / nPts;
@@ -145,10 +156,14 @@ namespace stolmine
 
         case 3: // Bitcrush: quantized Y, staircase
         {
-          int levels = 2 + (int)((1.0f - fxParam) * 10.0f);
-          float qStep = 2.0f / (float)levels;
-          float qVal = floorf(val / qStep + 0.5f) * qStep;
-          int qy = centerY - (int)(qVal * ampScale);
+          // Quantize in display-pixel space so segments are always visible
+          // regardless of signal level (raw-value quant collapsed to 0 for
+          // typical audio peaks).
+          int levels = 2 + (int)((1.0f - fxParam) * 8.0f);
+          int stepPx = MAX(3, (h - 4) / (levels * 2));
+          int pyRaw = (int)(val * ampScale);
+          int qPy = (pyRaw >= 0 ? (pyRaw / stepPx) : -((-pyRaw + stepPx - 1) / stepPx)) * stepPx;
+          int qy = centerY - qPy;
           if (qy < bot) qy = bot;
           if (qy > bot + h - 1) qy = bot + h - 1;
           int qLo = (qy < centerY) ? qy : centerY;
@@ -314,6 +329,7 @@ namespace stolmine
     float mDcState = 0.0f;
     float mVizPhase = 0.0f;
     int mHeldY = 0;
+    float mAutoGain = 1.0f;
   };
 
 } // namespace stolmine
