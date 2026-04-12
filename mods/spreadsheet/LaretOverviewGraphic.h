@@ -296,16 +296,23 @@ namespace stolmine
           break;
         }
 
-        case 11: // Comb: rippled fill
-        {
-          float wobble = sinf((float)px * 0.3f + mVizPhase * 2.0f) * fxParam * ampScale * 0.3f;
-          int wobY = py + (int)wobble;
-          if (wobY < bot) wobY = bot;
-          if (wobY > bot + h - 1) wobY = bot + h - 1;
-          int wLo = (wobY < centerY) ? wobY : centerY;
-          int wHi = (wobY < centerY) ? centerY : wobY;
-          fb.vline(GRAY7, x, wLo, wHi);
-          fb.pixel(WHITE, x, wobY);
+        case 11: // Comb: envelope contour + concentric inner waveform copies.
+        {        // Tight comb = many shrinking inner rings, long comb = single contour.
+          fb.vline(GRAY3, x, yLo, yHi);
+          int numRings = (int)((1.0f - fxParam) * 7.0f);
+          if (numRings > 0)
+          {
+            float amp = (float)(py - centerY);
+            for (int r = 1; r <= numRings; r++)
+            {
+              float scale = 1.0f - (float)r / (float)(numRings + 1);
+              int rPy = centerY + (int)(amp * scale);
+              int gray = 4 + (int)(scale * 8.0f);
+              if (gray < 1) gray = 1;
+              if (rPy >= bot && rPy < bot + h) fb.pixel(gray, x, rPy);
+            }
+          }
+          fb.pixel(WHITE, x, py);
           break;
         }
 
