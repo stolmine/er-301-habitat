@@ -53,10 +53,10 @@ namespace stolmine
     float mScreenX[kMaxClusters], mScreenY[kMaxClusters], mScreenZ[kMaxClusters];
     float mProjStr[kMaxClusters];
 
-    // Spectral complexity (zero-crossing rate) for brightness
+    // Brightness: mean |dx| / RMS of the decimated output ring. Grows with
+    // timbral richness (sidebands, folds, feedback) and is approximately
+    // pitch-independent because the ring captures ~8 cycles regardless of f0.
     float mSpectralBright = 0.5f;
-    // Spectral centroid proxy for shell radius
-    float mCentroidSlew = 0.5f;
 
     // Frame skip: evaluate field every other frame, blit cache otherwise
     int mFrameToggle = 1; // start with eval frame, not blit
@@ -215,28 +215,10 @@ namespace stolmine
         projStr[c] = mCstr[c] * mNoiseScale[c];
       }
 
-      // Spectral complexity: zero-crossing rate on output ring buffer
-      int crossings = 0;
-      for (int i = 1; i < 256; i++)
-      {
-        float s0 = mpHelicase->getOutputSample(i - 1);
-        float s1 = mpHelicase->getOutputSample(i);
-        if ((s0 >= 0.0f && s1 < 0.0f) || (s0 < 0.0f && s1 >= 0.0f))
-          crossings++;
-      }
-      // Normalize: pure sine ~2 crossings per cycle, rich FM = many more
-      // Map to brightness: 0.3 (clean) to 1.0 (complex)
-      float spectralTarget = 0.15f + (float)crossings / 60.0f * 0.85f;
-      if (spectralTarget > 1.0f) spectralTarget = 1.0f;
-      mSpectralBright += (spectralTarget - mSpectralBright) * 0.1f;
-
-      // Active cluster count from spectral complexity: 6 (clean) to 24 (rich)
-      mActiveClusters = 6 + (int)(mSpectralBright * 18.0f);
-      if (mActiveClusters > kMaxClusters) mActiveClusters = kMaxClusters;
-      if (mActiveClusters < 6) mActiveClusters = 6;
-
-      // Spectral centroid proxy: mean absolute first difference / RMS
-      // Higher ratio = brighter sound = tighter shell
+      // Single brightness measure: mean |dx| / RMS of the decimated ring.
+      // Clean sine lands near ~0.15-0.2, rich FM with folds toward 1.5-2.0.
+      // Floor 0.3 keeps the viz readable at rest; slope 0.4 brings max in
+      // at centroidRaw ~= 1.75.
       float sumDiff = 0.0f, sumSq = 0.0f;
       for (int i = 1; i < 256; i++)
       {
@@ -248,11 +230,13 @@ namespace stolmine
       }
       float rms = sqrtf(sumSq / 255.0f) + 0.001f;
       float centroidRaw = sumDiff / (255.0f * rms);
-      // Map: low centroid (~0.5) = wide shell, high centroid (~3.0) = tight
-      float centroidTarget = 1.0f - (centroidRaw - 0.5f) / 3.0f;
-      if (centroidTarget < 0.3f) centroidTarget = 0.3f;
-      if (centroidTarget > 0.95f) centroidTarget = 0.95f;
-      mCentroidSlew += (centroidTarget - mCentroidSlew) * 0.08f;
+      float brightTarget = 0.3f + centroidRaw * 0.4f;
+      if (brightTarget > 1.0f) brightTarget = 1.0f;
+      mSpectralBright += (brightTarget - mSpectralBright) * 0.1f;
+
+      mActiveClusters = 6 + (int)(mSpectralBright * 18.0f);
+      if (mActiveClusters > kMaxClusters) mActiveClusters = kMaxClusters;
+      if (mActiveClusters < 6) mActiveClusters = 6;
 
       // Frame skip: expensive field eval every other frame, blit cache otherwise
       mFrameToggle ^= 1;
@@ -326,9 +310,9 @@ namespace stolmine
           if (isBlob)
           {
             float blob = (sharp - 0.04f) * 30.0f;
-            if (blob > 13.0f) blob = 13.0f;
+            if (blob > 15.0f) blob = 15.0f;
             blobGray = (int)(blob * mSpectralBright);
-            if (blobGray > 13) blobGray = 13;
+            if (blobGray > 15) blobGray = 15;
             cellGray = blobGray;
           }
 
