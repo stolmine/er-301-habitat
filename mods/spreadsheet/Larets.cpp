@@ -210,7 +210,10 @@ namespace stolmine
 
     case FX_STUTTER:
     {
-      int len = MAX(1, (int)(param * 8192.0f));
+      // Loop length as fraction of clock period: param 0 = 1/32, param 1 = full period
+      int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.5f);
+      int len = MAX(64, (int)(period * (0.03f + param * 0.97f)));
+      if (len > kBufferSize / 2) len = kBufferSize / 2;
       int idx = (((s.writePos - len) + kBufferSize) % kBufferSize + (int)s.readPos) % kBufferSize;
       float o = s.buffer[idx];
       s.readPos += 1.0f; if ((int)s.readPos >= len) s.readPos = 0.0f;
@@ -219,7 +222,9 @@ namespace stolmine
 
     case FX_REVERSE:
     {
-      int len = MAX(1, (int)(sr * 0.25f));
+      int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.5f);
+      int len = MAX(1, period);
+      if (len > kBufferSize / 2) len = kBufferSize / 2;
       int head = ((s.writePos - len) + kBufferSize) % kBufferSize;
       float o = s.buffer[(head + len - 1 - (int)s.readPos + kBufferSize) % kBufferSize];
       float rate = 0.5f + param * 1.5f;
@@ -253,7 +258,9 @@ namespace stolmine
     case FX_PITCHSHIFT:
     {
       float rate = s.cachedPitchRate;
-      int len = MAX(1, (int)(sr * 0.1f));
+      int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.5f);
+      int len = MAX(1, period / 2);
+      if (len > kBufferSize / 2) len = kBufferSize / 2;
       int head = ((s.writePos - len) + kBufferSize) % kBufferSize;
       float o = s.buffer[(head + (int)s.readPos) % kBufferSize];
       s.readPos += rate; if ((int)s.readPos >= len) s.readPos -= (float)len;
@@ -263,7 +270,9 @@ namespace stolmine
     case FX_TAPESTOP:
     {
       float rate = fmaxf(0.0f, 1.0f - sp * (0.5f + param * 0.5f));
-      int len = MAX(1, (int)(sr * 0.5f));
+      int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.5f);
+      int len = MAX(1, period);
+      if (len > kBufferSize / 2) len = kBufferSize / 2;
       int head = ((s.writePos - len) + kBufferSize) % kBufferSize;
       float o = s.buffer[(head + (int)s.readPos) % kBufferSize];
       s.readPos += rate; if ((int)s.readPos >= len) s.readPos = (float)(len - 1);
@@ -282,7 +291,9 @@ namespace stolmine
     case FX_SHUFFLE:
     {
       int segs = 2 + (int)(param * 6.0f);
-      int len = MAX(1, (int)(sr * 0.25f));
+      int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.5f);
+      int len = MAX(1, period);
+      if (len > kBufferSize / 2) len = kBufferSize / 2;
       int segLen = MAX(1, len / segs);
       int head = ((s.writePos - len) + kBufferSize) % kBufferSize;
       uint32_t h = (uint32_t)(mStep * 2654435761u) ^ (uint32_t)(segs * 2246822519u);

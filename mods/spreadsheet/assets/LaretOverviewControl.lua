@@ -23,7 +23,6 @@ function LaretOverviewControl:init(args)
   container:addChild(overview)
   self:setMainCursorController(overview)
   self:setControlGraphic(container)
-  self:addSpotDescriptor { center = 0.5 * ply }
 
   self.paramMode = true
   self.shiftHeld = false
