@@ -541,6 +541,8 @@ Multiband comp and spectral gate share crossover/band-splitting frontend with Pa
 - [ ] Comb viz rework: concentric waveform contours instead of the current sinusoidal wobble fill. Tight comb (low param) = many tightly-spaced rings over the waveform. Long comb (high param) = wide spacing, collapsing to a single contour at max.
 - [ ] Shuffle repeats sections: current mapping uses (mStep, curChunk) as hash seed, so the same chunk-to-chunk permutation recurs whenever s.readPos wraps within a step. Should pick fresh source chunks each loop pass (include a loop counter in the hash, or re-draw on wrap).
 - [ ] Bitcrush viz: replace the staircase with a particle fill of the area under the waveform contour. Lower bit depth = denser fill plus noise-driven particle motion; at max bit depth still keep some motion and a fair fill percentage so the viz never goes dead.
+- [ ] Drive gain compensation: distortion step gets louder with higher drive even after the 1/sqrt(drive) makeup -- push the compensation harder so perceived level stays flat or drops as drive climbs.
+- [x] Bitcrush range + direction: inverted so param=0 is clean (12-bit, `2^12`=4096 levels) and param=1 is most crushed (`2^2.5`≈5.66 levels, matches old param=0.1). Now agrees with the viz (low param = many thin bands, high param = few big bands).
 - [x] Tape stop removed. Deceleration behavior never felt musical in this stepped context; cleaner to reclaim the slot than to keep tuning it.
 - [x] Reverse viz rework: sweep a highlighted band right-to-left across the waveform at the playback rate. Reads visually as "playing backwards".
 

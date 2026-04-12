@@ -266,7 +266,9 @@ namespace stolmine
 
     case FX_BITCRUSH:
     {
-      float lvl = powf(2.0f, 1.0f + param * 15.0f);
+      // param=0 -> 12-bit (clean), param=1 -> ~2.5-bit (heavily crushed).
+      // Direction inverted: higher param = more reduction. Matches the viz.
+      float lvl = powf(2.0f, 12.0f - param * 9.5f);
       return floorf(input * lvl + 0.5f) / lvl;
     }
 
