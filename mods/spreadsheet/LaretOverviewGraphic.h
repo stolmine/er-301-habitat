@@ -169,23 +169,29 @@ namespace stolmine
           break;
         }
 
-        case 3: // Bitcrush: quantized Y, staircase
+        case 3: // Bitcrush: particle fill under contour, density+motion scale with crush
         {
-          // Quantize in display-pixel space so segments are always visible
-          // regardless of signal level (raw-value quant collapsed to 0 for
-          // typical audio peaks).
-          int levels = 2 + (int)((1.0f - fxParam) * 8.0f);
-          int stepPx = MAX(3, (h - 4) / (levels * 2));
-          int pyRaw = (int)(val * ampScale);
-          int qPy = (pyRaw >= 0 ? (pyRaw / stepPx) : -((-pyRaw + stepPx - 1) / stepPx)) * stepPx;
-          int qy = centerY - qPy;
-          if (qy < bot) qy = bot;
-          if (qy > bot + h - 1) qy = bot + h - 1;
-          int qLo = (qy < centerY) ? qy : centerY;
-          int qHi = (qy < centerY) ? centerY : qy;
-          fb.hline(GRAY9, x, (px < nPts - 1) ? left + px + 1 : x, qy);
-          fb.vline(GRAY7, x, qLo, qHi);
-          fb.pixel(WHITE, x, qy);
+          int topY = (py < centerY) ? py : centerY;
+          int botY = (py < centerY) ? centerY : py;
+          if (topY < bot) topY = bot;
+          if (botY > bot + h - 1) botY = bot + h - 1;
+          int area = botY - topY;
+          if (area < 1) area = 1;
+          // Floor density so the viz never dies at max bit depth.
+          int count = (int)((float)area * (0.15f + fxParam * 0.55f));
+          if (count < 1) count = 1;
+          int particleGray = 6 + (int)(fxParam * 9.0f);
+          if (particleGray > 15) particleGray = 15;
+          for (int p = 0; p < count; p++)
+          {
+            uint32_t h32 = ((uint32_t)px * 374761393u
+                + (uint32_t)p * 2246822519u
+                + (uint32_t)(mVizPhase * 100.0f)) ^ 0x85ebca6bu;
+            float hf = (float)((h32 >> 16) & 0xFFFF) / 65535.0f;
+            int pY = topY + (int)(hf * (float)area);
+            fb.pixel(particleGray, x, pY);
+          }
+          fb.pixel(WHITE, x, py);
           break;
         }
 
