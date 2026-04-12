@@ -61,8 +61,6 @@ namespace stolmine
     int decimCounter;
     float prevOutput;
     int crossfadeCounter;
-    float cachedPitchRate;
-    float cachedBaseFreq;
     int tmpType[kMaxSteps];
     float tmpParam[kMaxSteps];
     int tmpTicks[kMaxSteps];
@@ -82,7 +80,6 @@ namespace stolmine
       ic1eq = 0.0f; ic2eq = 0.0f;
       holdSample = 0.0f; decimCounter = 0;
       prevOutput = 0.0f; crossfadeCounter = 0;
-      cachedPitchRate = 1.0f; cachedBaseFreq = 40.0f;
       stepProgress = 0.0f;
       compDetector = 0.0f;
       pitchPhase = 0.0f;
@@ -101,13 +98,11 @@ namespace stolmine
     addParameter(mOutputLevel); addParameter(mCompressAmt);
     addParameter(mClockDiv); addParameter(mTransformFunc); addParameter(mTransformDepth);
     addParameter(mLoopLength);
+    addParameter(mParamOffset);
     addParameter(mEditType); addParameter(mEditParam); addParameter(mEditTicks);
     addOption(mAutoMakeup);
     mpInternal = new Internal();
     mpInternal->Init();
-    float p0 = mpInternal->param[0];
-    mpInternal->cachedPitchRate = powf(2.0f, (p0 * 24.0f - 12.0f) / 12.0f);
-    mpInternal->cachedBaseFreq = 40.0f * powf(500.0f, p0);
   }
 
   Larets::~Larets() { delete mpInternal; }
@@ -281,7 +276,10 @@ namespace stolmine
 
     case FX_FILTER:
     {
-      float freq = CLAMP(20.0f, sr * 0.49f, s.cachedBaseFreq * (1.0f + sp * 4.0f));
+      // Recompute from effective param each sample so the global offset
+      // tracks CV smoothly, rather than freezing at step-boundary cache.
+      float baseFreq = 40.0f * powf(500.0f, param);
+      float freq = CLAMP(20.0f, sr * 0.49f, baseFreq * (1.0f + sp * 4.0f));
       float g = tanf(3.14159f * freq / sr), k = 1.05f;
       float a1 = 1.0f / (1.0f + g * (g + k)), a2 = g * a1, a3 = g * a2;
       float v3 = input - s.ic2eq, v1 = a1 * s.ic1eq + a2 * v3, v2 = s.ic2eq + a2 * s.ic1eq + a3 * v3;
@@ -295,7 +293,7 @@ namespace stolmine
       // move through a grain window 180 deg out of phase, windowed with
       // sin^2 so their sum is constant-amplitude. Adapted from the SDK's
       // MonoGrainDelay idea with period tracking live buffer writes.
-      float rate = s.cachedPitchRate;
+      float rate = powf(2.0f, (param * 24.0f - 12.0f) / 12.0f);
       int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.1f);
       int D = MAX(1024, period / 4);
       if (D > kBufferSize / 2) D = kBufferSize / 2;
@@ -392,6 +390,7 @@ namespace stolmine
     float skew = CLAMP(-1.0f, 1.0f, mSkew.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
+    float paramOffset = CLAMP(-1.0f, 1.0f, mParamOffset.value());
     float compAmt = CLAMP(0.0f, 1.0f, mCompressAmt.value());
     bool autoMakeup = mAutoMakeup.value() == 1;
     bool compActive = compAmt > 0.001f;
@@ -452,16 +451,16 @@ namespace stolmine
             mTickCount = 0; s.readPos = 0.0f; s.ic1eq = 0.0f; s.ic2eq = 0.0f; s.stepProgress = 0.0f;
             s.stepStartPos = s.writePos;
             effTicks = MAX(1, (int)roundf((float)s.ticks[mStep] * skewMultiplier(mStep, stepCount, skew)));
-            float np = s.param[mStep];
-            s.cachedPitchRate = powf(2.0f, (np * 24.0f - 12.0f) / 12.0f);
-            s.cachedBaseFreq = 40.0f * powf(500.0f, np);
           }
         }
       }
 
       s.stepProgress = (effTicks > 0) ? CLAMP(0.0f, 1.0f, (float)mTickCount / (float)effTicks) : 0.0f;
 
-      float wet = processEffect(inputSample, s.type[mStep % stepCount], s.param[mStep % stepCount], s.stepProgress);
+      float effParam = s.param[mStep % stepCount] + paramOffset;
+      if (effParam < 0.0f) effParam = 0.0f;
+      if (effParam > 1.0f) effParam = 1.0f;
+      float wet = processEffect(inputSample, s.type[mStep % stepCount], effParam, s.stepProgress);
 
       if (s.crossfadeCounter > 0)
       {

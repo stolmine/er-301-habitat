@@ -28,6 +28,7 @@ namespace stolmine
     od::Parameter mMix{"Mix", 0.5f};
     od::Parameter mOutputLevel{"OutputLevel", 1.0f};
     od::Parameter mCompressAmt{"TanhAmt", 0.0f};
+    od::Parameter mParamOffset{"ParamOffset", 0.0f};
     od::Parameter mClockDiv{"ClockDiv", 1.0f};
     od::Parameter mTransformFunc{"TransformFunc", 0.0f};
     od::Parameter mTransformDepth{"TransformDepth", 0.5f};

@@ -27,6 +27,7 @@ end
 
 local skewMap = floatMap(-1, 1)
 local mixMap = floatMap(0, 1)
+local offsetMap = floatMap(-1, 1)
 local clockDivMap = intMap(1, 16)
 local stepCountMap = intMap(1, 16)
 
@@ -98,6 +99,11 @@ function Larets:onLoadGraph(channelCount)
   tie(op, "LoopLength", loopLength, "Out")
   self:addMonoBranch("loopLength", loopLength, "In", loopLength, "Out")
 
+  local paramOffset = self:addObject("paramOffset", app.ParameterAdapter())
+  paramOffset:hardSet("Bias", 0.0)
+  tie(op, "ParamOffset", paramOffset, "Out")
+  self:addMonoBranch("paramOffset", paramOffset, "In", paramOffset, "Out")
+
   local xformFunc = self:addObject("xformFunc", app.ParameterAdapter())
   xformFunc:hardSet("Bias", 0)
   tie(op, "TransformFunc", xformFunc, "Out")
@@ -144,6 +150,17 @@ function Larets:onLoadViews()
       gainbias = self.objects.skew,
       range = self.objects.skew,
       biasMap = skewMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
+    },
+    offset = GainBias {
+      button = "ofs",
+      description = "Param Offset",
+      branch = self.branches.paramOffset,
+      gainbias = self.objects.paramOffset,
+      range = self.objects.paramOffset,
+      biasMap = offsetMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
@@ -203,7 +220,7 @@ function Larets:onLoadViews()
       initialBias = 1
     }
   }, {
-    expanded = { "clock", "steps", "overview", "xform", "mix" },
+    expanded = { "clock", "steps", "overview", "offset", "xform", "mix" },
     collapsed = {},
     clock = { "clock", "reset", "clockDiv" },
     overview = { "overview", "skew" }
@@ -227,6 +244,7 @@ function Larets:serialize()
   t.mix = self.objects.mix:getParameter("Bias"):target()
   t.outputLevel = self.objects.outputLevel:getParameter("Bias"):target()
   t.compressAmt = self.objects.compressAmt:getParameter("Bias"):target()
+  t.paramOffset = self.objects.paramOffset:getParameter("Bias"):target()
   t.loopLength = self.objects.loopLength:getParameter("Bias"):target()
   t.clockDiv = self.objects.clockDiv:getParameter("Bias"):target()
   t.xformFunc = self.objects.xformFunc:getParameter("Bias"):target()
@@ -250,6 +268,7 @@ function Larets:deserialize(t)
   if t.mix ~= nil then self.objects.mix:hardSet("Bias", t.mix) end
   if t.outputLevel ~= nil then self.objects.outputLevel:hardSet("Bias", t.outputLevel) end
   if t.compressAmt ~= nil then self.objects.compressAmt:hardSet("Bias", t.compressAmt) end
+  if t.paramOffset ~= nil then self.objects.paramOffset:hardSet("Bias", t.paramOffset) end
   if t.loopLength ~= nil then self.objects.loopLength:hardSet("Bias", t.loopLength) end
   if t.clockDiv ~= nil then self.objects.clockDiv:hardSet("Bias", t.clockDiv) end
   if t.xformFunc ~= nil then self.objects.xformFunc:hardSet("Bias", t.xformFunc) end
