@@ -7,7 +7,7 @@ local Gate = require "Unit.ViewControl.Gate"
 local LaretStepListControl = require "spreadsheet.LaretStepListControl"
 local LaretOverviewControl = require "spreadsheet.LaretOverviewControl"
 local LaretClockControl = require "spreadsheet.LaretClockControl"
-local MixControl = require "spreadsheet.MixControl"
+local LaretsMixControl = require "spreadsheet.LaretsMixControl"
 local TransformGateControl = require "spreadsheet.TransformGateControl"
 local MenuHeader = require "Unit.MenuControl.Header"
 local Task = require "Unit.MenuControl.Task"
@@ -77,11 +77,6 @@ function Larets:onLoadGraph(channelCount)
   mix:hardSet("Bias", 1.0)
   tie(op, "Mix", mix, "Out")
   self:addMonoBranch("mix", mix, "In", mix, "Out")
-
-  local inputLevel = self:addObject("inputLevel", app.ParameterAdapter())
-  inputLevel:hardSet("Bias", 1.0)
-  tie(op, "InputLevel", inputLevel, "Out")
-  self:addMonoBranch("inputLevel", inputLevel, "In", inputLevel, "Out")
 
   local outputLevel = self:addObject("outputLevel", app.ParameterAdapter())
   outputLevel:hardSet("Bias", 1.0)
@@ -176,7 +171,7 @@ function Larets:onLoadViews()
       factorPrecision = 2,
       paramALabel = "depth"
     },
-    mix = MixControl {
+    mix = LaretsMixControl {
       button = "mix",
       description = "Mix",
       branch = self.branches.mix,
@@ -186,11 +181,9 @@ function Larets:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 1.0,
-      inputLevel = self.objects.inputLevel:getParameter("Bias"),
       outputLevel = self.objects.outputLevel:getParameter("Bias"),
-      tanhAmt = self.objects.compressAmt:getParameter("Bias"),
-      thirdLabel = "comp",
-      thirdDesc = "Comp"
+      compressAmt = self.objects.compressAmt:getParameter("Bias"),
+      op = self.objects.op
     },
     reset = Gate {
       button = "reset",
@@ -232,7 +225,6 @@ function Larets:serialize()
   t.stepCount = self.objects.stepCount:getParameter("Bias"):target()
   t.skew = self.objects.skew:getParameter("Bias"):target()
   t.mix = self.objects.mix:getParameter("Bias"):target()
-  t.inputLevel = self.objects.inputLevel:getParameter("Bias"):target()
   t.outputLevel = self.objects.outputLevel:getParameter("Bias"):target()
   t.compressAmt = self.objects.compressAmt:getParameter("Bias"):target()
   t.loopLength = self.objects.loopLength:getParameter("Bias"):target()
@@ -256,7 +248,6 @@ function Larets:deserialize(t)
   if t.stepCount ~= nil then self.objects.stepCount:hardSet("Bias", t.stepCount) end
   if t.skew ~= nil then self.objects.skew:hardSet("Bias", t.skew) end
   if t.mix ~= nil then self.objects.mix:hardSet("Bias", t.mix) end
-  if t.inputLevel ~= nil then self.objects.inputLevel:hardSet("Bias", t.inputLevel) end
   if t.outputLevel ~= nil then self.objects.outputLevel:hardSet("Bias", t.outputLevel) end
   if t.compressAmt ~= nil then self.objects.compressAmt:hardSet("Bias", t.compressAmt) end
   if t.loopLength ~= nil then self.objects.loopLength:hardSet("Bias", t.loopLength) end

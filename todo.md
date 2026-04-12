@@ -527,6 +527,15 @@ Multiband comp and spectral gate share crossover/band-splitting frontend with Pa
 - [ ] Buffer capture for stutter/reverse/shuffle effects (short circular buffer, ~1s)
 - [ ] Could share some infrastructure with Ballot (step sequencer) and Petrichor (buffer management)
 
+### Larets Polish
+
+- [ ] Overview viz: scale Y by 2x. Huge amount of vertical resolution unused -- waveform/metaball layer is compressed into ~half the available height.
+- [ ] Effect differentiation -- pitch shift, shuffle, and stutter sound nearly identical right now. Needs distinct character per effect:
+  - Stutter should feel like a beat repeat / short loop capture, not a buffer smear. Lock loop length to a musical fraction of the clock period (e.g. 1/2, 1/4, 1/8 tick) instead of free-length.
+  - Shuffle needs larger minimum chunk sizes with clock-awareness -- quantize segment boundaries to clock subdivisions, not arbitrary sample counts.
+  - Pitch shift needs to stay distinct from the buffer-read-based effects (consider granular or OLA resynthesis instead of just variable read rate).
+- [ ] Type readout parallax: integer and mode labels on the step-list type readout drift out of alignment in the sub-display. Audit how other spreadsheet units align labels with readouts (Excel TrackerSeq step list, Ballot GateSeq, Helicase ModControl). Look for shared label/readout positioning utilities before rolling our own.
+
 ## Grain Cloud
 
 N grains (8-16) reading from a single sample buffer. Extends builtin manual grains x N.

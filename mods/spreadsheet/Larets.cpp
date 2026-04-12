@@ -9,6 +9,27 @@
 namespace stolmine
 {
 
+  // IEEE 754 fast log2/exp2 (from Parfait/Impasto)
+  static inline float fast_log2(float x)
+  {
+    union { float f; int32_t i; } v;
+    v.f = x;
+    float y = (float)(v.i);
+    y *= 1.0f / (1 << 23);
+    y -= 127.0f;
+    return y;
+  }
+
+  static inline float fast_exp2(float x)
+  {
+    union { float f; int32_t i; } v;
+    v.i = (int32_t)((x + 127.0f) * (1 << 23));
+    return v.f;
+  }
+
+  static inline float fast_log10(float x) { return fast_log2(x) * 0.30103f; }
+  static inline float fast_fromDb(float db) { return fast_exp2(db * 0.16609640474f); }
+
   static const int kMaxSteps = 16;
   static const int kBufferSize = 96000;
   static const int kCrossfadeSamples = 64;
@@ -73,10 +94,11 @@ namespace stolmine
     addInput(mIn); addInput(mClock); addInput(mReset); addInput(mTransform);
     addOutput(mOut);
     addParameter(mStepCount); addParameter(mSkew); addParameter(mMix);
-    addParameter(mInputLevel); addParameter(mOutputLevel); addParameter(mCompressAmt);
+    addParameter(mOutputLevel); addParameter(mCompressAmt);
     addParameter(mClockDiv); addParameter(mTransformFunc); addParameter(mTransformDepth);
     addParameter(mLoopLength);
     addParameter(mEditType); addParameter(mEditParam); addParameter(mEditTicks);
+    addOption(mAutoMakeup);
     mpInternal = new Internal();
     mpInternal->Init();
     float p0 = mpInternal->param[0];
@@ -111,6 +133,9 @@ namespace stolmine
   }
 
   void Larets::fireTransform() { mManualFire = true; }
+
+  bool Larets::isAutoMakeupEnabled() { return mAutoMakeup.value() == 1; }
+  void Larets::toggleAutoMakeup() { mAutoMakeup.set(isAutoMakeupEnabled() ? 2 : 1); }
 
   static float skewMultiplier(int step, int stepCount, float skew)
   {
@@ -331,14 +356,22 @@ namespace stolmine
     int stepCount = CLAMP(1, kMaxSteps, (int)(mStepCount.value() + 0.5f));
     float skew = CLAMP(-1.0f, 1.0f, mSkew.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
-    float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
     float compAmt = CLAMP(0.0f, 1.0f, mCompressAmt.value());
-    float compAttack = 1.0f - expf(-1.0f / (0.001f * sr));
-    float compRelease = 1.0f - expf(-1.0f / (0.1f * sr));
-    float compThreshold = 1.0f - compAmt * 0.8f;
-    float compThreshDb = 10.0f * log10f(compThreshold * compThreshold + 1e-20f);
-    float compRatioFactor = 1.0f - 1.0f / (1.0f + compAmt * 7.0f);
+    bool autoMakeup = mAutoMakeup.value() == 1;
+    bool compActive = compAmt > 0.001f;
+
+    // CPR single-band: threshold -24 dB..0, ratio 1:1..8:1
+    float compThresholdDb = -compAmt * 24.0f;
+    float compRatioI = 1.0f / (1.0f + compAmt * 7.0f);
+    float compAttackSec = 0.010f;
+    float compReleaseSec = 0.200f;
+    float compRiseCoeff = expf(-1.0f / (compAttackSec * sr));
+    float compFallCoeff = expf(-1.0f / (compReleaseSec * sr));
+    float compMakeupGain = autoMakeup
+        ? fast_fromDb(-compThresholdDb * (1.0f - compRatioI))
+        : 1.0f;
+
     int clockDiv = MAX(1, (int)(mClockDiv.value() + 0.5f));
     int loopLen = CLAMP(0, stepCount, (int)(mLoopLength.value() + 0.5f));
     int wrapLen = (loopLen > 0) ? loopLen : stepCount;
@@ -354,7 +387,7 @@ namespace stolmine
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
-      float inputSample = in[i] * inputLevel;
+      float inputSample = in[i];
       s.buffer[s.writePos] = inputSample;
       s.writePos = (s.writePos + 1) % kBufferSize;
 
@@ -405,17 +438,16 @@ namespace stolmine
 
       float mixed = in[i] * (1.0f - mix) + wet * mix;
 
-      if (compAmt > 0.001f)
+      if (compActive)
       {
-        float energy = mixed * mixed;
-        if (energy > s.compDetector)
-          s.compDetector += (energy - s.compDetector) * compAttack;
-        else
-          s.compDetector += (energy - s.compDetector) * compRelease;
-        float levelDb = 4.3429f * logf(s.compDetector + 1e-20f);
-        float overDb = levelDb - compThreshDb;
-        if (overDb > 0.0f)
-          mixed *= expf(-0.1151f * overDb * compRatioFactor);
+        float absLevel = fabsf(mixed);
+        float coeff = absLevel > s.compDetector ? compRiseCoeff : compFallCoeff;
+        s.compDetector = coeff * s.compDetector + (1.0f - coeff) * absLevel;
+        float levelDb = 20.0f * fast_log10(s.compDetector + 1e-10f);
+        float overDb = levelDb - compThresholdDb;
+        if (overDb < 0.0f) overDb = 0.0f;
+        float reductionDb = overDb * (1.0f - compRatioI);
+        mixed *= fast_fromDb(-reductionDb) * compMakeupGain;
       }
 
       out[i] = mixed * outputLevel;

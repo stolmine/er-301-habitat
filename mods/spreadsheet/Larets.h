@@ -26,7 +26,6 @@ namespace stolmine
     od::Parameter mStepCount{"StepCount", 8.0f};
     od::Parameter mSkew{"Skew", 0.0f};
     od::Parameter mMix{"Mix", 0.5f};
-    od::Parameter mInputLevel{"InputLevel", 1.0f};
     od::Parameter mOutputLevel{"OutputLevel", 1.0f};
     od::Parameter mCompressAmt{"TanhAmt", 0.0f};
     od::Parameter mClockDiv{"ClockDiv", 1.0f};
@@ -37,6 +36,8 @@ namespace stolmine
     od::Parameter mEditType{"EditType", 0.0f};
     od::Parameter mEditParam{"EditParam", 0.0f};
     od::Parameter mEditTicks{"EditTicks", 1.0f};
+
+    od::Option mAutoMakeup{"AutoMakeup", 2}; // 1=on, 2=off
 #endif
 
     // SWIG-visible
@@ -58,6 +59,9 @@ namespace stolmine
     float getEffectiveTickCount(int i);
     float getClockPeriodSeconds();
     float getOutputSample(int idx);
+
+    bool isAutoMakeupEnabled();
+    void toggleAutoMakeup();
 
 #ifndef SWIGLUA
   private:
