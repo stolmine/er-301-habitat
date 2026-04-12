@@ -191,10 +191,28 @@ function Larets:onLoadViews()
       tanhAmt = self.objects.compressAmt:getParameter("Bias"),
       thirdLabel = "comp",
       thirdDesc = "Comp"
+    },
+    reset = Gate {
+      button = "reset",
+      description = "Reset",
+      branch = self.branches.reset,
+      comparator = self.objects.reset
+    },
+    clockDiv = GainBias {
+      button = "div",
+      description = "Clock Division",
+      branch = self.branches.clockDiv,
+      gainbias = self.objects.clockDiv,
+      range = self.objects.clockDiv,
+      biasMap = clockDivMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 1
     }
   }, {
     expanded = { "clock", "steps", "overview", "xform", "mix" },
     collapsed = {},
+    clock = { "clock", "reset", "clockDiv" },
     overview = { "overview", "skew" }
   }
 end
@@ -211,6 +229,7 @@ function Larets:serialize()
   t.stepTypes = types
   t.stepParams = params
   t.stepTicks = ticks
+  t.stepCount = self.objects.stepCount:getParameter("Bias"):target()
   t.skew = self.objects.skew:getParameter("Bias"):target()
   t.mix = self.objects.mix:getParameter("Bias"):target()
   t.inputLevel = self.objects.inputLevel:getParameter("Bias"):target()
@@ -234,6 +253,7 @@ function Larets:deserialize(t)
       if t.stepTicks and t.stepTicks[k] ~= nil then op:setStepTicks(i, t.stepTicks[k]) end
     end
   end
+  if t.stepCount ~= nil then self.objects.stepCount:hardSet("Bias", t.stepCount) end
   if t.skew ~= nil then self.objects.skew:hardSet("Bias", t.skew) end
   if t.mix ~= nil then self.objects.mix:hardSet("Bias", t.mix) end
   if t.inputLevel ~= nil then self.objects.inputLevel:hardSet("Bias", t.inputLevel) end
