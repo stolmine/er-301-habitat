@@ -67,7 +67,7 @@ namespace stolmine
 
         int type = mpLarets->getStepType(step);
         if (type < 0) type = 0;
-        if (type > 12) type = 12;
+        if (type > 11) type = 11;
         fb.text(WHITE, mWorldLeft + 18, y + 1, kTypeAbbrev[type], 10);
       }
 

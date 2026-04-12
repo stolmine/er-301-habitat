@@ -12,8 +12,6 @@ local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
 local col3 = app.BUTTON3_CENTER
 
-local typeNames = { [0] = "off", "stt", "rev", "bit", "dec", "flt", "pch", "gat", "drv", "shf", "dly", "cmb" }
-
 local typeMap = (function()
   local m = app.LinearDialMap(0, 11)
   m:setSteps(1, 1, 1, 1)
@@ -69,6 +67,15 @@ function LaretStepListControl:init(args)
     g:setAttributes(app.unitNone, typeMap)
     g:setPrecision(0)
     g:setCenter(col1, center4)
+    -- Kill target/value lag: softSet's 50-step ramp made the displayed
+    -- target name disagree with the stored (interpolated) value that
+    -- storeStep saw. Discrete selector should never interpolate anyway.
+    if g.useHardSet then g:useHardSet() end
+    if g.addName then
+      g:addName("off"); g:addName("stt"); g:addName("rev"); g:addName("bit")
+      g:addName("dec"); g:addName("flt"); g:addName("pch"); g:addName("gat")
+      g:addName("drv"); g:addName("shf"); g:addName("dly"); g:addName("cmb")
+    end
     return g
   end)()
 
@@ -79,6 +86,7 @@ function LaretStepListControl:init(args)
     g:setAttributes(app.unitNone, paramMap)
     g:setPrecision(2)
     g:setCenter(col2, center4)
+    if g.useHardSet then g:useHardSet() end
     return g
   end)()
 
@@ -89,12 +97,9 @@ function LaretStepListControl:init(args)
     g:setAttributes(app.unitNone, ticksMap)
     g:setPrecision(0)
     g:setCenter(col3, center4)
+    if g.useHardSet then g:useHardSet() end
     return g
   end)()
-
-  self.typeLabel = app.Label("off", 10)
-  self.typeLabel:fitToText(0)
-  self.typeLabel:setCenter(col1, center3 + 1)
 
   self.description = (function()
     local g = app.Label(description, 10)
@@ -110,7 +115,6 @@ function LaretStepListControl:init(args)
   self.subGraphic:addChild(self.typeReadout)
   self.subGraphic:addChild(self.paramReadout)
   self.subGraphic:addChild(self.ticksReadout)
-  self.subGraphic:addChild(self.typeLabel)
   self.subGraphic:addChild(self.description)
   self.subGraphic:addChild(app.SubButton("type", 1))
   self.subGraphic:addChild(app.SubButton("param", 2))
@@ -119,17 +123,10 @@ function LaretStepListControl:init(args)
   self.pDisplay:follow(op)
   op:loadStep(0)
   self:updateTitle()
-  self:updateTypeLabel()
 end
 
 function LaretStepListControl:updateTitle()
   self.description:setText(string.format("Step %d", self.currentStep + 1))
-end
-
-function LaretStepListControl:updateTypeLabel()
-  local val = self.op:getStepType(self.currentStep)
-  local name = typeNames[val]
-  if name then self.typeLabel:setText(name) end
 end
 
 function LaretStepListControl:switchToStep(newStep)
@@ -142,7 +139,6 @@ function LaretStepListControl:switchToStep(newStep)
   self.op:loadStep(newStep)
   self.pDisplay:setSelectedStep(newStep)
   self:updateTitle()
-  self:updateTypeLabel()
 end
 
 function LaretStepListControl:setFocusedReadout(readout)
@@ -222,9 +218,6 @@ function LaretStepListControl:encoder(change, shifted)
   elseif self.focusedReadout then
     self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Fine)
     self.op:storeStep(self.currentStep)
-    if self.focusedReadout == self.typeReadout then
-      self:updateTypeLabel()
-    end
     return true
   else
     self:scrollStep(change)
