@@ -649,6 +649,7 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [x] Lo-fi/hi-fi config menu toggle (OPL bit-depth quantization, hard/morphable shapes, fine fader steps)
 - [ ] Carrier shape: consider wider selection beyond OPL3 set
 - [ ] CPU profiling on am335x
+- [x] Phase-receptivity sync threshold modulatable: added a dedicated GainBias expansion fader ("phase") alongside the unmodified sync ply. Uses the already-existing `syncThreshold` ParameterAdapter + mono branch. No custom control needed -- sync main view unchanged, expansion driven entirely by `views.sync = { "sync", "syncPhase" }`.
 
 ## Buffer Shuffler / Groovebox
 

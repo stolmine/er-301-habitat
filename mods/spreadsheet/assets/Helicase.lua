@@ -326,6 +326,20 @@ function Helicase:onLoadViews()
     phaseThresholdParam = self.objects.syncThreshold:getParameter("Bias")
   }
 
+  -- Sync expansion: sync + phase threshold GainBias (CV-modulatable)
+  views.sync = { "sync", "syncPhase" }
+  controls.syncPhase = GainBias {
+    button = "phase",
+    description = "Phase Threshold",
+    branch = self.branches.syncThreshold,
+    gainbias = self.objects.syncThreshold,
+    range = self.objects.syncThreshold,
+    biasMap = floatMap(0, 1),
+    biasUnits = app.unitNone,
+    biasPrecision = 2,
+    initialBias = 0.0
+  }
+
   controls.level = GainBias {
     button = "level",
     description = "Level",
