@@ -47,9 +47,11 @@ function MixControl:init(args)
 
   self.inputReadout = makeReadout(args.inputLevel, levelMap, 2, col1)
   self.outputReadout = makeReadout(args.outputLevel, levelMap, 2, col2)
+  local thirdLabel = args.thirdLabel or "tanh"
+  local thirdDesc = args.thirdDesc or "Sat"
   self.tanhReadout = makeReadout(args.tanhAmt, tanhMap, 2, col3)
 
-  local desc = app.Label("Input / Output / Sat", 10)
+  local desc = app.Label("Input / Output / " .. thirdDesc, 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
@@ -62,7 +64,7 @@ function MixControl:init(args)
   self.paramSubGraphic:addChild(desc)
   self.paramSubGraphic:addChild(app.SubButton("input", 1))
   self.paramSubGraphic:addChild(app.SubButton("out", 2))
-  self.paramSubGraphic:addChild(app.SubButton("tanh", 3))
+  self.paramSubGraphic:addChild(app.SubButton(thirdLabel, 3))
 end
 
 function MixControl:setParamMode(enabled)

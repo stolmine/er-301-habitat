@@ -9,6 +9,8 @@ local LaretOverviewControl = require "spreadsheet.LaretOverviewControl"
 local LaretClockControl = require "spreadsheet.LaretClockControl"
 local MixControl = require "spreadsheet.MixControl"
 local TransformGateControl = require "spreadsheet.TransformGateControl"
+local MenuHeader = require "Unit.MenuControl.Header"
+local Task = require "Unit.MenuControl.Task"
 
 local function floatMap(min, max)
   local map = app.LinearDialMap(min, max)
@@ -86,10 +88,10 @@ function Larets:onLoadGraph(channelCount)
   tie(op, "OutputLevel", outputLevel, "Out")
   self:addMonoBranch("outputLevel", outputLevel, "In", outputLevel, "Out")
 
-  local tanhAmt = self:addObject("tanhAmt", app.ParameterAdapter())
-  tanhAmt:hardSet("Bias", 0.0)
-  tie(op, "TanhAmt", tanhAmt, "Out")
-  self:addMonoBranch("tanhAmt", tanhAmt, "In", tanhAmt, "Out")
+  local compressAmt = self:addObject("compressAmt", app.ParameterAdapter())
+  compressAmt:hardSet("Bias", 0.0)
+  tie(op, "CompressAmt", compressAmt, "Out")
+  self:addMonoBranch("compressAmt", compressAmt, "In", compressAmt, "Out")
 
   local clockDiv = self:addObject("clockDiv", app.ParameterAdapter())
   clockDiv:hardSet("Bias", 1)
@@ -159,9 +161,9 @@ function Larets:onLoadViews()
       branch = self.branches.xform,
       funcParam = self.objects.xformFunc:getParameter("Bias"),
       factorParam = self.objects.xformDepth:getParameter("Bias"),
-      funcNames = { [0] = "rnd", "rot", "rev", "rnd t" },
+      funcNames = { [0] = "all", "t+p", "type", "prm", "tick", "rot", "rev" },
       funcMap = (function()
-        local m = app.LinearDialMap(0, 3)
+        local m = app.LinearDialMap(0, 6)
         m:setSteps(1, 1, 1, 1)
         m:setRounding(1)
         return m
@@ -186,7 +188,9 @@ function Larets:onLoadViews()
       initialBias = 1.0,
       inputLevel = self.objects.inputLevel:getParameter("Bias"),
       outputLevel = self.objects.outputLevel:getParameter("Bias"),
-      tanhAmt = self.objects.tanhAmt:getParameter("Bias")
+      tanhAmt = self.objects.compressAmt:getParameter("Bias"),
+      thirdLabel = "comp",
+      thirdDesc = "Comp"
     }
   }, {
     expanded = { "clock", "steps", "overview", "xform", "mix" },
@@ -211,7 +215,7 @@ function Larets:serialize()
   t.mix = self.objects.mix:getParameter("Bias"):target()
   t.inputLevel = self.objects.inputLevel:getParameter("Bias"):target()
   t.outputLevel = self.objects.outputLevel:getParameter("Bias"):target()
-  t.tanhAmt = self.objects.tanhAmt:getParameter("Bias"):target()
+  t.compressAmt = self.objects.compressAmt:getParameter("Bias"):target()
   t.loopLength = self.objects.loopLength:getParameter("Bias"):target()
   t.clockDiv = self.objects.clockDiv:getParameter("Bias"):target()
   t.xformFunc = self.objects.xformFunc:getParameter("Bias"):target()
@@ -234,12 +238,33 @@ function Larets:deserialize(t)
   if t.mix ~= nil then self.objects.mix:hardSet("Bias", t.mix) end
   if t.inputLevel ~= nil then self.objects.inputLevel:hardSet("Bias", t.inputLevel) end
   if t.outputLevel ~= nil then self.objects.outputLevel:hardSet("Bias", t.outputLevel) end
-  if t.tanhAmt ~= nil then self.objects.tanhAmt:hardSet("Bias", t.tanhAmt) end
+  if t.compressAmt ~= nil then self.objects.compressAmt:hardSet("Bias", t.compressAmt) end
   if t.loopLength ~= nil then self.objects.loopLength:hardSet("Bias", t.loopLength) end
   if t.clockDiv ~= nil then self.objects.clockDiv:hardSet("Bias", t.clockDiv) end
   if t.xformFunc ~= nil then self.objects.xformFunc:hardSet("Bias", t.xformFunc) end
   if t.xformDepth ~= nil then self.objects.xformDepth:hardSet("Bias", t.xformDepth) end
   op:loadStep(0)
+end
+
+function Larets:setAllTicks(len)
+  local op = self.objects.op
+  for i = 0, 15 do
+    op:setStepTicks(i, len)
+  end
+  if self.controls and self.controls.steps then
+    op:loadStep(self.controls.steps.currentStep or 0)
+  end
+end
+
+function Larets:onShowMenu(objects, branches)
+  return {
+    tickHeader = MenuHeader { description = "Set All Tick Lengths" },
+    tick1 = Task { description = "1 tick", task = function() self:setAllTicks(1) end },
+    tick2 = Task { description = "2 ticks", task = function() self:setAllTicks(2) end },
+    tick4 = Task { description = "4 ticks", task = function() self:setAllTicks(4) end },
+    tick8 = Task { description = "8 ticks", task = function() self:setAllTicks(8) end },
+    tick16 = Task { description = "16 ticks", task = function() self:setAllTicks(16) end }
+  }, { "tickHeader", "tick1", "tick2", "tick4", "tick8", "tick16" }
 end
 
 return Larets

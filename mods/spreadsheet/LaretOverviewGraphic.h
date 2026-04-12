@@ -47,7 +47,7 @@ namespace stolmine
         return;
 
       static const char kTypeLetter[] = {
-          'O', 'S', 'R', 'B', 'D', 'F', 'P', 'T', 'G', 'X', 'H'};
+          'O', 'S', 'R', 'B', 'D', 'F', 'P', 'T', 'G', 'X', 'H', 'Y', 'C'};
 
       int xCursor = mWorldLeft;
       for (int i = 0; i < stepCount; i++)
@@ -76,7 +76,7 @@ namespace stolmine
         {
           int type = mpLarets->getStepType(i);
           if (type < 0) type = 0;
-          if (type > 10) type = 10;
+          if (type > 12) type = 12;
           char letter[2] = {kTypeLetter[type], '\0'};
           int letterX = xCursor + barW / 2 - 2;
           int letterY = barBottom + (barAreaHeight - 10) / 2;

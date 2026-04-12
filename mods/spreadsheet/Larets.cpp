@@ -17,7 +17,7 @@ namespace stolmine
   {
     FX_OFF = 0, FX_STUTTER, FX_REVERSE, FX_BITCRUSH,
     FX_DOWNSAMPLE, FX_FILTER, FX_PITCHSHIFT, FX_TAPESTOP,
-    FX_GATE, FX_DISTORTION, FX_SHUFFLE, FX_COUNT
+    FX_GATE, FX_DISTORTION, FX_SHUFFLE, FX_DELAY, FX_COMB, FX_COUNT
   };
 
   static uint32_t lRandState = 98765;
@@ -46,6 +46,7 @@ namespace stolmine
     float tmpParam[kMaxSteps];
     int tmpTicks[kMaxSteps];
     float stepProgress;
+    float compDetector;
 
     void Init()
     {
@@ -57,6 +58,7 @@ namespace stolmine
       prevOutput = 0.0f; crossfadeCounter = 0;
       cachedPitchRate = 1.0f; cachedBaseFreq = 40.0f;
       stepProgress = 0.0f;
+      compDetector = 0.0f;
     }
   };
 
@@ -65,7 +67,7 @@ namespace stolmine
     addInput(mIn); addInput(mClock); addInput(mReset); addInput(mTransform);
     addOutput(mOut);
     addParameter(mStepCount); addParameter(mSkew); addParameter(mMix);
-    addParameter(mInputLevel); addParameter(mOutputLevel); addParameter(mTanhAmt);
+    addParameter(mInputLevel); addParameter(mOutputLevel); addParameter(mCompressAmt);
     addParameter(mClockDiv); addParameter(mTransformFunc); addParameter(mTransformDepth);
     addParameter(mLoopLength);
     addParameter(mEditType); addParameter(mEditParam); addParameter(mEditTicks);
@@ -121,21 +123,45 @@ namespace stolmine
   void Larets::applyTransform()
   {
     Internal &s = *mpInternal;
-    int func = CLAMP(0, 3, (int)(mTransformFunc.value() + 0.5f));
+    int func = CLAMP(0, 6, (int)(mTransformFunc.value() + 0.5f));
     float depth = CLAMP(0.0f, 1.0f, mTransformDepth.value());
     int sc = getStepCount();
 
     switch (func)
     {
-    case 0: // Random: randomize types and params
+    case 0: // Randomize all (type + param + ticks)
       for (int i = 0; i < sc; i++)
-      {
+        if ((lRandFloat() + 1.0f) * 0.5f < depth)
+        {
+          s.type[i] = (int)((lRandFloat() + 1.0f) * 0.5f * (FX_COUNT - 1) + 0.5f) % FX_COUNT;
+          s.param[i] = CLAMP(0.0f, 1.0f, (lRandFloat() + 1.0f) * 0.5f);
+          s.ticks[i] = 1 + (int)((lRandFloat() + 1.0f) * 0.5f * 3.0f);
+        }
+      break;
+    case 1: // Randomize type + params
+      for (int i = 0; i < sc; i++)
+        if ((lRandFloat() + 1.0f) * 0.5f < depth)
+        {
+          s.type[i] = (int)((lRandFloat() + 1.0f) * 0.5f * (FX_COUNT - 1) + 0.5f) % FX_COUNT;
+          s.param[i] = CLAMP(0.0f, 1.0f, (lRandFloat() + 1.0f) * 0.5f);
+        }
+      break;
+    case 2: // Randomize types only
+      for (int i = 0; i < sc; i++)
         if ((lRandFloat() + 1.0f) * 0.5f < depth)
           s.type[i] = (int)((lRandFloat() + 1.0f) * 0.5f * (FX_COUNT - 1) + 0.5f) % FX_COUNT;
-        s.param[i] = CLAMP(0.0f, 1.0f, s.param[i] + lRandFloat() * depth * 0.5f);
-      }
       break;
-    case 1: // Rotate
+    case 3: // Randomize params only
+      for (int i = 0; i < sc; i++)
+        if ((lRandFloat() + 1.0f) * 0.5f < depth)
+          s.param[i] = CLAMP(0.0f, 1.0f, (lRandFloat() + 1.0f) * 0.5f);
+      break;
+    case 4: // Randomize ticks
+      for (int i = 0; i < sc; i++)
+        if ((lRandFloat() + 1.0f) * 0.5f < depth)
+          s.ticks[i] = 1 + (int)((lRandFloat() + 1.0f) * 0.5f * 3.0f);
+      break;
+    case 5: // Rotate
     {
       int rot = MAX(1, (int)(depth * (float)sc)) % sc;
       for (int i = 0; i < sc; i++) { int src = (i + rot) % sc; s.tmpType[i] = s.type[src]; s.tmpParam[i] = s.param[src]; s.tmpTicks[i] = s.ticks[src]; }
@@ -144,7 +170,7 @@ namespace stolmine
       memcpy(s.ticks, s.tmpTicks, sc * sizeof(int));
       break;
     }
-    case 2: // Reverse
+    case 6: // Reverse
       for (int i = 0; i < sc / 2; i++)
       {
         int j = sc - 1 - i;
@@ -152,11 +178,6 @@ namespace stolmine
         float p = s.param[i]; s.param[i] = s.param[j]; s.param[j] = p;
         int k = s.ticks[i]; s.ticks[i] = s.ticks[j]; s.ticks[j] = k;
       }
-      break;
-    case 3: // Randomize ticks
-      for (int i = 0; i < sc; i++)
-        if ((lRandFloat() + 1.0f) * 0.5f < depth)
-          s.ticks[i] = 1 + (int)((lRandFloat() + 1.0f) * 0.5f * 3.0f);
       break;
     }
   }
@@ -254,6 +275,20 @@ namespace stolmine
       return o;
     }
 
+    case FX_DELAY:
+    {
+      int delaySamples = MAX(1, (int)(param * sr * 0.5f));
+      int idx = ((s.writePos - delaySamples) + kBufferSize) % kBufferSize;
+      return s.buffer[idx];
+    }
+
+    case FX_COMB:
+    {
+      int delaySamples = MAX(1, (int)(20.0f + param * (sr * 0.02f - 20.0f)));
+      int idx = ((s.writePos - delaySamples) + kBufferSize) % kBufferSize;
+      return input + s.buffer[idx] * 0.7f;
+    }
+
     default: return input;
     }
   }
@@ -263,13 +298,19 @@ namespace stolmine
     Internal &s = *mpInternal;
     float *in = mIn.buffer(), *clock = mClock.buffer();
     float *reset = mReset.buffer(), *xform = mTransform.buffer(), *out = mOut.buffer();
+    float sr = globalConfig.sampleRate;
 
     int stepCount = CLAMP(1, kMaxSteps, (int)(mStepCount.value() + 0.5f));
     float skew = CLAMP(-1.0f, 1.0f, mSkew.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
-    float tanhAmt = CLAMP(0.0f, 1.0f, mTanhAmt.value());
+    float compAmt = CLAMP(0.0f, 1.0f, mCompressAmt.value());
+    float compAttack = 1.0f - expf(-1.0f / (0.001f * sr));
+    float compRelease = 1.0f - expf(-1.0f / (0.1f * sr));
+    float compThreshold = 1.0f - compAmt * 0.8f;
+    float compThreshDb = 10.0f * log10f(compThreshold * compThreshold + 1e-20f);
+    float compRatioFactor = 1.0f - 1.0f / (1.0f + compAmt * 7.0f);
     int clockDiv = MAX(1, (int)(mClockDiv.value() + 0.5f));
     int loopLen = CLAMP(0, stepCount, (int)(mLoopLength.value() + 0.5f));
     int wrapLen = (loopLen > 0) ? loopLen : stepCount;
@@ -333,7 +374,20 @@ namespace stolmine
       }
 
       float mixed = in[i] * (1.0f - mix) + wet * mix;
-      if (tanhAmt > 0.0f) mixed = mixed * (1.0f - tanhAmt) + tanhf(mixed) * tanhAmt;
+
+      if (compAmt > 0.001f)
+      {
+        float energy = mixed * mixed;
+        if (energy > s.compDetector)
+          s.compDetector += (energy - s.compDetector) * compAttack;
+        else
+          s.compDetector += (energy - s.compDetector) * compRelease;
+        float levelDb = 4.3429f * logf(s.compDetector + 1e-20f);
+        float overDb = levelDb - compThreshDb;
+        if (overDb > 0.0f)
+          mixed *= expf(-0.1151f * overDb * compRatioFactor);
+      }
+
       out[i] = mixed * outputLevel;
     }
   }
