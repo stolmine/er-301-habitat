@@ -326,11 +326,16 @@ namespace stolmine
 
     case FX_DISTORTION:
     {
-      float drive = 1.0f + param * 9.0f;
-      // Normalize loudness against drive: 1/sqrt(drive) keeps perceived
-      // level close to other effects across the range.
-      float makeup = 1.0f / sqrtf(drive);
-      return tanhf(input * drive) * makeup;
+      // Hard clip against a unit-ceiling limiter: linear slope up to
+      // +/-1, flat after. Drive 1..20 so anything above ~0.05 input
+      // clips at max -- plenty of squared-off character. Makeup
+      // 1/drive^0.7 leaves a bit of boost in the output relative to a
+      // flat 1/drive, so the distortion reads louder than bare input.
+      float drive = 1.0f + param * 19.0f;
+      float y = input * drive;
+      if (y > 1.0f) y = 1.0f;
+      else if (y < -1.0f) y = -1.0f;
+      return y * powf(drive, -0.7f);
     }
 
     case FX_SHUFFLE:
