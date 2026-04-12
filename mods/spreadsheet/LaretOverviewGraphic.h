@@ -212,20 +212,7 @@ namespace stolmine
           break;
         }
 
-        case 7: // Tape stop: compress rightward over step age
-        {
-          float compress = 1.0f;
-          float sp = mVizPhase / 6.28318f;
-          int cutoff = (int)((float)nPts * (1.0f - sp * 0.8f));
-          if (px < cutoff)
-          {
-            fb.vline(GRAY7, x, yLo, yHi);
-            fb.pixel(WHITE, x, py);
-          }
-          break;
-        }
-
-        case 8: // Gate: pulsing brightness
+        case 7: // Gate: pulsing brightness
         {
           float pulse = 0.5f + 0.5f * sinf(mVizPhase * 3.0f);
           int fillGray = (int)(pulse * 5.0f);
@@ -236,7 +223,7 @@ namespace stolmine
           break;
         }
 
-        case 9: // Distortion: jittered Y fill
+        case 8: // Distortion: jittered Y fill
         {
           uint32_t hash = (px * 374761393u + (uint32_t)(mVizPhase * 50.0f)) ^ 0x85ebca6bu;
           float jitter = (float)((int32_t)(hash >> 16) & 0xFF) / 255.0f - 0.5f;
@@ -250,7 +237,7 @@ namespace stolmine
           break;
         }
 
-        case 10: // Shuffle: segment swaps
+        case 9: // Shuffle: segment swaps
         {
           int segs = 4;
           int segLen = nPts / segs;
@@ -273,7 +260,7 @@ namespace stolmine
           break;
         }
 
-        case 11: // Delay: layered chains
+        case 10: // Delay: layered chains
         {
           int offset1 = nPts / 4;
           int offset2 = nPts / 2;
@@ -288,7 +275,7 @@ namespace stolmine
           break;
         }
 
-        case 12: // Comb: rippled fill
+        case 11: // Comb: rippled fill
         {
           float wobble = sinf((float)px * 0.3f + mVizPhase * 2.0f) * fxParam * ampScale * 0.3f;
           int wobY = py + (int)wobble;

@@ -41,7 +41,7 @@ namespace stolmine
 
       static const char *kTypeAbbrev[] = {
           "off", "stt", "rev", "bit", "dec",
-          "flt", "pch", "tap", "gat", "drv", "shf", "dly", "cmb"};
+          "flt", "pch", "gat", "drv", "shf", "dly", "cmb"};
 
       for (int r = 0; r < visibleRows; r++)
       {

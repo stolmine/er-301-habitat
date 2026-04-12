@@ -12,10 +12,10 @@ local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
 local col3 = app.BUTTON3_CENTER
 
-local typeNames = { [0] = "off", "stt", "rev", "bit", "dec", "flt", "pch", "tap", "gat", "drv", "shf", "dly", "cmb" }
+local typeNames = { [0] = "off", "stt", "rev", "bit", "dec", "flt", "pch", "gat", "drv", "shf", "dly", "cmb" }
 
 local typeMap = (function()
-  local m = app.LinearDialMap(0, 12)
+  local m = app.LinearDialMap(0, 11)
   m:setSteps(1, 1, 1, 1)
   m:setRounding(1)
   return m

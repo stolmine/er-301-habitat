@@ -37,7 +37,7 @@ namespace stolmine
   enum FxType
   {
     FX_OFF = 0, FX_STUTTER, FX_REVERSE, FX_BITCRUSH,
-    FX_DOWNSAMPLE, FX_FILTER, FX_PITCHSHIFT, FX_TAPESTOP,
+    FX_DOWNSAMPLE, FX_FILTER, FX_PITCHSHIFT,
     FX_GATE, FX_DISTORTION, FX_SHUFFLE, FX_DELAY, FX_COMB, FX_COUNT
   };
 
@@ -314,18 +314,6 @@ namespace stolmine
       float wB = sinf(3.14159265f * phB); wB *= wB;
 
       return s.buffer[posA] * wA + s.buffer[posB] * wB;
-    }
-
-    case FX_TAPESTOP:
-    {
-      float rate = fmaxf(0.0f, 1.0f - sp * (0.5f + param * 0.5f));
-      int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.5f);
-      int len = MAX(1, period);
-      if (len > kBufferSize / 2) len = kBufferSize / 2;
-      int head = ((s.writePos - len) + kBufferSize) % kBufferSize;
-      float o = s.buffer[(head + (int)s.readPos) % kBufferSize];
-      s.readPos += rate; if ((int)s.readPos >= len) s.readPos = (float)(len - 1);
-      return o;
     }
 
     case FX_GATE:
