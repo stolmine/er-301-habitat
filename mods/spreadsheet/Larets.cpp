@@ -120,6 +120,12 @@ namespace stolmine
     return roundf((float)mpInternal->ticks[CLAMP(0, kMaxSteps - 1, i)] * skewMultiplier(i, sc, skew));
   }
 
+  float Larets::getClockPeriodSeconds()
+  {
+    if (mClockPeriodSamples <= 0) return 1.0f;
+    return (float)mClockPeriodSamples / globalConfig.sampleRate;
+  }
+
   void Larets::applyTransform()
   {
     Internal &s = *mpInternal;
@@ -333,6 +339,8 @@ namespace stolmine
       bool clockHigh = clock[i] > 0.5f, resetHigh = reset[i] > 0.5f;
       bool clockRise = clockHigh && !mClockWasHigh, resetRise = resetHigh && !mResetWasHigh;
       mClockWasHigh = clockHigh; mResetWasHigh = resetHigh;
+      mSamplesSinceLastClock++;
+      if (clockRise) { mClockPeriodSamples = mSamplesSinceLastClock; mSamplesSinceLastClock = 0; }
 
       if (resetRise)
       {

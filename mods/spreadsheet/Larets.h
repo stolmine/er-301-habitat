@@ -56,6 +56,7 @@ namespace stolmine
     void fireTransform();
     int getActiveStep() { return mStep; }
     float getEffectiveTickCount(int i);
+    float getClockPeriodSeconds();
 
 #ifndef SWIGLUA
   private:
@@ -69,6 +70,8 @@ namespace stolmine
     bool mResetWasHigh = false;
     bool mTransformWasHigh = false;
     bool mManualFire = false;
+    int mClockPeriodSamples = 0;
+    int mSamplesSinceLastClock = 0;
 
     void applyTransform();
     float processEffect(float input, int type, float param, float stepProgress);

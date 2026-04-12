@@ -69,10 +69,6 @@ namespace stolmine
         if (type < 0) type = 0;
         if (type > 12) type = 12;
         fb.text(WHITE, mWorldLeft + 18, y + 1, kTypeAbbrev[type], 10);
-
-        int ticks = mpLarets->getStepTicks(step);
-        snprintf(buf, sizeof(buf), "%d", ticks);
-        fb.text(GRAY7, mWorldLeft + 42, y + 1, buf, 10);
       }
 
       if (stepCount > visibleRows)
