@@ -6,27 +6,25 @@ local Encoder = require "Encoder"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
-local center3 = app.GRID5_CENTER3
 local center4 = app.GRID5_CENTER4
 local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
 local col3 = app.BUTTON3_CENTER
 
-local HelicaseOverviewControl = Class {}
-HelicaseOverviewControl:include(GainBias)
+local LaretOverviewControl = Class {}
+LaretOverviewControl:include(GainBias)
 
-function HelicaseOverviewControl:init(args)
+function LaretOverviewControl:init(args)
   GainBias.init(self, args)
 
-  -- Replace fader with phase space viz
-  local phase = libspreadsheet.HelicasePhaseGraphic(0, 0, ply, 64)
-  phase:follow(args.helicase)
-  local container = app.Graphic(0, 0, ply, 64)
-  container:addChild(phase)
-  self:setMainCursorController(phase)
+  local overview = libspreadsheet.LaretOverviewGraphic(0, 0, ply * 2, 64)
+  overview:follow(args.op)
+  local container = app.Graphic(0, 0, ply * 2, 64)
+  container:addChild(overview)
+  self:setMainCursorController(overview)
   self:setControlGraphic(container)
+  self:addSpotDescriptor { center = ply }
 
-  -- Default sub-display: modMix, lin/expo, (slot 3 free)
   self.paramMode = true
   self.shiftHeld = false
   self.shiftUsed = false
@@ -42,72 +40,73 @@ function HelicaseOverviewControl:init(args)
   desc:setCenter(col2, center1 + 1)
   self.paramSubGraphic:addChild(desc)
 
-  local mixMap = (function()
-    local m = app.LinearDialMap(0, 1)
+  local skewMap = (function()
+    local m = app.LinearDialMap(-1, 1)
     m:setSteps(0.1, 0.01, 0.001, 0.001)
     return m
   end)()
 
-  self.mixReadout = (function()
-    local g = app.Readout(0, 0, ply, 10)
-    g:setParameter(args.gainbias:getParameter("Bias"))
-    g:setAttributes(app.unitNone, mixMap)
-    g:setPrecision(2)
-    g:setCenter(col1, center4)
-    return g
-  end)()
-  self.paramSubGraphic:addChild(self.mixReadout)
-
-  -- Lin/Expo label
-  self.helicase = args.helicase
-  local linOption = args.helicase:getOption("LinExpo")
-  linOption:enableSerialization()
-  self.linExpoLabel = app.Label("exp", 10)
-  self.linExpoLabel:fitToText(0)
-  self.linExpoLabel:setCenter(col2, center3 + 1)
-  self.paramSubGraphic:addChild(self.linExpoLabel)
-
-  -- Carrier shape readout
-  local shapeMap = (function()
-    local m = app.LinearDialMap(0, 7)
+  local stepCountMap = (function()
+    local m = app.LinearDialMap(1, 16)
     m:setSteps(1, 1, 1, 1)
     m:setRounding(1)
     return m
   end)()
-  self.carrierShapeParam = args.carrierShapeParam
-  self.shapeReadout = (function()
+
+  local loopMap = (function()
+    local m = app.LinearDialMap(0, 16)
+    m:setSteps(1, 1, 1, 1)
+    m:setRounding(1)
+    return m
+  end)()
+
+  self.skewReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
-    g:setParameter(args.carrierShapeParam)
-    g:setAttributes(app.unitNone, shapeMap)
+    g:setParameter(args.gainbias:getParameter("Bias"))
+    g:setAttributes(app.unitNone, skewMap)
+    g:setPrecision(2)
+    g:setCenter(col1, center4)
+    return g
+  end)()
+
+  self.stepCountReadout = (function()
+    local g = app.Readout(0, 0, ply, 10)
+    g:setParameter(args.stepCountParam)
+    g:setAttributes(app.unitNone, stepCountMap)
+    g:setPrecision(0)
+    g:setCenter(col2, center4)
+    return g
+  end)()
+
+  self.loopReadout = (function()
+    local g = app.Readout(0, 0, ply, 10)
+    g:setParameter(args.loopParam)
+    g:setAttributes(app.unitNone, loopMap)
     g:setPrecision(0)
     g:setCenter(col3, center4)
     return g
   end)()
-  self.paramSubGraphic:addChild(self.shapeReadout)
+  if self.loopReadout.addName then
+    self.loopReadout:addName("all")
+  end
 
-  self.paramSubGraphic:addChild(app.SubButton("mix", 1))
-  self.paramSubGraphic:addChild(app.SubButton("l/e", 2))
-  self.paramSubGraphic:addChild(app.SubButton("carr", 3))
+  self.paramSubGraphic:addChild(self.skewReadout)
+  self.paramSubGraphic:addChild(self.stepCountReadout)
+  self.paramSubGraphic:addChild(self.loopReadout)
+  self.paramSubGraphic:addChild(app.SubButton("skew", 1))
+  self.paramSubGraphic:addChild(app.SubButton("steps", 2))
+  self.paramSubGraphic:addChild(app.SubButton("loop", 3))
 
   self:setParamMode(true)
 end
 
-function HelicaseOverviewControl:updateLinExpo()
-  if self.helicase:isLinFM() then
-    self.linExpoLabel:setText("lin")
-  else
-    self.linExpoLabel:setText("exp")
-  end
-end
-
-function HelicaseOverviewControl:setParamMode(enabled)
+function LaretOverviewControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
   self.paramFocusedReadout = nil
   self:setSubCursorController(nil)
   if enabled then
     self.subGraphic = self.paramSubGraphic
-    self:updateLinExpo()
   else
     self.subGraphic = self.levelSubGraphic
     self:setFocusedReadout(self.bias)
@@ -115,12 +114,12 @@ function HelicaseOverviewControl:setParamMode(enabled)
   self:addSubGraphic(self.subGraphic)
 end
 
-function HelicaseOverviewControl:onCursorEnter(spot)
+function LaretOverviewControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
 end
 
-function HelicaseOverviewControl:onCursorLeave(spot)
+function LaretOverviewControl:onCursorLeave(spot)
   if not self.paramMode then
     self:removeSubGraphic(self.subGraphic)
     self.paramMode = true
@@ -130,7 +129,7 @@ function HelicaseOverviewControl:onCursorLeave(spot)
   GainBias.onCursorLeave(self, spot)
 end
 
-function HelicaseOverviewControl:shiftPressed()
+function LaretOverviewControl:shiftPressed()
   self.shiftHeld = true
   self.shiftUsed = false
   if self.paramFocusedReadout then
@@ -141,7 +140,7 @@ function HelicaseOverviewControl:shiftPressed()
   return true
 end
 
-function HelicaseOverviewControl:shiftReleased()
+function LaretOverviewControl:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
     if self.paramFocusedReadout and self.shiftSnapshot then
       local cur = self.paramFocusedReadout:getValueInUnits()
@@ -158,30 +157,26 @@ function HelicaseOverviewControl:shiftReleased()
   return true
 end
 
-function HelicaseOverviewControl:subReleased(i, shifted)
+function LaretOverviewControl:focusParamReadout(readout)
+  readout:save()
+  self.paramFocusedReadout = readout
+  self:setSubCursorController(readout)
+  if not self:hasFocus("encoder") then self:focus() end
+end
+
+function LaretOverviewControl:subReleased(i, shifted)
   if shifted then return false end
   if self.paramMode then
-    if i == 1 then
-      self.mixReadout:save()
-      self.paramFocusedReadout = self.mixReadout
-      self:setSubCursorController(self.mixReadout)
-      if not self:hasFocus("encoder") then self:focus() end
-    elseif i == 2 then
-      -- Toggle lin/expo
-      self.helicase:toggleLinFM()
-      self:updateLinExpo()
-    elseif i == 3 then
-      self.shapeReadout:save()
-      self.paramFocusedReadout = self.shapeReadout
-      self:setSubCursorController(self.shapeReadout)
-      if not self:hasFocus("encoder") then self:focus() end
+    if i == 1 then self:focusParamReadout(self.skewReadout)
+    elseif i == 2 then self:focusParamReadout(self.stepCountReadout)
+    elseif i == 3 then self:focusParamReadout(self.loopReadout)
     end
     return true
   end
   return GainBias.subReleased(self, i, shifted)
 end
 
-function HelicaseOverviewControl:encoder(change, shifted)
+function LaretOverviewControl:encoder(change, shifted)
   if shifted and self.shiftHeld then self.shiftUsed = true end
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
@@ -190,7 +185,7 @@ function HelicaseOverviewControl:encoder(change, shifted)
   return GainBias.encoder(self, change, shifted)
 end
 
-function HelicaseOverviewControl:zeroPressed()
+function LaretOverviewControl:zeroPressed()
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:zero()
     return true
@@ -198,7 +193,7 @@ function HelicaseOverviewControl:zeroPressed()
   return GainBias.zeroPressed(self)
 end
 
-function HelicaseOverviewControl:cancelReleased(shifted)
+function LaretOverviewControl:cancelReleased(shifted)
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:restore()
     return true
@@ -206,4 +201,4 @@ function HelicaseOverviewControl:cancelReleased(shifted)
   return GainBias.cancelReleased(self, shifted)
 end
 
-return HelicaseOverviewControl
+return LaretOverviewControl

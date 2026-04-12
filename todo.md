@@ -217,8 +217,8 @@ Produces a burst of gates from a single trigger input.
 - [x] 94 Discont — 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush)
 - [x] Latch Filter — switched-capacitor S&H → SVF with V/Oct tracking
 - [x] Stereo processing for Canals, 94 Discont, and Latch Filter (dual DSP instances)
-- [ ] HD2-style FM oscillator pair (dual osc with FM index + feedback)
-- [ ] 4-op FM voice (Akemie's Castle / TX81Z style, build on Accents XOXO voice)
+- [x] 2-op FM oscillator (Helicase — OPL3 waveforms, discontinuity folder, phase-receptivity sync)
+- [ ] X-op FM voice (4-op or beyond, Akemie's Castle / TX81Z style, build on Accents XOXO voice)
 - [ ] Additional filter models from monokit (MoogFF, DFM1, BMoog)
 
 ## Polyphonic Sample Playback
@@ -517,7 +517,7 @@ Multiband comp and spectral gate share crossover/band-splitting frontend with Pa
 - [ ] Same crossover, per-band: threshold, attack/release, level
 - [ ] Global: crossover freqs, input gain, mix
 
-### Stepwise Multi-Effect (dblue Glitch / Infiltrator-style)
+### Larets (Stepwise Multi-Effect, dblue Glitch / Infiltrator-style)
 - [ ] Sequenced effect chain: each step applies a different effect to the audio
 - [ ] Effect types: stutter/repeat, reverse, bitcrush, downsample, filter sweep, pitch shift, tape stop, gate, distortion, buffer shuffle
 - [ ] Per-step: effect type, depth/amount, probability, duration (or sync to clock)
@@ -578,9 +578,9 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [ ] Seed is serialized so patches recall the same sound
 - [ ] Spreadsheet package (procedural generation + scan = complex UI)
 
-### Varishape Oscillator
-- [ ] Continuously variable waveshape: sine > triangle > saw > square > pulse
-- [ ] Single shape parameter + PWM, V/Oct, sync input
+### Varishape Oscillator -- COMPLETE
+- [x] Continuously variable waveshape: sine > triangle > saw > square > pulse
+- [x] Single shape parameter + PWM, V/Oct, sync input
 
 ### Control Forge-alike
 - [ ] Multistage envelope generator, spreadsheet paradigm (each row = stage)

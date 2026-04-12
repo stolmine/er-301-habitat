@@ -28,6 +28,9 @@
 #include "HelicasePhaseGraphic.h"
 #include "HelicaseCurveGraphic.h"
 #include "HelicaseOrbitalGraphic.h"
+#include "Larets.h"
+#include "LaretStepListGraphic.h"
+#include "LaretOverviewGraphic.h"
 #define SWIGLUA
 %}
 
@@ -56,3 +59,6 @@
 %include "HelicasePhaseGraphic.h"
 %include "HelicaseCurveGraphic.h"
 %include "HelicaseOrbitalGraphic.h"
+%include "Larets.h"
+%include "LaretStepListGraphic.h"
+%include "LaretOverviewGraphic.h"

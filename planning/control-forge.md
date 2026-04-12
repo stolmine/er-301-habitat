@@ -45,9 +45,9 @@ Offset steps define the level skeleton. Transitional steps (ramp/sinus/noise) de
 6. **Xform** — gate-triggered transforms, Etcher-style
 7. **Level** — TBD if needed, may not be necessary given shape=level for offset steps
 
-## Skew (TBD)
+## Skew
 
-Redistributes tick weights across the full step sequence. Details to be worked out — key question is whether total tick count is preserved (redistribute) or scaled (stretch).
+Per-step clock multiplier curve. Each step's programmed tick count is multiplied by a weight derived from its position in the sequence and the skew value. At center: all weights = 1x (no change). Skewed left: early steps play slower (higher multiplier), late steps faster. Skewed right: opposite. Total sequence length changes — the sequence takes more or fewer clocks to complete, which is natural for a looping system. Non-destructive: programmed tick counts are always ground truth, skew is a multiplier on top.
 
 ## Open Questions
 

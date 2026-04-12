@@ -112,14 +112,28 @@ end
 function HelicaseModControl:shiftPressed()
   self.shiftHeld = true
   self.shiftUsed = false
+  if self.paramFocusedReadout then
+    self.shiftSnapshot = self.paramFocusedReadout:getValueInUnits()
+  else
+    self.shiftSnapshot = nil
+  end
   return true
 end
 
 function HelicaseModControl:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
+    if self.paramFocusedReadout and self.shiftSnapshot then
+      local cur = self.paramFocusedReadout:getValueInUnits()
+      if cur ~= self.shiftSnapshot then
+        self.shiftHeld = false
+        self.shiftSnapshot = nil
+        return true
+      end
+    end
     self:setParamMode(not self.paramMode)
   end
   self.shiftHeld = false
+  self.shiftSnapshot = nil
   return true
 end
 
