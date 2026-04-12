@@ -115,11 +115,11 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 
 ### v2.1.0
 
-**Larets + Helicase polish pass.** See [RELEASE-2.1.0.md](RELEASE-2.1.0.md) for full details. spreadsheet v2.0.0 -> v2.1.0; all other packages unchanged.
+**Two new units in the spreadsheet package.** See [RELEASE-2.1.0.md](RELEASE-2.1.0.md) for full details. spreadsheet v2.0.0 -> v2.1.0; all other packages unchanged.
 
-Larets: CPR single-band compressor, Parfait-style Mix ply with auto-makeup, grain pitch shift (Dattorro two-grain overlap), hard-clip distortion with extended drive, clock-locked stutter (beat repeat), fresh-per-loop shuffle, inverted bitcrush direction with 12-bit ceiling, 1-16 loop length with momentary-hold floor, bipolar global param offset, unified step-list type readout (`addName` + `useHardSet`), new reverse/bitcrush/comb visualizations, tape stop and gate effects removed.
+**Larets** -- stepped multi-effect processor. Clock-driven 16-step sequencer where each step applies one of 10 audio effects (stutter, reverse, bitcrush, downsample, filter, pitch shift, distortion, shuffle, delay, comb) to the incoming signal. Global CPR single-band compressor, bipolar param offset, momentary-hold loop length, transform gate for CV-driven randomization. Custom overview viz with per-effect visual feedback.
 
-Helicase: single brightness measure (mean |Δ| / RMS), blob gray ceiling raised to white, sync phase threshold exposed on expansion GainBias (CV modulatable without touching the sync main view).
+**Helicase** -- 2-op FM oscillator. Carrier + modulator, each with 8 OPL3-inspired waveforms. 16 discontinuity fold shapes, modulator feedback with soft clip, lin/expo FM, lo-fi/hi-fi quality toggle. JF-inspired phase-receptivity sync with CV-modulatable threshold. Three custom visualizations: k-means phase-space metaballs, transfer curve preview, circular modulator ribbon.
 
 ### v2.0.1
 
