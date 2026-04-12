@@ -88,6 +88,9 @@ function LaretOverviewControl:init(args)
   end)()
   if self.loopReadout.addName then
     self.loopReadout:addName("all")
+    for i = 1, 16 do
+      self.loopReadout:addName(tostring(i))
+    end
   end
 
   self.paramSubGraphic:addChild(self.skewReadout)

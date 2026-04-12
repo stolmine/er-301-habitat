@@ -6,6 +6,7 @@ local Encoder = require "Encoder"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
+local center3 = app.GRID5_CENTER3
 local center4 = app.GRID5_CENTER4
 local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
@@ -91,11 +92,9 @@ function LaretStepListControl:init(args)
     return g
   end)()
 
-  if self.typeReadout.addName then
-    for _, v in ipairs({"off", "stt", "rev", "bit", "dec", "flt", "pch", "tap", "gat", "drv", "shf"}) do
-      self.typeReadout:addName(v)
-    end
-  end
+  self.typeLabel = app.Label("off", 10)
+  self.typeLabel:fitToText(0)
+  self.typeLabel:setCenter(col1, center3 + 1)
 
   self.description = (function()
     local g = app.Label(description, 10)
@@ -111,6 +110,7 @@ function LaretStepListControl:init(args)
   self.subGraphic:addChild(self.typeReadout)
   self.subGraphic:addChild(self.paramReadout)
   self.subGraphic:addChild(self.ticksReadout)
+  self.subGraphic:addChild(self.typeLabel)
   self.subGraphic:addChild(self.description)
   self.subGraphic:addChild(app.SubButton("type", 1))
   self.subGraphic:addChild(app.SubButton("param", 2))
@@ -119,10 +119,17 @@ function LaretStepListControl:init(args)
   self.pDisplay:follow(op)
   op:loadStep(0)
   self:updateTitle()
+  self:updateTypeLabel()
 end
 
 function LaretStepListControl:updateTitle()
   self.description:setText(string.format("Step %d", self.currentStep + 1))
+end
+
+function LaretStepListControl:updateTypeLabel()
+  local val = self.op:getStepType(self.currentStep)
+  local name = typeNames[val]
+  if name then self.typeLabel:setText(name) end
 end
 
 function LaretStepListControl:switchToStep(newStep)
@@ -135,6 +142,7 @@ function LaretStepListControl:switchToStep(newStep)
   self.op:loadStep(newStep)
   self.pDisplay:setSelectedStep(newStep)
   self:updateTitle()
+  self:updateTypeLabel()
 end
 
 function LaretStepListControl:setFocusedReadout(readout)
@@ -214,6 +222,9 @@ function LaretStepListControl:encoder(change, shifted)
   elseif self.focusedReadout then
     self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Fine)
     self.op:storeStep(self.currentStep)
+    if self.focusedReadout == self.typeReadout then
+      self:updateTypeLabel()
+    end
     return true
   else
     self:scrollStep(change)
