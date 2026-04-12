@@ -17,13 +17,13 @@ LaretOverviewControl:include(GainBias)
 function LaretOverviewControl:init(args)
   GainBias.init(self, args)
 
-  local overview = libspreadsheet.LaretOverviewGraphic(0, 0, ply * 2, 64)
+  local overview = libspreadsheet.LaretOverviewGraphic(0, 0, ply, 64)
   overview:follow(args.op)
-  local container = app.Graphic(0, 0, ply * 2, 64)
+  local container = app.Graphic(0, 0, ply, 64)
   container:addChild(overview)
   self:setMainCursorController(overview)
   self:setControlGraphic(container)
-  self:addSpotDescriptor { center = ply }
+  self:addSpotDescriptor { center = 0.5 * ply }
 
   self.paramMode = true
   self.shiftHeld = false

@@ -57,6 +57,7 @@ namespace stolmine
     int getActiveStep() { return mStep; }
     float getEffectiveTickCount(int i);
     float getClockPeriodSeconds();
+    float getOutputSample(int idx);
 
 #ifndef SWIGLUA
   private:

@@ -47,6 +47,9 @@ namespace stolmine
     int tmpTicks[kMaxSteps];
     float stepProgress;
     float compDetector;
+    float vizRing[128];
+    int vizPos;
+    int vizDecimCounter;
 
     void Init()
     {
@@ -59,6 +62,9 @@ namespace stolmine
       cachedPitchRate = 1.0f; cachedBaseFreq = 40.0f;
       stepProgress = 0.0f;
       compDetector = 0.0f;
+      memset(vizRing, 0, sizeof(vizRing));
+      vizPos = 0;
+      vizDecimCounter = 0;
     }
   };
 
@@ -118,6 +124,11 @@ namespace stolmine
     int sc = getStepCount();
     float skew = CLAMP(-1.0f, 1.0f, mSkew.value());
     return roundf((float)mpInternal->ticks[CLAMP(0, kMaxSteps - 1, i)] * skewMultiplier(i, sc, skew));
+  }
+
+  float Larets::getOutputSample(int idx)
+  {
+    return mpInternal->vizRing[(mpInternal->vizPos + idx) & 127];
   }
 
   float Larets::getClockPeriodSeconds()
@@ -397,6 +408,13 @@ namespace stolmine
       }
 
       out[i] = mixed * outputLevel;
+
+      if (++s.vizDecimCounter >= 8)
+      {
+        s.vizDecimCounter = 0;
+        s.vizRing[s.vizPos] = out[i];
+        s.vizPos = (s.vizPos + 1) & 127;
+      }
     }
   }
 
