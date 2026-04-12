@@ -69,6 +69,7 @@ namespace stolmine
     float stepProgress;
     float compDetector;
     float pitchPhase;
+    int stepStartPos;
     float vizRing[128];
     int vizPos;
     int vizDecimCounter;
@@ -85,6 +86,7 @@ namespace stolmine
       stepProgress = 0.0f;
       compDetector = 0.0f;
       pitchPhase = 0.0f;
+      stepStartPos = 0;
       memset(vizRing, 0, sizeof(vizRing));
       vizPos = 0;
       vizDecimCounter = 0;
@@ -237,12 +239,15 @@ namespace stolmine
 
     case FX_STUTTER:
     {
-      // Loop length as fraction of clock period: param 0 = 1/32, param 1 = full period
+      // Beat-repeat: snapshot the last <div> of a clock period at step start
+      // and loop it for the duration of the step. Musical fractions only.
       int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.5f);
-      int len = MAX(64, (int)(period * (0.03f + param * 0.97f)));
+      static const float kDivs[] = { 1.0f / 16.0f, 1.0f / 8.0f, 1.0f / 4.0f, 1.0f / 2.0f, 1.0f };
+      int divIdx = CLAMP(0, 4, (int)(param * 4.999f));
+      int len = MAX(64, (int)(period * kDivs[divIdx]));
       if (len > kBufferSize / 2) len = kBufferSize / 2;
-      int idx = (((s.writePos - len) + kBufferSize) % kBufferSize + (int)s.readPos) % kBufferSize;
-      float o = s.buffer[idx];
+      int base = ((s.stepStartPos - len) + kBufferSize) % kBufferSize;
+      float o = s.buffer[(base + (int)s.readPos) % kBufferSize];
       s.readPos += 1.0f; if ((int)s.readPos >= len) s.readPos = 0.0f;
       return o;
     }
@@ -340,16 +345,31 @@ namespace stolmine
 
     case FX_SHUFFLE:
     {
-      int segs = 2 + (int)(param * 6.0f);
+      // Clock-quantized chunk shuffle: divide a one-tick snapshot into
+      // musical-fraction chunks (1/2, 1/4, 1/8, 1/16 tick), permute
+      // chunk-by-chunk via hash. Minimum chunk ~43 ms so slices are
+      // musical rather than textural.
       int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.5f);
-      int len = MAX(1, period);
-      if (len > kBufferSize / 2) len = kBufferSize / 2;
-      int segLen = MAX(1, len / segs);
-      int head = ((s.writePos - len) + kBufferSize) % kBufferSize;
-      uint32_t h = (uint32_t)(mStep * 2654435761u) ^ (uint32_t)(segs * 2246822519u);
-      int offset = (int)((h >> 16) % (uint32_t)segs) * segLen;
-      float o = s.buffer[(head + offset + (int)s.readPos % segLen) % kBufferSize];
-      s.readPos += 1.0f; if ((int)s.readPos >= len) s.readPos = 0.0f;
+      static const float kChunkDivs[] = { 1.0f / 2.0f, 1.0f / 4.0f, 1.0f / 8.0f, 1.0f / 16.0f };
+      int chunkIdxDiv = CLAMP(0, 3, (int)(param * 3.999f));
+      int chunkLen = MAX(2048, (int)(period * kChunkDivs[chunkIdxDiv]));
+      int numChunks = MAX(2, period / chunkLen);
+      int windowLen = chunkLen * numChunks;
+      if (windowLen > kBufferSize / 2)
+      {
+        windowLen = kBufferSize / 2;
+        numChunks = MAX(2, windowLen / chunkLen);
+        windowLen = chunkLen * numChunks;
+      }
+      int base = ((s.stepStartPos - windowLen) + kBufferSize) % kBufferSize;
+      int readSamp = (int)s.readPos;
+      int curChunk = readSamp / chunkLen;
+      int offsetInChunk = readSamp - curChunk * chunkLen;
+      uint32_t h = ((uint32_t)mStep * 2654435761u + (uint32_t)curChunk * 374761393u) ^ 0x85ebca6bu;
+      int srcChunk = (int)((h >> 16) % (uint32_t)numChunks);
+      float o = s.buffer[(base + srcChunk * chunkLen + offsetInChunk) % kBufferSize];
+      s.readPos += 1.0f;
+      if ((int)s.readPos >= windowLen) s.readPos = 0.0f;
       return o;
     }
 
@@ -426,6 +446,7 @@ namespace stolmine
       if (resetRise)
       {
         mStep = 0; mTickCount = 0; mDivCount = 0;
+        s.stepStartPos = s.writePos;
         effTicks = MAX(1, (int)roundf((float)s.ticks[0] * skewMultiplier(0, stepCount, skew)));
       }
 
@@ -439,6 +460,7 @@ namespace stolmine
             s.crossfadeCounter = kCrossfadeSamples;
             mStep = (mStep + 1) % wrapLen;
             mTickCount = 0; s.readPos = 0.0f; s.ic1eq = 0.0f; s.ic2eq = 0.0f; s.stepProgress = 0.0f;
+            s.stepStartPos = s.writePos;
             effTicks = MAX(1, (int)roundf((float)s.ticks[mStep] * skewMultiplier(mStep, stepCount, skew)));
             float np = s.param[mStep];
             s.cachedPitchRate = powf(2.0f, (np * 24.0f - 12.0f) / 12.0f);

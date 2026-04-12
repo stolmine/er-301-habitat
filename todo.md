@@ -538,6 +538,8 @@ Multiband comp and spectral gate share crossover/band-splitting frontend with Pa
 - [ ] Shuffle needs larger minimum chunk sizes with clock-awareness -- quantize segment boundaries to clock subdivisions, not arbitrary sample counts.
 - [ ] Type readout parallax: integer and mode labels on the step-list type readout drift out of alignment in the sub-display. Audit how other spreadsheet units align labels with readouts (Excel TrackerSeq step list, Ballot GateSeq, Helicase ModControl). Look for shared label/readout positioning utilities before rolling our own.
 - [ ] Global param offset control: top-level ply to the left of xform. Non-destructive (does not rewrite stored step params); adds an offset to every step's param when read at playback. Clamp final value to [0,1]. Main fader with CV input like other GainBias controls.
+- [ ] Tape stop too slow: deceleration curve needs to bottom out faster, particularly at higher param values. Currently the rate floor drifts toward 0 across the full step -- should be steeper so it comes to a near-stop within the first third.
+- [ ] Reverse viz rework: drop the right-end brightness fade. Instead sweep a highlighted band right-to-left across the waveform, speed proportional to the reverse playback rate -- reads visually as "playing backwards".
 
 ## Grain Cloud
 
