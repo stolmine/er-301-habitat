@@ -534,8 +534,8 @@ Multiband comp and spectral gate share crossover/band-splitting frontend with Pa
 - [x] Distortion makeup: 1/sqrt(drive) to level-match other effects.
 - [x] Compressor at full: -40 dB threshold, 20:1 ratio, 1 ms attack. Actual limiter territory.
 - [x] Bitcrush viz: quantize in display-pixel space (min 3 px step), segments always visible.
-- [ ] Stutter should feel like a beat repeat / short loop capture, not a buffer smear. Lock loop length to a musical fraction of the clock period (e.g. 1/2, 1/4, 1/8 tick) instead of free-length.
-- [ ] Shuffle needs larger minimum chunk sizes with clock-awareness -- quantize segment boundaries to clock subdivisions, not arbitrary sample counts.
+- [x] Stutter: snapshot at step start, loop a musical fraction of the clock period (1/16, 1/8, 1/4, 1/2, 1 tick). Beat-repeat feel.
+- [x] Shuffle: chunk-quantized swaps across a one-tick snapshot, min ~43 ms chunks.
 - [x] Type readout parallax: replaced separate integer readout + label pair with a single Readout using `addName` (same `(int)(v+0.5f)` rounding as storeStep). Also called `useHardSet()` on the step-list readouts so the parameter's target and value stay in sync -- the actual off-by-one was softSet's 50-step ramp, not rounding, which made the displayed target name disagree with the storeStep-visible interpolated value.
 - [ ] Global param offset control: top-level ply to the left of xform. Non-destructive (does not rewrite stored step params); adds an offset to every step's param when read at playback. Clamp final value to [0,1]. Main fader with CV input like other GainBias controls.
 - [ ] Comb viz rework: concentric waveform contours instead of the current sinusoidal wobble fill. Tight comb (low param) = many tightly-spaced rings over the waveform. Long comb (high param) = wide spacing, collapsing to a single contour at max.
