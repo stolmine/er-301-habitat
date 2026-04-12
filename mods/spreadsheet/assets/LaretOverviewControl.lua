@@ -53,7 +53,7 @@ function LaretOverviewControl:init(args)
   end)()
 
   local loopMap = (function()
-    local m = app.LinearDialMap(0, 16)
+    local m = app.LinearDialMap(1, 16)
     m:setSteps(1, 1, 1, 1)
     m:setRounding(1)
     return m
@@ -65,6 +65,7 @@ function LaretOverviewControl:init(args)
     g:setAttributes(app.unitNone, skewMap)
     g:setPrecision(2)
     g:setCenter(col1, center4)
+    if g.useHardSet then g:useHardSet() end
     return g
   end)()
 
@@ -74,6 +75,7 @@ function LaretOverviewControl:init(args)
     g:setAttributes(app.unitNone, stepCountMap)
     g:setPrecision(0)
     g:setCenter(col2, center4)
+    if g.useHardSet then g:useHardSet() end
     return g
   end)()
 
@@ -83,10 +85,13 @@ function LaretOverviewControl:init(args)
     g:setAttributes(app.unitNone, loopMap)
     g:setPrecision(0)
     g:setCenter(col3, center4)
+    if g.useHardSet then g:useHardSet() end
     return g
   end)()
   if self.loopReadout.addName then
-    self.loopReadout:addName("all")
+    -- Index 0 is unreachable (map clamps to [1,16]); placeholder keeps the
+    -- integer indices lined up with the displayed value.
+    self.loopReadout:addName("--")
     for i = 1, 16 do
       self.loopReadout:addName(tostring(i))
     end

@@ -68,6 +68,7 @@ namespace stolmine
     float compDetector;
     float pitchPhase;
     int stepStartPos;
+    int shuffleOffset;
     float vizRing[128];
     int vizPos;
     int vizDecimCounter;
@@ -84,6 +85,7 @@ namespace stolmine
       compDetector = 0.0f;
       pitchPhase = 0.0f;
       stepStartPos = 0;
+      shuffleOffset = 0;
       memset(vizRing, 0, sizeof(vizRing));
       vizPos = 0;
       vizDecimCounter = 0;
@@ -333,31 +335,36 @@ namespace stolmine
 
     case FX_SHUFFLE:
     {
-      // Clock-quantized chunk shuffle: divide a one-tick snapshot into
-      // musical-fraction chunks (1/2, 1/4, 1/8, 1/16 tick), permute
-      // chunk-by-chunk via hash. Minimum chunk ~43 ms so slices are
-      // musical rather than textural.
+      // Beat-repeat with random source pick per loop: loop length is a
+      // musical fraction of the clock (same as stutter). Each time the
+      // loop wraps, a fresh random start offset is chosen inside a
+      // two-tick buffer window, so successive repeats are different
+      // pieces of audio rather than the same fixed slice.
       int period = (mClockPeriodSamples > 0) ? mClockPeriodSamples : (int)(sr * 0.5f);
-      static const float kChunkDivs[] = { 1.0f / 2.0f, 1.0f / 4.0f, 1.0f / 8.0f, 1.0f / 16.0f };
-      int chunkIdxDiv = CLAMP(0, 3, (int)(param * 3.999f));
-      int chunkLen = MAX(2048, (int)(period * kChunkDivs[chunkIdxDiv]));
-      int numChunks = MAX(2, period / chunkLen);
-      int windowLen = chunkLen * numChunks;
-      if (windowLen > kBufferSize / 2)
+      static const float kDivs[] = { 1.0f / 16.0f, 1.0f / 8.0f, 1.0f / 4.0f, 1.0f / 2.0f, 1.0f };
+      int divIdx = CLAMP(0, 4, (int)(param * 4.999f));
+      int len = MAX(64, (int)(period * kDivs[divIdx]));
+      if (len > kBufferSize / 2) len = kBufferSize / 2;
+
+      int windowLen = period * 2;
+      if (len * 4 > windowLen) windowLen = len * 4;
+      if (windowLen < len) windowLen = len;
+      if (windowLen > kBufferSize / 2) windowLen = kBufferSize / 2;
+
+      if ((int)s.readPos == 0)
       {
-        windowLen = kBufferSize / 2;
-        numChunks = MAX(2, windowLen / chunkLen);
-        windowLen = chunkLen * numChunks;
+        int maxOff = windowLen - len;
+        if (maxOff < 1) maxOff = 1;
+        float r = (lRandFloat() + 1.0f) * 0.5f;
+        if (r < 0.0f) r = 0.0f;
+        if (r > 1.0f) r = 1.0f;
+        s.shuffleOffset = (int)(r * (float)maxOff);
       }
+
       int base = ((s.stepStartPos - windowLen) + kBufferSize) % kBufferSize;
-      int readSamp = (int)s.readPos;
-      int curChunk = readSamp / chunkLen;
-      int offsetInChunk = readSamp - curChunk * chunkLen;
-      uint32_t h = ((uint32_t)mStep * 2654435761u + (uint32_t)curChunk * 374761393u) ^ 0x85ebca6bu;
-      int srcChunk = (int)((h >> 16) % (uint32_t)numChunks);
-      float o = s.buffer[(base + srcChunk * chunkLen + offsetInChunk) % kBufferSize];
+      float o = s.buffer[(base + s.shuffleOffset + (int)s.readPos) % kBufferSize];
       s.readPos += 1.0f;
-      if ((int)s.readPos >= windowLen) s.readPos = 0.0f;
+      if ((int)s.readPos >= len) s.readPos = 0.0f;
       return o;
     }
 
@@ -408,8 +415,8 @@ namespace stolmine
         : 1.0f;
 
     int clockDiv = MAX(1, (int)(mClockDiv.value() + 0.5f));
-    int loopLen = CLAMP(0, stepCount, (int)(mLoopLength.value() + 0.5f));
-    int wrapLen = (loopLen > 0) ? loopLen : stepCount;
+    int loopLen = CLAMP(1, kMaxSteps, (int)(mLoopLength.value() + 0.5f));
+    int wrapLen = MIN(loopLen, stepCount);
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {

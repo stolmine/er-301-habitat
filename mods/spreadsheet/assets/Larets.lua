@@ -95,7 +95,7 @@ function Larets:onLoadGraph(channelCount)
   self:addMonoBranch("clockDiv", clockDiv, "In", clockDiv, "Out")
 
   local loopLength = self:addObject("loopLength", app.ParameterAdapter())
-  loopLength:hardSet("Bias", 0)
+  loopLength:hardSet("Bias", 16)
   tie(op, "LoopLength", loopLength, "Out")
   self:addMonoBranch("loopLength", loopLength, "In", loopLength, "Out")
 
@@ -153,6 +153,33 @@ function Larets:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
+    },
+    stepCount = GainBias {
+      button = "steps",
+      description = "Step Count",
+      branch = self.branches.stepCount,
+      gainbias = self.objects.stepCount,
+      range = self.objects.stepCount,
+      biasMap = stepCountMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 8
+    },
+    loopLength = GainBias {
+      button = "loop",
+      description = "Loop Length",
+      branch = self.branches.loopLength,
+      gainbias = self.objects.loopLength,
+      range = self.objects.loopLength,
+      biasMap = (function()
+        local m = app.LinearDialMap(1, 16)
+        m:setSteps(1, 1, 1, 1)
+        m:setRounding(1)
+        return m
+      end)(),
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 16
     },
     offset = GainBias {
       button = "ofs",
@@ -223,7 +250,7 @@ function Larets:onLoadViews()
     expanded = { "clock", "steps", "overview", "offset", "xform", "mix" },
     collapsed = {},
     clock = { "clock", "reset", "clockDiv" },
-    overview = { "overview", "skew" }
+    overview = { "overview", "skew", "stepCount", "loopLength" }
   }
 end
 
@@ -269,7 +296,13 @@ function Larets:deserialize(t)
   if t.outputLevel ~= nil then self.objects.outputLevel:hardSet("Bias", t.outputLevel) end
   if t.compressAmt ~= nil then self.objects.compressAmt:hardSet("Bias", t.compressAmt) end
   if t.paramOffset ~= nil then self.objects.paramOffset:hardSet("Bias", t.paramOffset) end
-  if t.loopLength ~= nil then self.objects.loopLength:hardSet("Bias", t.loopLength) end
+  if t.loopLength ~= nil then
+    -- Old patches stored 0 to mean "all steps"; new semantics use 1-16 with
+    -- the wrap clamped to current step count. Migrate 0 to 16 (max = all).
+    local v = t.loopLength
+    if v < 1 then v = 16 end
+    self.objects.loopLength:hardSet("Bias", v)
+  end
   if t.clockDiv ~= nil then self.objects.clockDiv:hardSet("Bias", t.clockDiv) end
   if t.xformFunc ~= nil then self.objects.xformFunc:hardSet("Bias", t.xformFunc) end
   if t.xformDepth ~= nil then self.objects.xformDepth:hardSet("Bias", t.xformDepth) end

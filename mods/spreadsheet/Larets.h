@@ -32,7 +32,7 @@ namespace stolmine
     od::Parameter mClockDiv{"ClockDiv", 1.0f};
     od::Parameter mTransformFunc{"TransformFunc", 0.0f};
     od::Parameter mTransformDepth{"TransformDepth", 0.5f};
-    od::Parameter mLoopLength{"LoopLength", 0.0f};
+    od::Parameter mLoopLength{"LoopLength", 16.0f};
 
     od::Parameter mEditType{"EditType", 0.0f};
     od::Parameter mEditParam{"EditParam", 0.0f};
