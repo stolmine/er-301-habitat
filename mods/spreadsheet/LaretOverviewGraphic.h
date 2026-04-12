@@ -312,6 +312,9 @@ namespace stolmine
               if (rPy >= bot && rPy < bot + h) fb.pixel(gray, x, rPy);
             }
           }
+          // Envelope contour outline on top of the fill.
+          fb.pixel(GRAY10, x, yLo);
+          fb.pixel(GRAY10, x, yHi);
           fb.pixel(WHITE, x, py);
           break;
         }
