@@ -144,11 +144,26 @@ namespace stolmine
           break;
         }
 
-        case 2: // Reverse: brightness decays L→R
+        case 2: // Reverse: highlight band sweeps right to left at playback rate
         {
-          float fade = (float)(nPts - 1 - px) / (float)(nPts - 1);
-          int fillGray = 1 + (int)(fade * 4.0f);
-          int dotGray = 3 + (int)(fade * 10.0f);
+          float rate = 0.5f + fxParam * 1.5f;
+          float sweepT = mVizPhase * rate / 6.28318f;
+          sweepT -= floorf(sweepT);
+          int sweepX = (int)((1.0f - sweepT) * (float)(nPts - 1));
+          int bandW = nPts / 4; if (bandW < 4) bandW = 4;
+          int dist = px - sweepX; if (dist < 0) dist = -dist;
+          int fillGray, dotGray;
+          if (dist < bandW)
+          {
+            float t = 1.0f - (float)dist / (float)bandW;
+            fillGray = 2 + (int)(t * 7.0f);
+            dotGray = 5 + (int)(t * 10.0f);
+          }
+          else
+          {
+            fillGray = 2;
+            dotGray = 4;
+          }
           fb.vline(fillGray, x, yLo, yHi);
           fb.pixel(dotGray, x, py);
           break;
