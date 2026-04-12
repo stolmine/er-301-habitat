@@ -650,6 +650,7 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [ ] Carrier shape: consider wider selection beyond OPL3 set
 - [ ] CPU profiling on am335x
 - [ ] Overview viz: more reactive. Workable as-is but feels like it smooths over quick parameter wiggles. Candidates: faster brightness slew (0.1 -> 0.2), faster centroid slew (0.10 -> 0.2), briefer min/max contraction (currently 0.01 -- maybe 0.03 for quicker re-zoom), per-cluster LFO coupled to brightness so breathing speeds up with timbral richness. Per-cluster noise could also respond to disc index/type rather than being purely seeded.
+- [ ] Discontinuity transfer functions 7, 12, 15 click: audible pops at what sounds like zero crossings. Likely the shape has a discontinuity in value (not just slope) that isn't being interpolated or snapped. Look at the fold/wrap/ring-fold cases in Helicase.cpp's discontinuity application -- a sign flip or value jump at certain input thresholds is the probable cause. Could be fixed with a small smoothing window or by shifting the discontinuity off the zero line.
 - [x] Phase-receptivity sync threshold modulatable: added a dedicated GainBias expansion fader ("phase") alongside the unmodified sync ply. Uses the already-existing `syncThreshold` ParameterAdapter + mono branch. No custom control needed -- sync main view unchanged, expansion driven entirely by `views.sync = { "sync", "syncPhase" }`.
 
 ## Buffer Shuffler / Groovebox
