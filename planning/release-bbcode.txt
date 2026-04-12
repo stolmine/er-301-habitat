@@ -1,19 +1,16 @@
-[b]stolmine firmware v0.7.0-stolmine.9.0.0 + habitat v2.0.0[/b]
+[b]stolmine firmware + habitat v2.1.0[/b]
 
-10 new units, 67 commits. Highlights:
+Focused polish pass on the spreadsheet package. 17 commits since v2.0.1.
 
-[b]Impasto[/b] — 3-band multiband compressor. LR4 crossover, per-band FFT spectrum with gain reduction contour, sidechain split through crossover for frequency-aware detection. SSL G-Bus style speed control. Based on tomf's CPR algorithm.
+[b]Larets[/b] -- stepped multi-effect overhaul. New CPR single-band compressor behind a single knob (Giannoulis/Massberg/Reiss feedforward, adapted from Impasto), auto-makeup toggle on a Parfait-style Mix ply. Grain-based pitch shift (two-grain Dattorro overlap, sin^2 windows). Hard-clip distortion with 1-20 drive and 1/drive^0.7 makeup, replacing the old tanh soft-knee -- distortion step now reads as a true limiter. Clock-locked stutter (musical-fraction beat repeat from a step-start buffer snapshot) and fresh-per-loop shuffle (new random source offset each repeat, within a two-tick window). Bitcrush direction inverted with a 12-bit ceiling. New bipolar (-1..1) global param offset ply between overview and xform -- non-destructive, applied per-sample so CV modulation tracks smoothly. Loop length reworked to 1-16 integer with a minimum of 1 for momentary single-step hold. Step-list type readout unified so the displayed abbreviation always matches what's stored. Tape stop and gate effects removed; the slots didn't have enough temporal headroom to do either idea justice in a stepped context. New reverse sweep, bitcrush particle fill, and concentric comb contour visualizations.
 
-[b]Parfait[/b] — 3-band multiband saturator. 7 shapers per band (tube/diode/fold/half-rect/crush/sine/fractal), SVF morph filter, single-knob compressor, per-band FFT spectrum. 13% idle CPU on hardware.
+[b]Helicase[/b] -- cosmetic and expansion polish. Overview phase-space viz brightness now driven by a single measure (mean |dx| / RMS of the decimated output ring, approximately pitch-independent because the ring captures ~8 carrier cycles regardless of f0). Rest-state floor raised and blob gray ceiling lifted to white so peak FM pushes the viz all the way up. Sync phase-receptivity threshold now exposed on an expansion GainBias fader with a CV input -- sync ply main view is untouched.
 
-[b]Rauschen[/b] — 11-algorithm noise and chaos generator. White, Pink, Dust, Particle, Crackle, Logistic, Henon, Clocked, Velvet, Gendy, Lorenz. X/Y controls per algorithm, post-generator SVF morph filter with V/Oct, 3D rotating phase space visualization.
+Only spreadsheet bumped (2.0.0 -> 2.1.0). Other packages unchanged.
 
-[b]Pecto[/b] — Comb resonator. 16 tap patterns, 4 resonator types (raw/guitar/clarinet/sitar), gate-triggered xform randomization.
+Delete the installed spreadsheet lib from the rear SD card to force reinstall:
+[code]
+sudo rm -rf /mnt/v0.7/libs/spreadsheet/
+[/code]
 
-[b]Etcher[/b] — Now with 8 depth-controlled transforms (random/rotate/invert/reverse/smooth/quantize/spread/fold) and CV gate trigger.
-
-Also: [b]Varishape Osc[/b] (POLYBLEP), [b]Transport[/b] (gated clock), [b]Spectrogram[/b] (inline FFT analyzer), plus three experimental units in the new catchall package ([b]Sfera[/b], [b]Lambda[/b], [b]Flakes[/b]).
-
-Firmware adds Doom screensaver, threshold labels API, slot machine text input (WIP), maze screensaver, quicksave confirmation guard, favorites scroll fixes.
-
-Requires er-301-stolmine firmware. All packages compatible with vanilla community packages (Accents, sloop, lojik, strike, polygon).
+Requires er-301-stolmine firmware. Compatible with vanilla community packages (Accents, sloop, lojik, strike, polygon).

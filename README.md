@@ -103,6 +103,8 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Parfait | 3-band multiband saturator -- 7 shapers per band, SVF morph filter, compressor, per-band FFT spectrum display |
 | | Rauschen | Parametric noise and chaos generator -- 11 algorithms (White, Pink, Dust, Particle, Crackle, Logistic, Henon, Clocked, Velvet, Gendy, Lorenz), post-generator SVF morph filter with V/Oct, 3D phase space visualization |
 | | Impasto | 3-band multiband compressor -- per-band FFT spectrum with GR ceiling contour, sidechain input, G-Bus speed control, auto makeup |
+| | Helicase | 2-op FM oscillator -- OPL3 carrier + modulator with 16 fold shapes, JF-style phase-receptivity sync, lin/expo FM, lo-fi/hi-fi toggle, k-means phase-space viz |
+| | Larets | Stepped multi-effect -- 10 effects (stutter/reverse/bitcrush/downsample/filter/pitch shift/distortion/shuffle/delay/comb) with clock-locked buffer tricks, CPR single-band compressor, bipolar global param offset, 16-step sequencer with xform gate |
 | **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization -- stereo-aware passthrough with waveform display |
 | | Spectrogram | Inline FFT spectrum analyzer -- 256-point pffft, stereo passthrough, peak hold + RMS gradient |
 | **catchall** | Sfera | Z-plane morphing filter -- 32 configs, audio-reactive ferrofluid visualization (experimental) |
@@ -110,6 +112,14 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Flakes | Granular shimmer/freeze -- feedback looper with self-modulating delay (experimental) |
 
 ## Changelog
+
+### v2.1.0
+
+**Larets + Helicase polish pass.** See [RELEASE-2.1.0.md](RELEASE-2.1.0.md) for full details. spreadsheet v2.0.0 -> v2.1.0; all other packages unchanged.
+
+Larets: CPR single-band compressor, Parfait-style Mix ply with auto-makeup, grain pitch shift (Dattorro two-grain overlap), hard-clip distortion with extended drive, clock-locked stutter (beat repeat), fresh-per-loop shuffle, inverted bitcrush direction with 12-bit ceiling, 1-16 loop length with momentary-hold floor, bipolar global param offset, unified step-list type readout (`addName` + `useHardSet`), new reverse/bitcrush/comb visualizations, tape stop and gate effects removed.
+
+Helicase: single brightness measure (mean |Δ| / RMS), blob gray ceiling raised to white, sync phase threshold exposed on expansion GainBias (CV modulatable without touching the sync main view).
 
 ### v2.0.1
 
