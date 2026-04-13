@@ -1,5 +1,36 @@
 # TODO
 
+## Bugs
+
+### Excel
+- [ ] Playhead can get stuck outside bounds when step count is reduced while playhead is beyond new range (e.g. shows 14/1). Need to clamp mStep on stepCount change.
+- [ ] Offset range menu remap doesn't update readout display live — user has to touch readout again.
+
+### Ballot
+- [ ] Ratchet settings (RatchetLen, RatchetVel toggle options) do not persist across quicksave/load. Likely missing from serialize/deserialize.
+- [ ] Gate width 0 produces a trigger instead of silence. May be intentional — decide if this is desired behavior or a bug.
+
+### Pecto
+- [ ] CPU spikes on certain settings (high density + long comb + sitar/clarinet resonator). Profile on am335x.
+- [ ] Zipper noise on V/Oct and comb size changes. Needs per-block interpolation or one-pole smoother on delay length.
+
+### Tomograph
+- [ ] Overview viz: one lobe hangs permanently too far toward bottom-center. Likely misplaced angle in radial layout.
+- [ ] FilterListControl type label doesn't update when macros change filter type externally (readout is correct, label text stale).
+
+### Helicase
+- [ ] Discontinuity transfer functions 7, 12, 15 click at zero crossings. Value discontinuity in fold/wrap/ring-fold cases needs interpolation or smoothing.
+
+### Impasto
+- [ ] Auto gain + sidechain enable only affect one channel in stereo. Toggle handlers need to fan out to both op instances.
+- [ ] Impasto menu: stereo option re-labels to "mono" / "stereo" but the saved option state can disagree with actual instantiation if toggled without re-insert.
+
+### Kryos
+- [ ] Debug hang on load — test in emulator first to isolate hardware vs code issue.
+
+### Larets
+- [ ] Stutter vs shuffle viz distinction: both read similar at a glance. Stutter should show boxed loop window, shuffle should show rearranged fragment blocks.
+
 ## Release
 
 - [x] Version bump biome and spreadsheet packages to v1.0.1 for hotfix released 2026-04-05. Rebuild and reupload.
@@ -90,8 +121,6 @@ Refinements:
 - [x] Transport -- gated clock generator. Toggle run/stop, BPM fader (1-300), 4 ppqn output (16th notes). Phase resets on start/stop.
 - [x] Pecto -- comb resonator. 16 tap patterns (uniform/fibonacci/early/late/middle/ess/flat/rev-fib + 8 randomized variants), 4 slopes, 4 resonator types (raw/guitar/clarinet/sitar), xform gate randomization, dual-instance stereo, 2s buffer, adaptive labels, MixControl + TransformGateControl reuse.
 - [x] Pecto: density capped at 24 (CPU/UI), sorted tap reads for cache locality, xform randomization respects cap, TI ARM ICE workaround (O1 on recomputeTaps)
-- [ ] Pecto still produces huge CPU spikes on certain settings. Math out the inner loop for edge cases: high density (24) + long comb (large tap offsets) + sitar/clarinet resonator (amplitude-dependent delay modulation). Likely candidates: per-tap delay-line writes/reads thrashing the cache despite the sort, or the amplitude-mod feedback path doing redundant work per sample. Profile the actual hotspot on am335x, then either NEON-vectorize the tap loop or restructure so amplitude-dependent updates happen at a lower rate than per-sample.
-- [ ] Pecto zipper noise on V/Oct and comb size changes. Current reads of the pitch/size parameters per-sample jump discontinuously when the upstream Bias changes in steps (encoder tick or quantized CV). Options: per-block linear interpolation of target value across FRAMELENGTH (like the Helicase freq slew pattern), or a one-pole smoother on the delay length with a short time constant (~2-5 ms). V/Oct in particular needs smoothing since musical CV modulation should sound continuous.
 
 ## Sequencer Suite
 
@@ -211,9 +240,7 @@ Produces a burst of gates from a single trigger input.
 
 ## Kryos (spectral freeze)
 
-- [ ] Debug hang on load -- test in emulator first to isolate hardware vs code issue
-- [ ] If emulator works: hardware-specific issue (alignment, memory, toolchain)
-- [ ] If emulator hangs: DSP bug in process() or constructor
+- [ ] See Bugs section. If emulator works: hardware-specific issue. If emulator hangs: DSP bug.
 - [ ] High priority: blocks multiband spectral freeze unit (per-band freeze gates on crossover engine)
 
 ## stolmine (original units)
@@ -279,7 +306,7 @@ Spreadsheet-style parallel fixed filter bank. Mono and stereo.
 - [ ] Band list expansion: gate controls for randomize freq, gain, type across all bands
 - [x] Fine/coarse reversed on sub-display readouts. Fixed `Encoder.Coarse` -> `Encoder.Fine` across all 15 controls package-wide.
 - [ ] Default gain/Q review: unit could use better defaults for immediate audibility on load
-- [ ] Tomograph overview viz: one lobe appears to hang permanently too far down toward the bottom-center, as if a band is stuck or the radial layout has a misplaced bump. Likely in the `FilterResponseGraphic.h` or the radial overview drawing. Check whether it's a specific scale angle that maps to that position, whether the rotate/skew affect it, and whether it's tied to a band that's been silenced rather than removed.
+- [ ] See Bugs section: overview viz lobe positioning issue.
 
 ## 4ms SMR
 
@@ -352,7 +379,7 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
 
 ### Remaining
 - [x] Tap macros: volume (11: full/off/20-80%/asc/desc/even/odd/sine), pan (11: center/L/R/L>R/R>L/evens/odds/cluster), cutoff (6), Q (11: off/20-80%/full/asc/desc/even/odd/sine), type (16: all/evens/odds/cyclical/cluster)
-- [ ] FilterListControl type label doesn't update when macros change filter type externally (readout is correct, label text stale)
+- [ ] See Bugs section: FilterListControl type label stale on macro changes.
 - [x] Stack parameter (groups coincident taps, in overview expansion)
 - [x] Xform gate: single target selector (17 positions) + depth + fire. Gate fires randomization via Bias ref pattern.
   - Targets: rnd all, rnd taps, rnd delay, rnd filters, rnd level, rnd pan, rnd pitch, rnd cutoff, rnd Q, rnd type, rnd time, rnd fdbk, rnd tone, rnd skew, rnd grain, rnd count, reset
@@ -520,7 +547,7 @@ Multiband comp and spectral gate share crossover/band-splitting frontend with Pa
 - [x] CompSidechainControl (adapted from tomf's SidechainMeter)
 - [x] Drive/tone EQ, skew, auto makeup, dry/wet mix
 - [x] Dual-instance stereo, option serialization
-- [ ] Auto gain + sidechain enable only affect one channel in stereo. Both `mAutoMakeup` and `mEnableSidechain` options are per-instance. `CompMixControl.lua:142` and `CompSidechainControl.lua:125` call toggle methods on the single `compressor` reference (primary op) -- the R op never hears the toggle. Fix: pass both ops to the controls and have the toggle handlers fan out to all instances, or extract the option into a shared state the unit owns and replicate into both ops on change.
+- [ ] See Bugs section: auto gain + sidechain stereo drift.
 - [x] Repo-wide stereo audit complete. Dual-instance (opR) units: Canals, Discont, LatchFilter, Pecto (biome); Flakes, Sfera (catchall); Filterbank, MultibandCompressor/Impasto, MultibandSaturator/Parfait (spreadsheet). All params and gate inputs properly mirrored to both instances. MI ports (Rings, Clouds, Warps, Plaits, Stratos, Commotio) use native stereo inside a single op -- not dual-instance. **Only Impasto has the option-toggle stereo drift** (see entry above). Pecto's `setTopLevelBias` only targets `op` but `applyRandomize` runs on both ops with NULL-guarded pointers and shared ParameterAdapter Bias targets, so the effect is identical on both channels -- not a bug.
 
 ### Spectral Gate
@@ -660,7 +687,7 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 - [ ] Carrier shape: consider wider selection beyond OPL3 set
 - [ ] CPU profiling on am335x
 - [ ] Overview viz: more reactive. Workable as-is but feels like it smooths over quick parameter wiggles. Candidates: faster brightness slew (0.1 -> 0.2), faster centroid slew (0.10 -> 0.2), briefer min/max contraction (currently 0.01 -- maybe 0.03 for quicker re-zoom), per-cluster LFO coupled to brightness so breathing speeds up with timbral richness. Per-cluster noise could also respond to disc index/type rather than being purely seeded.
-- [ ] Discontinuity transfer functions 7, 12, 15 click: audible pops at what sounds like zero crossings. Likely the shape has a discontinuity in value (not just slope) that isn't being interpolated or snapped. Look at the fold/wrap/ring-fold cases in Helicase.cpp's discontinuity application -- a sign flip or value jump at certain input thresholds is the probable cause. Could be fixed with a small smoothing window or by shifting the discontinuity off the zero line.
+- [ ] See Bugs section: discontinuity shapes 7/12/15 click at zero crossings.
 - [x] Phase-receptivity sync threshold modulatable: added a dedicated GainBias expansion fader ("phase") alongside the unmodified sync ply. Uses the already-existing `syncThreshold` ParameterAdapter + mono branch. No custom control needed -- sync main view unchanged, expansion driven entirely by `views.sync = { "sync", "syncPhase" }`.
 
 ## Buffer Shuffler / Groovebox
