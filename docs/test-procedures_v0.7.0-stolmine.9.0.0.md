@@ -13,7 +13,7 @@ For each unit section:
 5. For *save / load round-trip*, quicksave after setting every parameter to a non-default value, then delete the chain and reload the quicksave. Confirm every piece of state returned.
 6. For *edge cases*, sweep the listed parameter combinations and listen for instability, runaway gain, or visual breakage.
 
-Bugs found go into `todo.md` under the owning unit's section, not here.
+Bugs found go into `todo.md` once recorded here.
 
 ## Conventions
 
