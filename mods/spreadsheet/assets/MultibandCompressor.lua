@@ -230,6 +230,7 @@ function MultibandCompressor:onLoadViews()
     description = "Sidechain",
     branch = self.branches.sidechain,
     compressor = self.objects.op,
+    compressorR = self.objects.opR,
     inputGainParam = self.objects.inputGain:getParameter("Bias"),
     map = inputGainMap,
     units = app.unitNone
@@ -338,6 +339,7 @@ function MultibandCompressor:onLoadViews()
     biasPrecision = 2,
     initialBias = 1.0,
     compressor = self.objects.op,
+    compressorR = self.objects.opR,
     outputLevel = self.objects.outputLevel:getParameter("Bias")
   }
 
@@ -380,6 +382,24 @@ function MultibandCompressor:onLoadViews()
   }
 
   return controls, views
+end
+
+-- Options are serialized per-op. Legacy saves only enabled serialization on
+-- the primary, so the R-side options reset to default on load and produced a
+-- stereo desync (one channel honored saved auto-makeup or sidechain state,
+-- the other didn't). Sync opR to op after deserialize to fix legacy patches.
+function MultibandCompressor:deserialize(t)
+  Unit.deserialize(self, t)
+  if self.objects.opR then
+    local op = self.objects.op
+    local opR = self.objects.opR
+    if opR:isAutoMakeupEnabled() ~= op:isAutoMakeupEnabled() then
+      opR:toggleAutoMakeup()
+    end
+    if opR:isSidechainEnabled() ~= op:isSidechainEnabled() then
+      opR:toggleSidechainEnabled()
+    end
+  end
 end
 
 return MultibandCompressor

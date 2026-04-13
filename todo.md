@@ -4,6 +4,8 @@
 
 - [x] Version bump biome and spreadsheet packages to v1.0.1 for hotfix released 2026-04-05. Rebuild and reupload.
 - [x] v2.0.0 released 2026-04-09. biome 2.0.0, spreadsheet 2.0.0, catchall 0.1.0. Full rebuild against current firmware.
+- [x] v2.1.0 released 2026-04-12. spreadsheet 2.1.0 -- Larets and Helicase shipped as first-release public units.
+- [x] Test procedures draft: `docs/test-procedures.md` -- per-unit checklists covering insert, every control, sub-displays, expansion views, menus, CV behavior, stereo routing, save/load round-trip, and edge cases for all units across spreadsheet/biome/catchall/scope/stolmine packages. Global sanity pass appended. Runs in a couple of hours pre-release.
 
 ## Mutable Instruments Ports
 
@@ -88,6 +90,8 @@ Refinements:
 - [x] Transport -- gated clock generator. Toggle run/stop, BPM fader (1-300), 4 ppqn output (16th notes). Phase resets on start/stop.
 - [x] Pecto -- comb resonator. 16 tap patterns (uniform/fibonacci/early/late/middle/ess/flat/rev-fib + 8 randomized variants), 4 slopes, 4 resonator types (raw/guitar/clarinet/sitar), xform gate randomization, dual-instance stereo, 2s buffer, adaptive labels, MixControl + TransformGateControl reuse.
 - [x] Pecto: density capped at 24 (CPU/UI), sorted tap reads for cache locality, xform randomization respects cap, TI ARM ICE workaround (O1 on recomputeTaps)
+- [ ] Pecto still produces huge CPU spikes on certain settings. Math out the inner loop for edge cases: high density (24) + long comb (large tap offsets) + sitar/clarinet resonator (amplitude-dependent delay modulation). Likely candidates: per-tap delay-line writes/reads thrashing the cache despite the sort, or the amplitude-mod feedback path doing redundant work per sample. Profile the actual hotspot on am335x, then either NEON-vectorize the tap loop or restructure so amplitude-dependent updates happen at a lower rate than per-sample.
+- [ ] Pecto zipper noise on V/Oct and comb size changes. Current reads of the pitch/size parameters per-sample jump discontinuously when the upstream Bias changes in steps (encoder tick or quantized CV). Options: per-block linear interpolation of target value across FRAMELENGTH (like the Helicase freq slew pattern), or a one-pole smoother on the delay length with a short time constant (~2-5 ms). V/Oct in particular needs smoothing since musical CV modulation should sound continuous.
 
 ## Sequencer Suite
 
@@ -145,7 +149,8 @@ Refinements:
   - [ ] Probability variant: per-step probability of firing as separate unit
   - [ ] Snap-to-scale mode for offset values
   - [ ] Playhead/cursor coupling: auto-scroll display follows playback, manual nav decouples
-  - [ ] Excel Gate Seq: 64-step gate sequencer with chaselight grid display, ratchet, algorithmic transforms (euclidean, NR, grids, necklace), velocity-controlled gate amplitude
+  - [ ] Excel Gate Seq: 64-step gate sequencer with chaselight grid display, ratchet, algorithmic transforms (euclidean, NR, grids, necklace), velocity-derived gate amplitude
+  - [ ] Ballot ratchet settings don't survive save/reload. Earlier todo marked "persist RatchetLen, RatchetVel options" as done, but they're regressing in practice -- options may have `enableSerialization()` missing at the control level, or custom state isn't being captured in the unit's `serialize()`. Check GateSeq.lua + RatchetControl.lua for the same kind of serialization gap Impasto just had (per-op option serialization not enabled on the wrapping control).
 
 ### Sequencer UI Research
 
@@ -274,6 +279,7 @@ Spreadsheet-style parallel fixed filter bank. Mono and stereo.
 - [ ] Band list expansion: gate controls for randomize freq, gain, type across all bands
 - [x] Fine/coarse reversed on sub-display readouts. Fixed `Encoder.Coarse` -> `Encoder.Fine` across all 15 controls package-wide.
 - [ ] Default gain/Q review: unit could use better defaults for immediate audibility on load
+- [ ] Tomograph overview viz: one lobe appears to hang permanently too far down toward the bottom-center, as if a band is stuck or the radial layout has a misplaced bump. Likely in the `FilterResponseGraphic.h` or the radial overview drawing. Check whether it's a specific scale angle that maps to that position, whether the rotate/skew affect it, and whether it's tied to a band that's been silenced rather than removed.
 
 ## 4ms SMR
 
@@ -371,6 +377,8 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
 - [x] Buffer size tiers (2s/5s/10s/20s menu, time fader + xform clamped to buffer)
 - [ ] Stereo optimization: dual-instance pattern doubles CPU; investigate shared buffer or interleaved processing for Petrichor and Pecto on stereo chains
 - [ ] Macro filter cutoff offset: CV-modulatable continuous shift of all per-tap cutoffs. On feedback shift SD + expansion (feedback + tone + filterOffset).
+- [ ] Tap pitch macro: CV-modulatable continuous pitch offset applied to every tap's pitch param (like the filter-cutoff macro above but for pitch). Existing tap macros cover volume/pan/cutoff/type/Q but not pitch. Semitones ideally, -24..+24 range, applied additively on top of per-tap pitch values so the per-tap structure is preserved.
+- [ ] Serialization audit -- tap states (per-tap level/pan/cutoff/Q/type/time/pitch), tap count, and xform settings don't carry across saves. Audit MultitapDelay.lua's serialize/deserialize vs the C++ state and the set of ParameterAdapters. Need: (a) explicit getters/setters for per-tap state that the Lua serializer can iterate (similar to Larets' getStepType/setStepType pattern), (b) tap count persisted in the serialize table, (c) xform params (target, depth, grid, stack, drift, reverse probability) confirmed restored. Probable cause is that per-tap state lives in the C++ Internal struct rather than `od::Parameter`s, so the default Unit.serialize doesn't capture it.
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
 - [ ] Perlin noise LUT: RaindropGraphic has a working tileable 64x64 LUT approach (bake Perlin at init, bilinear sample at runtime). The firmware repo has Voronoi and Perlin screensavers that could adopt this pattern for efficient noise generation. See RaindropGraphic.h for the implementation.
 
@@ -512,6 +520,8 @@ Multiband comp and spectral gate share crossover/band-splitting frontend with Pa
 - [x] CompSidechainControl (adapted from tomf's SidechainMeter)
 - [x] Drive/tone EQ, skew, auto makeup, dry/wet mix
 - [x] Dual-instance stereo, option serialization
+- [ ] Auto gain + sidechain enable only affect one channel in stereo. Both `mAutoMakeup` and `mEnableSidechain` options are per-instance. `CompMixControl.lua:142` and `CompSidechainControl.lua:125` call toggle methods on the single `compressor` reference (primary op) -- the R op never hears the toggle. Fix: pass both ops to the controls and have the toggle handlers fan out to all instances, or extract the option into a shared state the unit owns and replicate into both ops on change.
+- [x] Repo-wide stereo audit complete. Dual-instance (opR) units: Canals, Discont, LatchFilter, Pecto (biome); Flakes, Sfera (catchall); Filterbank, MultibandCompressor/Impasto, MultibandSaturator/Parfait (spreadsheet). All params and gate inputs properly mirrored to both instances. MI ports (Rings, Clouds, Warps, Plaits, Stratos, Commotio) use native stereo inside a single op -- not dual-instance. **Only Impasto has the option-toggle stereo drift** (see entry above). Pecto's `setTopLevelBias` only targets `op` but `applyRandomize` runs on both ops with NULL-guarded pointers and shared ParameterAdapter Bias targets, so the effect is identical on both channels -- not a bug.
 
 ### Spectral Gate
 - [ ] Same crossover, per-band: threshold, attack/release, level

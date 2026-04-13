@@ -22,6 +22,7 @@ function CompMixControl:init(args)
   self.shiftUsed = false
   self.normalSubGraphic = self.subGraphic
   self.compressor = args.compressor
+  self.compressorR = args.compressorR
 
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
@@ -33,9 +34,13 @@ function CompMixControl:init(args)
   desc:setCenter(col2, center1 + 1)
   self.paramSubGraphic:addChild(desc)
 
-  -- Auto makeup toggle indicator
+  -- Auto makeup toggle indicator. Enable serialization on BOTH op options
+  -- so the R-side state survives quicksave/reload in stereo.
   local autoOption = args.compressor:getOption("AutoMakeup")
   autoOption:enableSerialization()
+  if args.compressorR then
+    args.compressorR:getOption("AutoMakeup"):enableSerialization()
+  end
   self.autoIndicator = app.BinaryIndicator(0, 24, ply, 32)
   self.autoIndicator:setCenter(col1, center3)
   self.paramSubGraphic:addChild(self.autoIndicator)
@@ -140,6 +145,10 @@ function CompMixControl:subReleased(i, shifted)
   if self.paramMode then
     if i == 1 then
       self.compressor:toggleAutoMakeup()
+      if self.compressorR
+          and self.compressorR:isAutoMakeupEnabled() ~= self.compressor:isAutoMakeupEnabled() then
+        self.compressorR:toggleAutoMakeup()
+      end
       self:updateAutoIndicator()
     elseif i == 2 then
       self.outputReadout:save()

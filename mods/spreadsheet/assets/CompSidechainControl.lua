@@ -24,6 +24,7 @@ function CompSidechainControl:init(args)
 
   self.branch = args.branch
   self.compressor = args.compressor
+  self.compressorR = args.compressorR
 
   -- Main graphic: fader for input gain
   self.fader = (function()
@@ -56,9 +57,13 @@ function CompSidechainControl:init(args)
   self.scope:setCornerRadius(3, 3, 3, 3)
   self.subGraphic:addChild(self.scope)
 
-  -- Enable indicator
+  -- Enable indicator. Enable serialization on both op options so R-side
+  -- sidechain state survives quicksave/reload.
   local scOption = args.compressor:getOption("EnableSidechain")
   scOption:enableSerialization()
+  if args.compressorR then
+    args.compressorR:getOption("EnableSidechain"):enableSerialization()
+  end
   self.enableIndicator = app.BinaryIndicator(0, 24, ply, 32)
   self.enableIndicator:setCenter(col2, center3)
   self.subGraphic:addChild(self.enableIndicator)
@@ -123,6 +128,10 @@ function CompSidechainControl:subReleased(i, shifted)
     self.branch:show()
   elseif i == 2 then
     self.compressor:toggleSidechainEnabled()
+    if self.compressorR
+        and self.compressorR:isSidechainEnabled() ~= self.compressor:isSidechainEnabled() then
+      self.compressorR:toggleSidechainEnabled()
+    end
     self:updateState()
   elseif i == 3 then
     self.gainReadout:save()
