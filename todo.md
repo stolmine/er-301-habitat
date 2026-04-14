@@ -777,6 +777,11 @@ Grid-based sequencer where placement rules from board games drive step generatio
 - [ ] Norns-inspired generative visual + audio units
 - [ ] Glitchy eye candy: generative visuals driven by audio/CV (ref: Paratek modules)
 - [ ] Pseudo-3D waveform viz: wavetable frames stacked serially for 3D view
+- [ ] Clicks-and-cuts family (research, then units). Aesthetic target: microsound / glitch / electroacoustic -- Oval/Pole/Raster-Noton texture, plus the physical-interaction weirdness of Folktek Matter and the interacting-oscillator-lattice feel of Ciat-Lonbarde Plumbutter (Peter Blasser's Rollz + Gongs + paper-circuit lineage). Both modules derive complex output from a handful of cross-coupled simple elements (chaotic-but-settling feedback, tuned carriers hitting each other, charge-based rhythm generators). Research goals before picking unit scope:
+  - Trace Matter's architecture from available docs/teardowns -- what's the signal path, what's the interaction model, how does stability-in-chaos arise.
+  - Trace Plumbutter's Rollz / Gongs / Lattice roles -- how are the resonators tuned, how are rhythms generated from interacting oscillators, what makes the output read as "organic".
+  - Identify 2-3 extractable kernels that make sense as ER-301 units: e.g. tuned-carrier lattice, charge-bucket rhythm generator, contact-imperfection glitch processor, stereo-field electroacoustic smear.
+  - Prototype the cheapest kernel first (probably the lattice of ~4 tuned resonators with cross-coupling), since it's a foundation both aesthetics share.
 
 ## Port Candidates
 
