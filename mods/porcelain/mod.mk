@@ -13,7 +13,13 @@ ASSET_DIR = $(MOD_DIR)/assets
 
 MOD_CPP = $(wildcard $(MOD_DIR)/*.cpp)
 
+EURORACK = eurorack
+
+# stmlib for Svf filter (same pattern as spreadsheet package)
+STMLIB_CC = $(EURORACK)/stmlib/dsp/units.cc
+
 OBJECTS = $(addprefix $(OUT_DIR)/,$(MOD_CPP:%.cpp=%.o))
+OBJECTS += $(addprefix $(OUT_DIR)/,$(STMLIB_CC:%.cc=%.o))
 
 SWIG_SOURCE = $(MOD_DIR)/$(PKGNAME).cpp.swig
 SWIG_WRAPPER = $(OUT_DIR)/$(MOD_DIR)/$(PKGNAME)_swig.cpp
@@ -22,9 +28,9 @@ OBJECTS += $(SWIG_OBJECT)
 
 ASSETS := $(call rwildcard, $(ASSET_DIR), *)
 
-INCLUDES = $(MOD_DIR) mods $(SDKPATH) $(SDKPATH)/arch/$(ARCH) $(SDKPATH)/emu
+INCLUDES = $(MOD_DIR) mods $(SDKPATH) $(SDKPATH)/arch/$(ARCH) $(SDKPATH)/emu $(EURORACK)
 
-SYMBOLS =
+SYMBOLS = TEST
 
 CFLAGS.common = -Wall -ffunction-sections -fdata-sections
 CFLAGS.speed = -O3 -ftree-vectorize -ffast-math
@@ -80,6 +86,11 @@ $(PACKAGE_FILE): $(LIB_FILE) $(ASSETS)
 	@zip -jq $@ $(LIB_FILE)
 
 $(OUT_DIR)/%.o: %.cpp
+	@echo [C++ $<]
+	@mkdir -p $(@D)
+	@$(CPP) $(CFLAGS) -std=gnu++11 -c $< -o $@
+
+$(OUT_DIR)/%.o: %.cc
 	@echo [C++ $<]
 	@mkdir -p $(@D)
 	@$(CPP) $(CFLAGS) -std=gnu++11 -c $< -o $@

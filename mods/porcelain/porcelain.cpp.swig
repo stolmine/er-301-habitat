@@ -3,5 +3,10 @@
 
 %{
 #undef SWIGLUA
+#include "Chime.h"
+#include "ChimeEnergyGraphic.h"
 #define SWIGLUA
 %}
+
+%include "Chime.h"
+%include "ChimeEnergyGraphic.h"
