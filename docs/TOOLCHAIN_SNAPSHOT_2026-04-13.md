@@ -152,3 +152,126 @@ while not breaking the emu x86 build:
   or `fb.circle` calls involved. If there's a firmware/toolchain
   interaction producing this, it's in the `fb.pixel` path or in the
   trigonometry/cast pipeline.
+
+---
+
+# Comparison snapshot — 2026-04-13 (second machine)
+
+Captured on a different dev machine the same day to compare against the
+baseline above. Same repos, same TI ARM toolchain by md5, but several
+host-side tools differ. Documented in the same format for direct diff.
+
+## Host machine
+
+| Item                | Value                                                     |
+|---------------------|-----------------------------------------------------------|
+| Host                | `bram-macbookpro102`                                      |
+| OS                  | EndeavourOS (Arch Linux derivative), rolling              |
+| Kernel              | `6.19.8-arch1-1`, x86_64                                  |
+| Kernel build date   | 2026-03-20 (from `/boot/vmlinuz-linux` mtime)             |
+
+## Host-native toolchain (used for emu + SWIG wrapper + Lua syntax checks)
+
+| Item              | Version                                                     | Source       |
+|-------------------|-------------------------------------------------------------|--------------|
+| `gcc`             | 15.2.1 (`gcc 15.2.1+r604+g0b99615a8aef-1`)                  | Arch pkg     |
+| `make`            | GNU Make 4.4.1 (`make 4.4.1-2`)                             | Arch pkg     |
+| `swig`            | **4.4.0** (`swig 4.4.0-2`)                                  | Arch pkg     |
+| `lua`             | 5.4.8 (`lua 5.4.8-2`) -- note: `lua` is 5.4 here, not 5.5   | Arch pkg `lua` |
+| (alt)             | `lua54` not installed; `luajit` 2.1.1772619647              | Arch pkg     |
+| `zip`             | 3.0 (`zip 3.0-11`)                                          | Arch pkg     |
+| `python3`         | 3.14.3 (`python 3.14.3-1`)                                  | Arch pkg     |
+| `binutils`        | 2.46-1                                                      | Arch pkg     |
+
+## ARM cross toolchain (used for am335x / Cortex-A8)
+
+Same pinned TI 4.9.3 (2015q3) at the same path. md5s and mtime are
+**byte-identical** to the baseline machine, so the ARM code generator
+itself is not a variable between the two hosts.
+
+| Item                       | Value                                                   |
+|----------------------------|---------------------------------------------------------|
+| Primary cross GCC          | `~/ti/gcc-arm-none-eabi-4_9-2015q3/bin/arm-none-eabi-gcc` |
+| `arm-none-eabi-gcc --version` | 4.9.3 20150529 (release) [ARM/embedded-4_9-branch revision 227977] |
+| `arm-none-eabi-ld --version`  | GNU ld (GNU Tools for ARM Embedded Processors) 2.24.0.20150921 |
+| Binary mtime               | 2015-09-21 12:59:15                                     |
+| `gcc` md5                  | `2eda7a25553c6a56ee738f2fcd111414` (matches baseline)   |
+| `g++` md5                  | `721e14dd5fe4ebc6da32a35fc5da96c0` (matches baseline)   |
+
+### Alt ARM toolchain
+
+Not installed on this machine. No `/usr/bin/arm-none-eabi-*` present;
+`pacman -Q arm-none-eabi-*` returns not-found for all three
+(`gcc`, `binutils`, `newlib`). There is no Arch 14.2 fallback on `$PATH`,
+so any accidental bare `arm-none-eabi-gcc` invocation will fail outright
+instead of silently picking up a different compiler.
+
+### TI bundle contents
+
+Same list as baseline. All subdirs present under `~/ti/`:
+
+```
+bios_6_46_05_55
+cg_xml
+edma3_lld_2_12_05_29
+gcc-arm-none-eabi-4_9-2015q3
+ndk_2_25_01_11
+pdk_am335x_1_0_8
+processor_sdk_rtos_am335x_4_01_00_06
+ti-cgt-pru_2.1.5
+xdctools_3_32_01_22_core
+```
+
+## Repo state at time of snapshot
+
+| Repo                                          | HEAD                                               |
+|-----------------------------------------------|----------------------------------------------------|
+| `~/repos/er-301-stolmine` (SDK, via symlink)  | `d022c69` (2026-04-08), `v0.7.0-txo.8.6.7-2-gd022c69` |
+| `~/repos/er-301-habitat`                      | `0f4e362` (2026-04-13), one commit past `v2.1.0`   |
+
+Habitat SDK symlink: `er-301-habitat/er-301 -> /home/sure/repos/er-301-stolmine`
+(same as baseline).
+
+Firmware binary present in `er-301/release/am335x/app/app.bin`:
+
+```
+md5  9c357cafdc286042416d00b8aa28a90e
+```
+
+SD card not mounted at snapshot time (`/mnt/ER-301/firmware/` absent).
+
+## Deltas vs baseline machine
+
+| Item                     | Baseline (`sure-macbookpro91`)        | This machine (`bram-macbookpro102`)    |
+|--------------------------|---------------------------------------|----------------------------------------|
+| Kernel                   | 6.18.21-1-lts (2026-04-02)            | 6.19.8-arch1-1 (2026-03-20)            |
+| `swig`                   | **4.4.1**                             | **4.4.0**                              |
+| `lua` (default binary)   | 5.5.0                                 | 5.4.8                                  |
+| `lua54` alt pkg          | present                               | not installed                          |
+| `luajit`                 | 2.1.1774896198                        | 2.1.1772619647                         |
+| `python3`                | unspecified                           | 3.14.3                                 |
+| `binutils` (host)        | (gcc 15.2 default)                    | 2.46-1                                 |
+| Arch `arm-none-eabi-*`   | installed (14.2.0, 2026-02-02)        | **not installed**                      |
+| SDK HEAD                 | `0df7a03` (v0.7.0-stolmine.9.0.0)     | `d022c69` (v0.7.0-txo.8.6.7-2-gd022c69) |
+| Habitat HEAD             | `52b3213` (v2.1.0)                    | `0f4e362` (v2.1.0 + toolchain doc)     |
+| `app.bin` md5            | `3a4d9cc883db9a438788510116a70be2`    | `9c357cafdc286042416d00b8aa28a90e`     |
+| TI ARM gcc md5           | `2eda7a25...`                         | `2eda7a25...` (match)                  |
+| TI ARM g++ md5           | `721e14dd...`                         | `721e14dd...` (match)                  |
+
+Items most likely to affect the Tomograph viz regression if the baseline
+machine reproduces it and this one does not (or vice versa):
+
+1. **SWIG 4.4.0 vs 4.4.1.** Generated wrapper C++ is fed to the same TI
+   4.9.3 compiler, so any codegen delta between 4.4.0 and 4.4.1 could
+   surface as an ARM-only runtime bug. First thing to diff if behavior
+   differs between machines.
+2. **SDK HEAD differs.** `d022c69` here is on a `txo.8.6.7` tag line;
+   the baseline was on `stolmine.9.0.0`. `app.bin` md5 differs, which is
+   consistent with either an SDK commit delta or a different build of the
+   same source. Worth confirming which SDK branch the known-good build
+   came from before attributing the regression to habitat or toolchain.
+3. **Lua 5.4 vs 5.5 on host.** Syntax-check only; shouldn't affect the
+   ARM `.so`. Non-factor for the rendering regression, noted for
+   completeness.
+4. **Kernel and Arch `arm-none-eabi` presence.** Neither touches the
+   build path given the pinned TI toolchain. Pure environment noise.
