@@ -252,7 +252,7 @@ function Etcher:onLoadViews()
       biasMap = skewMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 1.0
+      initialBias = 0.0
     },
     segCount = GainBias {
       button = "segs",

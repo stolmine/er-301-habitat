@@ -28,6 +28,9 @@
 ### Kryos
 - [ ] Debug hang on load — test in emulator first to isolate hardware vs code issue.
 
+### Etcher
+- [x] Skew loaded at 1.0 instead of 0.0 (neutral). `initialBias = 1.0` on the GainBias overrode `skew:hardSet("Bias", 0.0)` in onLoadGraph. Changed to 0.0.
+
 ### Larets
 - [ ] Stutter vs shuffle viz distinction: both read similar at a glance. Stutter should show boxed loop window, shuffle should show rearranged fragment blocks.
 
