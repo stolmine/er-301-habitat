@@ -290,6 +290,20 @@ Produces a burst of gates from a single trigger input.
 - [ ] See Bugs section. If emulator works: hardware-specific issue. If emulator hangs: DSP bug.
 - [ ] High priority: blocks multiband spectral freeze unit (per-band freeze gates on crossover engine)
 
+## Microsound / electroacoustic family (research first)
+
+Audio units, not visualizers. Aesthetic target: clicks and cuts / microsound / electroacoustic glitch in the vein of Raster-Noton artists (Alva Noto, Ryoji Ikeda, Carsten Nicolai), and the interacting-oscillator-lattice feel of Ciat-Lonbarde Plumbutter (Peter Blasser). Not a single unit -- a set of related DSP tools that share a sensibility.
+
+- [ ] Research phase (depth-first before unit design):
+  - Raster-Noton production methods: what techniques recur across the catalog (sine-wave rhythm cells, micro-edit stutter, spectral masking, DC-click percussion, click-and-drone layering)? Target artists to read about: Alva Noto, Carsten Nicolai / Frank Bretschneider, Ryoji Ikeda. Read interviews, look for tooling references.
+  - Peter Blasser's Plumbutter schematics (Ciat-Lonbarde, paper circuit lineage). Schematics should be public on ciat-lonbarde.net / blasser's site. Understand Rollz (rhythm generator via charge-bucket pulse logic), Gongs (tuned LC resonators hit by percussive pulses), Lattice (cross-coupling between oscillators that produces organic interlocking rhythms), and the stereo "butter" electroacoustic smear on the output.
+  - Extract 2-3 DSP kernels that make sense for ER-301: e.g. a charge-bucket pulse divider, a tuned-resonator bank hit by pulses rather than audio, a lattice-style coupling matrix between oscillators, a click-train + DC-pulse percussion generator.
+- [ ] Candidate unit directions (pick after research):
+  - Click / tick generator: sine-wave pulses, DC clicks, configurable density and spectral character. Think Ikeda's "+ / -" catalog.
+  - Resonator bank hit by pulses (not audio-excited): 4-8 tuned resonators, percussive excitation, stereo spread. The Gongs kernel.
+  - Charge-bucket rhythm generator: interacting pulse dividers with cross-feedback, produces polyrhythmic-but-musical patterns from simple counter logic. The Rollz kernel.
+  - Lattice oscillator: 4-6 tuned oscillators with cross-coupling matrix, outputs their sum plus modulated resonance. Settles into organic interlocking patterns.
+
 ## stolmine (original units)
 
 - [x] NR — gate sequencer (migrated from standalone package)
@@ -777,11 +791,6 @@ Grid-based sequencer where placement rules from board games drive step generatio
 - [ ] Norns-inspired generative visual + audio units
 - [ ] Glitchy eye candy: generative visuals driven by audio/CV (ref: Paratek modules)
 - [ ] Pseudo-3D waveform viz: wavetable frames stacked serially for 3D view
-- [ ] Clicks-and-cuts family (research, then units). Aesthetic target: microsound / glitch / electroacoustic -- Oval/Pole/Raster-Noton texture, plus the physical-interaction weirdness of Folktek Matter and the interacting-oscillator-lattice feel of Ciat-Lonbarde Plumbutter (Peter Blasser's Rollz + Gongs + paper-circuit lineage). Both modules derive complex output from a handful of cross-coupled simple elements (chaotic-but-settling feedback, tuned carriers hitting each other, charge-based rhythm generators). Research goals before picking unit scope:
-  - Trace Matter's architecture from available docs/teardowns -- what's the signal path, what's the interaction model, how does stability-in-chaos arise.
-  - Trace Plumbutter's Rollz / Gongs / Lattice roles -- how are the resonators tuned, how are rhythms generated from interacting oscillators, what makes the output read as "organic".
-  - Identify 2-3 extractable kernels that make sense as ER-301 units: e.g. tuned-carrier lattice, charge-bucket rhythm generator, contact-imperfection glitch processor, stereo-field electroacoustic smear.
-  - Prototype the cheapest kernel first (probably the lattice of ~4 tuned resonators with cross-coupling), since it's a foundation both aesthetics share.
 
 ## Port Candidates
 
