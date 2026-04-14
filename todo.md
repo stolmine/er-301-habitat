@@ -303,7 +303,7 @@ Audio units, not visualizers. Aesthetic target: clicks and cuts / microsound / e
   5. **Generation-loss processor** -- Alva Noto Xerrox kernel. Bit-reducer + SR-reducer + feedback loop with tape-LPF, iterative self-feeding mode. Builds on existing bitcrush code.
   6. **Trigger-locked grain burst** -- Bretschneider Rhythm kernel. Live buffer + trigger-driven 5-30 ms slice playback with randomized position/length. Distinct from Clouds (continuous) and Flakes (looper).
   7. (Optional) **Schroeder allpass smear** -- Plumbutter Butter kernel. Mini-reverb utility, might belong in scope or catchall rather than standalone.
-- [ ] Package scoping: decide whether these ship as a new `glitch` or `microsound` package or join `catchall`. New package probably cleaner since they share kernels (pulse -> resonator -> smear) and can provide shared C++ helpers.
+- [x] Package scoping decided: new `porcelain` package (v0.1.0 scaffolded). Name picked for the fragile-cracks / hard-surface-clicks duality that covers both the Raster-Noton and Plumbutter aesthetics. Scaffold lives at `mods/porcelain/` with empty SWIG and toc.lua populated as units land.
 
 ## stolmine (original units)
 
