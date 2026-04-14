@@ -186,7 +186,7 @@ Refinements:
   - [ ] Snap-to-scale mode for offset values
   - [ ] Playhead/cursor coupling: auto-scroll display follows playback, manual nav decouples
   - [ ] Excel Gate Seq: 64-step gate sequencer with chaselight grid display, ratchet, algorithmic transforms (euclidean, NR, grids, necklace), velocity-derived gate amplitude
-  - [ ] Ballot ratchet settings don't survive save/reload. Earlier todo marked "persist RatchetLen, RatchetVel options" as done, but they're regressing in practice -- options may have `enableSerialization()` missing at the control level, or custom state isn't being captured in the unit's `serialize()`. Check GateSeq.lua + RatchetControl.lua for the same kind of serialization gap Impasto just had (per-op option serialization not enabled on the wrapping control).
+  - [x] Ballot ratchet settings persist -- rebased options to 1/2 convention, enableSerialization in C++ constructor, RatchetMult round-tripped via ParameterAdapter Bias target/hardSet (see Bugs/Ballot).
 
 ### Sequencer UI Research
 
@@ -412,7 +412,7 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
 - [ ] Stereo optimization: dual-instance pattern doubles CPU; investigate shared buffer or interleaved processing for Petrichor and Pecto on stereo chains
 - [ ] Macro filter cutoff offset: CV-modulatable continuous shift of all per-tap cutoffs. On feedback shift SD + expansion (feedback + tone + filterOffset).
 - [ ] Tap pitch macro: CV-modulatable continuous pitch offset applied to every tap's pitch param (like the filter-cutoff macro above but for pitch). Existing tap macros cover volume/pan/cutoff/type/Q but not pitch. Semitones ideally, -24..+24 range, applied additively on top of per-tap pitch values so the per-tap structure is preserved.
-- [ ] Serialization audit -- tap states (per-tap level/pan/cutoff/Q/type/time/pitch), tap count, and xform settings don't carry across saves. Audit MultitapDelay.lua's serialize/deserialize vs the C++ state and the set of ParameterAdapters. Need: (a) explicit getters/setters for per-tap state that the Lua serializer can iterate (similar to Larets' getStepType/setStepType pattern), (b) tap count persisted in the serialize table, (c) xform params (target, depth, grid, stack, drift, reverse probability) confirmed restored. Probable cause is that per-tap state lives in the C++ Internal struct rather than `od::Parameter`s, so the default Unit.serialize doesn't capture it.
+- [x] Serialization audit -- all 23 top-level ParameterAdapter Biases (masterTime/feedback/mix/tapCount/feedbackTone/vOctAdapter/{vol,pan,pitch,cutoff,q,type}Macro/xform{Target,Depth,Spread}/grainSize/skew/drift/reverse/stack/grid/{input,output}Level/tanhAmt) plus tune Offset and xformGate Threshold now round-tripped via Excel target/hardSet pattern. Per-tap state already covered. Reload restores full patch.
 - [ ] Cross-feedback matrix (stretch: tap N feeds tap M)
 - [ ] Perlin noise LUT: RaindropGraphic has a working tileable 64x64 LUT approach (bake Perlin at init, bilinear sample at runtime). The firmware repo has Voronoi and Perlin screensavers that could adopt this pattern for efficient noise generation. See RaindropGraphic.h for the implementation.
 

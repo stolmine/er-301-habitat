@@ -50,6 +50,12 @@ local qMacroNames = {
   [0] = "off", "20%", "40%", "60%", "80%", "full", "asc", "desc", "even", "odd", "sine"
 }
 
+local pitchMacroNames = {
+  [0] = "0", "+12", "-12", "+7", "-7",
+  "asc", "desc", "asc8", "ds8",
+  "e12", "e-12", "e+7", "maj", "min"
+}
+
 local xformTargetNames = {
   [0] = "all", "taps", "delay", "filt",
   "level", "pan", "pitch", "cut", "Q", "type",
@@ -158,6 +164,10 @@ function MultitapDelay:onLoadGraph(channelCount)
   local typeMacro = self:addObject("typeMacro", app.ParameterAdapter())
   typeMacro:hardSet("Bias", 0)
   self:addMonoBranch("typeMacro", typeMacro, "In", typeMacro, "Out")
+
+  local pitchMacro = self:addObject("pitchMacro", app.ParameterAdapter())
+  pitchMacro:hardSet("Bias", 0)
+  self:addMonoBranch("pitchMacro", pitchMacro, "In", pitchMacro, "Out")
 
   -- Xform gate
   local xformGate = self:addObject("xformGate", app.Comparator())
@@ -354,6 +364,35 @@ function MultitapDelay:applyTypeMacro(value)
     end
   end
   op:loadFilter(self.controls and self.controls.filters and self.controls.filters.currentTap or 0)
+end
+
+function MultitapDelay:applyPitchMacro(value)
+  local op = self.objects.op
+  local n = op:getTapCount()
+  local majorCycle = { 0, 4, 7, 12 }
+  local minorCycle = { 0, 3, 7, 12 }
+  for i = 0, n - 1 do
+    if value == 0 then op:setTapPitch(i, 0)                                       -- unison
+    elseif value == 1 then op:setTapPitch(i, 12)                                  -- +12
+    elseif value == 2 then op:setTapPitch(i, -12)                                 -- -12
+    elseif value == 3 then op:setTapPitch(i, 7)                                   -- +7
+    elseif value == 4 then op:setTapPitch(i, -7)                                  -- -7
+    elseif value == 5 then op:setTapPitch(i, i)                                   -- asc semi
+    elseif value == 6 then op:setTapPitch(i, -i)                                  -- desc semi
+    elseif value == 7 then                                                         -- asc octaves spread
+      local t = (n > 1) and (i / (n - 1)) or 0
+      op:setTapPitch(i, math.floor(-12 + t * 24 + 0.5))
+    elseif value == 8 then                                                         -- desc octaves spread
+      local t = (n > 1) and (i / (n - 1)) or 0
+      op:setTapPitch(i, math.floor(12 - t * 24 + 0.5))
+    elseif value == 9 then op:setTapPitch(i, (i % 2 == 0) and 0 or 12)             -- even 0 / odd +12
+    elseif value == 10 then op:setTapPitch(i, (i % 2 == 0) and 0 or -12)           -- even 0 / odd -12
+    elseif value == 11 then op:setTapPitch(i, (i % 2 == 0) and 7 or -7)            -- fifths spread
+    elseif value == 12 then op:setTapPitch(i, majorCycle[(i % 4) + 1])             -- maj chord cycle
+    elseif value == 13 then op:setTapPitch(i, minorCycle[(i % 4) + 1])             -- min chord cycle
+    end
+  end
+  op:loadTap(self.controls and self.controls.taps and self.controls.taps.currentTap or 0)
 end
 
 -- Xform: randomization helper
@@ -719,6 +758,19 @@ function MultitapDelay:onLoadViews()
       modeNames = typeMacroNames,
       applyPreset = function(v) self:applyTypeMacro(v) end
     },
+    pitchMacro = MacroControl {
+      button = "pitch",
+      description = "Pitch Macro",
+      branch = self.branches.pitchMacro,
+      gainbias = self.objects.pitchMacro,
+      range = self.objects.pitchMacro,
+      biasMap = intMap(0, 13),
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 0,
+      modeNames = pitchMacroNames,
+      applyPreset = function(v) self:applyPitchMacro(v) end
+    },
     xform = TransformGateControl {
       seq = self,
       button = "xform",
@@ -740,7 +792,7 @@ function MultitapDelay:onLoadViews()
   }, {
     expanded = { "tune", "taps", "overview", "masterTime", "feedback", "xform", "mix" },
     collapsed = {},
-    taps = { "taps", "filters", "tapCount", "volMacro", "panMacro", "cutoffMacro", "qMacro", "typeMacro" },
+    taps = { "taps", "filters", "tapCount", "volMacro", "panMacro", "pitchMacro", "cutoffMacro", "qMacro", "typeMacro" },
     overview = { "overview", "grainSize", "tapCount", "stack" },
     masterTime = { "masterTime", "grid", "drift", "reverse", "skew" },
     feedback = { "feedback", "feedbackTone" },
@@ -767,6 +819,18 @@ function MultitapDelay:onShowMenu(objects, branches)
   }, { "bufHeader", "buf2", "buf5", "buf10", "buf20" }
 end
 
+-- All ParameterAdapter objects with a user-facing Bias value.
+-- Round-tripped via getParameter("Bias"):target() / hardSet("Bias", v) --
+-- matches the Excel xform pattern.
+local adapterBiases = {
+  "masterTime", "feedback", "mix", "tapCount", "feedbackTone",
+  "vOctAdapter",
+  "volMacro", "panMacro", "pitchMacro", "cutoffMacro", "qMacro", "typeMacro",
+  "xformTarget", "xformDepth", "xformSpread",
+  "grainSize", "skew", "drift", "reverse", "stack", "grid",
+  "inputLevel", "outputLevel", "tanhAmt"
+}
+
 function MultitapDelay:serialize()
   local t = Unit.serialize(self)
   local op = self.objects.op
@@ -784,6 +848,19 @@ function MultitapDelay:serialize()
   end
   t.taps = taps
   t.bufferSeconds = self.bufferSeconds
+  for _, name in ipairs(adapterBiases) do
+    local obj = self.objects[name]
+    if obj then
+      t[name] = obj:getParameter("Bias"):target()
+    end
+  end
+  -- Special cases: different parameter names on non-adapter objects
+  if self.objects.tune then
+    t.tuneOffset = self.objects.tune:getParameter("Offset"):target()
+  end
+  if self.objects.xformGate then
+    t.xformGateThreshold = self.objects.xformGate:getParameter("Threshold"):target()
+  end
   return t
 end
 
@@ -806,6 +883,17 @@ function MultitapDelay:deserialize(t)
         op:setFilterType(i, tap.filterType or 0)
       end
     end
+  end
+  for _, name in ipairs(adapterBiases) do
+    if t[name] ~= nil and self.objects[name] then
+      self.objects[name]:hardSet("Bias", t[name])
+    end
+  end
+  if t.tuneOffset ~= nil and self.objects.tune then
+    self.objects.tune:hardSet("Offset", t.tuneOffset)
+  end
+  if t.xformGateThreshold ~= nil and self.objects.xformGate then
+    self.objects.xformGate:hardSet("Threshold", t.xformGateThreshold)
   end
   self.objects.op:loadTap(0)
   self.objects.op:loadFilter(0)
