@@ -188,6 +188,8 @@ namespace stolmine
     addParameter(mSyncThreshold);
     addOption(mLinExpo);
     addOption(mHiFi);
+    mLinExpo.enableSerialization();
+    mHiFi.enableSerialization();
 
     mpInternal = new Internal();
     mpInternal->Init();

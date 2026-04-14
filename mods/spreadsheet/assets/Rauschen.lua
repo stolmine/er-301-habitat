@@ -243,4 +243,35 @@ function Rauschen:onLoadViews(objects, branches)
   }
 end
 
+-- ParameterAdapter Biases round-tripped via Excel target/hardSet pattern.
+local adapterBiases = {
+  "algo", "paramX", "paramY",
+  "filterFreq", "filterQ", "filterMorph",
+  "level"
+}
+
+function Rauschen:serialize()
+  local t = Unit.serialize(self)
+  for _, name in ipairs(adapterBiases) do
+    local obj = self.objects[name]
+    if obj then
+      t[name] = obj:getParameter("Bias"):target()
+    end
+  end
+  return t
+end
+
+function Rauschen:deserialize(t)
+  Unit.deserialize(self, t)
+  for _, name in ipairs(adapterBiases) do
+    if t[name] ~= nil and self.objects[name] then
+      self.objects[name]:hardSet("Bias", t[name])
+    end
+  end
+  -- Refresh algo fader label so on-screen name matches restored algo index
+  if self.controls and self.controls.algo and self.controls.algo.updateLabel then
+    self.controls.algo:updateLabel()
+  end
+end
+
 return Rauschen

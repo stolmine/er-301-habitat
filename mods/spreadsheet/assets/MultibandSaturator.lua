@@ -495,4 +495,40 @@ function MultibandSaturator:onLoadViews()
   }
 end
 
+-- ParameterAdapter objects with a user-facing Bias. Round-tripped via
+-- Excel target/hardSet pattern. BandMute[0..2] on op have
+-- enableSerialization() set in C++ constructor for automatic handling.
+local adapterBiases = {
+  "drive", "skew", "mix", "outputLevel", "compressAmt",
+  "tanhAmt", "scHpf", "toneAmount", "toneFreq",
+  "bandLevel0", "bandLevel1", "bandLevel2",
+  "bandWeight0", "bandWeight1", "bandWeight2",
+  "bandAmount0", "bandAmount1", "bandAmount2",
+  "bandBias0", "bandBias1", "bandBias2",
+  "bandType0", "bandType1", "bandType2",
+  "bandFilterFreq0", "bandFilterFreq1", "bandFilterFreq2",
+  "bandFilterMorph0", "bandFilterMorph1", "bandFilterMorph2",
+  "bandFilterQ0", "bandFilterQ1", "bandFilterQ2"
+}
+
+function MultibandSaturator:serialize()
+  local t = Unit.serialize(self)
+  for _, name in ipairs(adapterBiases) do
+    local obj = self.objects[name]
+    if obj then
+      t[name] = obj:getParameter("Bias"):target()
+    end
+  end
+  return t
+end
+
+function MultibandSaturator:deserialize(t)
+  Unit.deserialize(self, t)
+  for _, name in ipairs(adapterBiases) do
+    if t[name] ~= nil and self.objects[name] then
+      self.objects[name]:hardSet("Bias", t[name])
+    end
+  end
+end
+
 return MultibandSaturator

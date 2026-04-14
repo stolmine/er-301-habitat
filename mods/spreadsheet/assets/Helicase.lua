@@ -407,4 +407,47 @@ function Helicase:onShowMenu(objects, branches)
   }, { "modeHeader", "hifi" }
 end
 
+local adapterBiases = {
+  "syncThreshold", "f0", "modMix", "carrierShape", "modIndex",
+  "discIndex", "discType", "ratio", "feedback", "modShape",
+  "fine", "level"
+}
+
+function Helicase:serialize()
+  local t = Unit.serialize(self)
+  for _, name in ipairs(adapterBiases) do
+    local obj = self.objects[name]
+    if obj then
+      t[name] = obj:getParameter("Bias"):target()
+    end
+  end
+  if self.objects.tune then
+    t.tuneOffset = self.objects.tune:getParameter("Offset"):target()
+  end
+  if self.objects.syncComparator then
+    t.syncCompThreshold = self.objects.syncComparator:getParameter("Threshold"):target()
+  end
+  return t
+end
+
+function Helicase:deserialize(t)
+  Unit.deserialize(self, t)
+  for _, name in ipairs(adapterBiases) do
+    if t[name] ~= nil and self.objects[name] then
+      self.objects[name]:hardSet("Bias", t[name])
+    end
+  end
+  if t.tuneOffset ~= nil and self.objects.tune then
+    self.objects.tune:hardSet("Offset", t.tuneOffset)
+  end
+  if t.syncCompThreshold ~= nil and self.objects.syncComparator then
+    self.objects.syncComparator:hardSet("Threshold", t.syncCompThreshold)
+  end
+  -- Refresh lin/exp label so on-screen state matches restored option
+  if self.controls and self.controls.overview
+      and self.controls.overview.updateLinExpo then
+    self.controls.overview:updateLinExpo()
+  end
+end
+
 return Helicase

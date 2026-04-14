@@ -103,6 +103,7 @@ namespace stolmine
     addParameter(mParamOffset);
     addParameter(mEditType); addParameter(mEditParam); addParameter(mEditTicks);
     addOption(mAutoMakeup);
+    mAutoMakeup.enableSerialization();
     mpInternal = new Internal();
     mpInternal->Init();
   }

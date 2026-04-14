@@ -275,6 +275,9 @@ namespace stolmine
     addParameter(mBandMute0);
     addParameter(mBandMute1);
     addParameter(mBandMute2);
+    mBandMute0.enableSerialization();
+    mBandMute1.enableSerialization();
+    mBandMute2.enableSerialization();
 
     mpInternal = new Internal();
     mpInternal->Init();
