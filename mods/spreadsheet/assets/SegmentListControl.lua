@@ -248,8 +248,20 @@ function SegmentListControl:upReleased(shifted)
   return false
 end
 
+function SegmentListControl:reconcileSelection()
+  local segCount = self.etcher:getSegmentCount()
+  if self.currentSegment >= segCount then
+    local clamped = math.max(0, segCount - 1)
+    self.currentSegment = clamped
+    self.etcher:loadSegment(clamped)
+    self.pDisplay:setSelectedSegment(clamped)
+    self:updateTitle()
+  end
+end
+
 function SegmentListControl:onCursorEnter(spot)
   Base.onCursorEnter(self, spot)
+  self:reconcileSelection()
   self.pDisplay:setFocused(true)
 end
 

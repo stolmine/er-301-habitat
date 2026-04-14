@@ -34,6 +34,9 @@ namespace stolmine
       const int rowHeight = 10;
       const int visibleRows = mHeight / rowHeight;
 
+      if (mSelectedSegment >= segCount)
+        mSelectedSegment = segCount - 1;
+
       // Keep selected segment visible
       if (mSelectedSegment < mScrollOffset)
         mScrollOffset = mSelectedSegment;

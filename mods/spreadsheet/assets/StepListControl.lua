@@ -236,8 +236,20 @@ function StepListControl:upReleased(shifted)
   return false
 end
 
+function StepListControl:reconcileSelection()
+  local seqLen = self.seq:getSeqLength()
+  if self.currentStep >= seqLen then
+    local clamped = math.max(0, seqLen - 1)
+    self.currentStep = clamped
+    self.seq:loadStep(clamped)
+    self.pDisplay:setSelectedStep(clamped)
+    self:updateTitle()
+  end
+end
+
 function StepListControl:onCursorEnter(spot)
   Base.onCursorEnter(self, spot)
+  self:reconcileSelection()
   self.pDisplay:setFocused(true)
 end
 

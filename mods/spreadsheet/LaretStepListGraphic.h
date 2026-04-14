@@ -32,6 +32,9 @@ namespace stolmine
       const int rowHeight = 10;
       const int visibleRows = mHeight / rowHeight;
 
+      if (mSelectedStep >= stepCount)
+        mSelectedStep = stepCount - 1;
+
       if (mSelectedStep < mScrollOffset)
         mScrollOffset = mSelectedStep;
       if (mSelectedStep >= mScrollOffset + visibleRows)

@@ -237,8 +237,20 @@ function LaretStepListControl:upReleased(shifted)
   return false
 end
 
+function LaretStepListControl:reconcileSelection()
+  local count = self.op:getStepCount()
+  if self.currentStep >= count then
+    local clamped = math.max(0, count - 1)
+    self.currentStep = clamped
+    self.op:loadStep(clamped)
+    self.pDisplay:setSelectedStep(clamped)
+    self:updateTitle()
+  end
+end
+
 function LaretStepListControl:onCursorEnter(spot)
   Base.onCursorEnter(self, spot)
+  self:reconcileSelection()
   self.pDisplay:setFocused(true)
 end
 
