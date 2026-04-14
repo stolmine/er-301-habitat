@@ -298,6 +298,7 @@ Spreadsheet paradigm: N voices with per-voice params.
 - [x] Tilt EQ
 - [x] DJ Filter -- bipolar LP/HP sweep with resonance
 - [x] Canals (Three Sisters clone) — linked resonant filter with crossover/formant modes
+- [ ] Combined Petrichor + Pecto unit (cut down, CPU-efficient). The two live together musically -- multitap delay into comb resonator, or comb-bed for a delay network -- but they currently compete heavily for CPU when stacked on the same chain, so users have to choose one. Explore a single DSP object that shares buffer, grain, and filter infrastructure between the two. Candidates for the cut-down: fewer taps, fewer comb tap patterns, single filter type per tap, one resonator model instead of four (or audio-rate xfade if needed). Goal is a unit that costs closer to one of them than both summed, while preserving the shared musical character. Design sketch first, then prototype DSP.
 
 ## Canals Improvements (Three Sisters fidelity)
 
