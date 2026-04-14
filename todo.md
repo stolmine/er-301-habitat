@@ -294,15 +294,16 @@ Produces a burst of gates from a single trigger input.
 
 Audio units, not visualizers. Aesthetic target: clicks and cuts / microsound / electroacoustic glitch in the vein of Raster-Noton artists (Alva Noto, Ryoji Ikeda, Carsten Nicolai), and the interacting-oscillator-lattice feel of Ciat-Lonbarde Plumbutter (Peter Blasser). Not a single unit -- a set of related DSP tools that share a sensibility.
 
-- [ ] Research phase (depth-first before unit design):
-  - Raster-Noton production methods: what techniques recur across the catalog (sine-wave rhythm cells, micro-edit stutter, spectral masking, DC-click percussion, click-and-drone layering)? Target artists to read about: Alva Noto, Carsten Nicolai / Frank Bretschneider, Ryoji Ikeda. Read interviews, look for tooling references.
-  - Peter Blasser's Plumbutter schematics (Ciat-Lonbarde, paper circuit lineage). Schematics should be public on ciat-lonbarde.net / blasser's site. Understand Rollz (rhythm generator via charge-bucket pulse logic), Gongs (tuned LC resonators hit by percussive pulses), Lattice (cross-coupling between oscillators that produces organic interlocking rhythms), and the stereo "butter" electroacoustic smear on the output.
-  - Extract 2-3 DSP kernels that make sense for ER-301: e.g. a charge-bucket pulse divider, a tuned-resonator bank hit by pulses rather than audio, a lattice-style coupling matrix between oscillators, a click-train + DC-pulse percussion generator.
-- [ ] Candidate unit directions (pick after research):
-  - Click / tick generator: sine-wave pulses, DC clicks, configurable density and spectral character. Think Ikeda's "+ / -" catalog.
-  - Resonator bank hit by pulses (not audio-excited): 4-8 tuned resonators, percussive excitation, stereo spread. The Gongs kernel.
-  - Charge-bucket rhythm generator: interacting pulse dividers with cross-feedback, produces polyrhythmic-but-musical patterns from simple counter logic. The Rollz kernel.
-  - Lattice oscillator: 4-6 tuned oscillators with cross-coupling matrix, outputs their sum plus modulated resonance. Settles into organic interlocking patterns.
+- [x] Research phase complete (2026-04-14). See `docs/microsound-research.md` for full writeup. Raster-Noton methods (Alva Noto, Ikeda, Bretschneider) and Plumbutter paper-circuit subsystems (Rollz, Gongs, Lattice, Butter) both documented with extractable DSP kernels.
+- [ ] Prototype order, lowest cost first:
+  1. **Pulse-excited resonator bank** -- Plumbutter Gongs kernel. 4-8 tuned biquad BPFs with Q~30-100, short-impulse excitation, `tanh()` non-linear damping for the "gong clip" character. Trigger inlet per bank or CV-indexed. Cheapest audio-producing starting point and validates the non-linear biquad approach used in later kernels.
+  2. **Charge-bucket rhythm generator** -- Plumbutter Rollz kernel. N leaky integrators with threshold-reset (`v = a*v + k*pulse; if v>=thr: fire; v-=thr`), weak cross-coupling injection matrix, per-bucket threshold jitter. Drives the resonator bank above.
+  3. **Lattice oscillator** -- Plumbutter Lattice kernel. 6-8 phase accumulators with Kuramoto-style coupling just below mode-lock. Outputs the sum plus modulates Gongs / retriggers Rollz thresholds. Small random walk on base frequencies to replace thermal drift.
+  4. **Sine-pulse + DC-click generator** -- Raster-Noton kernels (Ikeda, Cyclo.). Short-gated sine bursts at 1-4 kHz + single-sample DC steps. Separate control over tonal pulse vs. DC click, configurable AR + pre-envelope DC kick.
+  5. **Generation-loss processor** -- Alva Noto Xerrox kernel. Bit-reducer + SR-reducer + feedback loop with tape-LPF, iterative self-feeding mode. Builds on existing bitcrush code.
+  6. **Trigger-locked grain burst** -- Bretschneider Rhythm kernel. Live buffer + trigger-driven 5-30 ms slice playback with randomized position/length. Distinct from Clouds (continuous) and Flakes (looper).
+  7. (Optional) **Schroeder allpass smear** -- Plumbutter Butter kernel. Mini-reverb utility, might belong in scope or catchall rather than standalone.
+- [ ] Package scoping: decide whether these ship as a new `glitch` or `microsound` package or join `catchall`. New package probably cleaner since they share kernels (pulse -> resonator -> smear) and can provide shared C++ helpers.
 
 ## stolmine (original units)
 
