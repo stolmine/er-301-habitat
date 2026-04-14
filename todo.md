@@ -181,6 +181,21 @@ Refinements:
   - Clock/reset gate inputs, global slew, V/Oct scaled output (offset 1 = 1 octave)
   - Config: offset range (2Vpp/10Vpp), batch step lengths, randomize/clear offsets
 
+- [ ] Drum Kit Sequencer (working name "Kit" or similar). The use case: a single monophonic voice chain (OSC + noise + env + VCA + filter) is made to sound like a kit by sequencing *bundles* of parameters per step -- step 1 is a kick (low pitch, fast decay, no noise), step 2 is a snare (mid pitch, medium decay, lots of noise), step 3 is a hat (high pitch, tiny decay, noise-dominant). Currently this takes 4-5 parallel Excel sequencers sharing a clock, one per parameter, which is awkward to edit and hard to reason about as "voices".
+
+  Design goals, distinct from Excel and the Control-Forge-alike:
+  - Each step holds a *bundle* of N synth parameters (pitch, env decay, noise amount, filter cutoff, amplitude -- configurable which outputs are active).
+  - Multiple simultaneous CV outputs -- one outlet per bundled parameter -- so one unit sequences the whole voice.
+  - UI shows each step as a "kit slot" with a preview of the whole bundle (not one value per step like Excel). List row is multi-column.
+  - Voice preset bank: save/recall named bundle configs ("kick", "snare 808", "hat closed") and paint them onto steps by selection, so you build a pattern by dropping preset tags into step slots rather than dialing each parameter step-by-step.
+  - Xform gate for per-parameter probability/deviation per step.
+
+  Difference from Control-Forge-alike: CF is time-interpolated multistage (envelope-shaped). Drum Kit Sequencer is step-triggered (bundle snaps on clock edge, no ramping). Different musical purpose.
+
+  Difference from running 4 Excels in parallel: one clock/reset point, preset bundles, visual "kit pattern" view, per-step bundle editing in one place.
+
+  Open design questions: how many outlets (4-6 covers most kit voices), whether envelope shape itself is one of the bundled params (which makes the unit own envelopes vs. just CV), whether the preset bank is per-patch or global.
+
 ### Verified on hardware
   - [x] Canals/Discont/LatchFilter true stereo (dual DSP instances, shared params)
   - [x] Clouds adaptive mode labelling (Gran/Delay/Spect via ModeSelector)
