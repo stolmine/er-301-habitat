@@ -359,6 +359,9 @@ namespace stolmine
     mCachedSeqLength = seqLen;
     mCachedLoopLength = loopLen;
 
+    if (mStep >= seqLen)
+      mStep = mStep % seqLen;
+
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       bool clockHigh = clock[i] > 0.0f;

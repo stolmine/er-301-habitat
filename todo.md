@@ -3,7 +3,7 @@
 ## Bugs
 
 ### Excel
-- [ ] Playhead can get stuck outside bounds when step count is reduced while playhead is beyond new range (e.g. shows 14/1). Need to clamp mStep on stepCount change.
+- [x] Playhead stuck past new bound on stepCount reduce ("14/1"). mStep modulo-wraps into the new range each audio block once mCachedSeqLength updates. Same fix applied to GateSeq (Ballot).
 - [x] Offset range switch now scales all stored offsets proportionally (×5 on 2V→10V, ×0.2 on 10V→2V) and reloads the edit buffer. Readout updates live; pattern shape is preserved and round-trip reversible.
 
 ### Ballot
