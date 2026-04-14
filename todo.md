@@ -38,6 +38,30 @@
 ### Step-list units (Excel, Ballot, Larets, Etcher)
 - [x] Count reduction below current cursor: graphic now clamps mSelectedStep to listLen-1 at top of draw() (viewport follows automatically). Lua controls reconcile currentStep on onCursorEnter so edit-buffer params track the clamped step.
 
+### Serialization & stale-label inventory (spreadsheet package)
+
+Progress this session:
+- [x] Excel (TrackerSeq): complete -- per-step state, offsetRange10v, xform func+paramA/B/scope via ParameterAdapter target/hardSet, xform funcLabel refreshed in deserialize.
+- [x] Ballot (GateSeq): RatchetLen/Vel options rebased to 1/2 convention + enableSerialization() in C++ constructor; RatchetMult ParameterAdapter round-tripped; xform funcLabel + ratchet len/vel labels refreshed in deserialize.
+- [x] Etcher: all top-level ParameterAdapter Biases + per-segment state round-tripped. No options, no stale labels.
+- [x] Petrichor (MultitapDelay): 23 top-level ParameterAdapter Biases + tune Offset + xformGate Threshold round-tripped via Excel pattern. Tap state already covered.
+- [x] Parfait (MultibandSaturator): 33 ParameterAdapter Biases (9 global + 24 per-band) round-tripped; BandMute0/1/2 Parameters got enableSerialization() in C++ constructor.
+- [x] Rauschen: 7 top-level ParameterAdapter Biases round-tripped; algo fader label refreshed via ModeSelector:updateLabel() in deserialize.
+- [x] Impasto (MultibandCompressor): stereo opR sync for AutoMakeup/EnableSidechain options in deserialize (52b3213). Options have enableSerialization() in the Lua control init, not in C++ constructor -- working per user but minor inconsistency.
+- [x] Helicase: LinExpo + HiFi options enableSerialization() in C++ constructor; 12 ParameterAdapter Biases + tune Offset + syncComparator Threshold round-tripped; lin/expo overview label refreshed via updateLinExpo() in deserialize.
+- [x] Larets: AutoMakeup option enableSerialization() in C++ constructor. Labels are all dynamic (track currentStep, chain mnemonic) -- no stale-label surface.
+
+Remaining gaps:
+- [ ] Tomograph (Filterbank): `scale` ParameterAdapter Bias is NOT serialized (only 9 of 10 top-level adapters covered at Filterbank.lua:431-439 / 464-472). And scale uses a ModeSelector (the scale-name fader), so even after adding round-trip, updateLabel() needs to be called in deserialize so the fader name matches the restored scale index on load.
+- [ ] Petrichor macro fader labels: 6 MacroControls (volMacro/panMacro/pitchMacro/cutoffMacro/qMacro/typeMacro) extend ModeSelector. Their labels are only refreshed on user interaction, never on deserialize, so the on-fader preset name stays at the default after reload even though per-tap audio state is correct. Call `updateLabel()` on each from MultitapDelay:deserialize.
+- [ ] Impasto option enableSerialization placement: AutoMakeup and EnableSidechain are enrolled in the Lua control init (CompMixControl/CompSidechainControl) rather than the C++ constructor. Functional but inconsistent with the rest of the package -- moving them to MultibandCompressor.cpp constructor matches the Ballot/Helicase/Larets pattern and makes the save/load flag set at object construction, before any Lua code runs.
+
+Cross-cutting patterns established this session (saved to memory):
+- od::Option toggles must use 1/2 values (never 0; it's CHOICE_UNKNOWN sentinel).
+- `enableSerialization()` in the C++ constructor is the safest placement -- the flag is set before any Lua or framework save/load path runs.
+- For N>2 or CV-modulatable controls, use ParameterAdapter + Bias, round-trip via target()/hardSet("Bias", v) in Lua.
+- Any control whose label is derived from a restorable value (ModeSelector fader name, toggle ON/off badge, discrete function name) needs an explicit `updateLabel()` or equivalent call at the end of the unit's deserialize -- the framework restores the underlying value but does not trigger label refresh.
+
 ## Release
 
 - [x] Version bump biome and spreadsheet packages to v1.0.1 for hotfix released 2026-04-05. Rebuild and reupload.
