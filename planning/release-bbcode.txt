@@ -1,12 +1,36 @@
-[b]stolmine firmware + habitat v2.1.0[/b]
+[b]stolmine firmware + habitat v2.2.0[/b]
 
-Two new units in the spreadsheet package.
+Bug-fix release. No new units; [b]spreadsheet[/b] bumped 2.1.0 -> 2.2.0, all other packages unchanged.
 
-[b]Larets[/b] -- stepped multi-effect processor. Clock-driven 16-step sequencer where each step applies one of 10 audio effects to the incoming signal: stutter, reverse, bitcrush, downsample, filter, pitch shift, distortion, shuffle, delay, comb. Per-step param and tick count, global skew for rhythmic variation, CPR single-band compressor, bipolar global param offset for sweeping all step values together, loop length down to 1 for momentary single-step hold, transform gate for CV-driven randomization. Clock-locked buffer effects (stutter is true beat repeat, shuffle picks fresh slices per loop pass) and Dattorro-style grain pitch shift. Custom overview viz gives per-effect visual feedback (concentric rings for comb, sweeping highlight for reverse, particle fill for bitcrush, etc.) with auto-normalizing Y axis.
+[b]Tomograph -- hardware viz fix[/b]
 
-[b]Helicase[/b] -- 2-op FM oscillator with discontinuity waveshaping and phase-latched sync. Carrier + modulator each offer 8 OPL3-inspired waveforms. 16 post-FM fold shapes (tanh through Chebyshev T3), modulator feedback with tanh soft clip, lin/expo FM toggle, lo-fi/hi-fi quality option. JF-inspired phase-receptivity sync: pending edges fire only when the modulator phase crosses a programmable threshold (0 = hard sync, 0.5 = soft sync, 1.0 = subharmonic lock), threshold CV-modulatable via sync-ply expansion fader. Three custom visualizations: 3D k-means phase-space metaballs with Voronoi edges, live transfer curve showing the active fold, circular modulator ribbon with Catmull-Rom interpolation.
+Restored the "ferrofluid ring" overview visualization on ER-301 hardware. The radial polyline had been rendering with a distended bottom lobe and spoke lines landing in wrong positions since the v2.0.0 window. Root cause was that runtime sinf/cosf calls from inside a package .so miscompute on am335x with the TI 4.9.3 toolchain; firmware-compiled graphics (ScaleQuantizer's PitchCircle, etc.) are unaffected because they link directly. Fixed by rebuilding FilterResponseGraphic around a 72-entry precomputed cos/sin lookup table. Identical render math, values never touch libm at runtime. Emulator behavior unchanged.
 
-Only spreadsheet bumped (2.0.0 -> 2.1.0). Other packages unchanged.
+[b]New: Petrichor pitch macro[/b]
+
+Sixth MacroControl on Petrichor alongside vol / pan / cutoff / Q / type. 14 presets that snap all active taps to musical pitch patterns in semitones: unison at 0, +/-12, +/-7; ascending and descending semitones; octave spreads; even/odd splits at octave and fifth intervals; major and minor chord cycles. Lives in the taps expansion row as button [b]pitch[/b]. Sets per-tap pitch non-destructively so further per-tap edits work over the macro baseline.
+
+[b]Serialization overhaul[/b]
+
+Every unit in the spreadsheet package now round-trips its full user-facing state across quicksave / reload. Previous behavior was that most top-level faders reverted to insert-time defaults on reload, and some toggle state and preset labels stayed out of sync with the underlying value.
+
+Per-unit fixes:
+[list]
+[*][b]Excel[/b] -- offset range switch now scales all 64 stored offsets proportionally (x5 on 2V->10V, x0.2 on 10V->2V). Playhead wraps into the new range on stepCount reduction (was stuck showing "14/1").
+[*][b]Ballot[/b] -- RatchetLen / RatchetVel options + RatchetMult fader persist. Toggle badges (len:ON, vel:ON) refresh post-reload. Playhead wrap matches Excel.
+[*][b]Larets[/b] -- AutoMakeup option persists. Playhead wrap matches Excel / Ballot.
+[*][b]Etcher[/b] -- Skew default corrected from 1.0 (extreme) to 0.0 (neutral).
+[*][b]Tomograph[/b] -- scale ParameterAdapter persists and the scale-name fader label refreshes on load.
+[*][b]Petrichor[/b] -- every top-level knob (23 ParameterAdapters plus tune and xform-gate threshold) persists. All 6 macro fader labels refresh on load.
+[*][b]Parfait[/b] -- 33 ParameterAdapter Biases (9 global + 24 per-band) plus BandMute parameters persist.
+[*][b]Rauschen[/b] -- 7 ParameterAdapter Biases persist. Algorithm fader label refreshes on load.
+[*][b]Impasto[/b] -- 28 ParameterAdapter Biases plus both options persist. opR option sync retained for legacy patches so L/R stay coherent on stereo chains after save/load.
+[*][b]Helicase[/b] -- 12 ParameterAdapter Biases plus LinExpo and HiFi options plus tune Offset plus syncComparator Threshold persist. lin/exp label refreshes on load.
+[/list]
+
+[b]Step-list UX[/b]
+
+Excel / Ballot / Larets / Etcher: reducing step count below the currently selected step now drags the cursor to the new last entry and the viewport follows, instead of scrolling past the end and leaving the list rendering as a blank region. On re-entering the ply the edit buffer reconciles to the clamped step.
 
 Delete the installed spreadsheet lib from the rear SD card to force reinstall:
 [code]

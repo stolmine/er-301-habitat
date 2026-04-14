@@ -113,6 +113,20 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 
 ## Changelog
 
+### v2.2.0
+
+**Hardware viz fix + serialization overhaul + Petrichor pitch macro.** See [RELEASE-2.2.0.md](RELEASE-2.2.0.md) for full details. spreadsheet v2.1.0 -> v2.2.0; all other packages unchanged.
+
+**Tomograph** -- restored the radial overview viz on hardware (was rendering with a distended bottom lobe since v2.0.0). Rebuilt `FilterResponseGraphic` around a 72-entry precomputed cos/sin LUT after identifying that runtime `sinf`/`cosf` from a package `.so` miscomputes on am335x with the TI 4.9.3 toolchain.
+
+**Serialization** -- every unit in the spreadsheet package (Excel, Ballot, Etcher, Tomograph, Petrichor, Parfait, Rauschen, Impasto, Helicase, Larets) now round-trips its full user-facing state across quicksave / reload. Top-level faders, option toggles, and preset-name labels all survive patch reload.
+
+**Petrichor pitch macro** -- new 14-preset MacroControl alongside vol / pan / cutoff / Q / type: unison at +/-12 / +/-7, asc / desc semitones, octave spreads, even-odd splits, major / minor chord cycles.
+
+**Step-list UX** -- Excel / Ballot / Larets / Etcher: reducing step count below the current cursor now drags the selection (and viewport) to the new last entry instead of leaving the list rendering as a blank region.
+
+**Other fixes** -- Excel offset range switch scales stored offsets proportionally; Excel / Ballot / Larets playhead modulo-wraps into the new range on stepCount reduction; Etcher skew default corrected to 0.0 (neutral).
+
 ### v2.1.0
 
 **Two new units in the spreadsheet package.** See [RELEASE-2.1.0.md](RELEASE-2.1.0.md) for full details. spreadsheet v2.0.0 -> v2.1.0; all other packages unchanged.
