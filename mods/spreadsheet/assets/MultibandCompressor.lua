@@ -384,12 +384,40 @@ function MultibandCompressor:onLoadViews()
   return controls, views
 end
 
--- Options are serialized per-op. Legacy saves only enabled serialization on
--- the primary, so the R-side options reset to default on load and produced a
--- stereo desync (one channel honored saved auto-makeup or sidechain state,
--- the other didn't). Sync opR to op after deserialize to fix legacy patches.
+-- ParameterAdapter Biases round-tripped via Excel target/hardSet pattern.
+-- AutoMakeup / EnableSidechain options have enableSerialization() in the
+-- C++ constructor; the opR sync below covers legacy patches where only the
+-- primary op's option state was saved.
+local adapterBiases = {
+  "drive", "toneAmount", "toneFreq", "skew",
+  "inputGain", "mix", "outputLevel",
+  "bandThreshold0", "bandThreshold1", "bandThreshold2",
+  "bandRatio0", "bandRatio1", "bandRatio2",
+  "bandSpeed0", "bandSpeed1", "bandSpeed2",
+  "bandAttack0", "bandAttack1", "bandAttack2",
+  "bandRelease0", "bandRelease1", "bandRelease2",
+  "bandWeight0", "bandWeight1", "bandWeight2",
+  "bandLevel0", "bandLevel1", "bandLevel2"
+}
+
+function MultibandCompressor:serialize()
+  local t = Unit.serialize(self)
+  for _, name in ipairs(adapterBiases) do
+    local obj = self.objects[name]
+    if obj then
+      t[name] = obj:getParameter("Bias"):target()
+    end
+  end
+  return t
+end
+
 function MultibandCompressor:deserialize(t)
   Unit.deserialize(self, t)
+  for _, name in ipairs(adapterBiases) do
+    if t[name] ~= nil and self.objects[name] then
+      self.objects[name]:hardSet("Bias", t[name])
+    end
+  end
   if self.objects.opR then
     local op = self.objects.op
     local opR = self.objects.opR

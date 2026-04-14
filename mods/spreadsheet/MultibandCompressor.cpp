@@ -140,6 +140,8 @@ namespace stolmine
 
     addOption(mAutoMakeup);
     addOption(mEnableSidechain);
+    mAutoMakeup.enableSerialization();
+    mEnableSidechain.enableSerialization();
 
     mpInternal = new Internal();
     mpInternal->Init();

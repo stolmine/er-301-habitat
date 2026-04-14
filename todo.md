@@ -52,9 +52,9 @@ Progress this session:
 - [x] Larets: AutoMakeup option enableSerialization() in C++ constructor. Labels are all dynamic (track currentStep, chain mnemonic) -- no stale-label surface.
 
 Remaining gaps:
-- [ ] Tomograph (Filterbank): `scale` ParameterAdapter Bias is NOT serialized (only 9 of 10 top-level adapters covered at Filterbank.lua:431-439 / 464-472). And scale uses a ModeSelector (the scale-name fader), so even after adding round-trip, updateLabel() needs to be called in deserialize so the fader name matches the restored scale index on load.
-- [ ] Petrichor macro fader labels: 6 MacroControls (volMacro/panMacro/pitchMacro/cutoffMacro/qMacro/typeMacro) extend ModeSelector. Their labels are only refreshed on user interaction, never on deserialize, so the on-fader preset name stays at the default after reload even though per-tap audio state is correct. Call `updateLabel()` on each from MultitapDelay:deserialize.
-- [ ] Impasto option enableSerialization placement: AutoMakeup and EnableSidechain are enrolled in the Lua control init (CompMixControl/CompSidechainControl) rather than the C++ constructor. Functional but inconsistent with the rest of the package -- moving them to MultibandCompressor.cpp constructor matches the Ballot/Helicase/Larets pattern and makes the save/load flag set at object construction, before any Lua code runs.
+- [x] Tomograph (Filterbank): `scale` ParameterAdapter Bias added to serialize/deserialize; ModeSelector fader label refreshed via `updateLabel()` in deserialize so the scale name matches the restored index on load.
+- [x] Petrichor macro fader labels: 6 MacroControls now get `updateLabel()` called in a loop at end of MultitapDelay:deserialize, so vol/pan/pitch/cutoff/Q/type preset names match the restored Bias on load.
+- [x] Impasto (MultibandCompressor): `mAutoMakeup.enableSerialization()` and `mEnableSidechain.enableSerialization()` moved to the C++ constructor for consistency with Ballot/Helicase/Larets. Also added full Excel-pattern round-trip for all 28 ParameterAdapter Biases (7 global + 21 per-band) so sidechain input gain fader and all band threshold/ratio/speed/attack/release/weight/level values persist. opR option sync on deserialize retained for legacy patches.
 
 Cross-cutting patterns established this session (saved to memory):
 - od::Option toggles must use 1/2 values (never 0; it's CHOICE_UNKNOWN sentinel).

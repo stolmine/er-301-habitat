@@ -431,6 +431,7 @@ function Filterbank:serialize()
   t.mix = self.objects.mix:getParameter("Bias"):target()
   t.macroQ = self.objects.macroQ:getParameter("Bias"):target()
   t.bandCount = self.objects.bandCount:getParameter("Bias"):target()
+  t.scale = self.objects.scale:getParameter("Bias"):target()
   t.rotate = self.objects.rotate:getParameter("Bias"):target()
   t.vOctOffset = self.objects.vOctOffset:getParameter("Bias"):target()
   t.slew = self.objects.slew:getParameter("Bias"):target()
@@ -464,6 +465,7 @@ function Filterbank:deserialize(t)
   restoreParam("mix", "mix")
   restoreParam("macroQ", "macroQ")
   restoreParam("bandCount", "bandCount")
+  restoreParam("scale", "scale")
   restoreParam("rotate", "rotate")
   restoreParam("vOctOffset", "vOctOffset")
   restoreParam("slew", "slew")
@@ -471,6 +473,10 @@ function Filterbank:deserialize(t)
   restoreParam("outputLevel", "outputLevel")
   restoreParam("tanhAmt", "tanhAmt")
   self.objects.op:loadBand(0)
+  -- Refresh scale ModeSelector fader label so name matches restored scale index
+  if self.controls and self.controls.scale and self.controls.scale.updateLabel then
+    self.controls.scale:updateLabel()
+  end
 end
 
 return Filterbank

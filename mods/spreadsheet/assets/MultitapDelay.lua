@@ -897,6 +897,15 @@ function MultitapDelay:deserialize(t)
   end
   self.objects.op:loadTap(0)
   self.objects.op:loadFilter(0)
+  -- Refresh macro fader labels (ModeSelector-based) so preset name matches restored Bias
+  local macros = { "volMacro", "panMacro", "pitchMacro",
+                   "cutoffMacro", "qMacro", "typeMacro" }
+  if self.controls then
+    for _, name in ipairs(macros) do
+      local c = self.controls[name]
+      if c and c.updateLabel then c:updateLabel() end
+    end
+  end
 end
 
 return MultitapDelay
