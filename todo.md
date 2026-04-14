@@ -7,7 +7,7 @@
 - [x] Offset range switch now scales all stored offsets proportionally (×5 on 2V→10V, ×0.2 on 10V→2V) and reloads the edit buffer. Readout updates live; pattern shape is preserved and round-trip reversible.
 
 ### Ballot
-- [ ] Ratchet settings (RatchetLen, RatchetVel toggle options) do not persist across quicksave/load. Likely missing from serialize/deserialize.
+- [x] Ratchet settings (RatchetLen, RatchetVel toggle options) + RatchetMult now persist. Options rebased to 1/2 convention (0 was CHOICE_UNKNOWN sentinel), enableSerialization() in C++ constructor, mult round-tripped via ParameterAdapter Bias target/hardSet.
 - [ ] Gate width 0 produces a trigger instead of silence. May be intentional — decide if this is desired behavior or a bug.
 
 ### Pecto

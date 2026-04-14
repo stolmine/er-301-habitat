@@ -53,6 +53,8 @@ namespace stolmine
     addParameter(mRatchetMult);
     addOption(mRatchetLenToggle);
     addOption(mRatchetVelToggle);
+    mRatchetLenToggle.enableSerialization();
+    mRatchetVelToggle.enableSerialization();
     addParameter(mTransformFunc);
     addParameter(mTransformParamA);
     addParameter(mTransformParamB);

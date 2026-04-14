@@ -151,6 +151,8 @@ function RatchetControl:init(args)
   -- Store references for toggle
   self.lenToggleOption = args.lenToggleOption
   self.velToggleOption = args.velToggleOption
+  if self.lenToggleOption then self.lenToggleOption:enableSerialization() end
+  if self.velToggleOption then self.velToggleOption:enableSerialization() end
 
   self:setRatchetMode(true)
   branch:subscribe("contentChanged", self)
@@ -314,14 +316,14 @@ function RatchetControl:subReleased(i, shifted)
       -- Toggle len
       if self.lenToggleOption then
         local current = self.lenToggleOption:value()
-        self.lenToggleOption:set(current == 0 and 1 or 0)
+        self.lenToggleOption:set(current == 1 and 2 or 1)
         self:updateToggleLabels()
       end
     elseif i == 3 then
       -- Toggle vel
       if self.velToggleOption then
         local current = self.velToggleOption:value()
-        self.velToggleOption:set(current == 0 and 1 or 0)
+        self.velToggleOption:set(current == 1 and 2 or 1)
         self:updateToggleLabels()
       end
     end

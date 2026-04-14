@@ -337,6 +337,7 @@ function GateSeqUnit:serialize()
   t.steps = steps
   t.ratchetLen = op:getOption("RatchetLen"):value()
   t.ratchetVel = op:getOption("RatchetVel"):value()
+  t.ratchetMult = self.objects.ratchetMult:getParameter("Bias"):target()
   t.xformFunc = self.objects.xformFunc:getParameter("Bias"):target()
   t.xformParamA = self.objects.xformParamA:getParameter("Bias"):target()
   t.xformParamB = self.objects.xformParamB:getParameter("Bias"):target()
@@ -360,6 +361,9 @@ function GateSeqUnit:deserialize(t)
   local op = self.objects.op
   if t.ratchetLen ~= nil then op:getOption("RatchetLen"):set(t.ratchetLen) end
   if t.ratchetVel ~= nil then op:getOption("RatchetVel"):set(t.ratchetVel) end
+  if t.ratchetMult ~= nil then
+    self.objects.ratchetMult:hardSet("Bias", t.ratchetMult)
+  end
   if t.xformFunc ~= nil then
     self.objects.xformFunc:hardSet("Bias", t.xformFunc)
   end
@@ -379,6 +383,10 @@ function GateSeqUnit:deserialize(t)
     local val = math.floor(self.objects.xformFunc:getParameter("Bias"):target() + 0.5)
     local name = self.controls.xform.funcNames[val]
     if name then self.controls.xform.funcLabel:setText(name) end
+  end
+  -- Refresh ratchet toggle labels so on-screen state matches restored options
+  if self.controls and self.controls.ratchet then
+    self.controls.ratchet:updateToggleLabels()
   end
 end
 

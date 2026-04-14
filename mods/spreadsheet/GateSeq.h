@@ -60,8 +60,8 @@ namespace stolmine
 
     // Ratchet
     od::Parameter mRatchetMult{"RatchetMult", 1.0f};
-    od::Option mRatchetLenToggle{"RatchetLen", 0};
-    od::Option mRatchetVelToggle{"RatchetVel", 0};
+    od::Option mRatchetLenToggle{"RatchetLen", 2}; // 1=on, 2=off
+    od::Option mRatchetVelToggle{"RatchetVel", 2}; // 1=on, 2=off
 
     // Transform
     od::Parameter mTransformFunc{"TransformFunc", 0.0f};
