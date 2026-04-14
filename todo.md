@@ -290,7 +290,9 @@ Produces a burst of gates from a single trigger input.
 - [ ] See Bugs section. If emulator works: hardware-specific issue. If emulator hangs: DSP bug.
 - [ ] High priority: blocks multiband spectral freeze unit (per-band freeze gates on crossover engine)
 
-## Microsound / electroacoustic family (research first)
+## Microsound / electroacoustic family (research first) -- ON HOLD
+
+Status 2026-04-14: Chime v0 (first porcelain unit, commit `d3a6206`) has a decent and unique sound but many rough edges and missing pieces. Putting the whole family on hold to let it marinate and to pick up other work first. When we come back to it, revisit Chime's impulse shaping, coupling stability at high Q, the viz layout (currently buried inside an expansion view rather than occupying its own ply), and the Lua UI (overview control is scaffolded as a stub that reuses the scale GainBias -- needs a dedicated control class with the ChimeEnergyGraphic as its main-view widget).
 
 Audio units, not visualizers. Aesthetic target: clicks and cuts / microsound / electroacoustic glitch in the vein of Raster-Noton artists (Alva Noto, Ryoji Ikeda, Carsten Nicolai), and the interacting-oscillator-lattice feel of Ciat-Lonbarde Plumbutter (Peter Blasser). Not a single unit -- a set of related DSP tools that share a sensibility.
 
@@ -475,6 +477,7 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
 ## Fade Mixer
 
 - [x] 4-input crossfader with BranchMeter controls (gain, meter, solo/mute). Equal-power crossfade, CV fade position, output level. Chain passthrough summed with crossfaded mix.
+- [ ] Multiband FadeMixer variant (spreadsheet package). 3 dedicated inlets, one per band, naturally suits per-band processing chains: patch Canals / Three Sisters filter stages into their own inputs and mix them with the full multiband-unit toolkit. Reuse the 3-band crossover layout already developed for Parfait and Impasto. Per-band: weight, skew, level, optional filter (low-shelf / bell / high-shelf for band shaping beyond the crossover). Global: crossover freqs (low/mid, mid/high), per-band solo/mute, output. Crossover shape could match the Parfait/Impasto convention so the same ears-training applies across the package. Differentiator vs. FadeMixer: explicit band architecture with input-per-band routing, not a generic crossfader. Differentiator vs. Parfait/Impasto: these process a single input through a crossover, the new unit takes three pre-separated inputs and applies crossover-framed mixing. Open design Qs: whether per-band filters should be SVF-configurable (type + cutoff + Q per band) or fixed shelves, whether to default to the Parfait/Impasto band weights, whether it owns a summing bus at all vs. just three band-sum outputs.
 
 ## Etcher (Transfer Function Designer, inspired by MI Frames)
 
