@@ -10,6 +10,72 @@
 
 namespace stolmine
 {
+  // 72-entry cos/sin LUT at a = 2*pi*i/72 - pi/2.
+  // Used via lutCos/lutSin helpers with linear interpolation for arbitrary
+  // radians. Replaces runtime sinf/cosf calls which miscompute on the current
+  // toolchain when invoked from a package .so on am335x.
+  static const float kLutCos[72] = {
+    +0.00000000f, +0.08715574f, +0.17364818f, +0.25881905f, +0.34202014f,
+    +0.42261826f, +0.50000000f, +0.57357644f, +0.64278761f, +0.70710678f,
+    +0.76604444f, +0.81915204f, +0.86602540f, +0.90630779f, +0.93969262f,
+    +0.96592583f, +0.98480775f, +0.99619470f, +1.00000000f, +0.99619470f,
+    +0.98480775f, +0.96592583f, +0.93969262f, +0.90630779f, +0.86602540f,
+    +0.81915204f, +0.76604444f, +0.70710678f, +0.64278761f, +0.57357644f,
+    +0.50000000f, +0.42261826f, +0.34202014f, +0.25881905f, +0.17364818f,
+    +0.08715574f, +0.00000000f, -0.08715574f, -0.17364818f, -0.25881905f,
+    -0.34202014f, -0.42261826f, -0.50000000f, -0.57357644f, -0.64278761f,
+    -0.70710678f, -0.76604444f, -0.81915204f, -0.86602540f, -0.90630779f,
+    -0.93969262f, -0.96592583f, -0.98480775f, -0.99619470f, -1.00000000f,
+    -0.99619470f, -0.98480775f, -0.96592583f, -0.93969262f, -0.90630779f,
+    -0.86602540f, -0.81915204f, -0.76604444f, -0.70710678f, -0.64278761f,
+    -0.57357644f, -0.50000000f, -0.42261826f, -0.34202014f, -0.25881905f,
+    -0.17364818f, -0.08715574f
+  };
+  static const float kLutSin[72] = {
+    -1.00000000f, -0.99619470f, -0.98480775f, -0.96592583f, -0.93969262f,
+    -0.90630779f, -0.86602540f, -0.81915204f, -0.76604444f, -0.70710678f,
+    -0.64278761f, -0.57357644f, -0.50000000f, -0.42261826f, -0.34202014f,
+    -0.25881905f, -0.17364818f, -0.08715574f, +0.00000000f, +0.08715574f,
+    +0.17364818f, +0.25881905f, +0.34202014f, +0.42261826f, +0.50000000f,
+    +0.57357644f, +0.64278761f, +0.70710678f, +0.76604444f, +0.81915204f,
+    +0.86602540f, +0.90630779f, +0.93969262f, +0.96592583f, +0.98480775f,
+    +0.99619470f, +1.00000000f, +0.99619470f, +0.98480775f, +0.96592583f,
+    +0.93969262f, +0.90630779f, +0.86602540f, +0.81915204f, +0.76604444f,
+    +0.70710678f, +0.64278761f, +0.57357644f, +0.50000000f, +0.42261826f,
+    +0.34202014f, +0.25881905f, +0.17364818f, +0.08715574f, +0.00000000f,
+    -0.08715574f, -0.17364818f, -0.25881905f, -0.34202014f, -0.42261826f,
+    -0.50000000f, -0.57357644f, -0.64278761f, -0.70710678f, -0.76604444f,
+    -0.81915204f, -0.86602540f, -0.90630779f, -0.93969262f, -0.96592583f,
+    -0.98480775f, -0.99619470f
+  };
+
+  // Arbitrary-angle lookup with linear interpolation. Wraps via a large
+  // positive bias (72000 periods) so negative angles truncate safely without
+  // floorf (also libm).
+  static inline float lutCos(float rad)
+  {
+    const float scale = 72.0f / (2.0f * M_PI);
+    const float bias = M_PI * 0.5f * scale + 72.0f * 1000.0f;
+    float t = rad * scale + bias;
+    int ii = (int)t;
+    float frac = t - (float)ii;
+    int i = ii % 72;
+    int next = (i + 1) % 72;
+    return kLutCos[i] + (kLutCos[next] - kLutCos[i]) * frac;
+  }
+
+  static inline float lutSin(float rad)
+  {
+    const float scale = 72.0f / (2.0f * M_PI);
+    const float bias = M_PI * 0.5f * scale + 72.0f * 1000.0f;
+    float t = rad * scale + bias;
+    int ii = (int)t;
+    float frac = t - (float)ii;
+    int i = ii % 72;
+    int next = (i + 1) % 72;
+    return kLutSin[i] + (kLutSin[next] - kLutSin[i]) * frac;
+  }
+
   class FilterResponseGraphic : public od::Graphic
   {
   public:
@@ -36,11 +102,8 @@ namespace stolmine
       int cy = mWorldBottom + mHeight / 2;
       int maxR = MIN(mWidth, mHeight) / 2 - 3;
 
-      // Reference circle
       fb.circle(GRAY3, cx, cy, maxR);
 
-      // Per-band: blend gain with spectral response for visual variety
-      // Gain as base shape, modulated by live filter energy
       float values[16];
       float maxVal = 0.0001f;
       for (int i = 0; i < bandCount; i++)
@@ -52,16 +115,13 @@ namespace stolmine
           maxVal = values[i];
       }
 
-      // Sample radius around circle: base + band bumps at frequency positions
       float baseR = 0.35f * (float)maxR;
       float bumpRange = (float)maxR - baseR;
       float invMax = 1.0f / maxVal;
 
-      // Rotate offset: whole graphic spins with rotate parameter
       float rotateVal = mpFB->getRotate();
       float rotateOffset = 2.0f * M_PI * rotateVal / (float)bandCount;
 
-      // Find actual frequency range of active bands for full-circle mapping
       float freqLog[16];
       float logLo = 1e10f, logHi = -1e10f;
       for (int i = 0; i < bandCount; i++)
@@ -71,17 +131,14 @@ namespace stolmine
         if (freqLog[i] < logLo) logLo = freqLog[i];
         if (freqLog[i] > logHi) logHi = freqLog[i];
       }
-      // Expand range so wrap gap equals average inter-band spacing
       float logRange = logHi - logLo;
       if (logRange < 0.1f) logRange = 0.1f;
       float avgSpacing = (bandCount > 1) ? logRange / (float)(bandCount - 1) : logRange;
-      // Add one extra spacing for the wrap-around gap
       float totalRange = logRange + avgSpacing;
       float logPad = avgSpacing * 0.5f;
       logLo -= logPad;
       logRange = totalRange;
 
-      // Band angles from current (slewed) frequency, filling full circle
       float bandAngles[16];
       float bandBump[16];
       for (int i = 0; i < bandCount; i++)
@@ -90,7 +147,6 @@ namespace stolmine
         bandBump[i] = values[i] * invMax * bumpRange;
       }
 
-      // Sample at N points, radius = base + Gaussian bumps from all bands
       static const int kSteps = 72;
       float sigma = 0.2f;
       float invSigma2 = 1.0f / (2.0f * sigma * sigma);
@@ -111,24 +167,22 @@ namespace stolmine
         if (bump > maxBump) maxBump = bump;
       }
 
-      // Normalize so max bump exactly reaches maxR
       float sampleR[72];
       int px[72], py[72];
       float bumpScale = bumpRange / maxBump;
       for (int step = 0; step < kSteps; step++)
       {
-        float a = 2.0f * M_PI * (float)step / (float)kSteps - M_PI * 0.5f;
         sampleR[step] = baseR + rawBumps[step] * bumpScale;
-        px[step] = cx + (int)(cosf(a) * sampleR[step]);
-        py[step] = cy + (int)(sinf(a) * sampleR[step]);
+        // Perimeter uses LUT directly — step-to-index is identity.
+        px[step] = cx + (int)(kLutCos[step] * sampleR[step]);
+        py[step] = cy + (int)(kLutSin[step] * sampleR[step]);
       }
 
-      // Gradient fill: all 16 gray levels, Q controls brightness
+      // Gradient radial fill: all 16 gray levels, Q controls brightness
       float macroQ = mpFB->getMacroQ();
       for (int step = 0; step < kSteps; step++)
       {
-        float a = 2.0f * M_PI * (float)step / (float)kSteps - M_PI * 0.5f;
-        float ca = cosf(a), sa = sinf(a);
+        float ca = kLutCos[step], sa = kLutSin[step];
         float range = sampleR[step] - baseR;
         if (range < 1.0f) continue;
         int numBands = (int)(range);
@@ -144,7 +198,6 @@ namespace stolmine
           int y0 = cy + (int)(sa * r0);
           int x1 = cx + (int)(ca * r1);
           int y1 = cy + (int)(sa * r1);
-          // Q scales brightness: low Q = dim gradient, high Q = bright
           float t = (float)g / (float)(numBands - 1);
           int color = 1 + (int)(t * macroQ * 14.0f);
           if (color < 1) color = 1;
@@ -153,17 +206,17 @@ namespace stolmine
         }
       }
 
-      // Draw smooth closed curve on top
       for (int i = 0; i < kSteps; i++)
       {
         int next = (i + 1) % kSteps;
         fb.line(WHITE, px[i], py[i], px[next], py[next]);
       }
 
-      // Band spokes at frequency positions
+      // Band spokes — angles are arbitrary radians, use LUT helpers.
       for (int i = 0; i < bandCount; i++)
       {
-        float ca = cosf(bandAngles[i]), sa = sinf(bandAngles[i]);
+        float ca = lutCos(bandAngles[i]);
+        float sa = lutSin(bandAngles[i]);
         int edgeX = cx + (int)(ca * (float)maxR);
         int edgeY = cy + (int)(sa * (float)maxR);
         if (i == mSelectedBand)
