@@ -31,6 +31,10 @@
 ### Larets
 - [ ] Stutter vs shuffle viz distinction: both read similar at a glance. Stutter should show boxed loop window, shuffle should show rearranged fragment blocks.
 
+### Step-list units (Excel, Ballot, Larets, any spreadsheet step list)
+- [ ] When step count is reduced below the currently focused step, cursor stays past the new end. Should clamp selected step to last-in-range on count change.
+- [ ] List viewport doesn't scroll to keep the new last step visible after count reduction -- can land on an all-black region until the user manually scrolls up to find the bottom boundary. Viewport needs to follow the clamp.
+
 ## Release
 
 - [x] Version bump biome and spreadsheet packages to v1.0.1 for hotfix released 2026-04-05. Rebuild and reupload.
