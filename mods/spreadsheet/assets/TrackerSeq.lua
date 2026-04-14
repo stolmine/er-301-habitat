@@ -122,6 +122,16 @@ function TrackerSeq:randomizeOffsets()
   end
 end
 
+function TrackerSeq:scaleAllOffsets(factor)
+  local op = self.objects.op
+  for i = 0, 63 do
+    op:setStepOffset(i, op:getStepOffset(i) * factor)
+  end
+  if self.controls and self.controls.steps then
+    op:loadStep(self.controls.steps.currentStep or 0)
+  end
+end
+
 function TrackerSeq:clearAllOffsets()
   local op = self.objects.op
   for i = 0, 63 do
@@ -157,6 +167,9 @@ function TrackerSeq:onShowMenu(objects, branches)
   controls.range10v = Task {
     description = "10Vpp (-5 to +5)",
     task = function()
+      if self.offsetRange10v ~= true then
+        self:scaleAllOffsets(5.0)
+      end
       self.offsetRange10v = true
       self.controls.steps:setOffsetRange(true)
       self.objects.op:getParameter("OffsetRange"):hardSet(5.0)
@@ -165,6 +178,9 @@ function TrackerSeq:onShowMenu(objects, branches)
   controls.range2v = Task {
     description = "2Vpp (-1 to +1)",
     task = function()
+      if self.offsetRange10v ~= false then
+        self:scaleAllOffsets(0.2)
+      end
       self.offsetRange10v = false
       self.controls.steps:setOffsetRange(false)
       self.objects.op:getParameter("OffsetRange"):hardSet(1.0)

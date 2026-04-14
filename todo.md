@@ -4,7 +4,7 @@
 
 ### Excel
 - [ ] Playhead can get stuck outside bounds when step count is reduced while playhead is beyond new range (e.g. shows 14/1). Need to clamp mStep on stepCount change.
-- [ ] Offset range menu remap doesn't update readout display live — user has to touch readout again.
+- [x] Offset range switch now scales all stored offsets proportionally (×5 on 2V→10V, ×0.2 on 10V→2V) and reloads the edit buffer. Readout updates live; pattern shape is preserved and round-trip reversible.
 
 ### Ballot
 - [ ] Ratchet settings (RatchetLen, RatchetVel toggle options) do not persist across quicksave/load. Likely missing from serialize/deserialize.
