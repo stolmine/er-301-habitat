@@ -15,7 +15,7 @@
 - [ ] Zipper noise on V/Oct and comb size changes. Needs per-block interpolation or one-pole smoother on delay length.
 
 ### Tomograph
-- [ ] Overview viz: one lobe hangs permanently too far toward bottom-center. Likely misplaced angle in radial layout.
+- [x] Overview viz: distended bottom lobe / off-position band spokes on hardware. Root cause was runtime sinf/cosf from package .so miscomputing on am335x; firmware-compiled graphics unaffected. Fixed with 72-entry cos/sin LUT in FilterResponseGraphic (77ca47a). LUT memory saved for future package graphics.
 - [ ] FilterListControl type label doesn't update when macros change filter type externally (readout is correct, label text stale).
 
 ### Helicase
@@ -310,7 +310,7 @@ Spreadsheet-style parallel fixed filter bank. Mono and stereo.
 - [ ] Band list expansion: gate controls for randomize freq, gain, type across all bands
 - [x] Fine/coarse reversed on sub-display readouts. Fixed `Encoder.Coarse` -> `Encoder.Fine` across all 15 controls package-wide.
 - [ ] Default gain/Q review: unit could use better defaults for immediate audibility on load
-- [ ] See Bugs section: overview viz lobe positioning issue.
+- [x] Overview viz lobe positioning issue -- fixed via LUT trig (see Bugs/Tomograph).
 
 ## 4ms SMR
 
