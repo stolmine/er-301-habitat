@@ -22,7 +22,7 @@
 - [ ] Discontinuity transfer functions 7, 12, 15 click at zero crossings. Value discontinuity in fold/wrap/ring-fold cases needs interpolation or smoothing.
 
 ### Impasto
-- [ ] Auto gain + sidechain enable only affect one channel in stereo. Toggle handlers need to fan out to both op instances.
+- [x] Auto gain + sidechain enable only affect one channel in stereo. Toggle handlers fan out to both op instances; deserialize re-syncs opR to op (52b3213).
 - [ ] Impasto menu: stereo option re-labels to "mono" / "stereo" but the saved option state can disagree with actual instantiation if toggled without re-insert.
 
 ### Kryos
