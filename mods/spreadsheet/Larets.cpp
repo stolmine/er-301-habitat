@@ -417,6 +417,9 @@ namespace stolmine
     int loopLen = CLAMP(1, kMaxSteps, (int)(mLoopLength.value() + 0.5f));
     int wrapLen = MIN(loopLen, stepCount);
 
+    if (mStep >= stepCount)
+      mStep = mStep % stepCount;
+
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       bool xHigh = xform[i] > 0.0f;

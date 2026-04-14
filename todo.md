@@ -33,6 +33,7 @@
 
 ### Larets
 - [ ] Stutter vs shuffle viz distinction: both read similar at a glance. Stutter should show boxed loop window, shuffle should show rearranged fragment blocks.
+- [x] Playhead stuck past new bound on stepCount reduce. Same mStep modulo-wrap as Excel/Ballot, applied at top of audio block after stepCount refresh. Etcher audited: mActiveSegment is recomputed from input CV each sample, so no stale-playhead vector exists there.
 
 ### Step-list units (Excel, Ballot, Larets, Etcher)
 - [x] Count reduction below current cursor: graphic now clamps mSelectedStep to listLen-1 at top of draw() (viewport follows automatically). Lua controls reconcile currentStep on onCursorEnter so edit-buffer params track the clamped step.
