@@ -31,6 +31,8 @@
 #include "Larets.h"
 #include "LaretStepListGraphic.h"
 #include "LaretOverviewGraphic.h"
+#include "Blanda.h"
+#include "BlandaInputGraphic.h"
 #define SWIGLUA
 %}
 
@@ -62,3 +64,5 @@
 %include "Larets.h"
 %include "LaretStepListGraphic.h"
 %include "LaretOverviewGraphic.h"
+%include "Blanda.h"
+%include "BlandaInputGraphic.h"
