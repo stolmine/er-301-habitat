@@ -43,9 +43,10 @@ function MixInputControl:init(args)
   -- ---- Main view ----
   local container = app.Graphic(0, 0, ply, 64)
 
+  -- MiniScope backdrop. No border / corner radius so three adjacent
+  -- input plies visually form one continuous landscape field; Impasto
+  -- and Parfait's per-band plies use the same approach.
   self.mainScope = app.MiniScope(0, 0, ply, 64)
-  self.mainScope:setBorder(1)
-  self.mainScope:setCornerRadius(3, 3, 3, 3)
   container:addChild(self.mainScope)
 
   self.landscape = libspreadsheet.BlandaInputGraphic(0, 0, ply, 64)

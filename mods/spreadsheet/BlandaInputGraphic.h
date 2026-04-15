@@ -220,50 +220,23 @@ namespace stolmine
         }
       }
 
-      // 2. Peak tick for this input.
-      {
-        float myOffset = mpBlanda->getInputOffset(mIndex);
-        if (myOffset >= slice0 && myOffset < slice1)
-        {
-          int tx = x0 + (int)((myOffset - slice0) / sliceSize * (float)w);
-          if (tx < x0) tx = x0;
-          if (tx >= x0 + w) tx = x0 + w - 1;
-          int peakY = y0 + (h - 2);
-          int baseY = peakY - 5;
-          if (baseY < y0) baseY = y0;
-          fb.line(WHITE, tx, baseY, tx, peakY);
-        }
-      }
-
-      // 3. Horizontal dotted mix-coef indicator for this input. y tracks
+      // 2. Horizontal dotted mix-coef indicator for this input. y tracks
       // the bell value at the current scan position, so as the user
       // sweeps scan the line rises and falls and meets the scan playhead
-      // right on the bell curve. Per-pixel read the backdrop so the dots
-      // invert shade (WHITE over dark, GRAY3 over bright) and stay
-      // legible when crossing the MiniScope waveform.
+      // right on the bell curve. Always WHITE (muted inputs dim to
+      // GRAY4); keeping a single shade reads more legibly through the
+      // MiniScope waveform than the earlier readPixel inversion.
       {
         float myCoef = mpBlanda->getMixCoef(mIndex);
         float myLevel = mpBlanda->getInputLevel(mIndex);
         int coefY = y0 + (int)(myCoef * (float)(h - 2));
         if (coefY >= y0 + h) coefY = y0 + h - 1;
-        int active = (myLevel >= 0.001f);
+        int shade = (myLevel >= 0.001f) ? WHITE : GRAY4;
         for (int px = 0; px < w; px += 3)
-        {
-          int wx = x0 + px;
-          // Any non-black backdrop pixel flips the dot to its contrasting
-          // shade -- MiniScope fills the waveform body in GRAY3 with WHITE
-          // peak endpoints, both of which count as "drawn" here.
-          int under = fb.readPixel(wx, coefY);
-          int shade;
-          if (active)
-            shade = (under > 0) ? BLACK : WHITE;
-          else
-            shade = (under > 0) ? BLACK : GRAY4;
-          fb.pixel(shade, wx, coefY);
-        }
+          fb.pixel(shade, x0 + px, coefY);
       }
 
-      // 4. Scan-position playhead. WHITE dashed vertical (1 px on / 2
+      // 3. Scan-position playhead. WHITE dashed vertical (1 px on / 2
       // px off) drawn only by the ply whose slice contains scan, so
       // exactly one ply shows it at any time.
       if (scanPos >= slice0 && scanPos < slice1)
