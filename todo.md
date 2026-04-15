@@ -487,13 +487,12 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
 
   Bell shape: `coef[i] = 0.5 * (1 + cos(clamp(-1,1, pi * (scan - offset[i]) / (weight[i] * focusWidth))))` where `focusWidth = focusBaseline * pow(4, focus)` (±1 gives 4x wider or narrower). Cos² window, no expf needed. At render time a triangular approximation is fine.
 
-  **Controls (main plies, left to right):**
+  **Controls (main plies, left to right, six total):**
   - **in1** -- custom MixInputControl (see below). Main view is a MiniScope of input 1. Shift sub-display: Level / Weight / Offset readouts + sub-buttons.
   - **in2** -- same, for input 2.
   - **in3** -- same, for input 3.
   - **scan** -- GainBias with CV inlet, 0..1.
   - **focus** -- GainBias, bipolar -1..+1.
-  - **tilt** -- global skew applied across all three inputs' levels (think Tilt EQ, but domain is input mix).
   - **level** -- output level.
 
   **MixInputControl** (custom, one instance per input):
@@ -513,7 +512,7 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
   - `float getInputOffset(int i)` / `getInputWeight(int i)` / `getInputLevel(int i)`.
   - `float getMixCoef(int i)` -- the per-sample-averaged coefficient for this frame, cached at block top.
 
-  **Serialize**: Level/Weight/Offset per input + Scan/Focus/Tilt/OutputLevel global via ParameterAdapter Bias target/hardSet per the established pattern.
+  **Serialize**: Level/Weight/Offset per input + Scan/Focus/OutputLevel global via ParameterAdapter Bias target/hardSet per the established pattern.
 
   **Differentiators:**
   - vs. FadeMixer: fewer inputs, but replaces generic equal-power crossfade with a continuous scan + per-input positioning, and gets the multiband-unit UI vocabulary (Weight).
@@ -522,7 +521,6 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
 
   **Open Qs (defer until prototyping):**
   - Focus baseline width default (what does focus=0 mean for bell width in absolute scan-axis units).
-  - Tilt semantics (log-tilt across inputs? linear? emulate Tilt EQ's tilt-style mapping?).
   - Whether to expose an RxMx-style follower-mix option (each input's envelope ducks the others) as a config menu item in v0.2.
   - Mono vs stereo out for v0 (probably mono, since each input is mono).
 
