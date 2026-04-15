@@ -505,6 +505,7 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
     3. Short vertical WHITE tick at this input's current offset position (migrates between plies as Offset moves).
     4. Single dotted horizontal mix-coef indicator for own input (Impasto-style). GRAY9 active, GRAY4 when input's Level is 0.
     5. Vertical WHITE dashed scan-position playhead, drawn only by the ply whose x-range currently contains `scan`.
+  - Shift sub-display for v0: standard readouts only (Level / Weight / Offset with three sub-buttons). No animated viz. Sub-display bell preview would be nice but is deferred (see Open Qs).
 
   **SWIG getters on the op** (needed so each graphic instance can read shared state):
   - `float getScanPos()` -- live scan value.
@@ -523,6 +524,11 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
   - Focus baseline width default (what does focus=0 mean for bell width in absolute scan-axis units).
   - Whether to expose an RxMx-style follower-mix option (each input's envelope ducks the others) as a config menu item in v0.2.
   - Mono vs stereo out for v0 (probably mono, since each input is mono).
+
+  **Future improvements (post-v0):**
+  - Animated bell preview in the shift sub-display showing this input's isolated bell on the scan axis with live scan-position marker. Would visually reinforce what Weight and Offset do while the user is editing them. Not done in the package before; may require firmware-side work on how sub-display graphics receive per-frame ticks for live animation. Static readouts cover v0.
+  - Follower-mix menu option (see above).
+  - Stereo out.
 
 ## Etcher (Transfer Function Designer, inspired by MI Frames)
 
