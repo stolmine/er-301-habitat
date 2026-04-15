@@ -131,6 +131,57 @@ namespace stolmine
           if (coef[b] > maxCoef) maxCoef = coef[b];
         }
 
+        // Two-pass per-column: first decide which bells qualify to ghost
+        // at this column (hidden, outranks at least one lighter, no
+        // tied), then suppress any qualifier that has a strictly heavier
+        // bell ALSO qualifying at the same column. That gives the
+        // "perpendicular" look -- C's ghost only draws where the
+        // heaviest's ghost isn't present, so C's curve butts up against
+        // A's ghost and stops instead of crossing it.
+        bool qualifies[kBlandaInputs] = {false, false, false};
+        for (int b = 0; b < kBlandaInputs; b++)
+        {
+          if (coef[b] <= 0.0f) continue;
+          if (coef[b] >= maxCoef) continue; // silhouette, not ghost
+          bool anyLighter = false;
+          bool anyTied = false;
+          for (int j = 0; j < kBlandaInputs; j++)
+          {
+            if (j == b) continue;
+            if (coef[j] > 0.0f)
+            {
+              if (weight[j] == weight[b]) { anyTied = true; break; }
+              if (weight[j] < weight[b]) anyLighter = true;
+            }
+          }
+          if (!anyTied && anyLighter) qualifies[b] = true;
+        }
+
+        bool ghostsHere[kBlandaInputs] = {false, false, false};
+        for (int b = 0; b < kBlandaInputs; b++)
+        {
+          if (!qualifies[b]) continue;
+          bool barred = false;
+          for (int j = 0; j < kBlandaInputs; j++)
+          {
+            if (j == b) continue;
+            // Bar whenever any ACTIVE heavier bell sits at or above b's
+            // coef -- b is in the heavier's "implied territory" (below
+            // its curve). This suppresses the mid-weight ghost
+            // underneath the heaviest's silhouette AND underneath its
+            // ghost line; mid only draws where it emerges above
+            // heaviest's curve. When b's coef rises past the heavier's
+            // curve, the bar drops and the line starts (butt-joint
+            // exactly at the crossing).
+            if (coef[j] > 0.0f && weight[j] > weight[b] && coef[j] >= coef[b])
+            {
+              barred = true;
+              break;
+            }
+          }
+          if (!barred) ghostsHere[b] = true;
+        }
+
         // Per-bell polyline with shade-per-segment.
         for (int b = 0; b < kBlandaInputs; b++)
         {
@@ -146,27 +197,15 @@ namespace stolmine
             // This bell IS the silhouette at this column.
             shade = WHITE;
           }
+          else if (ghostsHere[b])
+          {
+            shade = GRAY5;
+          }
           else
           {
-            // Hidden. Ghost only if strictly heavier than every other
-            // active bell.
-            bool strictlyDominant = true;
-            for (int j = 0; j < kBlandaInputs; j++)
-            {
-              if (j == b) continue;
-              if (coef[j] > 0.0f && weight[j] >= weight[b])
-              {
-                strictlyDominant = false;
-                break;
-              }
-            }
-            if (!strictlyDominant)
-            {
-              // Break this bell's polyline; it is hidden and not dominant.
-              prevBellX[b] = -1;
-              continue;
-            }
-            shade = GRAY5;
+            // Hidden and barred (or doesn't qualify). Break polyline.
+            prevBellX[b] = -1;
+            continue;
           }
 
           int bellY = y0 + (int)(coef[b] * (float)(h - 2));
