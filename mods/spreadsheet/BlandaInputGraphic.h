@@ -90,17 +90,24 @@ namespace stolmine
 
       const float scanPos = mpBlanda->getScanPos();
 
-      // 1. Bell landscape: max-of-all-bells silhouette as solid polyline,
-      // plus dotted "ghost" curves for any bell that is hidden under a
-      // lower-weight neighbour. A bell only ghosts when it's occluded
-      // AND it outranks at least one of the bells occluding it -- so
-      // the heaviest bell globally always ghosts through obstructing
-      // peaks, the lightest never ghosts.
+      // 1. Bell landscape: each bell is drawn as its OWN continuous
+      // polyline with the shade chosen per column by its role --
+      //   WHITE  when the bell IS the silhouette (coef == maxCoef)
+      //   GRAY5  when the bell is hidden AND strictly heavier than every
+      //          other active bell at this column ("dominant ghost")
+      //   skip   when the bell is hidden and not strictly dominant
+      //
+      // Drawing each bell as one polyline (with shade varying between
+      // segments) keeps the curve connected through the silhouette-to-
+      // ghost handoff, so the strongest bell's ghost runs right out of
+      // its own peak without a pixel-jump aura.
       float weight[kBlandaInputs];
       for (int b = 0; b < kBlandaInputs; b++)
         weight[b] = mpBlanda->getInputWeight(b);
 
-      int prevX = -1, prevY = 0;
+      int prevBellX[kBlandaInputs] = {-1, -1, -1};
+      int prevBellY[kBlandaInputs] = {0, 0, 0};
+
       for (int px = 0; px < w; px++)
       {
         float globalScan = slice0 + ((float)px / (float)w) * sliceSize;
@@ -124,47 +131,53 @@ namespace stolmine
           if (coef[b] > maxCoef) maxCoef = coef[b];
         }
 
-        // Solid max-of-all silhouette polyline.
-        if (maxCoef > 0.0f)
+        // Per-bell polyline with shade-per-segment.
+        for (int b = 0; b < kBlandaInputs; b++)
         {
-          int maxY = y0 + (int)(maxCoef * (float)(h - 2));
-          if (maxY >= y0 + h) maxY = y0 + h - 1;
-          if (prevX >= 0)
-            fb.line(WHITE, prevX, prevY, wx, maxY);
-          else
-            fb.pixel(WHITE, wx, maxY);
-          prevX = wx;
-          prevY = maxY;
-        }
-        else
-        {
-          prevX = -1;
-        }
-
-        // Dotted ghost curves on alternate columns.
-        if ((px & 1) == 0)
-        {
-          for (int b = 0; b < kBlandaInputs; b++)
+          if (coef[b] <= 0.0f)
           {
-            if (coef[b] <= 0.0f) continue;
-            if (coef[b] >= maxCoef) continue; // this bell IS the silhouette here
-            // Does b outrank at least one of the bells above it?
-            bool anyLighter = false;
+            prevBellX[b] = -1;
+            continue;
+          }
+
+          int shade;
+          if (coef[b] >= maxCoef)
+          {
+            // This bell IS the silhouette at this column.
+            shade = WHITE;
+          }
+          else
+          {
+            // Hidden. Ghost only if strictly heavier than every other
+            // active bell.
+            bool strictlyDominant = true;
             for (int j = 0; j < kBlandaInputs; j++)
             {
               if (j == b) continue;
-              if (coef[j] > 0.0f && weight[j] < weight[b])
+              if (coef[j] > 0.0f && weight[j] >= weight[b])
               {
-                anyLighter = true;
+                strictlyDominant = false;
                 break;
               }
             }
-            if (!anyLighter) continue;
-
-            int ghostY = y0 + (int)(coef[b] * (float)(h - 2));
-            if (ghostY >= y0 + h) ghostY = y0 + h - 1;
-            fb.pixel(WHITE, wx, ghostY);
+            if (!strictlyDominant)
+            {
+              // Break this bell's polyline; it is hidden and not dominant.
+              prevBellX[b] = -1;
+              continue;
+            }
+            shade = GRAY5;
           }
+
+          int bellY = y0 + (int)(coef[b] * (float)(h - 2));
+          if (bellY >= y0 + h) bellY = y0 + h - 1;
+
+          if (prevBellX[b] >= 0)
+            fb.line(shade, prevBellX[b], prevBellY[b], wx, bellY);
+          else
+            fb.pixel(shade, wx, bellY);
+          prevBellX[b] = wx;
+          prevBellY[b] = bellY;
         }
       }
 

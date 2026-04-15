@@ -530,6 +530,12 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
   - Follower-mix menu option (see above).
   - Stereo out.
 
+  **Open v0 bugs / polish:**
+  - Ghost "aura" on dominant-bell transitions: at the silhouette-to-ghost handoff, weaker-bell visible portions appear to back off several pixels from the dominant bell's ghost edges and disappear prematurely back to their original intersection points. Attempted fix (per-bell polyline with shade-per-segment, commit in progress) did not fully resolve the pixel-jump perception. Revisit with a fresh look at silhouette-vs-ghost layer interaction, maybe render per-bell polylines plus a shared "max" overlay.
+  - Remove the short vertical "notch" drawn at each bell's peak (the Offset-tick line that stands straight up from the bell crest). It becomes visual clutter once three bells are live; prefer a subtler peak indicator or drop entirely.
+  - Skew sub-param on the scan control: surface a per-input or global skew (shape-bias) on the scan ply's shift sub, so users can tilt the bell shapes asymmetrically without going to each input ply's Shape.
+  - Expansion / focus-mode sub-display layouts need a design pass across all the dual-mode controls (MixInputControl, FocusShapeControl). Three readouts + three sub-buttons works but cramps legibility -- audit the layouts to ensure labels don't collide with readouts and the per-input identity is obvious when shifted in.
+
 ## Etcher (Transfer Function Designer, inspired by MI Frames)
 
 CV-addressed piecewise transfer function. Input voltage maps to output voltage
