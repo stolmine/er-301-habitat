@@ -11,6 +11,7 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local MixInputControl = require "spreadsheet.MixInputControl"
+local FocusShapeControl = require "spreadsheet.FocusShapeControl"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max, steps)
@@ -26,6 +27,7 @@ end
 local levelMap  = floatMap(0, 2, {0.1, 0.01, 0.001, 0.0001})
 local weightMap = floatMap(0, 2, {0.1, 0.01, 0.001, 0.0001})
 local offsetMap = floatMap(0, 1, {0.1, 0.01, 0.001, 0.0001})
+local shapeMap  = floatMap(0, 1, {0.1, 0.01, 0.001, 0.0001})
 local scanMap   = floatMap(0, 1, {0.1, 0.01, 0.001, 0.0001})
 local focusMap  = floatMap(-1, 1, {0.1, 0.01, 0.001, 0.0001})
 local outLevMap = floatMap(0, 2, {0.1, 0.01, 0.001, 0.0001})
@@ -74,6 +76,9 @@ function Blanda:onLoadGraph(channelCount)
   adapter("offset0", "Offset0", 0.1667)
   adapter("offset1", "Offset1", 0.5)
   adapter("offset2", "Offset2", 0.8333)
+  adapter("shape0",  "Shape0",  0.0)
+  adapter("shape1",  "Shape1",  0.0)
+  adapter("shape2",  "Shape2",  0.0)
   adapter("scan",    "Scan",    0.5)
   adapter("focus",   "Focus",   0.0)
   adapter("outputLevel", "OutputLevel", 1.0)
@@ -111,6 +116,11 @@ function Blanda:onLoadViews(objects, branches)
   controls.in2 = input(1, "in2", "Input 2", "in1")
   controls.in3 = input(2, "in3", "Input 3", "in2")
 
+  -- Enroll the three inputs in the unit's mute group so Solo/Mute work.
+  self:addToMuteGroup(controls.in1)
+  self:addToMuteGroup(controls.in2)
+  self:addToMuteGroup(controls.in3)
+
   controls.scan = GainBias {
     button = "scan",
     description = "Scan",
@@ -123,7 +133,7 @@ function Blanda:onLoadViews(objects, branches)
     initialBias = 0.5
   }
 
-  controls.focus = GainBias {
+  controls.focus = FocusShapeControl {
     button = "focus",
     description = "Focus",
     branch = branches.focus,
@@ -132,7 +142,11 @@ function Blanda:onLoadViews(objects, branches)
     biasMap = focusMap,
     biasUnits = app.unitNone,
     biasPrecision = 2,
-    initialBias = 0.0
+    initialBias = 0.0,
+    shapeMap = shapeMap,
+    shape0Param = objects.shape0:getParameter("Bias"),
+    shape1Param = objects.shape1:getParameter("Bias"),
+    shape2Param = objects.shape2:getParameter("Bias")
   }
 
   controls.level = GainBias {
@@ -160,6 +174,7 @@ local adapterBiases = {
   "level0", "level1", "level2",
   "weight0", "weight1", "weight2",
   "offset0", "offset1", "offset2",
+  "shape0", "shape1", "shape2",
   "scan", "focus", "outputLevel"
 }
 
@@ -171,6 +186,17 @@ function Blanda:serialize()
       t[name] = o:getParameter("Bias"):target()
     end
   end
+  -- Solo/mute state per input.
+  t.mute = {
+    self.controls.in1:isMuted(),
+    self.controls.in2:isMuted(),
+    self.controls.in3:isMuted()
+  }
+  t.solo = {
+    self.controls.in1:isSolo(),
+    self.controls.in2:isSolo(),
+    self.controls.in3:isSolo()
+  }
   return t
 end
 
@@ -179,6 +205,18 @@ function Blanda:deserialize(t)
   for _, name in ipairs(adapterBiases) do
     if t[name] ~= nil and self.objects[name] then
       self.objects[name]:hardSet("Bias", t[name])
+    end
+  end
+  if t.mute then
+    local inputs = { self.controls.in1, self.controls.in2, self.controls.in3 }
+    for i, c in ipairs(inputs) do
+      if t.mute[i] then c:mute() end
+    end
+  end
+  if t.solo then
+    local inputs = { self.controls.in1, self.controls.in2, self.controls.in3 }
+    for i, c in ipairs(inputs) do
+      if t.solo[i] then c:solo() end
     end
   end
 end

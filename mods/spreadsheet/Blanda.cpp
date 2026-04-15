@@ -31,6 +31,9 @@ namespace stolmine
     addParameter(mOffset0);
     addParameter(mOffset1);
     addParameter(mOffset2);
+    addParameter(mShape0);
+    addParameter(mShape1);
+    addParameter(mShape2);
     addParameter(mScan);
     addParameter(mFocus);
     addParameter(mOutputLevel);
@@ -44,6 +47,7 @@ namespace stolmine
   float Blanda::getInputOffset(int i) { return mLastOffset[CLAMP(0, kBlandaInputs - 1, i)]; }
   float Blanda::getInputWeight(int i) { return mLastWeight[CLAMP(0, kBlandaInputs - 1, i)]; }
   float Blanda::getInputLevel(int i)  { return mLastLevel[CLAMP(0, kBlandaInputs - 1, i)]; }
+  float Blanda::getInputShape(int i)  { return mLastShape[CLAMP(0, kBlandaInputs - 1, i)]; }
   float Blanda::getMixCoef(int i)     { return mLastCoef[CLAMP(0, kBlandaInputs - 1, i)]; }
 
   void Blanda::process()
@@ -74,6 +78,11 @@ namespace stolmine
         CLAMP(0.0f, 1.0f, mOffset1.value()),
         CLAMP(0.0f, 1.0f, mOffset2.value())
     };
+    float shape[kBlandaInputs] = {
+        CLAMP(0.0f, 1.0f, mShape0.value()),
+        CLAMP(0.0f, 1.0f, mShape1.value()),
+        CLAMP(0.0f, 1.0f, mShape2.value())
+    };
     float focus = CLAMP(-1.0f, 1.0f, mFocus.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
 
@@ -92,12 +101,17 @@ namespace stolmine
 
     float scan = CLAMP(0.0f, 1.0f, mScan.value());
 
+    // Bell shape morph: shape=0 triangle, shape=1 plateau.
+    // coef = max(0, 1 - (d/w)^gamma), gamma = 1 + shape*3.
     float coef[kBlandaInputs];
     for (int b = 0; b < kBlandaInputs; b++)
     {
       float d = scan - offset[b];
       if (d < 0.0f) d = -d;
-      float c = 1.0f - d / w[b];
+      float x = d / w[b];
+      if (x >= 1.0f) { coef[b] = 0.0f; continue; }
+      float gamma = 1.0f + shape[b] * 3.0f;
+      float c = 1.0f - powf(x, gamma);
       coef[b] = (c > 0.0f) ? c : 0.0f;
     }
 
@@ -121,6 +135,7 @@ namespace stolmine
       mLastOffset[b] = offset[b];
       mLastWeight[b] = weight[b];
       mLastLevel[b]  = level[b];
+      mLastShape[b]  = shape[b];
       mLastCoef[b]   = coef[b];
     }
   }

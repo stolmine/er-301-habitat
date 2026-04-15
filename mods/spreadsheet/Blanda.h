@@ -47,6 +47,9 @@ namespace stolmine
     od::Parameter mOffset0{"Offset0", 0.1667f};
     od::Parameter mOffset1{"Offset1", 0.5f};
     od::Parameter mOffset2{"Offset2", 0.8333f};
+    od::Parameter mShape0{"Shape0", 0.0f}; // 0 = triangle, 1 = plateau
+    od::Parameter mShape1{"Shape1", 0.0f};
+    od::Parameter mShape2{"Shape2", 0.0f};
 
     // Global
     od::Parameter mScan{"Scan", 0.5f};
@@ -62,6 +65,7 @@ namespace stolmine
     float getInputOffset(int i);
     float getInputWeight(int i);
     float getInputLevel(int i);
+    float getInputShape(int i);
     float getMixCoef(int i);
 
   private:
@@ -73,6 +77,7 @@ namespace stolmine
     float mLastOffset[kBlandaInputs] = {0.1667f, 0.5f, 0.8333f};
     float mLastWeight[kBlandaInputs] = {1.0f, 1.0f, 1.0f};
     float mLastLevel[kBlandaInputs]  = {1.0f, 1.0f, 1.0f};
+    float mLastShape[kBlandaInputs]  = {0.0f, 0.0f, 0.0f};
     float mLastCoef[kBlandaInputs]   = {0.0f, 0.0f, 0.0f};
 #endif
   };
