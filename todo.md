@@ -477,7 +477,7 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
 ## Fade Mixer
 
 - [x] 4-input crossfader with BranchMeter controls (gain, meter, solo/mute). Equal-power crossfade, CV fade position, output level. Chain passthrough summed with crossfaded mix.
-- [ ] Three-input scan mixer (spreadsheet package, working name **Tryptych** or TBD). A 3-input mixer with a Morph-4-style continuous scan, not a crossover. No onboard spectral processing -- pairs with Canals / Three Sisters pre-split outputs (or any three full-range chains) and lets the user scan / blend between them with per-input shaping.
+- [ ] Three-input scan mixer (spreadsheet package, working name **Blanda** -- Swedish for "mingle"). A 3-input mixer with a Morph-4-style continuous scan, not a crossover. No onboard spectral processing -- pairs with Canals / Three Sisters pre-split outputs (or any three full-range chains) and lets the user scan / blend between them with per-input shaping.
 
   **Design path chosen: Path B (pure mixer with scan fade).** Alternatives considered and rejected:
   - Path A (onboard crossover): duplicates Parfait/Impasto minus the DSP.
