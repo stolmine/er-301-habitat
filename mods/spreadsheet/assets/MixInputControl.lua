@@ -198,14 +198,14 @@ function MixInputControl:setMixMode(enabled)
   self.mixMode = enabled
   self.paramFocusedReadout = nil
   self:setSubCursorController(nil)
+  -- Always keep GainBias's focusedReadout pointing somewhere valid.
+  -- In param mode paramFocusedReadout drives the encoder, but GainBias's
+  -- own onFocused/cancel/zero still dereference self.focusedReadout.
+  self.focusedReadout = self.bias
   if enabled then
     self.subGraphic = self.mixSubGraphic
-    -- Keep Level editable in mix mode via GainBias default encoder path.
-    self.focusedReadout = self.bias
   else
     self.subGraphic = self.paramSubGraphic
-    -- In param mode we route via paramFocusedReadout; nothing "default."
-    self.focusedReadout = nil
   end
   self:addSubGraphic(self.subGraphic)
 end
@@ -224,6 +224,7 @@ function MixInputControl:onCursorLeave(spot)
     self:addSubGraphic(self.subGraphic)
     self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
+    self.focusedReadout = self.bias
   end
   self:releaseFocus("shiftPressed", "shiftReleased")
   GainBias.onCursorLeave(self, spot)
