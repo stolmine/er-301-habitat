@@ -83,7 +83,9 @@ function MixInputControl:init(args)
   local weightMap = args.weightMap or app.LinearDialMap(0, 2)
   local offsetMap = args.offsetMap or app.LinearDialMap(0, 1)
 
-  self.levelReadout  = makeReadout(self.bias, levelMap, args.biasPrecision or 2, col1)
+  local levelParam = args.levelParam
+                     or args.gainbias:getParameter("Bias")
+  self.levelReadout  = makeReadout(levelParam, levelMap, args.biasPrecision or 2, col1)
   self.weightReadout = makeReadout(args.weightParam, weightMap, 2, col2)
   self.offsetReadout = makeReadout(args.offsetParam, offsetMap, 2, col3)
 
