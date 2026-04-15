@@ -477,7 +477,54 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
 ## Fade Mixer
 
 - [x] 4-input crossfader with BranchMeter controls (gain, meter, solo/mute). Equal-power crossfade, CV fade position, output level. Chain passthrough summed with crossfaded mix.
-- [ ] Multiband FadeMixer variant (spreadsheet package). 3 dedicated inlets, one per band, naturally suits per-band processing chains: patch Canals / Three Sisters filter stages into their own inputs and mix them with the full multiband-unit toolkit. Reuse the 3-band crossover layout already developed for Parfait and Impasto. Per-band: weight, skew, level, optional filter (low-shelf / bell / high-shelf for band shaping beyond the crossover). Global: crossover freqs (low/mid, mid/high), per-band solo/mute, output. Crossover shape could match the Parfait/Impasto convention so the same ears-training applies across the package. Differentiator vs. FadeMixer: explicit band architecture with input-per-band routing, not a generic crossfader. Differentiator vs. Parfait/Impasto: these process a single input through a crossover, the new unit takes three pre-separated inputs and applies crossover-framed mixing. Open design Qs: whether per-band filters should be SVF-configurable (type + cutoff + Q per band) or fixed shelves, whether to default to the Parfait/Impasto band weights, whether it owns a summing bus at all vs. just three band-sum outputs.
+- [ ] Three-input scan mixer (spreadsheet package, working name **Tryptych** or TBD). A 3-input mixer with a Morph-4-style continuous scan, not a crossover. No onboard spectral processing -- pairs with Canals / Three Sisters pre-split outputs (or any three full-range chains) and lets the user scan / blend between them with per-input shaping.
+
+  **Design path chosen: Path B (pure mixer with scan fade).** Alternatives considered and rejected:
+  - Path A (onboard crossover): duplicates Parfait/Impasto minus the DSP.
+  - Path C (hybrid with menu-toggle crossover): two UIs, extra surface, unclear benefit.
+
+  **DSP model.** Three audio inlets. Each input has a bell-shaped scan response curve centered on a per-input Offset. A global Scan CV picks where on the scan axis we are. A bipolar Focus (-1..+1) scales all bells' widths simultaneously (-1 collapses to hard-select, 0 default, +1 full overlap). Per-input Weight multiplies that input's bell width relative to focus. Output is the summed per-input contributions, normalised so total mix coefficients always equal unity (equal-power).
+
+  Bell shape: `coef[i] = 0.5 * (1 + cos(clamp(-1,1, pi * (scan - offset[i]) / (weight[i] * focusWidth))))` where `focusWidth = focusBaseline * pow(4, focus)` (±1 gives 4x wider or narrower). Cos² window, no expf needed. At render time a triangular approximation is fine.
+
+  **Controls (main plies, left to right):**
+  - **in1** -- custom MixInputControl (see below). Main view is a MiniScope of input 1. Shift sub-display: Level / Weight / Offset readouts + sub-buttons.
+  - **in2** -- same, for input 2.
+  - **in3** -- same, for input 3.
+  - **scan** -- GainBias with CV inlet, 0..1.
+  - **focus** -- GainBias, bipolar -1..+1.
+  - **tilt** -- global skew applied across all three inputs' levels (think Tilt EQ, but domain is input mix).
+  - **level** -- output level.
+
+  **MixInputControl** (custom, one instance per input):
+  - Hides default MonoBranch controls; custom rendering only.
+  - Constructed with `myIndex` (0/1/2), follows the op pointer.
+  - Graphic draws a unified-across-plies visualization so all three MixInputControl instances together form a single continuous landscape. Each ply renders its own slice of the shared scan axis, mapped via `globalScan = myIndex/3 + localX/mWidth/3`.
+  - Layer stack per ply (bottom-up):
+    1. MiniScope waveform of own input, GRAY7 solid.
+    2. Bell landscape (all three bells plotted as equally-weighted WHITE solid lines), this ply's slice only.
+    3. Short vertical WHITE tick at this input's current offset position (migrates between plies as Offset moves).
+    4. Single dotted horizontal mix-coef indicator for own input (Impasto-style). GRAY9 active, GRAY4 when input's Level is 0.
+    5. Vertical WHITE dashed scan-position playhead, drawn only by the ply whose x-range currently contains `scan`.
+
+  **SWIG getters on the op** (needed so each graphic instance can read shared state):
+  - `float getScanPos()` -- live scan value.
+  - `float getFocus()` -- live focus value.
+  - `float getInputOffset(int i)` / `getInputWeight(int i)` / `getInputLevel(int i)`.
+  - `float getMixCoef(int i)` -- the per-sample-averaged coefficient for this frame, cached at block top.
+
+  **Serialize**: Level/Weight/Offset per input + Scan/Focus/Tilt/OutputLevel global via ParameterAdapter Bias target/hardSet per the established pattern.
+
+  **Differentiators:**
+  - vs. FadeMixer: fewer inputs, but replaces generic equal-power crossfade with a continuous scan + per-input positioning, and gets the multiband-unit UI vocabulary (Weight).
+  - vs. Parfait/Impasto: no onboard crossover -- user brings their own pre-separated signals or scans between arbitrary chains.
+  - vs. Joranalogue Morph 4: 3 inputs instead of 4, Offset per input (Morph 4's positions are fixed at quarter-axis intervals), multiband-unit shaping vocabulary, on-screen visualization rather than LEDs.
+
+  **Open Qs (defer until prototyping):**
+  - Focus baseline width default (what does focus=0 mean for bell width in absolute scan-axis units).
+  - Tilt semantics (log-tilt across inputs? linear? emulate Tilt EQ's tilt-style mapping?).
+  - Whether to expose an RxMx-style follower-mix option (each input's envelope ducks the others) as a config menu item in v0.2.
+  - Mono vs stereo out for v0 (probably mono, since each input is mono).
 
 ## Etcher (Transfer Function Designer, inspired by MI Frames)
 
