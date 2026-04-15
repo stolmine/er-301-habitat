@@ -532,7 +532,9 @@ Rainmaker-inspired multitap delay. 8 taps (capped for CPU), 20s max int16 buffer
 
   **Open v0 bugs / polish:**
   - [x] Ghost occlusion / "aura" / falloff on bell transitions (010aec8). Final rule: per-bell continuous polyline with shade-per-segment, plus territory-based ghost suppression -- a hidden bell ghosts only where its coef sits above every active heavier bell's coef, and cuts off with a hard butt-joint at the pixel where its curve meets the heavier's curve. Heaviest on top, mid-weight above lightest, lightest never ghosts, ties suppress.
-  - Remove the short vertical "notch" drawn at each bell's peak (the Offset-tick line that stands straight up from the bell crest). It becomes visual clutter once three bells are live; prefer a subtler peak indicator or drop entirely.
+  - [x] Remove the short vertical "notch" at each bell's peak (bfd18ca). The Offset-tick became clutter once three bells were live; the bell curves alone read Offset clearly.
+  - [x] Drop readPixel-based inversion on the horizontal mix-coef level indicator (bfd18ca). Single shade (WHITE active, GRAY4 muted) reads more legibly across the MiniScope waveform than alternating inversion did.
+  - [x] Remove main-view MiniScope border / corner radius (bfd18ca) so three adjacent input plies form one continuous landscape field, matching Impasto / Parfait per-band plies.
   - Skew sub-param on the scan control: surface a per-input or global skew (shape-bias) on the scan ply's shift sub, so users can tilt the bell shapes asymmetrically without going to each input ply's Shape.
   - Expansion / focus-mode sub-display layouts need a design pass across all the dual-mode controls (MixInputControl, FocusShapeControl). Three readouts + three sub-buttons works but cramps legibility -- audit the layouts to ensure labels don't collide with readouts and the per-input identity is obvious when shifted in.
 
