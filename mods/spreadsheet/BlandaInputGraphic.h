@@ -90,31 +90,81 @@ namespace stolmine
 
       const float scanPos = mpBlanda->getScanPos();
 
-      // 1. Bell landscape as polyline. Connect consecutive pixel columns
-      // with fb.line for a continuous silhouette.
+      // 1. Bell landscape: max-of-all-bells silhouette as solid polyline,
+      // plus dotted "ghost" curves for any bell that is hidden under a
+      // lower-weight neighbour. A bell only ghosts when it's occluded
+      // AND it outranks at least one of the bells occluding it -- so
+      // the heaviest bell globally always ghosts through obstructing
+      // peaks, the lightest never ghosts.
+      float weight[kBlandaInputs];
+      for (int b = 0; b < kBlandaInputs; b++)
+        weight[b] = mpBlanda->getInputWeight(b);
+
       int prevX = -1, prevY = 0;
       for (int px = 0; px < w; px++)
       {
         float globalScan = slice0 + ((float)px / (float)w) * sliceSize;
-        float top = bellValueAt(globalScan);
+        int wx = x0 + px;
 
-        if (top > 0.0f)
+        // Evaluate every bell at this column.
+        float coef[kBlandaInputs];
+        float maxCoef = 0.0f;
+        for (int b = 0; b < kBlandaInputs; b++)
         {
-          int bellY = y0 + (int)(top * (float)(h - 2));
-          if (bellY >= y0 + h) bellY = y0 + h - 1;
-          int wx = x0 + px;
+          float off = mpBlanda->getInputOffset(b);
+          float ww  = weight[b] * mpBlanda->getFocusWidth();
+          if (ww < 1.0f / 512.0f) ww = 1.0f / 512.0f;
+          float d = globalScan - off;
+          if (d < 0.0f) d = -d;
+          float xn = d / ww;
+          if (xn >= 1.0f) { coef[b] = 0.0f; continue; }
+          float gamma = 1.0f + mpBlanda->getInputShape(b) * 3.0f;
+          float c = 1.0f - powf(xn, gamma);
+          coef[b] = (c > 0.0f) ? c : 0.0f;
+          if (coef[b] > maxCoef) maxCoef = coef[b];
+        }
 
+        // Solid max-of-all silhouette polyline.
+        if (maxCoef > 0.0f)
+        {
+          int maxY = y0 + (int)(maxCoef * (float)(h - 2));
+          if (maxY >= y0 + h) maxY = y0 + h - 1;
           if (prevX >= 0)
-            fb.line(WHITE, prevX, prevY, wx, bellY);
+            fb.line(WHITE, prevX, prevY, wx, maxY);
           else
-            fb.pixel(WHITE, wx, bellY);
-
+            fb.pixel(WHITE, wx, maxY);
           prevX = wx;
-          prevY = bellY;
+          prevY = maxY;
         }
         else
         {
-          prevX = -1; // break the polyline across zero-bell gaps
+          prevX = -1;
+        }
+
+        // Dotted ghost curves on alternate columns.
+        if ((px & 1) == 0)
+        {
+          for (int b = 0; b < kBlandaInputs; b++)
+          {
+            if (coef[b] <= 0.0f) continue;
+            if (coef[b] >= maxCoef) continue; // this bell IS the silhouette here
+            // Does b outrank at least one of the bells above it?
+            bool anyLighter = false;
+            for (int j = 0; j < kBlandaInputs; j++)
+            {
+              if (j == b) continue;
+              if (coef[j] > 0.0f && weight[j] < weight[b])
+              {
+                anyLighter = true;
+                break;
+              }
+            }
+            if (!anyLighter) continue;
+
+            int ghostY = y0 + (int)(coef[b] * (float)(h - 2));
+            if (ghostY >= y0 + h) ghostY = y0 + h - 1;
+            fb.pixel(WHITE, wx, ghostY);
+          }
         }
       }
 
@@ -133,34 +183,43 @@ namespace stolmine
         }
       }
 
-      // 3. Rising level indicator at scan column. Vertical line from the
-      // bottom up to the bell's value at scan; per-pixel reads the
-      // backdrop and picks a contrasting shade so it stays visible when
-      // it crosses the MiniScope waveform.
+      // 3. Horizontal dotted mix-coef indicator for this input. y tracks
+      // the bell value at the current scan position, so as the user
+      // sweeps scan the line rises and falls and meets the scan playhead
+      // right on the bell curve. Per-pixel read the backdrop so the dots
+      // invert shade (WHITE over dark, GRAY3 over bright) and stay
+      // legible when crossing the MiniScope waveform.
+      {
+        float myCoef = mpBlanda->getMixCoef(mIndex);
+        float myLevel = mpBlanda->getInputLevel(mIndex);
+        int coefY = y0 + (int)(myCoef * (float)(h - 2));
+        if (coefY >= y0 + h) coefY = y0 + h - 1;
+        int active = (myLevel >= 0.001f);
+        for (int px = 0; px < w; px += 3)
+        {
+          int wx = x0 + px;
+          // Any non-black backdrop pixel flips the dot to its contrasting
+          // shade -- MiniScope fills the waveform body in GRAY3 with WHITE
+          // peak endpoints, both of which count as "drawn" here.
+          int under = fb.readPixel(wx, coefY);
+          int shade;
+          if (active)
+            shade = (under > 0) ? BLACK : WHITE;
+          else
+            shade = (under > 0) ? BLACK : GRAY4;
+          fb.pixel(shade, wx, coefY);
+        }
+      }
+
+      // 4. Scan-position playhead. WHITE dashed vertical (1 px on / 2
+      // px off) drawn only by the ply whose slice contains scan, so
+      // exactly one ply shows it at any time.
       if (scanPos >= slice0 && scanPos < slice1)
       {
         int sx = x0 + (int)((scanPos - slice0) / sliceSize * (float)w);
         if (sx < x0) sx = x0;
         if (sx >= x0 + w) sx = x0 + w - 1;
-
-        float top = bellValueAt(scanPos);
-        int topY = y0 + (int)(top * (float)(h - 2));
-        if (topY >= y0 + h) topY = y0 + h - 1;
-
-        // Draw base-to-top vertical; each pixel inverts against whatever
-        // is already there.
-        for (int py = y0; py <= topY; py++)
-        {
-          int under = fb.readPixel(sx, py);
-          int shade = (under > 7) ? GRAY3 : WHITE;
-          fb.pixel(shade, sx, py);
-        }
-
-        // 4. Scan playhead carrying past the top of the level indicator
-        // to the top of the ply (dashed 1-on / 2-off), so the full axis
-        // is legible. Only the section above the rising indicator uses
-        // dashes; below it is the solid inverted line.
-        for (int py = topY + 1; py < y0 + h; py += 3)
+        for (int py = y0; py < y0 + h; py += 3)
           fb.pixel(WHITE, sx, py);
       }
     }
