@@ -82,6 +82,11 @@ function CompBandControl:init(args)
 
   -- Start in comp mode
   self:setCompMode(true)
+
+  -- Defensive: GainBias-side focusedReadout always points at Level so
+  -- onFocused/cancel/zero don't hit nil when entering the ply in
+  -- compMode. (setCompMode(true) doesn't initialize it.)
+  self.focusedReadout = self.bias
 end
 
 function CompBandControl:setCompMode(enabled)

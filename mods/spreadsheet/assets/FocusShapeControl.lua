@@ -64,6 +64,10 @@ function FocusShapeControl:init(args)
   self.focusMode = true
   self.shiftHeld = false
   self.shiftUsed = false
+
+  -- Defensive: keep focusedReadout pointing at Focus's bias so the
+  -- GainBias default onFocused/cancel/zero path never hits nil.
+  self.focusedReadout = self.bias
 end
 
 function FocusShapeControl:setFocusMode(enabled)
