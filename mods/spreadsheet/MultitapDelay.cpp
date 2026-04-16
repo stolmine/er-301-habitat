@@ -667,16 +667,24 @@ namespace stolmine
       float wetR = 0.0f;
       float lastTapOut = 0.0f;
 
+      // Pre-pass: fire one prefetch per active tap upfront, before the
+      // main loop. tapCount is small (<= kMaxTaps = 8) so the memory
+      // system can service all the cache misses in parallel during the
+      // first iteration's work. Strictly more effective than the old
+      // 1-ahead in-loop prefetch on a short loop, and the buffer here
+      // can be up to 20s (~960 KB) so memory latency dominates.
+      int32_t prefIdx[kMaxTaps];
       for (int t = 0; t < tapCount; t++)
       {
-        // Prefetch next tap's buffer position (hides memory latency)
-        if (t + 1 < tapCount && s.tapLevel[t + 1] >= 0.001f)
-        {
-          float nextPos = (float)s.writeIndex - mCachedDelaySamples[t + 1];
-          if (nextPos < 0.0f) nextPos += (float)maxDelay;
-          __builtin_prefetch(&buf[(int)nextPos], 0, 1);
-        }
+        float p = (float)s.writeIndex - mCachedDelaySamples[t];
+        if (p < 0.0f) p += (float)maxDelay;
+        prefIdx[t] = (int)p;
+        if (s.tapLevel[t] >= 0.001f)
+          __builtin_prefetch(&buf[prefIdx[t]], 0, 1);
+      }
 
+      for (int t = 0; t < tapCount; t++)
+      {
         if (s.tapLevel[t] < 0.001f)
           continue;
 
