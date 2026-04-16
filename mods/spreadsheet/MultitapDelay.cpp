@@ -741,20 +741,40 @@ namespace stolmine
             }
             s.grainSpawnCounter[t] = grainPeriod;
           }
+          // Prefetch pre-pass: fire one prefetch per active grain up
+          // front so the memory system can service the 2-3 concurrent
+          // misses in parallel while the envelope lookup / arithmetic
+          // for the first grain runs.
+          int grainIdx[kGrainsPerTap];
+          for (int g = 0; g < kGrainsPerTap; g++)
+          {
+            if (!s.grains[t][g].active) { grainIdx[g] = -1; continue; }
+            int idx = (int)s.grains[t][g].readPos;
+            if (idx >= maxDelay) idx -= maxDelay;
+            grainIdx[g] = idx;
+            __builtin_prefetch(&buf[idx], 0, 1);
+          }
+
           for (int g = 0; g < kGrainsPerTap; g++)
           {
             Internal::TapGrain &gr = s.grains[t][g];
             if (!gr.active) continue;
             float env = s.lookupSine(gr.phase);
-            int idx = ((int)gr.readPos) % maxDelay;
-            if (idx < 0) idx += maxDelay;
-            float frac = gr.readPos - floorf(gr.readPos);
-            int idx2 = (idx + 1) % maxDelay;
+            // readPos is kept in [0, maxDelay) by the advance wrap below,
+            // so we can skip the modulo and floorf that were previously
+            // here -- (int) cast is floor for non-negative values, and
+            // integer modulo is an actual division on am335x (~15 cycles)
+            // which we don't want per grain per sample.
+            int idx = grainIdx[g];
+            float frac = gr.readPos - (float)idx;
+            int idx2 = idx + 1;
+            if (idx2 >= maxDelay) idx2 = 0;
             float s0 = bufRead(buf, idx);
             float s1 = bufRead(buf, idx2);
             tapOut += (s0 + (s1 - s0) * frac) * env;
             gr.readPos += gr.reverse ? -gr.speed : gr.speed;
             if (gr.readPos < 0.0f) gr.readPos += (float)maxDelay;
+            if (gr.readPos >= (float)maxDelay) gr.readPos -= (float)maxDelay;
             gr.phase += gr.phaseDelta;
             if (gr.phase >= 1.0f) gr.active = false;
           }
