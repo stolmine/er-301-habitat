@@ -359,7 +359,7 @@ namespace stolmine
     {
     case 0: // all
       rndBias(mBiasCombSize, 0.001f, 1.0f);
-      rndBias(mBiasFeedback, 0.0f, 0.99f);
+      rndBias(mBiasFeedback, -0.99f, 0.99f);
       rndBiasInt(mBiasResonatorType, 0.0f, 3.0f);
       rndBiasInt(mBiasDensity, 1.0f, 24.0f);
       rndBiasInt(mBiasPattern, 0.0f, 15.0f);
@@ -367,7 +367,7 @@ namespace stolmine
       rndBias(mBiasMix, 0.0f, 1.0f);
       break;
     case 1: rndBias(mBiasCombSize, 0.001f, 1.0f); break;
-    case 2: rndBias(mBiasFeedback, 0.0f, 0.99f); break;
+    case 2: rndBias(mBiasFeedback, -0.99f, 0.99f); break;
     case 3: rndBiasInt(mBiasResonatorType, 0.0f, 3.0f); break;
     case 4: rndBiasInt(mBiasDensity, 1.0f, 24.0f); break;
     case 5: rndBiasInt(mBiasPattern, 0.0f, 15.0f); break;
@@ -409,7 +409,10 @@ namespace stolmine
 
     // CombSize parameter is in seconds
     float combSize = CLAMP(0.00002f, 20.0f, mCombSize.value());
-    float feedback = CLAMP(0.0f, 0.99f, mFeedback.value());
+    // Feedback is bipolar: negative values phase-invert each tap loop,
+    // yielding a different comb character. |feedback| clamped to 0.99
+    // for stability (matches the old positive-only ceiling).
+    float feedback = CLAMP(-0.99f, 0.99f, mFeedback.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());

@@ -29,7 +29,7 @@ local sizeMap = (function()
   return map
 end)()
 
-local feedbackMap = floatMap(0, 0.99)
+local feedbackMap = floatMap(-0.99, 0.99)
 local mixMap = floatMap(0, 1)
 local inputLevelMap = floatMap(0, 4)
 local outputLevelMap = floatMap(0, 4)
