@@ -96,6 +96,25 @@ end
 function Blanda:onLoadViews(objects, branches)
   local controls = {}
 
+  -- Helper that wraps an existing ParameterAdapter (name matches both the
+  -- objects key and the branches key, thanks to the adapter() helper in
+  -- onLoadGraph) as a stock GainBias ply. Used for the helper plies that
+  -- only appear in a parent control's expansion view.
+  local function helper(button, description, adapterName, biasMap, precision)
+    local obj = objects[adapterName]
+    return GainBias {
+      button = button,
+      description = description,
+      branch = branches[adapterName],
+      gainbias = obj,
+      range = obj,
+      biasMap = biasMap,
+      biasUnits = app.unitNone,
+      biasPrecision = precision or 2,
+      initialBias = obj:getParameter("Bias"):value()
+    }
+  end
+
   local function input(i, button, description, branchName)
     return MixInputControl {
       button = button,
@@ -124,6 +143,14 @@ function Blanda:onLoadViews(objects, branches)
   self:addToMuteGroup(controls.in2)
   self:addToMuteGroup(controls.in3)
 
+  -- Helper plies for in1/in2/in3 expansion: Level / Weight / Offset per input.
+  for i = 0, 2 do
+    local n = i + 1
+    controls["level" .. i]  = helper("lvl",  "Level "  .. n, "level"  .. i, levelMap)
+    controls["weight" .. i] = helper("wght", "Weight " .. n, "weight" .. i, weightMap)
+    controls["offset" .. i] = helper("ofst", "Offset " .. n, "offset" .. i, offsetMap)
+  end
+
   controls.scan = ScanSkewControl {
     button = "scan",
     description = "Scan",
@@ -137,6 +164,9 @@ function Blanda:onLoadViews(objects, branches)
     skewMap = skewMap,
     skewParam = objects.skew:getParameter("Bias")
   }
+
+  -- Scan expansion helper.
+  controls.skew = helper("skew", "Skew", "skew", skewMap)
 
   controls.focus = FocusShapeControl {
     button = "focus",
@@ -154,6 +184,12 @@ function Blanda:onLoadViews(objects, branches)
     shape2Param = objects.shape2:getParameter("Bias")
   }
 
+  -- Focus expansion helpers: one Shape ply per input. Buttons mirror
+  -- FocusShapeControl's shift-sub sub-button labels for consistency.
+  controls.shape0 = helper("in1", "Shape 1", "shape0", shapeMap)
+  controls.shape1 = helper("in2", "Shape 2", "shape1", shapeMap)
+  controls.shape2 = helper("in3", "Shape 3", "shape2", shapeMap)
+
   controls.level = GainBias {
     button = "lvl",
     description = "Output Level",
@@ -168,7 +204,14 @@ function Blanda:onLoadViews(objects, branches)
 
   local views = {
     expanded = { "in1", "in2", "in3", "scan", "focus", "level" },
-    collapsed = {}
+    collapsed = {},
+    -- Per-control expansion sub-views: pressing expand on any of these
+    -- plies surfaces the parent control plus helper plies side-by-side.
+    in1 = { "in1", "level0", "weight0", "offset0" },
+    in2 = { "in2", "level1", "weight1", "offset1" },
+    in3 = { "in3", "level2", "weight2", "offset2" },
+    scan = { "scan", "skew" },
+    focus = { "focus", "shape0", "shape1", "shape2" }
   }
 
   return controls, views
