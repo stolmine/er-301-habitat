@@ -808,6 +808,20 @@ function MultitapDelay:onShowMenu(objects, branches)
       if self.objects.opR then
         self.objects.opR:allocateTimeUpTo(secs)
       end
+      -- Rebuild the masterTime fader's biasMap so the visible throw
+      -- matches the actual usable range. Without this, cutting buffer
+      -- from 20s to e.g. 2s leaves most of the fader in a dead zone.
+      if self.controls and self.controls.masterTime then
+        local newMap = app.LinearDialMap(0.01, secs)
+        newMap:setSteps(1, 0.1, 0.01, 0.001)
+        self.controls.masterTime:setBiasMap(newMap)
+      end
+      -- If the current masterTime value overshoots the new buffer,
+      -- clamp it so the fader doesn't land past its new maximum.
+      local cur = self.objects.masterTime:getParameter("Bias"):value()
+      if cur > secs then
+        self.objects.masterTime:hardSet("Bias", secs)
+      end
     end
   end
   return {
