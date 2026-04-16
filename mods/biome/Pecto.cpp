@@ -6,6 +6,11 @@
 #include <new>
 #include <stdlib.h>
 
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#define PECTO_HAS_NEON 1
+#endif
+
 namespace stolmine
 {
 
@@ -475,9 +480,10 @@ namespace stolmine
     // Separating compute / gather / combine lets the compiler auto-
     // vectorize the arithmetic passes (A and C) on NEON targets;
     // gather (B) stays scalar but is now isolated and prefetched
-    // further ahead.
-    int idx0[kMaxCombTaps];
-    int idx1[kMaxCombTaps];
+    // further ahead. idx0/idx1 are int32_t so NEON intrinsic
+    // vst1q_s32 compiles (it wants int32_t*, not int*, on ARM GCC).
+    int32_t idx0[kMaxCombTaps];
+    int32_t idx1[kMaxCombTaps];
     float frac[kMaxCombTaps];
     int16_t sA[kMaxCombTaps];
     int16_t sB[kMaxCombTaps];
@@ -494,36 +500,110 @@ namespace stolmine
       float writeIdxF = (float)s.writeIndex;
       float maxDelayF = (float)maxDelay;
 
-      // Pass A: compute read indices and fractional offsets. Simple
-      // linear arithmetic + masked add -- auto-vectorizes cleanly.
+#ifdef PECTO_HAS_NEON
+      // --- Pass A (NEON): compute read indices and fractional offsets.
+      {
+        const float32x4_t writeIdxVec = vdupq_n_f32(writeIdxF);
+        const float32x4_t zeroVec = vdupq_n_f32(0.0f);
+        const float32x4_t maxDelayFVec = vdupq_n_f32(maxDelayF);
+        const int32x4_t maxDelayVec = vdupq_n_s32(maxDelay);
+        const int32x4_t oneVec = vdupq_n_s32(1);
+        const int32x4_t zeroIVec = vdupq_n_s32(0);
+
+        int t = 0;
+        for (; t + 4 <= density; t += 4)
+        {
+          float32x4_t delayV = vld1q_f32(&mCachedDelaySamples[t]);
+          float32x4_t p = vsubq_f32(writeIdxVec, delayV);
+          uint32x4_t negMask = vcltq_f32(p, zeroVec);
+          float32x4_t pWrap = vaddq_f32(p, maxDelayFVec);
+          p = vbslq_f32(negMask, pWrap, p);
+          int32x4_t i0v = vcvtq_s32_f32(p);           // p >= 0, truncates = floor
+          int32x4_t i1v = vaddq_s32(i0v, oneVec);
+          uint32x4_t wrapMask = vcgeq_s32(i1v, maxDelayVec);
+          i1v = vbslq_s32(wrapMask, zeroIVec, i1v);
+          float32x4_t fracV = vsubq_f32(p, vcvtq_f32_s32(i0v));
+          vst1q_s32(&idx0[t], i0v);
+          vst1q_s32(&idx1[t], i1v);
+          vst1q_f32(&frac[t], fracV);
+        }
+        // Tail
+        for (; t < density; t++)
+        {
+          float p = writeIdxF - mCachedDelaySamples[t];
+          if (p < 0.0f) p += maxDelayF;
+          int i0 = (int)p;
+          int i1 = i0 + 1;
+          if (i1 >= maxDelay) i1 = 0;
+          idx0[t] = i0;
+          idx1[t] = i1;
+          frac[t] = p - (float)i0;
+        }
+      }
+#else
+      // Pass A (scalar): compiler auto-vectorizes on -O3 -msse4 etc.
       for (int t = 0; t < density; t++)
       {
         float p = writeIdxF - mCachedDelaySamples[t];
         if (p < 0.0f) p += maxDelayF;
-        int i0 = (int)p;                // floor since p >= 0
+        int i0 = (int)p;
         int i1 = i0 + 1;
         if (i1 >= maxDelay) i1 = 0;
         idx0[t] = i0;
         idx1[t] = i1;
         frac[t] = p - (float)i0;
       }
+#endif
 
-      // Pass B: scalar gather -- the one pass that can't vectorize on
-      // Cortex-A8 (no gather load in NEON). Prefetch 4 ahead so the
-      // memory system has time to service misses before we read them.
+      // Pass B: scalar gather (no NEON gather on Cortex-A8). Prefetch
+      // 8 taps ahead -- 192 KB buffer regularly misses L1 so we need
+      // a longer pipeline to hide memory latency.
       for (int t = 0; t < density; t++)
       {
-        int pfIdx = t + 4;
+        int pfIdx = t + 8;
         if (pfIdx < density)
           __builtin_prefetch(&buf[idx0[pfIdx]], 0, 1);
         sA[t] = buf[idx0[t]];
         sB[t] = buf[idx1[t]];
       }
 
-      // Pass C: interpolate + weight + accumulate. Dense float math --
-      // auto-vectorizes well as a scalar reduction.
       float wet = 0.0f;
       float lastTapOut = 0.0f;
+
+#ifdef PECTO_HAS_NEON
+      // --- Pass C (NEON): interpolate + weight + accumulate.
+      {
+        const float32x4_t scaleVec = vdupq_n_f32(scale);
+        float32x4_t wetVec = vdupq_n_f32(0.0f);
+        int t = 0;
+        for (; t + 4 <= density; t += 4)
+        {
+          int16x4_t sAi = vld1_s16(&sA[t]);
+          int16x4_t sBi = vld1_s16(&sB[t]);
+          float32x4_t aV = vmulq_f32(vcvtq_f32_s32(vmovl_s16(sAi)), scaleVec);
+          float32x4_t bV = vmulq_f32(vcvtq_f32_s32(vmovl_s16(sBi)), scaleVec);
+          float32x4_t fV = vld1q_f32(&frac[t]);
+          float32x4_t wV = vld1q_f32(&mCachedTapWeight[t]);
+          float32x4_t tapV = vmlaq_f32(aV, vsubq_f32(bV, aV), fV);
+          tapV = vmulq_f32(tapV, wV);
+          wetVec = vaddq_f32(wetVec, tapV);
+          lastTapOut = vgetq_lane_f32(tapV, 3);
+        }
+        // Horizontal sum (Cortex-A8: no vaddvq; use vadd + vpadd).
+        float32x2_t loHi = vadd_f32(vget_low_f32(wetVec), vget_high_f32(wetVec));
+        wet = vget_lane_f32(vpadd_f32(loHi, loHi), 0);
+        // Scalar tail
+        for (; t < density; t++)
+        {
+          float a = (float)sA[t] * scale;
+          float b = (float)sB[t] * scale;
+          float tapOut = (a + (b - a) * frac[t]) * mCachedTapWeight[t];
+          wet += tapOut;
+          lastTapOut = tapOut;
+        }
+      }
+#else
+      // Pass C (scalar): auto-vectorizes as a reduction on -O3.
       for (int t = 0; t < density; t++)
       {
         float a = (float)sA[t] * scale;
@@ -532,6 +612,7 @@ namespace stolmine
         wet += tapOut;
         lastTapOut = tapOut;
       }
+#endif
 
 
       // Feedback from longest tap (last position, highest delay)
