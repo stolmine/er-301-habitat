@@ -201,7 +201,10 @@ function Helicase:onLoadViews()
   }
   local carrShapeMap = (function()
     local m = app.LinearDialMap(0, 7)
-    m:setSteps(1, 0.1, 0.01, 0.001)
+    -- Fine/super-fine tuned for audibly smooth morphs between adjacent
+    -- integer shapes. Coarse stays at 1 so users can still snap to a
+    -- specific shape.
+    m:setSteps(1, 0.02, 0.001, 0.0001)
     return m
   end)()
   controls.overCarrierShape = GainBias {

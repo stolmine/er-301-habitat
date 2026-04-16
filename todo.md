@@ -13,13 +13,16 @@
 ### Pecto
 - [ ] CPU spikes on certain settings (high density + long comb + sitar/clarinet resonator). Profile on am335x.
 - [ ] Zipper noise on V/Oct and comb size changes. Needs per-block interpolation or one-pole smoother on delay length.
+- [ ] Feedback control bipolar: currently 0..1 positive-only. Extend to -1..+1 so negative feedback (phase-inverted) is available as well as positive. Bipolar map on the Lua ply + signed feedback term in the C++ process loop; watch for any existing stability assumptions that assumed positive-only.
+- [ ] Cap density at 12 taps (down from 24). Current cap of 24 was set for CPU/UI but 12 is the intended ceiling; lower the compile-time constant and verify xform randomization, sorted tap reads, and any graphic still respect it. Existing presets above 12 should clamp on load rather than truncate silently.
 
 ### Tomograph
 - [x] Overview viz: distended bottom lobe / off-position band spokes on hardware. Root cause was runtime sinf/cosf from package .so miscomputing on am335x; firmware-compiled graphics unaffected. Fixed with 72-entry cos/sin LUT in FilterResponseGraphic (77ca47a). LUT memory saved for future package graphics.
 - [ ] FilterListControl type label doesn't update when macros change filter type externally (readout is correct, label text stale).
 
 ### Helicase
-- [ ] Discontinuity transfer functions 7, 12, 15 click at zero crossings. Value discontinuity in fold/wrap/ring-fold cases needs interpolation or smoothing.
+- [x] Discontinuity transfer functions 7, 12, 15 click at zero crossings. Landed a three-part fix: polyBLEP for the value jumps in shapes 7 (opl3 log-saw) and 12 (wrap), smoothed-abs (`sqrt(s² + ε²)`) for the V-corners in shape 15, plus full 2× oversampling of the hi-fi inner loop (mod + feedback + FM + carrier + shaper) with 2-tap halfband decimation. Lo-fi path untouched. Carrier shape fine-step tightened to `(1, 0.02, 0.001, 0.0001)` so the morph is audibly smooth under sweep. CPU in hi-fi rises ~3pp to roughly 16-20% per instance.
+- [ ] DC offset: something in the shaping / discontinuity path (likely the asymmetric transfer functions) introduces significant DC. Want to remove it above a frequency threshold (say, ~1-2 Hz or whatever keeps LFO territory intact) so Helicase stays usable as an LFO -- LFOs legitimately carry DC, audio-rate output shouldn't. Candidate: high-pass at ~0.5-1 Hz always on, OR a frequency-gated DC blocker that disables below LFO range, OR a cheap one-pole DC blocker whose cutoff tracks f0. Design pick after identifying the DC source.
 
 ### Impasto
 - [x] Auto gain + sidechain enable only affect one channel in stereo. Toggle handlers fan out to both op instances; deserialize re-syncs opR to op (52b3213).

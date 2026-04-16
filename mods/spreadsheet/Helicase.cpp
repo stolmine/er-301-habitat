@@ -12,6 +12,23 @@ namespace stolmine
 
   static const float kTwoPi = 6.28318530718f;
 
+  // Polynomial BLEP residual for naive saw/wrap discontinuities.
+  // t: fractional phase position in [0, 1); dt: phase step per sample.
+  static inline float polyBlep(float t, float dt)
+  {
+    if (t < dt)
+    {
+      t /= dt;
+      return t + t - t * t - 1.0f;
+    }
+    if (t > 1.0f - dt)
+    {
+      t = (t - 1.0f) / dt;
+      return t * t + t + t + 1.0f;
+    }
+    return 0.0f;
+  }
+
   // OPL3 waveform set (8 shapes)
   // Used for modulator shape (hard-switched) and discontinuity folder (morphable)
   static inline float opl3Wave(float phase, int shape)
@@ -72,8 +89,12 @@ namespace stolmine
       float x2 = x * x;
       return x * (4.0f * x2 - 3.0f);
     }
-    case 15: // ring fold -- abs with DC cycling
-      return fabsf(sinf(x * (float)M_PI * 2.0f)) * 2.0f - 1.0f;
+    case 15: // ring fold -- smoothed-abs to round V-corners at sin zero crossings
+    {
+      float s = sinf(x * (float)M_PI * 2.0f);
+      const float eps = 0.03f;
+      return sqrtf(s * s + eps * eps) * 2.0f - 1.0f;
+    }
     }
     return x;
   }
@@ -102,7 +123,8 @@ namespace stolmine
 
   // Discontinuity folder: morph between adjacent transfer functions (0-15)
   // 0-7: OPL3 operations (phase-mapped), 8-15: wavefolders (direct)
-  static inline float discFold(float input, float typeF)
+  // prevInput feeds the polyBLEP correction for shapes with value jumps.
+  static inline float discFold(float input, float typeF, float prevInput)
   {
     int t0 = (int)typeF;
     int t1 = t0 + 1;
@@ -111,13 +133,30 @@ namespace stolmine
     if (t0 > 15) t0 = 15;
     float frac = typeF - (float)t0;
 
-    auto evalShape = [](float inp, int t) -> float {
+    float dt = fabsf(input - prevInput) * 0.5f;
+    if (dt < 1e-6f) dt = 1e-6f;
+    if (dt > 0.5f) dt = 0.5f;
+
+    auto evalShape = [dt](float inp, int t) -> float {
       if (t <= 7)
       {
         float p = (inp + 1.0f) * 0.5f;
-        return opl3Wave(p, t);
+        float w = opl3Wave(p, t);
+        if (t == 7)
+        {
+          float pp = p - floorf(p);
+          w += polyBlep(pp, dt);
+        }
+        return w;
       }
-      return foldShape(inp, t);
+      float w = foldShape(inp, t);
+      if (t == 12)
+      {
+        float p = (inp + 1.0f) * 0.5f;
+        p = p - floorf(p);
+        w -= polyBlep(p, dt);
+      }
+      return w;
     };
 
     float w0 = evalShape(input, t0);
@@ -150,6 +189,9 @@ namespace stolmine
     int ringDecimCounter;
     int ringDecimRate;
 
+    // Previous carrier signal into discFold (for polyBLEP dt estimation)
+    float lastShaperInput;
+
     void Init()
     {
       carrierPhase = 0.0f;
@@ -166,6 +208,7 @@ namespace stolmine
       curCarrierOutput = 0.0f;
       slewCarrierFreq = 110.0f;
       slewModFreq = 220.0f;
+      lastShaperInput = 0.0f;
     }
   };
 
@@ -308,63 +351,128 @@ namespace stolmine
       }
       float carrierInc = carrierFreq / sr;
       float modInc = modFreq / sr;
-      // Sync: phase-receptivity check (JF-inspired)
-      // Latch rising edge as pending, fire when modulator reaches threshold
+      // Sync edge detection stays at output (1x) rate -- sync input buffer
+      // is 1x. Rising edge latches syncPending; firing happens in the mod
+      // update block below at 2x rate in hifi so threshold crossings are
+      // caught with correct granularity.
       bool syncHigh = sync[i] > 0.5f;
       if (syncHigh && !s.syncWasHigh)
         s.syncPending = true;
       s.syncWasHigh = syncHigh;
 
-      float prevModPhase = s.modPhase;
+      float carrSig, modOut, folded;
 
-      // Modulator
-      s.modPhase += modInc;
-      s.modPhase -= floorf(s.modPhase);
-
-      // Phase-receptivity: fire pending sync when modulator crosses threshold
-      if (s.syncPending)
+      if (hifi)
       {
-        // Clear pending if modulator wrapped (missed this cycle)
-        if (s.modPhase < prevModPhase)
-          s.syncPending = false;
+        // --- 2x oversampled inner loop ---
+        // Full chain (mod osc + feedback + FM + carrier osc + shaper)
+        // advances at half-sample-rate-step per sub-iter. Halfband 2-tap
+        // average decimates back to 1x. Kills aliasing from hard-edged
+        // shapes, FM sidebands, feedback saturation, and shaper
+        // discontinuities in one pass.
+        float modIncH = modInc * 0.5f;
+        float carrierIncH = carrierInc * 0.5f;
 
-        if (s.modPhase >= syncThreshold)
+        float carrSub[2], modSub[2], foldSub[2];
+
+        for (int sub = 0; sub < 2; sub++)
         {
-          s.carrierPhase = 0.0f;
-          s.syncPending = false;
+          float prevModPhase = s.modPhase;
+          s.modPhase += modIncH;
+          s.modPhase -= floorf(s.modPhase);
+
+          if (s.syncPending)
+          {
+            if (s.modPhase < prevModPhase)
+              s.syncPending = false;
+            if (s.modPhase >= syncThreshold)
+            {
+              s.carrierPhase = 0.0f;
+              s.syncPending = false;
+            }
+          }
+
+          float fb = tanhf(s.modFeedbackState) * feedback * 0.5f;
+          float modPhaseFB = s.modPhase + fb;
+          float modOutSub = opl3WaveMorph(modPhaseFB, modShapeF);
+          s.modFeedbackState = modOutSub;
+
+          // FM, matched to 2x rate: linFM divides by sr*2 so the per-sub-
+          // sample phase step is half; expoFM uses modIncH which is
+          // already halved.
+          float fmAmount;
+          if (linFM)
+            fmAmount = modOutSub * modIndex * 100.0f / (sr * 2.0f);
+          else
+            fmAmount = modOutSub * modIndex * modIncH;
+
+          s.carrierPhase += carrierIncH + fmAmount;
+          s.carrierPhase -= floorf(s.carrierPhase);
+
+          float carrSigSub = opl3WaveMorph(s.carrierPhase, carrierShapeF);
+
+          // Shaper runs once per sub-sample with the REAL sub-sample
+          // carrier (not interpolated). Prior-sub-sample carrSig feeds
+          // the polyBLEP dt estimate via lastShaperInput.
+          float foldedSub = carrSigSub;
+          if (discIndex > 0.001f)
+          {
+            float f = discFold(carrSigSub, discTypeF, s.lastShaperInput);
+            foldedSub = carrSigSub * (1.0f - discIndex) + f * discIndex;
+          }
+          s.lastShaperInput = carrSigSub;
+
+          carrSub[sub] = carrSigSub;
+          modSub[sub] = modOutSub;
+          foldSub[sub] = foldedSub;
         }
+
+        // 2-tap halfband decimation (zero at Nyquist).
+        carrSig = 0.5f * (carrSub[0] + carrSub[1]);
+        modOut  = 0.5f * (modSub[0]  + modSub[1]);
+        folded  = 0.5f * (foldSub[0] + foldSub[1]);
       }
-
-      // Self-feedback: modulator output feeds back into its own phase
-      float fb = tanhf(s.modFeedbackState) * feedback * 0.5f;
-      float modPhaseFB = s.modPhase + fb;
-      float modOut = hifi ? opl3WaveMorph(modPhaseFB, modShapeF)
-                          : opl3Wave(modPhaseFB, modShape);
-      s.modFeedbackState = modOut;
-
-      // FM: modulator modulates carrier phase increment
-      float fmAmount;
-      if (linFM)
-        // Linear through-zero FM: deviation in Hz = modIndex * 100Hz
-        // Independent of carrier frequency, allows negative frequencies (TZFM)
-        fmAmount = modOut * modIndex * 100.0f / sr;
       else
-        // Exponential FM: ratio-preserving, deviation scales with modulator freq
-        fmAmount = modOut * modIndex * modInc;
-
-      s.carrierPhase += carrierInc + fmAmount;
-      s.carrierPhase -= floorf(s.carrierPhase);
-
-      // Carrier (always FM'd)
-      float carrSig = hifi ? opl3WaveMorph(s.carrierPhase, carrierShapeF)
-                           : opl3Wave(s.carrierPhase, carrierShape);
-
-      // Discontinuity folder
-      float folded = carrSig;
-      if (discIndex > 0.001f)
       {
-        float f = discFold(carrSig, discTypeF);
-        folded = carrSig * (1.0f - discIndex) + f * discIndex;
+        // --- 1x lofi path (unchanged behavior) ---
+        float prevModPhase = s.modPhase;
+        s.modPhase += modInc;
+        s.modPhase -= floorf(s.modPhase);
+
+        if (s.syncPending)
+        {
+          if (s.modPhase < prevModPhase)
+            s.syncPending = false;
+          if (s.modPhase >= syncThreshold)
+          {
+            s.carrierPhase = 0.0f;
+            s.syncPending = false;
+          }
+        }
+
+        float fb = tanhf(s.modFeedbackState) * feedback * 0.5f;
+        float modPhaseFB = s.modPhase + fb;
+        modOut = opl3Wave(modPhaseFB, modShape);
+        s.modFeedbackState = modOut;
+
+        float fmAmount;
+        if (linFM)
+          fmAmount = modOut * modIndex * 100.0f / sr;
+        else
+          fmAmount = modOut * modIndex * modInc;
+
+        s.carrierPhase += carrierInc + fmAmount;
+        s.carrierPhase -= floorf(s.carrierPhase);
+
+        carrSig = opl3Wave(s.carrierPhase, carrierShape);
+
+        folded = carrSig;
+        if (discIndex > 0.001f)
+        {
+          float f = discFold(carrSig, discTypeF, s.lastShaperInput);
+          folded = carrSig * (1.0f - discIndex) + f * discIndex;
+        }
+        s.lastShaperInput = carrSig;
       }
 
       // Lo-fi: OPL3 bit-depth quantization on oscillators before mix
