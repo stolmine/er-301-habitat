@@ -12,6 +12,7 @@ local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local MixInputControl = require "spreadsheet.MixInputControl"
 local FocusShapeControl = require "spreadsheet.FocusShapeControl"
+local ScanSkewControl = require "spreadsheet.ScanSkewControl"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max, steps)
@@ -30,6 +31,7 @@ local offsetMap = floatMap(0, 1, {0.1, 0.01, 0.001, 0.0001})
 local shapeMap  = floatMap(0, 1, {0.1, 0.01, 0.001, 0.0001})
 local scanMap   = floatMap(0, 1, {0.1, 0.01, 0.001, 0.0001})
 local focusMap  = floatMap(-1, 1, {0.1, 0.01, 0.001, 0.0001})
+local skewMap   = floatMap(-1, 1, {0.1, 0.01, 0.001, 0.0001})
 local outLevMap = floatMap(0, 2, {0.1, 0.01, 0.001, 0.0001})
 
 local Blanda = Class {}
@@ -81,6 +83,7 @@ function Blanda:onLoadGraph(channelCount)
   adapter("shape2",  "Shape2",  0.0)
   adapter("scan",    "Scan",    0.5)
   adapter("focus",   "Focus",   0.0)
+  adapter("skew",    "Skew",    0.0)
   adapter("outputLevel", "OutputLevel", 1.0)
 
   -- Output: just the op's out, duplicated across channels on stereo chain.
@@ -121,7 +124,7 @@ function Blanda:onLoadViews(objects, branches)
   self:addToMuteGroup(controls.in2)
   self:addToMuteGroup(controls.in3)
 
-  controls.scan = GainBias {
+  controls.scan = ScanSkewControl {
     button = "scan",
     description = "Scan",
     branch = branches.scan,
@@ -130,7 +133,9 @@ function Blanda:onLoadViews(objects, branches)
     biasMap = scanMap,
     biasUnits = app.unitNone,
     biasPrecision = 2,
-    initialBias = 0.5
+    initialBias = 0.5,
+    skewMap = skewMap,
+    skewParam = objects.skew:getParameter("Bias")
   }
 
   controls.focus = FocusShapeControl {
@@ -175,7 +180,7 @@ local adapterBiases = {
   "weight0", "weight1", "weight2",
   "offset0", "offset1", "offset2",
   "shape0", "shape1", "shape2",
-  "scan", "focus", "outputLevel"
+  "scan", "focus", "skew", "outputLevel"
 }
 
 function Blanda:serialize()

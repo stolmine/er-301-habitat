@@ -54,6 +54,7 @@ namespace stolmine
     // Global
     od::Parameter mScan{"Scan", 0.5f};
     od::Parameter mFocus{"Focus", 0.0f};
+    od::Parameter mSkew{"Skew", 0.0f}; // bipolar macro: warps all Offsets via pow(x, exp2(skew))
     od::Parameter mOutputLevel{"OutputLevel", 1.0f};
 #endif
 

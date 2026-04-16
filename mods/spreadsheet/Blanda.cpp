@@ -36,6 +36,7 @@ namespace stolmine
     addParameter(mShape2);
     addParameter(mScan);
     addParameter(mFocus);
+    addParameter(mSkew);
     addParameter(mOutputLevel);
   }
 
@@ -84,11 +85,19 @@ namespace stolmine
         CLAMP(0.0f, 1.0f, mShape2.value())
     };
     float focus = CLAMP(-1.0f, 1.0f, mFocus.value());
+    float skew = CLAMP(-1.0f, 1.0f, mSkew.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
 
     // focus bipolar: -1 -> focusWidth = kFocusBaseline/4, +1 -> 4x wider.
     // powf(4, focus) = exp(focus * ln 4).
     float focusWidth = kFocusBaseline * powf(4.0f, focus);
+
+    // Skew macro: warp every offset through pow(x, exp2(skew)). Monotonic,
+    // stays in [0,1], preserves ordering. Skew>0 bunches bells toward the
+    // low end of the scan axis, skew<0 toward the high end.
+    float skewGamma = exp2f(skew);
+    for (int b = 0; b < kBlandaInputs; b++)
+      offset[b] = powf(offset[b], skewGamma);
 
     // Precompute per-band widths.
     float w[kBlandaInputs];
