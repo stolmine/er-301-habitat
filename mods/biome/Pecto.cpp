@@ -40,7 +40,9 @@ namespace stolmine
     if (idx0 >= maxDelay) idx0 -= maxDelay;
     int idx1 = idx0 + 1;
     if (idx1 >= maxDelay) idx1 = 0;
-    return bufRead(buf, idx0) + (bufRead(buf, idx1) - bufRead(buf, idx0)) * frac;
+    float a = bufRead(buf, idx0);
+    float b = bufRead(buf, idx1);
+    return a + (b - a) * frac;
   }
 
   struct Pecto::Internal
@@ -285,6 +287,25 @@ namespace stolmine
       }
     }
 
+    // Sort tap positions ascending and carry weights alongside so the
+    // per-block cache population doesn't have to re-sort every block.
+    // Multiplying tapPosition[] by a positive scalar (baseDelay) preserves
+    // order, so this sort suffices for the lifetime of these tap settings.
+    for (int i = 1; i < density; i++)
+    {
+      float pKey = s.tapPosition[i];
+      float wKey = s.tapWeight[i];
+      int j = i - 1;
+      while (j >= 0 && s.tapPosition[j] > pKey)
+      {
+        s.tapPosition[j + 1] = s.tapPosition[j];
+        s.tapWeight[j + 1] = s.tapWeight[j];
+        j--;
+      }
+      s.tapPosition[j + 1] = pKey;
+      s.tapWeight[j + 1] = wKey;
+    }
+
     mLastDensity = density;
     mLastPattern = pattern;
     mLastSlope = slope;
@@ -412,25 +433,13 @@ namespace stolmine
     if (baseDelay < 1.0f) baseDelay = 1.0f;
     if (baseDelay > (float)(maxDelay - 1)) baseDelay = (float)(maxDelay - 1);
 
-    // Cache per-tap delay positions, sorted ascending for cache locality
+    // Cache per-tap delay positions. tapPosition[] and tapWeight[] are
+    // already sorted ascending inside recomputeTaps(), and multiplying
+    // by baseDelay preserves order, so no per-block sort is needed.
     for (int t = 0; t < density; t++)
     {
       mCachedDelaySamples[t] = baseDelay * s.tapPosition[t];
       mCachedTapWeight[t] = s.tapWeight[t];
-    }
-    for (int t = 1; t < density; t++)
-    {
-      float dKey = mCachedDelaySamples[t];
-      float wKey = mCachedTapWeight[t];
-      int j = t - 1;
-      while (j >= 0 && mCachedDelaySamples[j] > dKey)
-      {
-        mCachedDelaySamples[j + 1] = mCachedDelaySamples[j];
-        mCachedTapWeight[j + 1] = mCachedTapWeight[j];
-        j--;
-      }
-      mCachedDelaySamples[j + 1] = dKey;
-      mCachedTapWeight[j + 1] = wKey;
     }
 
     // Comb feedback: direct, no tap-count normalization
@@ -457,6 +466,11 @@ namespace stolmine
     // No tap normalization -- comb taps sum coherently for resonance.
     // Output limiter (tanh) handles any clipping.
 
+    // Resonator type and sitar-mode are block-constant. Hoist branches
+    // out of the per-sample loop: isSitar gates the jawari write-offset
+    // path (only path that differs structurally between types).
+    const bool isSitar = (resonatorType == 3);
+
     // Process audio
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -469,13 +483,14 @@ namespace stolmine
       float lastTapOut = 0.0f;
       for (int t = 0; t < density; t++)
       {
-        // Prefetch next tap's buffer position (hides memory latency)
-        if (t + 1 < density)
-        {
-          float nextPos = (float)s.writeIndex - mCachedDelaySamples[t + 1];
-          if (nextPos < 0.0f) nextPos += (float)maxDelay;
-          __builtin_prefetch(&buf[(int)nextPos], 0, 1);
-        }
+        // Prefetch next tap's buffer position (hides memory latency).
+        // mCachedDelaySamples[] is sized kMaxCombTaps; reading [t+1] at
+        // t == density-1 is always safe (prefetching a slightly-stale
+        // pointer is a hint-only no-op).
+        float nextPos = (float)s.writeIndex - mCachedDelaySamples[t + 1];
+        if (nextPos < 0.0f) nextPos += (float)maxDelay;
+        __builtin_prefetch(&buf[(int)nextPos], 0, 1);
+
         float readPos = (float)s.writeIndex - mCachedDelaySamples[t];
         if (readPos < 0.0f) readPos += (float)maxDelay;
         float tapOut = bufReadInterp(buf, readPos, maxDelay) * mCachedTapWeight[t];
@@ -522,22 +537,14 @@ namespace stolmine
       }
       }
 
-      // Sitar delay modulation: shift write position based on envelope
-      // This creates pitch wobble proportional to signal amplitude (jawari effect)
-      float writeOffset = 0.0f;
-      if (resonatorType == 3)
-      {
-        // Modulate delay by up to +/-2 samples based on amplitude
-        writeOffset = s.sitarEnvFollower * 4.0f;
-      }
-
-      // Write input + feedback combined
+      // Write input + feedback combined. Sitar modulates the write
+      // position for jawari pitch wobble; other types write straight.
       float fbInjection = (fabsf(fb) > 1.5f) ? fast_tanh(fb) : fb;
       int writePos = s.writeIndex;
-      if (writeOffset > 0.001f)
+      if (isSitar && s.sitarEnvFollower > 0.00025f)
       {
-        // Sitar: write at modulated position for pitch instability
-        int modPos = writePos + (int)(writeOffset);
+        // Modulate delay by up to ~+/- 2 samples based on amplitude
+        int modPos = writePos + (int)(s.sitarEnvFollower * 4.0f);
         if (modPos >= maxDelay) modPos -= maxDelay;
         if (modPos < 0) modPos += maxDelay;
         bufWrite(buf, modPos, x + fbInjection);
