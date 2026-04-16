@@ -58,12 +58,16 @@ namespace stolmine
     float tapWeight[kMaxCombTaps];
     float fbFilterState = 0.0f;
     float sitarEnvFollower = 0.0f;
+    float dcX1 = 0.0f;
+    float dcY1 = 0.0f;
 
     void Init()
     {
       writeIndex = 0;
       fbFilterState = 0.0f;
       sitarEnvFollower = 0.0f;
+      dcX1 = 0.0f;
+      dcY1 = 0.0f;
       for (int i = 0; i < kMaxCombTaps; i++)
       {
         tapPosition[i] = (float)(i + 1) / (float)kMaxCombTaps;
@@ -407,6 +411,12 @@ namespace stolmine
     int maxDelay = mMaxDelayInSamples;
     float sr = globalConfig.sampleRate;
 
+    // Fixed 20 Hz one-pole DC blocker at the output. Pecto is an audio-
+    // rate resonator -- no LFO use case to preserve -- so the filter
+    // runs unconditionally. Coefficient from (1 - 2pi*fc/sr), which
+    // matches exp(-2pi*fc/sr) for small fc/sr.
+    const float dcR = 1.0f - 6.28318530718f * 20.0f / sr;
+
     // CombSize parameter is in seconds
     float combSize = CLAMP(0.00002f, 20.0f, mCombSize.value());
     // Feedback is bipolar: negative values phase-invert each tap loop,
@@ -687,8 +697,14 @@ namespace stolmine
         mixed = mixed * (1.0f - tanhAmt) + fast_tanh(mixed * drive) * tanhAmt;
       }
 
+      // DC blocker (fixed 20 Hz). Feedback resonance can accumulate DC
+      // over time, especially with asymmetric saturation stages.
+      float dcOut = mixed - s.dcX1 + dcR * s.dcY1;
+      s.dcX1 = mixed;
+      s.dcY1 = dcOut;
+
       // Output
-      out[i] = fast_tanh(mixed * outputLevel);
+      out[i] = fast_tanh(dcOut * outputLevel);
     }
   }
 
