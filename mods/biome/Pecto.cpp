@@ -471,6 +471,18 @@ namespace stolmine
     // path (only path that differs structurally between types).
     const bool isSitar = (resonatorType == 3);
 
+    // Scratch buffers for the 3-pass per-sample tap processing.
+    // Separating compute / gather / combine lets the compiler auto-
+    // vectorize the arithmetic passes (A and C) on NEON targets;
+    // gather (B) stays scalar but is now isolated and prefetched
+    // further ahead.
+    int idx0[kMaxCombTaps];
+    int idx1[kMaxCombTaps];
+    float frac[kMaxCombTaps];
+    int16_t sA[kMaxCombTaps];
+    int16_t sB[kMaxCombTaps];
+    const float scale = 1.0f / 32767.0f;
+
     // Process audio
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -479,21 +491,44 @@ namespace stolmine
       // Read taps before writing (so we read previous frame's data)
       if (s.writeIndex >= maxDelay) s.writeIndex = 0;
 
+      float writeIdxF = (float)s.writeIndex;
+      float maxDelayF = (float)maxDelay;
+
+      // Pass A: compute read indices and fractional offsets. Simple
+      // linear arithmetic + masked add -- auto-vectorizes cleanly.
+      for (int t = 0; t < density; t++)
+      {
+        float p = writeIdxF - mCachedDelaySamples[t];
+        if (p < 0.0f) p += maxDelayF;
+        int i0 = (int)p;                // floor since p >= 0
+        int i1 = i0 + 1;
+        if (i1 >= maxDelay) i1 = 0;
+        idx0[t] = i0;
+        idx1[t] = i1;
+        frac[t] = p - (float)i0;
+      }
+
+      // Pass B: scalar gather -- the one pass that can't vectorize on
+      // Cortex-A8 (no gather load in NEON). Prefetch 4 ahead so the
+      // memory system has time to service misses before we read them.
+      for (int t = 0; t < density; t++)
+      {
+        int pfIdx = t + 4;
+        if (pfIdx < density)
+          __builtin_prefetch(&buf[idx0[pfIdx]], 0, 1);
+        sA[t] = buf[idx0[t]];
+        sB[t] = buf[idx1[t]];
+      }
+
+      // Pass C: interpolate + weight + accumulate. Dense float math --
+      // auto-vectorizes well as a scalar reduction.
       float wet = 0.0f;
       float lastTapOut = 0.0f;
       for (int t = 0; t < density; t++)
       {
-        // Prefetch next tap's buffer position (hides memory latency).
-        // mCachedDelaySamples[] is sized kMaxCombTaps; reading [t+1] at
-        // t == density-1 is always safe (prefetching a slightly-stale
-        // pointer is a hint-only no-op).
-        float nextPos = (float)s.writeIndex - mCachedDelaySamples[t + 1];
-        if (nextPos < 0.0f) nextPos += (float)maxDelay;
-        __builtin_prefetch(&buf[(int)nextPos], 0, 1);
-
-        float readPos = (float)s.writeIndex - mCachedDelaySamples[t];
-        if (readPos < 0.0f) readPos += (float)maxDelay;
-        float tapOut = bufReadInterp(buf, readPos, maxDelay) * mCachedTapWeight[t];
+        float a = (float)sA[t] * scale;
+        float b = (float)sB[t] * scale;
+        float tapOut = (a + (b - a) * frac[t]) * mCachedTapWeight[t];
         wet += tapOut;
         lastTapOut = tapOut;
       }
