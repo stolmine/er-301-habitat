@@ -99,7 +99,17 @@ namespace stolmine
     TapGrain grains[kMaxTaps][kGrainsPerTap];
     int grainSpawnCounter[kMaxTaps];
 
-    // Sine LUT for grain envelope (avoid sinf in inner loop)
+    // Per-tap smoothed delaySamples used for grain spawn start position.
+    // Smoothing at ~20ms time constant dampens jitter from CV/drift that
+    // would otherwise offset successive grain starts and produce inter-
+    // grain phase incoherence (audible as warble).
+    float smoothedDelaySamples[kMaxTaps];
+
+    // Hann-window LUT for grain envelope -- 0.5 * (1 - cos(2 pi phase)).
+    // Retains the sineLUT name for diff minimality but populated with
+    // Hann values; Hann is optimal for constant-overlap-add at 75%
+    // overlap (our grain spacing), vs the old sin(pi*phase) which
+    // produces audible amplitude ripple when grains sum.
     float sineLUT[kSineLUTSize];
 
     // Fast RNG (replaces rand() in inner loop)
@@ -134,17 +144,18 @@ namespace stolmine
         tapEnergy[i] = 0.0f;
         driftPhase[i] = (float)i * 1.618f; // golden ratio spread
         grainSpawnCounter[i] = 0;
+        smoothedDelaySamples[i] = 0.0f;
         for (int g = 0; g < kGrainsPerTap; g++)
         {
           grains[i][g].active = false;
           grains[i][g].reverse = false;
         }
       }
-      // Pre-compute sine LUT (half sine = grain envelope)
+      // Pre-compute Hann window LUT: 0.5 * (1 - cos(2 pi t)).
       for (int i = 0; i < kSineLUTSize; i++)
       {
         float t = (float)i / (float)(kSineLUTSize - 1);
-        sineLUT[i] = sinf(t * 3.14159265f);
+        sineLUT[i] = 0.5f * (1.0f - cosf(t * 6.28318530718f));
       }
     }
   };
@@ -267,7 +278,7 @@ namespace stolmine
   float MultitapDelay::getMaxBeatTime()
   {
     int tapCount = CLAMP(1, kMaxTaps, (int)(mTapCount.value() + 0.5f));
-    int stackExp = CLAMP(0, 4, (int)(mStack.value() + 0.5f));
+    int stackExp = CLAMP(0, 3, (int)(mStack.value() + 0.5f));
     int stack = 1 << stackExp;
     if (stack > tapCount) stack = tapCount;
     int gridExp = CLAMP(0, 4, (int)(mGrid.value() + 0.5f));
@@ -416,7 +427,7 @@ namespace stolmine
       rndBias(mBiasGrainSize, 0.0f, 1.0f);
       rndBias(mBiasDrift, 0.0f, 1.0f);
       rndBias(mBiasReverse, 0.0f, 1.0f);
-      rndBiasInt(mBiasStack, 0.0f, 4.0f);
+      rndBiasInt(mBiasStack, 0.0f, 3.0f);
       rndBiasInt(mBiasGrid, 0.0f, 4.0f);
       rndBiasInt(mBiasTapCount, 1.0f, 8.0f);
     };
@@ -455,7 +466,7 @@ namespace stolmine
     case 14: rndBias(mBiasGrainSize, 0.0f, 1.0f); break;
     case 15: rndBias(mBiasDrift, 0.0f, 1.0f); break;
     case 16: rndBias(mBiasReverse, 0.0f, 1.0f); break;
-    case 17: rndBiasInt(mBiasStack, 0.0f, 4.0f); break;
+    case 17: rndBiasInt(mBiasStack, 0.0f, 3.0f); break;
     case 18: rndBiasInt(mBiasGrid, 0.0f, 4.0f); break;
     case 19: rndBiasInt(mBiasTapCount, 1.0f, 8.0f); break;
     case 20: // reset
@@ -510,8 +521,8 @@ namespace stolmine
     float skew = mSkew.value();
     float drift = CLAMP(0.0f, 1.0f, mDrift.value());
     float reverse = CLAMP(0.0f, 1.0f, mReverse.value());
-    int stackExp = CLAMP(0, 4, (int)(mStack.value() + 0.5f));
-    int stack = 1 << stackExp; // 1, 2, 4, 8, 16
+    int stackExp = CLAMP(0, 3, (int)(mStack.value() + 0.5f));
+    int stack = 1 << stackExp; // 1, 2, 4, 8
     if (stack > tapCount) stack = tapCount;
     int gridExp = CLAMP(0, 4, (int)(mGrid.value() + 0.5f));
     int grid = 1 << gridExp; // 1, 2, 4, 8, 16
@@ -523,10 +534,16 @@ namespace stolmine
     // V/Oct master pitch (ConstantOffset outputs 0.1 per octave in 10Vpp range)
     float voctPitch = mVOctPitch.value() * 10.0f; // scale to octaves
 
-    // Grain size: 0=5ms, 0.5=30ms, 1.0=100ms
-    int grainDuration = (int)(sr * (0.005f + grainSizeParam * 0.095f));
+    // Grain size: 0=5ms, 0.5=150ms, 1.0=300ms. Max bumped from 100ms
+    // to 300ms to cover low-frequency pitched content with enough
+    // cycles per grain (avoids amplitude flutter on bass material).
+    int grainDuration = (int)(sr * (0.005f + grainSizeParam * 0.295f));
     if (grainDuration < 64) grainDuration = 64;
-    int grainPeriod = (int)(grainDuration * 0.75f);
+    // 50% overlap. With Hann envelope this is the COLA sweet spot --
+    // successive grains sum to flat amplitude, killing envelope-induced
+    // flutter. Fits the existing 3-grain-per-tap array (max 2 live at
+    // any moment plus 1 spare for transitions).
+    int grainPeriod = (int)(grainDuration * 0.5f);
     if (grainPeriod < 32) grainPeriod = 32;
     float grainPhaseDelta = 1.0f / (float)grainDuration;
 
@@ -667,15 +684,20 @@ namespace stolmine
       float wetR = 0.0f;
       float lastTapOut = 0.0f;
 
-      // Pre-pass: fire one prefetch per active tap upfront, before the
-      // main loop. tapCount is small (<= kMaxTaps = 8) so the memory
-      // system can service all the cache misses in parallel during the
+      // Pre-pass: smooth the delaySamples used for grain spawn (20ms
+      // time constant; tames CV / drift jitter so successive grain
+      // starts stay phase-coherent) AND fire one prefetch per active
+      // tap upfront. tapCount is small (<= kMaxTaps = 8) so the memory
+      // system can service all cache misses in parallel during the
       // first iteration's work. Strictly more effective than the old
       // 1-ahead in-loop prefetch on a short loop, and the buffer here
       // can be up to 20s (~960 KB) so memory latency dominates.
       int32_t prefIdx[kMaxTaps];
+      const float dsSmoothCoeff = 0.001f; // ~20ms @ 48 kHz
       for (int t = 0; t < tapCount; t++)
       {
+        s.smoothedDelaySamples[t] +=
+            (mCachedDelaySamples[t] - s.smoothedDelaySamples[t]) * dsSmoothCoeff;
         float p = (float)s.writeIndex - mCachedDelaySamples[t];
         if (p < 0.0f) p += (float)maxDelay;
         prefIdx[t] = (int)p;
@@ -708,7 +730,10 @@ namespace stolmine
                 s.grains[t][g].speed = tapSpeed;
                 bool rev = reverse > 0.001f && lcgFloat(s.rngSeed) < reverse;
                 s.grains[t][g].reverse = rev;
-                float startPos = (float)s.writeIndex - delaySamples;
+                // Use smoothed delaySamples so successive grain starts
+                // don't jitter with CV/drift, which would produce inter-
+                // grain phase incoherence and amplitude modulation.
+                float startPos = (float)s.writeIndex - s.smoothedDelaySamples[t];
                 while (startPos < 0.0f) startPos += (float)maxDelay;
                 s.grains[t][g].readPos = startPos;
                 break;

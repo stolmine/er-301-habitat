@@ -451,7 +451,7 @@ function MultitapDelay:applyRandomize(target, depth, spread)
     rndParam(self.objects.grainSize, "Bias", 0, 1)
     rndParam(self.objects.drift, "Bias", 0, 1)
     rndParam(self.objects.reverse, "Bias", 0, 1)
-    rndParam(self.objects.stack, "Bias", 0, 4)
+    rndParam(self.objects.stack, "Bias", 0, 3)
     rndParam(self.objects.grid, "Bias", 0, 4)
     rndParam(self.objects.tapCount, "Bias", 1, 8)
   elseif target == 1 then rndTapLevels(); rndTapPans(); rndTapPitch()  -- taps
@@ -463,7 +463,7 @@ function MultitapDelay:applyRandomize(target, depth, spread)
     rndParam(self.objects.grainSize, "Bias", 0, 1)
     rndParam(self.objects.drift, "Bias", 0, 1)
     rndParam(self.objects.reverse, "Bias", 0, 1)
-    rndParam(self.objects.stack, "Bias", 0, 4)
+    rndParam(self.objects.stack, "Bias", 0, 3)
     rndParam(self.objects.grid, "Bias", 0, 4)
     rndParam(self.objects.tapCount, "Bias", 1, 8)
   elseif target == 3 then rndCutoff(); rndQ(); rndType()                -- filters
@@ -665,11 +665,11 @@ function MultitapDelay:onLoadViews()
       branch = self.branches.stack,
       gainbias = self.objects.stack,
       range = self.objects.stack,
-      biasMap = intMap(0, 4),
+      biasMap = intMap(0, 3),
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = { [0] = "1", "2", "4", "8", "16" }
+      modeNames = { [0] = "1", "2", "4", "8" }
     },
     drift = GainBias {
       button = "drift",
