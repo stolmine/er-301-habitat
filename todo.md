@@ -11,7 +11,7 @@
 - [ ] Gate width 0 produces a trigger instead of silence. May be intentional — decide if this is desired behavior or a bug.
 
 ### Pecto
-- [ ] CPU spikes on certain settings (high density + long comb + sitar/clarinet resonator). Profile on am335x.
+- [x] CPU spikes on high density + long comb + sitar/clarinet resonator: addressed via tap-loop 3-pass restructuring (Pass A compute, Pass B scalar gather with 4-ahead prefetch, Pass C vectorizable combine) on top of batch-A clawback (pre-sorted taps, CSE'd bufReadInterp, hoisted sitar branch, unguarded prefetch). Stereo @ density 24 dropped ~50% CPU -> ~26% CPU on measurement. Phase 2/3 NEON intrinsics deferred -- not needed, plenty of headroom now.
 - [ ] Zipper noise on V/Oct and comb size changes. Needs per-block interpolation or one-pole smoother on delay length.
 - [ ] Feedback control bipolar: currently 0..1 positive-only. Extend to -1..+1 so negative feedback (phase-inverted) is available as well as positive. Bipolar map on the Lua ply + signed feedback term in the C++ process loop; watch for any existing stability assumptions that assumed positive-only.
 - [ ] Cap density at 12 taps (down from 24). Current cap of 24 was set for CPU/UI but 12 is the intended ceiling; lower the compile-time constant and verify xform randomization, sorted tap reads, and any graphic still respect it. Existing presets above 12 should clamp on load rather than truncate silently.
