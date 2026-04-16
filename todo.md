@@ -22,7 +22,7 @@
 
 ### Helicase
 - [x] Discontinuity transfer functions 7, 12, 15 click at zero crossings. Landed a three-part fix: polyBLEP for the value jumps in shapes 7 (opl3 log-saw) and 12 (wrap), smoothed-abs (`sqrt(s² + ε²)`) for the V-corners in shape 15, plus full 2× oversampling of the hi-fi inner loop (mod + feedback + FM + carrier + shaper) with 2-tap halfband decimation. Lo-fi path untouched. Carrier shape fine-step tightened to `(1, 0.02, 0.001, 0.0001)` so the morph is audibly smooth under sweep. CPU in hi-fi rises ~3pp to roughly 16-20% per instance.
-- [ ] DC offset: something in the shaping / discontinuity path (likely the asymmetric transfer functions) introduces significant DC. Want to remove it above a frequency threshold (say, ~1-2 Hz or whatever keeps LFO territory intact) so Helicase stays usable as an LFO -- LFOs legitimately carry DC, audio-rate output shouldn't. Candidate: high-pass at ~0.5-1 Hz always on, OR a frequency-gated DC blocker that disables below LFO range, OR a cheap one-pole DC blocker whose cutoff tracks f0. Design pick after identifying the DC source.
+- [x] DC offset: fixed 20 Hz one-pole HPF engaged only when f0 > 1 Hz, bypassed below so Helicase-as-LFO keeps legitimate sub-Hz content. Filter state evolves continuously so re-engagement on pitch-up is coherent. ~40 ms settling on shape changes at audio rate. DC sources identified: opl3 shapes 1/2/3/5 (half/abs/quarter-sine, camel) and foldShape 15 (ring fold) carry intrinsic DC; FM/feedback coupling compounds it; modMix propagates modulator DC to output.
 
 ### Impasto
 - [x] Auto gain + sidechain enable only affect one channel in stereo. Toggle handlers fan out to both op instances; deserialize re-syncs opR to op (52b3213).

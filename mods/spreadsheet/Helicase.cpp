@@ -192,6 +192,10 @@ namespace stolmine
     // Previous carrier signal into discFold (for polyBLEP dt estimation)
     float lastShaperInput;
 
+    // DC blocker state (one-pole HPF whose cutoff tracks f0)
+    float dcX1;
+    float dcY1;
+
     void Init()
     {
       carrierPhase = 0.0f;
@@ -209,6 +213,8 @@ namespace stolmine
       slewCarrierFreq = 110.0f;
       slewModFreq = 220.0f;
       lastShaperInput = 0.0f;
+      dcX1 = 0.0f;
+      dcY1 = 0.0f;
     }
   };
 
@@ -339,6 +345,12 @@ namespace stolmine
     // Linear ramp: constant step per sample to reach target by end of block
     float carrierStep = (targetCarrierFreq - s.slewCarrierFreq) / (float)FRAMELENGTH;
     float modStep = (targetModFreq - s.slewModFreq) / (float)FRAMELENGTH;
+
+    // DC blocker coefficient: fixed 20 Hz one-pole HPF, engaged only when
+    // f0 > 1 Hz. Below 1 Hz we bypass the filter so Helicase-as-LFO keeps
+    // legitimate sub-Hz content including DC. The coefficient is derived
+    // from (1 - 2pi*fc/sr) which matches exp(-2pi*fc/sr) for small fc/sr.
+    const float dcR = 1.0f - kTwoPi * 20.0f / sr;
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -484,7 +496,17 @@ namespace stolmine
 
       // Mix: carrier always present, modulator added on top
       float mixed = folded + modOut * modMix;
-      float finalOut = mixed * level;
+
+      // DC blocker: fixed 20 Hz one-pole HPF, engaged above 1 Hz f0.
+      // Below 1 Hz we bypass (LFO territory); the filter state keeps
+      // evolving so re-engagement on pitch-up is coherent. Fast settling
+      // (~40 ms) on shape changes at audio rate.
+      float dcOut = mixed - s.dcX1 + dcR * s.dcY1;
+      s.dcX1 = mixed;
+      s.dcY1 = dcOut;
+      float hpOut = (carrierFreq > 1.0f) ? dcOut : mixed;
+
+      float finalOut = hpOut * level;
 
       // Clamp output
       if (finalOut > 1.5f) finalOut = 1.5f;
