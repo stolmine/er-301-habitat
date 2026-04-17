@@ -4,9 +4,9 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local MixControl = require "spreadsheet.MixControl"
-local ModeSelector = require "spreadsheet.ModeSelector"
 local LaretClockControl = require "spreadsheet.LaretClockControl"
-local BBCutDensityControl = require "spreadsheet.BBCutDensityControl"
+local BBCutBlockControl = require "spreadsheet.BBCutBlockControl"
+local BBCutRepeatsControl = require "spreadsheet.BBCutRepeatsControl"
 local BBCutTextureControl = require "spreadsheet.BBCutTextureControl"
 local Encoder = require "Encoder"
 
@@ -24,13 +24,16 @@ local function intMap(min, max)
 end
 
 local densityMap = floatMap(0, 1)
-local dutyMap = floatMap(0, 1)
-local mixMap = floatMap(0, 1)
-local stutterAreaMap = floatMap(0, 1)
-local repeatsMap = floatMap(0, 8)
+local blockSizeMap = floatMap(0, 1)
+local blockMaxMap = intMap(1, 8)
+local repeatCountMap = intMap(2, 64)
+local ritardMap = floatMap(0, 1)
+local blendMap = floatMap(0, 1)
 local accelMap = floatMap(0.5, 0.999)
+local dutyMap = floatMap(-1, 1)
 local ampMap = floatMap(0, 1)
 local fadeMap = floatMap(0, 0.1)
+local mixMap = floatMap(0, 1)
 local levelMap = floatMap(0, 4)
 local tanhMap = floatMap(0, 1)
 local phraseMap = intMap(1, 8)
@@ -66,22 +69,24 @@ function BBCut:onLoadGraph(channelCount)
     self:addMonoBranch(name, a, "In", a, "Out")
   end
 
-  adapter("algorithm",   "Algorithm",   0)
-  adapter("density",     "Density",     0.5)
-  adapter("stutterArea", "StutterArea", 0.5)
-  adapter("repeats",     "Repeats",     2)
-  adapter("accel",       "Accel",       0.9)
-  adapter("subdiv",      "Subdiv",      8)
-  adapter("phraseMin",   "PhraseMin",   2)
-  adapter("phraseMax",   "PhraseMax",   4)
-  adapter("dutyCycle",   "DutyCycle",   1.0)
-  adapter("ampMin",      "AmpMin",      0.8)
-  adapter("ampMax",      "AmpMax",      1.0)
-  adapter("fade",        "Fade",        0.005)
-  adapter("mix",         "Mix",         1.0)
-  adapter("inputLevel",  "InputLevel",  1.0)
-  adapter("outputLevel", "OutputLevel", 1.0)
-  adapter("tanhAmt",     "TanhAmt",     0.0)
+  adapter("density",      "Density",      0.5)
+  adapter("blockSize",    "BlockSize",    0.5)
+  adapter("blockMax",     "BlockMax",     4)
+  adapter("repeatCount",  "RepeatCount",  8)
+  adapter("ritardBias",   "RitardBias",   0.5)
+  adapter("blend",        "Blend",        0.5)
+  adapter("accel",        "Accel",        0.9)
+  adapter("subdiv",       "Subdiv",       8)
+  adapter("phraseMin",    "PhraseMin",    2)
+  adapter("phraseMax",    "PhraseMax",    4)
+  adapter("dutyCycle",    "DutyCycle",    1.0)
+  adapter("ampMin",       "AmpMin",       0.8)
+  adapter("ampMax",       "AmpMax",       1.0)
+  adapter("fade",         "Fade",         0.005)
+  adapter("mix",          "Mix",          1.0)
+  adapter("inputLevel",   "InputLevel",   1.0)
+  adapter("outputLevel",  "OutputLevel",  1.0)
+  adapter("tanhAmt",      "TanhAmt",      0.0)
 end
 
 function BBCut:onLoadViews()
@@ -94,19 +99,21 @@ function BBCut:onLoadViews()
       resetComparator = self.objects.clock,
       divParam = self.objects.subdiv:getParameter("Bias")
     },
-    style = ModeSelector {
-      button = "style",
-      description = "Algorithm",
-      branch = self.branches.algorithm,
-      gainbias = self.objects.algorithm,
-      range = self.objects.algorithm,
-      biasMap = intMap(0, 2),
+    block = BBCutBlockControl {
+      button = "block",
+      description = "Block Size",
+      branch = self.branches.blockSize,
+      gainbias = self.objects.blockSize,
+      range = self.objects.blockSize,
+      biasMap = blockSizeMap,
       biasUnits = app.unitNone,
-      biasPrecision = 0,
-      initialBias = 0,
-      modeNames = { [0] = "dnb", "warp", "sqp" }
+      biasPrecision = 2,
+      initialBias = 0.5,
+      phraseMin = self.objects.phraseMin:getParameter("Bias"),
+      phraseMax = self.objects.phraseMax:getParameter("Bias"),
+      blockMax = self.objects.blockMax:getParameter("Bias")
     },
-    density = BBCutDensityControl {
+    density = GainBias {
       button = "dens",
       description = "Density",
       branch = self.branches.density,
@@ -115,9 +122,20 @@ function BBCut:onLoadViews()
       biasMap = densityMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.5,
-      stutterArea = self.objects.stutterArea:getParameter("Bias"),
-      repeats = self.objects.repeats:getParameter("Bias"),
+      initialBias = 0.5
+    },
+    repeats = BBCutRepeatsControl {
+      button = "rep",
+      description = "Repeats",
+      branch = self.branches.repeatCount,
+      gainbias = self.objects.repeatCount,
+      range = self.objects.repeatCount,
+      biasMap = repeatCountMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 8,
+      ritardBias = self.objects.ritardBias:getParameter("Bias"),
+      blend = self.objects.blend:getParameter("Bias"),
       accel = self.objects.accel:getParameter("Bias")
     },
     texture = BBCutTextureControl {
@@ -149,6 +167,17 @@ function BBCut:onLoadViews()
       tanhAmt = self.objects.tanhAmt:getParameter("Bias")
     },
     -- Expansion faders
+    blockFader = GainBias {
+      button = "block",
+      description = "Block Size",
+      branch = self.branches.blockSize,
+      gainbias = self.objects.blockSize,
+      range = self.objects.blockSize,
+      biasMap = blockSizeMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.5
+    },
     phraseMin = GainBias {
       button = "pMin",
       description = "Phrase Min",
@@ -171,49 +200,49 @@ function BBCut:onLoadViews()
       biasPrecision = 0,
       initialBias = 4
     },
-    subdivFader = GainBias {
-      button = "subdv",
-      description = "Subdivision",
-      branch = self.branches.subdiv,
-      gainbias = self.objects.subdiv,
-      range = self.objects.subdiv,
-      biasMap = subdivMap,
+    blockMaxFader = GainBias {
+      button = "bMax",
+      description = "Block Max",
+      branch = self.branches.blockMax,
+      gainbias = self.objects.blockMax,
+      range = self.objects.blockMax,
+      biasMap = blockMaxMap,
       biasUnits = app.unitNone,
       biasPrecision = 0,
-      initialBias = 8
-    },
-    densityFader = GainBias {
-      button = "dens",
-      description = "Density",
-      branch = self.branches.density,
-      gainbias = self.objects.density,
-      range = self.objects.density,
-      biasMap = densityMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.5
-    },
-    stutterAreaFader = GainBias {
-      button = "stut",
-      description = "Stutter Area",
-      branch = self.branches.stutterArea,
-      gainbias = self.objects.stutterArea,
-      range = self.objects.stutterArea,
-      biasMap = stutterAreaMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.5
+      initialBias = 4
     },
     repeatsFader = GainBias {
       button = "rep",
       description = "Repeats",
-      branch = self.branches.repeats,
-      gainbias = self.objects.repeats,
-      range = self.objects.repeats,
-      biasMap = repeatsMap,
+      branch = self.branches.repeatCount,
+      gainbias = self.objects.repeatCount,
+      range = self.objects.repeatCount,
+      biasMap = repeatCountMap,
       biasUnits = app.unitNone,
-      biasPrecision = 1,
-      initialBias = 2
+      biasPrecision = 0,
+      initialBias = 8
+    },
+    ritardFader = GainBias {
+      button = "rit",
+      description = "Ritard Bias",
+      branch = self.branches.ritardBias,
+      gainbias = self.objects.ritardBias,
+      range = self.objects.ritardBias,
+      biasMap = ritardMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.5
+    },
+    blendFader = GainBias {
+      button = "blnd",
+      description = "Blend",
+      branch = self.branches.blend,
+      gainbias = self.objects.blend,
+      range = self.objects.blend,
+      biasMap = blendMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.5
     },
     accelFader = GainBias {
       button = "accel",
@@ -225,6 +254,17 @@ function BBCut:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 3,
       initialBias = 0.9
+    },
+    subdivFader = GainBias {
+      button = "subdv",
+      description = "Subdivision",
+      branch = self.branches.subdiv,
+      gainbias = self.objects.subdiv,
+      range = self.objects.subdiv,
+      biasMap = subdivMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 8
     },
     textureFader = GainBias {
       button = "duty",
@@ -304,10 +344,10 @@ function BBCut:onLoadViews()
       initialBias = 0.0
     }
   }, {
-    expanded  = { "clock", "style", "density", "texture", "mix" },
+    expanded  = { "clock", "block", "density", "repeats", "texture", "mix" },
     collapsed = {},
-    style     = { "style", "phraseMin", "phraseMax", "subdivFader" },
-    density   = { "densityFader", "stutterAreaFader", "repeatsFader", "accelFader" },
+    block     = { "blockFader", "phraseMin", "phraseMax", "blockMaxFader" },
+    repeats   = { "repeatsFader", "ritardFader", "blendFader", "accelFader" },
     texture   = { "textureFader", "ampMinFader", "ampMaxFader", "fadeFader" },
     mix       = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
   }

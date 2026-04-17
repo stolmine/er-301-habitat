@@ -1,5 +1,7 @@
 // BBCut -- clock-driven breakbeat cutting processor
-// Based on Nick Collins' BBCut library and the Livecut C++ port.
+// WarpCut-derived engine with parameterized block size, repeat count,
+// accel/ritard bias, and bipolar duty cycle (reverse on negative).
+// Algorithm lineage: Nick Collins' BBCut via Livecut (Remy Muller, GPLv2).
 
 #include "BBCut.h"
 #include <od/config.h>
@@ -18,17 +20,19 @@ namespace stolmine
 
   static const int kBufferSize = 384000;
   static const int kCrossfadeSamples = 64;
-  static const int kMaxCuts = 64;
+  static const int kMaxCuts = 128;
   static const int kVizSize = 128;
+  static const int kMaxBlockUnits = 8;
 
   static const int kValidSubdivs[] = {6, 8, 12, 16, 24, 32};
   static const int kNumSubdivs = 6;
 
-  static const float kStutterMultWeights[] = {0.4f, 0.3f, 0.1f, 0.1f, 0.05f, 0.05f};
-  static const int kStutterMults[] = {1, 2, 3, 4, 6, 8};
-  static const int kNumStutterMults = 6;
-
-  static const float kSQWeights[] = {0.0f, 0.3f, 0.0f, 0.5f, 0.7f, 0.8f, 0.9f, 0.6f};
+  struct CutInfo
+  {
+    int size;
+    int length;
+    float amp;
+  };
 
   struct BBCut::Internal
   {
@@ -36,25 +40,20 @@ namespace stolmine
     int writePos;
 
     int phraseUnits;
-    int phrasePos;
+    int unitsDone;
 
-    int blockRepeats;
-    int blockRepeatIdx;
+    int unitsInBlock;
+    int unitsInsideBlock;
+
+    CutInfo cuts[kMaxCuts];
+    int numCuts;
+    int currentCut;
+    int readIndex;
     int sliceOrigin;
-
-    int cutSizes[kMaxCuts];
-    float cutAmps[kMaxCuts];
-    int numCutsInBlock;
-    int currentCutInBlock;
-    int cutPos;
-    int cutSizeInSamples;
-    float cutAmp;
-    bool passthrough;
 
     int samplesPerUnit;
     int unitSampleCounter;
 
-    float fadeEnvelope;
     float prevOutput;
     int crossfadeCounter;
 
@@ -68,30 +67,23 @@ namespace stolmine
     {
       memset(buffer, 0, sizeof(buffer));
       writePos = 0;
-      phraseUnits = 16;
-      phrasePos = 0;
-      blockRepeats = 1;
-      blockRepeatIdx = 0;
+      phraseUnits = 0;
+      unitsDone = 0;
+      unitsInBlock = 0;
+      unitsInsideBlock = 0;
+      numCuts = 0;
+      currentCut = 0;
+      readIndex = 0;
       sliceOrigin = 0;
-      numCutsInBlock = 1;
-      currentCutInBlock = 0;
-      cutPos = 0;
-      cutSizeInSamples = 24000;
-      cutAmp = 1.0f;
-      passthrough = true;
       samplesPerUnit = 12000;
       unitSampleCounter = 0;
-      fadeEnvelope = 0.0f;
       prevOutput = 0.0f;
       crossfadeCounter = 0;
       memset(vizRing, 0, sizeof(vizRing));
       vizPos = 0;
       vizDecimCounter = 0;
       rngState = 98765;
-      memset(cutSizes, 0, sizeof(cutSizes));
-      memset(cutAmps, 0, sizeof(cutAmps));
-      cutSizes[0] = 12000;
-      cutAmps[0] = 1.0f;
+      memset(cuts, 0, sizeof(cuts));
     }
   };
 
@@ -99,6 +91,11 @@ namespace stolmine
   {
     state = state * 1664525u + 1013904223u;
     return (float)(state >> 1) / (float)0x7FFFFFFF;
+  }
+
+  static inline float iRandRange(uint32_t &state, float lo, float hi)
+  {
+    return lo + (hi - lo) * iRandFloat(state);
   }
 
   static inline int iRandInt(uint32_t &state, int lo, int hi)
@@ -109,8 +106,7 @@ namespace stolmine
 
   static inline void bufWrite(int16_t *buf, int pos, float sample)
   {
-    int s = (int)(CLAMP(-1.0f, 1.0f, sample) * 32767.0f);
-    buf[pos] = (int16_t)s;
+    buf[pos] = (int16_t)(CLAMP(-1.0f, 1.0f, sample) * 32767.0f);
   }
 
   static inline float bufRead(const int16_t *buf, int pos)
@@ -131,15 +127,44 @@ namespace stolmine
     return best;
   }
 
+  static inline float expenv(float i, float fade, float size)
+  {
+    if (fade < 1.0f) fade = 1.0f;
+    return (1.0f - expf(-5.0f * i / fade)) * (1.0f - expf(5.0f * (i - size) / fade));
+  }
+
+  static int chooseWeightedBlockSize(uint32_t &rng, float bias, int blockMax)
+  {
+    if (blockMax <= 1) return 1;
+    float weights[kMaxBlockUnits];
+    float sum = 0.0f;
+    for (int k = 0; k < blockMax; k++)
+    {
+      float t = (float)k / (float)(blockMax - 1);
+      weights[k] = expf(bias * 4.0f * t);
+      sum += weights[k];
+    }
+    float r = iRandFloat(rng) * sum;
+    float cumul = 0.0f;
+    for (int k = 0; k < blockMax; k++)
+    {
+      cumul += weights[k];
+      if (r < cumul) return k + 1;
+    }
+    return blockMax;
+  }
+
   BBCut::BBCut()
   {
     addInput(mIn);
     addInput(mClock);
     addOutput(mOut);
-    addParameter(mAlgorithm);
     addParameter(mDensity);
-    addParameter(mStutterArea);
-    addParameter(mRepeats);
+    addParameter(mBlockSize);
+    addParameter(mBlockMax);
+    addParameter(mRepeatCount);
+    addParameter(mRitardBias);
+    addParameter(mBlend);
     addParameter(mAccel);
     addParameter(mSubdiv);
     addParameter(mPhraseMin);
@@ -165,7 +190,7 @@ namespace stolmine
     return (subdiv > 0) ? s.phraseUnits / subdiv : 1;
   }
 
-  int BBCut::getPhrasePosition() { return mpInternal->phrasePos; }
+  int BBCut::getPhrasePosition() { return mpInternal->unitsDone; }
   int BBCut::getPhraseLength() { return mpInternal->phraseUnits; }
 
   float BBCut::getOutputSample(int idx)
@@ -181,241 +206,112 @@ namespace stolmine
     int bars = iRandInt(s.rngState, pMin, pMax);
     int subdiv = snapSubdiv(mSubdiv.value());
     s.phraseUnits = bars * subdiv;
-    s.phrasePos = 0;
+    s.unitsDone = 0;
   }
 
-  void BBCut::chooseBlock_CutProc11(int unitsLeft)
+  void BBCut::chooseBlock(int unitsLeft)
   {
     Internal &s = *mpInternal;
     float density = CLAMP(0.0f, 1.0f, mDensity.value());
-    float stutterArea = CLAMP(0.0f, 1.0f, mStutterArea.value());
-    int maxRep = MAX(0, (int)(mRepeats.value() + 0.5f));
+    float blockSizeBias = CLAMP(0.0f, 1.0f, mBlockSize.value());
+    int blockMax = CLAMP(1, kMaxBlockUnits, (int)(mBlockMax.value() + 0.5f));
+    int repeatCount = CLAMP(2, 64, (int)(mRepeatCount.value() + 0.5f));
+    float ritardBias = CLAMP(0.0f, 1.0f, mRitardBias.value());
+    float blend = CLAMP(0.0f, 1.0f, mBlend.value());
+    float accel = CLAMP(0.5f, 0.999f, mAccel.value());
+    float dutyVal = CLAMP(-1.0f, 1.0f, mDutyCycle.value());
+    float dutyMag = (dutyVal > 0.0f) ? dutyVal : -dutyVal;
+    if (dutyMag < 0.01f) dutyMag = 0.01f;
     float ampMin = CLAMP(0.0f, 1.0f, mAmpMin.value());
     float ampMax = CLAMP(ampMin, 1.0f, mAmpMax.value());
     int subdiv = snapSubdiv(mSubdiv.value());
+    double spu = (double)s.samplesPerUnit;
 
     s.sliceOrigin = s.writePos;
-    s.passthrough = false;
 
-    float phraseRatio = (subdiv > 0) ? (float)unitsLeft / (float)subdiv : 1.0f;
-    bool doStutter = (phraseRatio < stutterArea) && (iRandFloat(s.rngState) < density);
-
-    if (doStutter && unitsLeft > 0)
-    {
-      float r = iRandFloat(s.rngState);
-      float cumulative = 0.0f;
-      int mult = 1;
-      for (int i = 0; i < kNumStutterMults; i++)
-      {
-        cumulative += kStutterMultWeights[i];
-        if (r < cumulative) { mult = kStutterMults[i]; break; }
-      }
-      int cutUnits = MAX(1, unitsLeft / mult);
-      int reps = (cutUnits > 0) ? unitsLeft / cutUnits : 1;
-      reps = MAX(1, reps);
-
-      s.numCutsInBlock = MIN(reps, kMaxCuts);
-      for (int i = 0; i < s.numCutsInBlock; i++)
-      {
-        s.cutSizes[i] = cutUnits * s.samplesPerUnit;
-        s.cutAmps[i] = ampMin + iRandFloat(s.rngState) * (ampMax - ampMin);
-      }
-      s.blockRepeats = s.numCutsInBlock;
-    }
-    else
-    {
-      int halfSubdiv = MAX(1, subdiv / 4);
-      int cutUnits = 2 * (int)(iRandFloat(s.rngState) * (float)halfSubdiv + 0.5f) + 1;
-      cutUnits = CLAMP(1, unitsLeft, cutUnits);
-
-      int reps = (maxRep > 0) ? iRandInt(s.rngState, 1, maxRep) : 1;
-      int totalUnits = cutUnits * reps;
-      while (totalUnits > unitsLeft && reps > 1) { reps--; totalUnits = cutUnits * reps; }
-      if (totalUnits > unitsLeft) { cutUnits = unitsLeft; reps = 1; }
-
-      s.numCutsInBlock = reps;
-      for (int i = 0; i < s.numCutsInBlock; i++)
-      {
-        s.cutSizes[i] = cutUnits * s.samplesPerUnit;
-        s.cutAmps[i] = ampMin + iRandFloat(s.rngState) * (ampMax - ampMin);
-      }
-      s.blockRepeats = reps;
-    }
-
-    s.blockRepeatIdx = 0;
-    s.currentCutInBlock = 0;
-    s.cutPos = 0;
-    if (s.numCutsInBlock > 0)
-    {
-      s.cutSizeInSamples = MAX(1, s.cutSizes[0]);
-      s.cutAmp = s.cutAmps[0];
-    }
-  }
-
-  void BBCut::chooseBlock_WarpCut(int unitsLeft)
-  {
-    Internal &s = *mpInternal;
-    float density = CLAMP(0.0f, 1.0f, mDensity.value());
-    float accel = CLAMP(0.5f, 0.999f, mAccel.value());
-    int maxRep = MAX(1, (int)(mRepeats.value() + 0.5f));
-    float ampMin = CLAMP(0.0f, 1.0f, mAmpMin.value());
-    float ampMax = CLAMP(ampMin, 1.0f, mAmpMax.value());
-
-    s.sliceOrigin = s.writePos;
-    s.passthrough = false;
+    s.unitsInBlock = chooseWeightedBlockSize(s.rngState, blockSizeBias, blockMax);
+    if (s.unitsInBlock > unitsLeft) s.unitsInBlock = unitsLeft;
 
     float straightChance = 1.0f - density;
-    float roll = iRandFloat(s.rngState);
 
-    if (roll < straightChance)
+    if (iRandFloat(s.rngState) < straightChance)
     {
-      int cutUnits = CLAMP(1, MIN(2, unitsLeft), unitsLeft);
-      s.numCutsInBlock = 1;
-      s.cutSizes[0] = cutUnits * s.samplesPerUnit;
-      s.cutAmps[0] = ampMin + iRandFloat(s.rngState) * (ampMax - ampMin);
-      s.blockRepeats = 1;
+      s.numCuts = 1;
+      int cutSamples = (int)(spu * (double)s.unitsInBlock);
+      s.cuts[0].size = MAX(1, cutSamples);
+      s.cuts[0].length = MAX(1, (int)((float)cutSamples * dutyMag));
+      s.cuts[0].amp = iRandRange(s.rngState, ampMin, ampMax);
     }
     else
     {
-      bool doAccel = iRandFloat(s.rngState) > 0.5f;
-      int totalUnits = CLAMP(1, MAX(2, unitsLeft / 2), unitsLeft);
-      int reps = CLAMP(2, maxRep, MAX(2, maxRep));
+      float startAmp = iRandRange(s.rngState, ampMin, ampMax);
+      float endAmp = iRandRange(s.rngState, ampMin, ampMax);
 
-      if (doAccel)
+      if (iRandFloat(s.rngState) < (1.0f - blend))
       {
-        float accelPow = 1.0f;
-        float sumPow = 0.0f;
-        for (int i = 0; i < reps; i++) { sumPow += accelPow; accelPow *= accel; }
-        float base = (float)(totalUnits * s.samplesPerUnit) / sumPow;
-
-        s.numCutsInBlock = MIN(reps, kMaxCuts);
-        accelPow = 1.0f;
-        for (int i = 0; i < s.numCutsInBlock; i++)
+        float temp = (float)s.unitsInBlock / (float)repeatCount;
+        s.numCuts = MIN(repeatCount, kMaxCuts);
+        for (int i = 0; i < s.numCuts; i++)
         {
-          s.cutSizes[i] = MAX(1, (int)(base * accelPow));
-          accelPow *= accel;
-          float t = (s.numCutsInBlock > 1) ? (float)i / (float)(s.numCutsInBlock - 1) : 0.0f;
-          s.cutAmps[i] = ampMin + (ampMax - ampMin) * (1.0f - t * 0.5f);
+          float phase = (float)i / (float)s.numCuts;
+          int l = (int)(spu * temp + 0.5);
+          s.cuts[i].size = MAX(1, l);
+          s.cuts[i].length = MAX(1, (int)((float)l * dutyMag));
+          s.cuts[i].amp = startAmp + (endAmp - startAmp) * phase;
         }
-
-        bool ritard = iRandFloat(s.rngState) < 0.5f;
-        if (ritard)
-        {
-          for (int i = 0; i < s.numCutsInBlock / 2; i++)
-          {
-            int j = s.numCutsInBlock - 1 - i;
-            int ts = s.cutSizes[i]; s.cutSizes[i] = s.cutSizes[j]; s.cutSizes[j] = ts;
-            float ta = s.cutAmps[i]; s.cutAmps[i] = s.cutAmps[j]; s.cutAmps[j] = ta;
-          }
-        }
-        s.blockRepeats = s.numCutsInBlock;
       }
       else
       {
-        int cutUnits = CLAMP(1, totalUnits / reps, unitsLeft);
-        reps = CLAMP(1, reps, unitsLeft / MAX(1, cutUnits));
-        s.numCutsInBlock = MIN(reps, kMaxCuts);
-        for (int i = 0; i < s.numCutsInBlock; i++)
+        float temp = (float)s.unitsInBlock * (1.0f - accel) /
+                     (1.0f - powf(accel, (float)repeatCount));
+        s.numCuts = MIN(repeatCount, kMaxCuts);
+        for (int i = 0; i < s.numCuts; i++)
         {
-          s.cutSizes[i] = cutUnits * s.samplesPerUnit;
-          float t = (s.numCutsInBlock > 1) ? (float)i / (float)(s.numCutsInBlock - 1) : 0.0f;
-          s.cutAmps[i] = ampMin + (ampMax - ampMin) * (1.0f - t * 0.3f);
+          float phase = (float)i / (float)s.numCuts;
+          int l = (int)(spu * temp * powf(accel, (float)i));
+          s.cuts[i].size = MAX(1, l);
+          s.cuts[i].length = MAX(1, (int)((float)l * dutyMag));
+          s.cuts[i].amp = startAmp + (endAmp - startAmp) * phase;
         }
-        s.blockRepeats = s.numCutsInBlock;
+        if (iRandFloat(s.rngState) < ritardBias)
+        {
+          for (int i = 0; i < s.numCuts / 2; i++)
+          {
+            int j = s.numCuts - 1 - i;
+            CutInfo tmp = s.cuts[i];
+            s.cuts[i] = s.cuts[j];
+            s.cuts[j] = tmp;
+          }
+        }
       }
     }
 
-    s.blockRepeatIdx = 0;
-    s.currentCutInBlock = 0;
-    s.cutPos = 0;
-    if (s.numCutsInBlock > 0)
-    {
-      s.cutSizeInSamples = MAX(1, s.cutSizes[0]);
-      s.cutAmp = s.cutAmps[0];
-    }
-  }
-
-  void BBCut::chooseBlock_SQPusher(int unitsLeft, int phrasePos)
-  {
-    Internal &s = *mpInternal;
-    float density = CLAMP(0.0f, 1.0f, mDensity.value());
-    float ampMin = CLAMP(0.0f, 1.0f, mAmpMin.value());
-    float ampMax = CLAMP(ampMin, 1.0f, mAmpMax.value());
-    int subdiv = snapSubdiv(mSubdiv.value());
-
-    s.sliceOrigin = s.writePos;
-    s.passthrough = false;
-
-    int quaverPos = (subdiv > 0) ? (phrasePos % subdiv) % 8 : 0;
-    float weight = kSQWeights[quaverPos] * density;
-    bool subdivide = iRandFloat(s.rngState) < weight;
-
-    bool inFillBar = (subdiv > 0) && (phrasePos >= s.phraseUnits - subdiv);
-    if (inFillBar) subdivide = iRandFloat(s.rngState) < (density * 0.8f + 0.2f);
-
-    if (subdivide && unitsLeft >= 2)
-    {
-      int reps = CLAMP(2, 4, MIN(4, unitsLeft));
-      int cutUnits = 1;
-      s.numCutsInBlock = MIN(reps, kMaxCuts);
-      for (int i = 0; i < s.numCutsInBlock; i++)
-      {
-        s.cutSizes[i] = cutUnits * s.samplesPerUnit;
-        s.cutAmps[i] = ampMin + iRandFloat(s.rngState) * (ampMax - ampMin);
-      }
-      s.blockRepeats = s.numCutsInBlock;
-    }
-    else
-    {
-      int cutUnits = CLAMP(1, 2, unitsLeft);
-      s.numCutsInBlock = 1;
-      s.cutSizes[0] = cutUnits * s.samplesPerUnit;
-      s.cutAmps[0] = ampMin + iRandFloat(s.rngState) * (ampMax - ampMin);
-      s.blockRepeats = 1;
-    }
-
-    s.blockRepeatIdx = 0;
-    s.currentCutInBlock = 0;
-    s.cutPos = 0;
-    if (s.numCutsInBlock > 0)
-    {
-      s.cutSizeInSamples = MAX(1, s.cutSizes[0]);
-      s.cutAmp = s.cutAmps[0];
-    }
+    s.unitsInsideBlock = 0;
+    s.currentCut = 0;
+    s.readIndex = 0;
+    s.crossfadeCounter = kCrossfadeSamples;
   }
 
   void BBCut::advanceUnit()
   {
     Internal &s = *mpInternal;
-    int algo = CLAMP(0, 2, (int)(mAlgorithm.value() + 0.5f));
 
-    s.currentCutInBlock++;
-    if (s.currentCutInBlock >= s.numCutsInBlock)
+    if (s.phraseUnits <= 0 || s.unitsDone >= s.phraseUnits)
+      choosePhraseLength();
+
+    if (s.unitsInsideBlock >= s.unitsInBlock)
     {
-      s.phrasePos += s.numCutsInBlock;
-      int unitsLeft = s.phraseUnits - s.phrasePos;
-
+      int unitsLeft = s.phraseUnits - s.unitsDone;
       if (unitsLeft <= 0)
       {
         choosePhraseLength();
         unitsLeft = s.phraseUnits;
       }
+      chooseBlock(unitsLeft);
+    }
 
-      switch (algo)
-      {
-        case 0: chooseBlock_CutProc11(unitsLeft); break;
-        case 1: chooseBlock_WarpCut(unitsLeft); break;
-        case 2: chooseBlock_SQPusher(unitsLeft, s.phrasePos); break;
-        default: chooseBlock_CutProc11(unitsLeft); break;
-      }
-    }
-    else
-    {
-      s.cutPos = 0;
-      s.cutSizeInSamples = MAX(1, s.cutSizes[s.currentCutInBlock]);
-      s.cutAmp = s.cutAmps[s.currentCutInBlock];
-      s.crossfadeCounter = kCrossfadeSamples;
-    }
+    s.unitsInsideBlock++;
+    s.unitsDone++;
   }
 
   void BBCut::process()
@@ -430,13 +326,11 @@ namespace stolmine
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
     float tanhAmt = CLAMP(0.0f, 1.0f, mTanhAmt.value());
-    float dutyCycle = CLAMP(0.0f, 1.0f, mDutyCycle.value());
-    float fadeSec = CLAMP(0.0f, 0.1f, mFade.value());
+    float fadeSamples = CLAMP(1.0f, globalConfig.sampleRate * 0.1f,
+                              mFade.value() * globalConfig.sampleRate);
+    float dutyVal = CLAMP(-1.0f, 1.0f, mDutyCycle.value());
+    bool reverseRead = (dutyVal < 0.0f);
     int subdiv = snapSubdiv(mSubdiv.value());
-
-    float fadeCoeff = (fadeSec > 0.0001f)
-      ? 1.0f / (fadeSec * globalConfig.sampleRate)
-      : 1.0f;
 
     s.samplesPerUnit = (subdiv > 0 && mClockPeriodSamples > 0)
       ? (mClockPeriodSamples * 4) / subdiv
@@ -467,25 +361,36 @@ namespace stolmine
         advanceUnit();
       }
 
-      float wet;
-      if (s.passthrough)
+      float wet = 0.0f;
+      if (s.currentCut < s.numCuts)
       {
-        wet = inSample;
-        s.fadeEnvelope = 0.0f;
-      }
-      else
-      {
-        float dutyGate = ((float)s.cutPos / (float)s.cutSizeInSamples < dutyCycle) ? 1.0f : 0.0f;
-        float target = dutyGate;
-        if (fadeCoeff >= 1.0f)
-          s.fadeEnvelope = target;
-        else
-          s.fadeEnvelope += (target - s.fadeEnvelope) * fadeCoeff;
+        CutInfo &ci = s.cuts[s.currentCut];
 
-        int readIdx = (s.sliceOrigin + (s.cutPos % s.cutSizeInSamples)) % kBufferSize;
-        if (readIdx < 0) readIdx += kBufferSize;
-        wet = bufRead(s.buffer, readIdx) * s.cutAmp * s.fadeEnvelope;
-        s.cutPos++;
+        if (s.readIndex < ci.length)
+        {
+          int readPos;
+          if (reverseRead)
+            readPos = (s.sliceOrigin + ci.size - 1 - s.readIndex) % kBufferSize;
+          else
+            readPos = (s.sliceOrigin + s.readIndex) % kBufferSize;
+          if (readPos < 0) readPos += kBufferSize;
+
+          float env = expenv((float)s.readIndex, fadeSamples, (float)ci.length);
+          wet = bufRead(s.buffer, readPos) * ci.amp * env;
+          s.readIndex++;
+        }
+        else
+        {
+          s.readIndex++;
+          wet = 0.0f;
+        }
+
+        if (s.readIndex >= ci.size)
+        {
+          s.currentCut++;
+          s.readIndex = 0;
+          s.crossfadeCounter = kCrossfadeSamples;
+        }
       }
 
       if (s.crossfadeCounter > 0)

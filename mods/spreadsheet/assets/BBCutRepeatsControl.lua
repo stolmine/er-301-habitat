@@ -10,10 +10,10 @@ local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
 local col3 = app.BUTTON3_CENTER
 
-local BBCutDensityControl = Class {}
-BBCutDensityControl:include(GainBias)
+local BBCutRepeatsControl = Class {}
+BBCutRepeatsControl:include(GainBias)
 
-function BBCutDensityControl:init(args)
+function BBCutRepeatsControl:init(args)
   GainBias.init(self, args)
 
   self.paramMode = false
@@ -23,15 +23,15 @@ function BBCutDensityControl:init(args)
 
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  local stutterAreaMap = (function()
+  local ritardMap = (function()
     local m = app.LinearDialMap(0, 1)
     m:setSteps(0.1, 0.01, 0.001, 0.001)
     return m
   end)()
 
-  local repeatsMap = (function()
-    local m = app.LinearDialMap(0, 8)
-    m:setSteps(1, 0.5, 0.1, 0.01)
+  local blendMap = (function()
+    local m = app.LinearDialMap(0, 1)
+    m:setSteps(0.1, 0.01, 0.001, 0.001)
     return m
   end)()
 
@@ -50,27 +50,27 @@ function BBCutDensityControl:init(args)
     return g
   end
 
-  self.stutterAreaReadout = makeReadout(args.stutterArea, stutterAreaMap, 2, col1)
-  self.repeatsReadout = makeReadout(args.repeats, repeatsMap, 1, col2)
+  self.ritardReadout = makeReadout(args.ritardBias, ritardMap, 2, col1)
+  self.blendReadout = makeReadout(args.blend, blendMap, 2, col2)
   self.accelReadout = makeReadout(args.accel, accelMap, 3, col3)
 
-  local desc = app.Label("Stut / Rep / Accel", 10)
+  local desc = app.Label("Rit / Blend / Accel", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
   desc:setCornerRadius(3, 0, 0, 3)
   desc:setCenter(col2, center1 + 1)
 
-  self.paramSubGraphic:addChild(self.stutterAreaReadout)
-  self.paramSubGraphic:addChild(self.repeatsReadout)
+  self.paramSubGraphic:addChild(self.ritardReadout)
+  self.paramSubGraphic:addChild(self.blendReadout)
   self.paramSubGraphic:addChild(self.accelReadout)
   self.paramSubGraphic:addChild(desc)
-  self.paramSubGraphic:addChild(app.SubButton("stut", 1))
-  self.paramSubGraphic:addChild(app.SubButton("rep", 2))
+  self.paramSubGraphic:addChild(app.SubButton("rit", 1))
+  self.paramSubGraphic:addChild(app.SubButton("blnd", 2))
   self.paramSubGraphic:addChild(app.SubButton("accel", 3))
 end
 
-function BBCutDensityControl:setParamMode(enabled)
+function BBCutRepeatsControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
   self.paramFocusedReadout = nil
@@ -84,12 +84,12 @@ function BBCutDensityControl:setParamMode(enabled)
   self:addSubGraphic(self.subGraphic)
 end
 
-function BBCutDensityControl:onCursorEnter(spot)
+function BBCutRepeatsControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
 end
 
-function BBCutDensityControl:onCursorLeave(spot)
+function BBCutRepeatsControl:onCursorLeave(spot)
   if self.paramMode then
     self:removeSubGraphic(self.subGraphic)
     self.paramMode = false
@@ -99,7 +99,7 @@ function BBCutDensityControl:onCursorLeave(spot)
   GainBias.onCursorLeave(self, spot)
 end
 
-function BBCutDensityControl:shiftPressed()
+function BBCutRepeatsControl:shiftPressed()
   self.shiftHeld = true
   self.shiftUsed = false
   if self.paramFocusedReadout then
@@ -110,7 +110,7 @@ function BBCutDensityControl:shiftPressed()
   return true
 end
 
-function BBCutDensityControl:shiftReleased()
+function BBCutRepeatsControl:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
     if self.paramFocusedReadout and self.shiftSnapshot then
       local cur = self.paramFocusedReadout:getValueInUnits()
@@ -127,7 +127,7 @@ function BBCutDensityControl:shiftReleased()
   return true
 end
 
-function BBCutDensityControl:spotReleased(spot, shifted)
+function BBCutRepeatsControl:spotReleased(spot, shifted)
   if self.paramMode then
     self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
@@ -136,11 +136,11 @@ function BBCutDensityControl:spotReleased(spot, shifted)
   return GainBias.spotReleased(self, spot, shifted)
 end
 
-function BBCutDensityControl:subReleased(i, shifted)
+function BBCutRepeatsControl:subReleased(i, shifted)
   if shifted then return false end
   if self.paramMode then
-    local readout = i == 1 and self.stutterAreaReadout
-        or i == 2 and self.repeatsReadout
+    local readout = i == 1 and self.ritardReadout
+        or i == 2 and self.blendReadout
         or i == 3 and self.accelReadout or nil
     if readout then
       readout:save()
@@ -153,10 +153,8 @@ function BBCutDensityControl:subReleased(i, shifted)
   return GainBias.subReleased(self, i, shifted)
 end
 
-function BBCutDensityControl:encoder(change, shifted)
-  if shifted and self.shiftHeld then
-    self.shiftUsed = true
-  end
+function BBCutRepeatsControl:encoder(change, shifted)
+  if shifted and self.shiftHeld then self.shiftUsed = true end
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
     return true
@@ -164,7 +162,7 @@ function BBCutDensityControl:encoder(change, shifted)
   return GainBias.encoder(self, change, shifted)
 end
 
-function BBCutDensityControl:zeroPressed()
+function BBCutRepeatsControl:zeroPressed()
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:zero()
     return true
@@ -172,7 +170,7 @@ function BBCutDensityControl:zeroPressed()
   return GainBias.zeroPressed(self)
 end
 
-function BBCutDensityControl:cancelReleased(shifted)
+function BBCutRepeatsControl:cancelReleased(shifted)
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:restore()
     return true
@@ -180,4 +178,4 @@ function BBCutDensityControl:cancelReleased(shifted)
   return GainBias.cancelReleased(self, shifted)
 end
 
-return BBCutDensityControl
+return BBCutRepeatsControl

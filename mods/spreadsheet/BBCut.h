@@ -19,10 +19,12 @@ namespace stolmine
     od::Inlet mClock{"Clock"};
     od::Outlet mOut{"Out"};
 
-    od::Parameter mAlgorithm{"Algorithm", 0.0f};
     od::Parameter mDensity{"Density", 0.5f};
-    od::Parameter mStutterArea{"StutterArea", 0.5f};
-    od::Parameter mRepeats{"Repeats", 2.0f};
+    od::Parameter mBlockSize{"BlockSize", 0.5f};
+    od::Parameter mBlockMax{"BlockMax", 4.0f};
+    od::Parameter mRepeatCount{"RepeatCount", 8.0f};
+    od::Parameter mRitardBias{"RitardBias", 0.5f};
+    od::Parameter mBlend{"Blend", 0.5f};
     od::Parameter mAccel{"Accel", 0.9f};
 
     od::Parameter mSubdiv{"Subdiv", 8.0f};
@@ -55,9 +57,7 @@ namespace stolmine
 
     void advanceUnit();
     void choosePhraseLength();
-    void chooseBlock_CutProc11(int unitsLeft);
-    void chooseBlock_WarpCut(int unitsLeft);
-    void chooseBlock_SQPusher(int unitsLeft, int phrasePos);
+    void chooseBlock(int unitsLeft);
   };
 
 }
