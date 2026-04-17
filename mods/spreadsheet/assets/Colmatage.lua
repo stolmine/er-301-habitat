@@ -5,9 +5,9 @@ local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local MixControl = require "spreadsheet.MixControl"
 local LaretClockControl = require "spreadsheet.LaretClockControl"
-local BBCutBlockControl = require "spreadsheet.BBCutBlockControl"
-local BBCutRepeatsControl = require "spreadsheet.BBCutRepeatsControl"
-local BBCutTextureControl = require "spreadsheet.BBCutTextureControl"
+local ColmatageBlockControl = require "spreadsheet.ColmatageBlockControl"
+local ColmatageRepeatsControl = require "spreadsheet.ColmatageRepeatsControl"
+local ColmatageTextureControl = require "spreadsheet.ColmatageTextureControl"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max)
@@ -39,17 +39,17 @@ local tanhMap = floatMap(0, 1)
 local phraseMap = intMap(1, 8)
 local subdivMap = intMap(6, 32)
 
-local BBCut = Class {}
-BBCut:include(Unit)
+local Colmatage = Class {}
+Colmatage:include(Unit)
 
-function BBCut:init(args)
-  args.title = "BBCut"
+function Colmatage:init(args)
+  args.title = "Colmatage"
   args.mnemonic = "BC"
   Unit.init(self, args)
 end
 
-function BBCut:onLoadGraph(channelCount)
-  local op = self:addObject("op", libspreadsheet.BBCut())
+function Colmatage:onLoadGraph(channelCount)
+  local op = self:addObject("op", libspreadsheet.Colmatage())
 
   connect(self, "In1", op, "In")
   connect(op, "Out", self, "Out1")
@@ -89,7 +89,7 @@ function BBCut:onLoadGraph(channelCount)
   adapter("tanhAmt",      "TanhAmt",      0.0)
 end
 
-function BBCut:onLoadViews()
+function Colmatage:onLoadViews()
   return {
     clock = LaretClockControl {
       button = "clock",
@@ -99,7 +99,7 @@ function BBCut:onLoadViews()
       resetComparator = self.objects.clock,
       divParam = self.objects.subdiv:getParameter("Bias")
     },
-    block = BBCutBlockControl {
+    block = ColmatageBlockControl {
       button = "block",
       description = "Block Size",
       branch = self.branches.blockSize,
@@ -124,7 +124,7 @@ function BBCut:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.5
     },
-    repeats = BBCutRepeatsControl {
+    repeats = ColmatageRepeatsControl {
       button = "rep",
       description = "Repeats",
       branch = self.branches.repeatCount,
@@ -138,7 +138,7 @@ function BBCut:onLoadViews()
       blend = self.objects.blend:getParameter("Bias"),
       accel = self.objects.accel:getParameter("Bias")
     },
-    texture = BBCutTextureControl {
+    texture = ColmatageTextureControl {
       button = "duty",
       description = "Duty Cycle",
       branch = self.branches.dutyCycle,
@@ -353,4 +353,4 @@ function BBCut:onLoadViews()
   }
 end
 
-return BBCut
+return Colmatage

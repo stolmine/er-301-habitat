@@ -10,10 +10,10 @@ local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
 local col3 = app.BUTTON3_CENTER
 
-local BBCutTextureControl = Class {}
-BBCutTextureControl:include(GainBias)
+local ColmatageRepeatsControl = Class {}
+ColmatageRepeatsControl:include(GainBias)
 
-function BBCutTextureControl:init(args)
+function ColmatageRepeatsControl:init(args)
   GainBias.init(self, args)
 
   self.paramMode = false
@@ -23,48 +23,54 @@ function BBCutTextureControl:init(args)
 
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  local ampMap = (function()
+  local ritardMap = (function()
     local m = app.LinearDialMap(0, 1)
     m:setSteps(0.1, 0.01, 0.001, 0.001)
     return m
   end)()
 
-  local fadeMap = (function()
-    local m = app.LinearDialMap(0, 0.1)
-    m:setSteps(0.01, 0.001, 0.0001, 0.0001)
+  local blendMap = (function()
+    local m = app.LinearDialMap(0, 1)
+    m:setSteps(0.1, 0.01, 0.001, 0.001)
     return m
   end)()
 
-  local function makeReadout(param, map, precision, units, x)
+  local accelMap = (function()
+    local m = app.LinearDialMap(0.5, 0.999)
+    m:setSteps(0.1, 0.01, 0.001, 0.001)
+    return m
+  end)()
+
+  local function makeReadout(param, map, precision, x)
     local g = app.Readout(0, 0, ply, 10)
     g:setParameter(param)
-    g:setAttributes(units, map)
+    g:setAttributes(app.unitNone, map)
     g:setPrecision(precision)
     g:setCenter(x, center4)
     return g
   end
 
-  self.ampMinReadout = makeReadout(args.ampMin, ampMap, 2, app.unitNone, col1)
-  self.ampMaxReadout = makeReadout(args.ampMax, ampMap, 2, app.unitNone, col2)
-  self.fadeReadout = makeReadout(args.fade, fadeMap, 3, app.unitSecs, col3)
+  self.ritardReadout = makeReadout(args.ritardBias, ritardMap, 2, col1)
+  self.blendReadout = makeReadout(args.blend, blendMap, 2, col2)
+  self.accelReadout = makeReadout(args.accel, accelMap, 3, col3)
 
-  local desc = app.Label("AMin / AMax / Fade", 10)
+  local desc = app.Label("Rit / Blend / Accel", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
   desc:setCornerRadius(3, 0, 0, 3)
   desc:setCenter(col2, center1 + 1)
 
-  self.paramSubGraphic:addChild(self.ampMinReadout)
-  self.paramSubGraphic:addChild(self.ampMaxReadout)
-  self.paramSubGraphic:addChild(self.fadeReadout)
+  self.paramSubGraphic:addChild(self.ritardReadout)
+  self.paramSubGraphic:addChild(self.blendReadout)
+  self.paramSubGraphic:addChild(self.accelReadout)
   self.paramSubGraphic:addChild(desc)
-  self.paramSubGraphic:addChild(app.SubButton("amin", 1))
-  self.paramSubGraphic:addChild(app.SubButton("amax", 2))
-  self.paramSubGraphic:addChild(app.SubButton("fade", 3))
+  self.paramSubGraphic:addChild(app.SubButton("rit", 1))
+  self.paramSubGraphic:addChild(app.SubButton("blnd", 2))
+  self.paramSubGraphic:addChild(app.SubButton("accel", 3))
 end
 
-function BBCutTextureControl:setParamMode(enabled)
+function ColmatageRepeatsControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
   self.paramFocusedReadout = nil
@@ -78,12 +84,12 @@ function BBCutTextureControl:setParamMode(enabled)
   self:addSubGraphic(self.subGraphic)
 end
 
-function BBCutTextureControl:onCursorEnter(spot)
+function ColmatageRepeatsControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
 end
 
-function BBCutTextureControl:onCursorLeave(spot)
+function ColmatageRepeatsControl:onCursorLeave(spot)
   if self.paramMode then
     self:removeSubGraphic(self.subGraphic)
     self.paramMode = false
@@ -93,7 +99,7 @@ function BBCutTextureControl:onCursorLeave(spot)
   GainBias.onCursorLeave(self, spot)
 end
 
-function BBCutTextureControl:shiftPressed()
+function ColmatageRepeatsControl:shiftPressed()
   self.shiftHeld = true
   self.shiftUsed = false
   if self.paramFocusedReadout then
@@ -104,7 +110,7 @@ function BBCutTextureControl:shiftPressed()
   return true
 end
 
-function BBCutTextureControl:shiftReleased()
+function ColmatageRepeatsControl:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
     if self.paramFocusedReadout and self.shiftSnapshot then
       local cur = self.paramFocusedReadout:getValueInUnits()
@@ -121,7 +127,7 @@ function BBCutTextureControl:shiftReleased()
   return true
 end
 
-function BBCutTextureControl:spotReleased(spot, shifted)
+function ColmatageRepeatsControl:spotReleased(spot, shifted)
   if self.paramMode then
     self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
@@ -130,12 +136,12 @@ function BBCutTextureControl:spotReleased(spot, shifted)
   return GainBias.spotReleased(self, spot, shifted)
 end
 
-function BBCutTextureControl:subReleased(i, shifted)
+function ColmatageRepeatsControl:subReleased(i, shifted)
   if shifted then return false end
   if self.paramMode then
-    local readout = i == 1 and self.ampMinReadout
-        or i == 2 and self.ampMaxReadout
-        or i == 3 and self.fadeReadout or nil
+    local readout = i == 1 and self.ritardReadout
+        or i == 2 and self.blendReadout
+        or i == 3 and self.accelReadout or nil
     if readout then
       readout:save()
       self.paramFocusedReadout = readout
@@ -147,10 +153,8 @@ function BBCutTextureControl:subReleased(i, shifted)
   return GainBias.subReleased(self, i, shifted)
 end
 
-function BBCutTextureControl:encoder(change, shifted)
-  if shifted and self.shiftHeld then
-    self.shiftUsed = true
-  end
+function ColmatageRepeatsControl:encoder(change, shifted)
+  if shifted and self.shiftHeld then self.shiftUsed = true end
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
     return true
@@ -158,7 +162,7 @@ function BBCutTextureControl:encoder(change, shifted)
   return GainBias.encoder(self, change, shifted)
 end
 
-function BBCutTextureControl:zeroPressed()
+function ColmatageRepeatsControl:zeroPressed()
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:zero()
     return true
@@ -166,7 +170,7 @@ function BBCutTextureControl:zeroPressed()
   return GainBias.zeroPressed(self)
 end
 
-function BBCutTextureControl:cancelReleased(shifted)
+function ColmatageRepeatsControl:cancelReleased(shifted)
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:restore()
     return true
@@ -174,4 +178,4 @@ function BBCutTextureControl:cancelReleased(shifted)
   return GainBias.cancelReleased(self, shifted)
 end
 
-return BBCutTextureControl
+return ColmatageRepeatsControl

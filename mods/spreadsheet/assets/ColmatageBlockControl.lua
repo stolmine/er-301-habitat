@@ -10,10 +10,10 @@ local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
 local col3 = app.BUTTON3_CENTER
 
-local BBCutRepeatsControl = Class {}
-BBCutRepeatsControl:include(GainBias)
+local ColmatageBlockControl = Class {}
+ColmatageBlockControl:include(GainBias)
 
-function BBCutRepeatsControl:init(args)
+function ColmatageBlockControl:init(args)
   GainBias.init(self, args)
 
   self.paramMode = false
@@ -23,21 +23,17 @@ function BBCutRepeatsControl:init(args)
 
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  local ritardMap = (function()
-    local m = app.LinearDialMap(0, 1)
-    m:setSteps(0.1, 0.01, 0.001, 0.001)
+  local phraseMap = (function()
+    local m = app.LinearDialMap(1, 8)
+    m:setSteps(1, 1, 1, 1)
+    m:setRounding(1)
     return m
   end)()
 
-  local blendMap = (function()
-    local m = app.LinearDialMap(0, 1)
-    m:setSteps(0.1, 0.01, 0.001, 0.001)
-    return m
-  end)()
-
-  local accelMap = (function()
-    local m = app.LinearDialMap(0.5, 0.999)
-    m:setSteps(0.1, 0.01, 0.001, 0.001)
+  local blockMaxMap = (function()
+    local m = app.LinearDialMap(1, 16)
+    m:setSteps(4, 1, 1, 1)
+    m:setRounding(1)
     return m
   end)()
 
@@ -50,27 +46,27 @@ function BBCutRepeatsControl:init(args)
     return g
   end
 
-  self.ritardReadout = makeReadout(args.ritardBias, ritardMap, 2, col1)
-  self.blendReadout = makeReadout(args.blend, blendMap, 2, col2)
-  self.accelReadout = makeReadout(args.accel, accelMap, 3, col3)
+  self.phraseMinReadout = makeReadout(args.phraseMin, phraseMap, 0, col1)
+  self.phraseMaxReadout = makeReadout(args.phraseMax, phraseMap, 0, col2)
+  self.blockMaxReadout = makeReadout(args.blockMax, blockMaxMap, 0, col3)
 
-  local desc = app.Label("Rit / Blend / Accel", 10)
+  local desc = app.Label("PMin / PMax / BMax", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
   desc:setCornerRadius(3, 0, 0, 3)
   desc:setCenter(col2, center1 + 1)
 
-  self.paramSubGraphic:addChild(self.ritardReadout)
-  self.paramSubGraphic:addChild(self.blendReadout)
-  self.paramSubGraphic:addChild(self.accelReadout)
+  self.paramSubGraphic:addChild(self.phraseMinReadout)
+  self.paramSubGraphic:addChild(self.phraseMaxReadout)
+  self.paramSubGraphic:addChild(self.blockMaxReadout)
   self.paramSubGraphic:addChild(desc)
-  self.paramSubGraphic:addChild(app.SubButton("rit", 1))
-  self.paramSubGraphic:addChild(app.SubButton("blnd", 2))
-  self.paramSubGraphic:addChild(app.SubButton("accel", 3))
+  self.paramSubGraphic:addChild(app.SubButton("pmin", 1))
+  self.paramSubGraphic:addChild(app.SubButton("pmax", 2))
+  self.paramSubGraphic:addChild(app.SubButton("bmax", 3))
 end
 
-function BBCutRepeatsControl:setParamMode(enabled)
+function ColmatageBlockControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
   self.paramFocusedReadout = nil
@@ -84,12 +80,12 @@ function BBCutRepeatsControl:setParamMode(enabled)
   self:addSubGraphic(self.subGraphic)
 end
 
-function BBCutRepeatsControl:onCursorEnter(spot)
+function ColmatageBlockControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
 end
 
-function BBCutRepeatsControl:onCursorLeave(spot)
+function ColmatageBlockControl:onCursorLeave(spot)
   if self.paramMode then
     self:removeSubGraphic(self.subGraphic)
     self.paramMode = false
@@ -99,7 +95,7 @@ function BBCutRepeatsControl:onCursorLeave(spot)
   GainBias.onCursorLeave(self, spot)
 end
 
-function BBCutRepeatsControl:shiftPressed()
+function ColmatageBlockControl:shiftPressed()
   self.shiftHeld = true
   self.shiftUsed = false
   if self.paramFocusedReadout then
@@ -110,7 +106,7 @@ function BBCutRepeatsControl:shiftPressed()
   return true
 end
 
-function BBCutRepeatsControl:shiftReleased()
+function ColmatageBlockControl:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
     if self.paramFocusedReadout and self.shiftSnapshot then
       local cur = self.paramFocusedReadout:getValueInUnits()
@@ -127,7 +123,7 @@ function BBCutRepeatsControl:shiftReleased()
   return true
 end
 
-function BBCutRepeatsControl:spotReleased(spot, shifted)
+function ColmatageBlockControl:spotReleased(spot, shifted)
   if self.paramMode then
     self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
@@ -136,12 +132,12 @@ function BBCutRepeatsControl:spotReleased(spot, shifted)
   return GainBias.spotReleased(self, spot, shifted)
 end
 
-function BBCutRepeatsControl:subReleased(i, shifted)
+function ColmatageBlockControl:subReleased(i, shifted)
   if shifted then return false end
   if self.paramMode then
-    local readout = i == 1 and self.ritardReadout
-        or i == 2 and self.blendReadout
-        or i == 3 and self.accelReadout or nil
+    local readout = i == 1 and self.phraseMinReadout
+        or i == 2 and self.phraseMaxReadout
+        or i == 3 and self.blockMaxReadout or nil
     if readout then
       readout:save()
       self.paramFocusedReadout = readout
@@ -153,7 +149,7 @@ function BBCutRepeatsControl:subReleased(i, shifted)
   return GainBias.subReleased(self, i, shifted)
 end
 
-function BBCutRepeatsControl:encoder(change, shifted)
+function ColmatageBlockControl:encoder(change, shifted)
   if shifted and self.shiftHeld then self.shiftUsed = true end
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
@@ -162,7 +158,7 @@ function BBCutRepeatsControl:encoder(change, shifted)
   return GainBias.encoder(self, change, shifted)
 end
 
-function BBCutRepeatsControl:zeroPressed()
+function ColmatageBlockControl:zeroPressed()
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:zero()
     return true
@@ -170,7 +166,7 @@ function BBCutRepeatsControl:zeroPressed()
   return GainBias.zeroPressed(self)
 end
 
-function BBCutRepeatsControl:cancelReleased(shifted)
+function ColmatageBlockControl:cancelReleased(shifted)
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:restore()
     return true
@@ -178,4 +174,4 @@ function BBCutRepeatsControl:cancelReleased(shifted)
   return GainBias.cancelReleased(self, shifted)
 end
 
-return BBCutRepeatsControl
+return ColmatageBlockControl

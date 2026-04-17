@@ -33,7 +33,7 @@
 #include "LaretOverviewGraphic.h"
 #include "Blanda.h"
 #include "BlandaInputGraphic.h"
-#include "BBCut.h"
+#include "Colmatage.h"
 #define SWIGLUA
 %}
 
@@ -67,4 +67,4 @@
 %include "LaretOverviewGraphic.h"
 %include "Blanda.h"
 %include "BlandaInputGraphic.h"
-%include "BBCut.h"
+%include "Colmatage.h"

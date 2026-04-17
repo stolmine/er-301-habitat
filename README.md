@@ -105,6 +105,7 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Impasto | 3-band multiband compressor -- per-band FFT spectrum with GR ceiling contour, sidechain input, G-Bus speed control, auto makeup |
 | | Helicase | 2-op FM oscillator -- OPL3 carrier + modulator with 16 fold shapes, JF-style phase-receptivity sync, lin/expo FM, lo-fi/hi-fi toggle, k-means phase-space viz |
 | | Larets | Stepped multi-effect -- 10 effects (stutter/reverse/bitcrush/downsample/filter/pitch shift/distortion/shuffle/delay/comb) with clock-locked buffer tricks, CPR single-band compressor, bipolar global param offset, 16-step sequencer with xform gate |
+| | Colmatage | Clock-driven breakbeat cutter -- WarpCut-derived algorithm with parameterized block size, repeat count, accel/ritard geometric series, bipolar duty cycle (reverse on negative), tanh saturation. Based on Nick Collins' BBCut library via Livecut |
 | **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization -- stereo-aware passthrough with waveform display |
 | | Spectrogram | Inline FFT spectrum analyzer -- 256-point pffft, stereo passthrough, peak hold + RMS gradient |
 | **catchall** | Sfera | Z-plane morphing filter -- 32 configs, audio-reactive ferrofluid visualization (experimental) |
@@ -319,4 +320,8 @@ Joe Filbrun - I drew directly from your menu paging schemes in Accents
 Brian Clarkson - For making my favorite instrument
 
 Émilie Gillet - For the incredible, generous gift of your code
+
+Nick Collins - Colmatage's algorithm descends from the BBCut library (ICMC 2002)
+
+Remy Muller - The Livecut VST (GPLv2) served as the primary C++ reference for the cut procedures
 

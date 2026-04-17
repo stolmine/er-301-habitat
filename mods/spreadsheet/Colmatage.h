@@ -6,11 +6,11 @@
 namespace stolmine
 {
 
-  class BBCut : public od::Object
+  class Colmatage : public od::Object
   {
   public:
-    BBCut();
-    virtual ~BBCut();
+    Colmatage();
+    virtual ~Colmatage();
 
 #ifndef SWIGLUA
     virtual void process();

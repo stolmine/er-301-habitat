@@ -1,9 +1,9 @@
-// BBCut -- clock-driven breakbeat cutting processor
+// Colmatage -- clock-driven breakbeat cutting processor (formerly BBCut)
 // WarpCut-derived engine with parameterized block size, repeat count,
 // accel/ritard bias, and bipolar duty cycle (reverse on negative).
-// Algorithm lineage: Nick Collins' BBCut via Livecut (Remy Muller, GPLv2).
+// Algorithm lineage: Nick Collins' Colmatage via Livecut (Remy Muller, GPLv2).
 
-#include "BBCut.h"
+#include "Colmatage.h"
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
@@ -34,7 +34,7 @@ namespace stolmine
     float amp;
   };
 
-  struct BBCut::Internal
+  struct Colmatage::Internal
   {
     int16_t buffer[kBufferSize];
     int writePos;
@@ -150,7 +150,7 @@ namespace stolmine
     return blockMax;
   }
 
-  BBCut::BBCut()
+  Colmatage::Colmatage()
   {
     addInput(mIn);
     addInput(mClock);
@@ -177,24 +177,24 @@ namespace stolmine
     mpInternal->Init();
   }
 
-  BBCut::~BBCut() { delete mpInternal; }
+  Colmatage::~Colmatage() { delete mpInternal; }
 
-  int BBCut::getPhraseBars()
+  int Colmatage::getPhraseBars()
   {
     Internal &s = *mpInternal;
     int subdiv = snapSubdiv(mSubdiv.value());
     return (subdiv > 0) ? s.phraseUnits / subdiv : 1;
   }
 
-  int BBCut::getPhrasePosition() { return mpInternal->unitsDone; }
-  int BBCut::getPhraseLength() { return mpInternal->phraseUnits; }
+  int Colmatage::getPhrasePosition() { return mpInternal->unitsDone; }
+  int Colmatage::getPhraseLength() { return mpInternal->phraseUnits; }
 
-  float BBCut::getOutputSample(int idx)
+  float Colmatage::getOutputSample(int idx)
   {
     return mpInternal->vizRing[(mpInternal->vizPos + idx) & (kVizSize - 1)];
   }
 
-  void BBCut::choosePhraseLength()
+  void Colmatage::choosePhraseLength()
   {
     Internal &s = *mpInternal;
     int pMin = MAX(1, (int)(mPhraseMin.value() + 0.5f));
@@ -205,7 +205,7 @@ namespace stolmine
     s.unitsDone = 0;
   }
 
-  void BBCut::chooseBlock(int unitsLeft)
+  void Colmatage::chooseBlock(int unitsLeft)
   {
     Internal &s = *mpInternal;
     int subdiv = snapSubdiv(mSubdiv.value());
@@ -290,7 +290,7 @@ namespace stolmine
     s.crossfadeCounter = kCrossfadeSamples;
   }
 
-  void BBCut::advanceUnit()
+  void Colmatage::advanceUnit()
   {
     Internal &s = *mpInternal;
 
@@ -312,7 +312,7 @@ namespace stolmine
     s.unitsDone++;
   }
 
-  void BBCut::process()
+  void Colmatage::process()
   {
     Internal &s = *mpInternal;
 
