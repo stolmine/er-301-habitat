@@ -14,6 +14,7 @@ return {
     { title = "Impasto",  moduleName = "MultibandCompressor", category = "Spreadsheet", keywords = "compressor, multiband, dynamics, sidechain, effect, impasto" },
     { title = "Helicase", moduleName = "Helicase",           category = "Spreadsheet", keywords = "oscillator, FM, synthesis, OPL3, generator, source, helicase" },
     { title = "Larets",   moduleName = "Larets",             category = "Spreadsheet", keywords = "effect, step, sequencer, multi, processor, larets" },
-    { title = "Blanda",   moduleName = "Blanda",             category = "Spreadsheet", keywords = "mixer, scan, morph, fade, three, input, blanda" }
+    { title = "Blanda",   moduleName = "Blanda",             category = "Spreadsheet", keywords = "mixer, scan, morph, fade, three, input, blanda" },
+    { title = "BBCut",    moduleName = "BBCut",              category = "Spreadsheet", keywords = "effect, rhythm, breakbeat, slicer, stutter, dj, bbcut" }
   }
 }
