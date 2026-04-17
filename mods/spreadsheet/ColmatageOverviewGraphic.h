@@ -14,16 +14,15 @@ namespace stolmine
     ColmatageOverviewGraphic(int left, int bottom, int width, int height)
         : od::Graphic(left, bottom, width, height)
     {
-      memset(mCurrent, 0, sizeof(mCurrent));
-      memset(mTarget, 0, sizeof(mTarget));
-      mNumCurrentCells = 0;
-      mNumTargetCells = 0;
+      memset(mTree, 0, sizeof(mTree));
       mTime = 0.0f;
       mLastPhrasePos = -1;
       mLastCut = -1;
-      mMorphProgress = 1.0f;
+      mNumLeaves = 0;
       mRng = 31415;
       bakeNoiseLUT();
+      initTree(0, 0, 0, width, height, 0);
+      retarget(0.5f);
     }
 
     virtual ~ColmatageOverviewGraphic()
@@ -48,8 +47,6 @@ namespace stolmine
       if (!mpColmatage)
         return;
 
-      int w = mWidth;
-      int h = mHeight;
       int left = mWorldLeft;
       int bot = mWorldBottom;
 
@@ -57,174 +54,63 @@ namespace stolmine
       int phraseLen = mpColmatage->getPhraseLength();
       float phraseProgress = (phraseLen > 0) ? (float)phrasePos / (float)phraseLen : 0.0f;
 
-      if (phrasePos < mLastPhrasePos || mNumCurrentCells == 0)
+      if (phrasePos < mLastPhrasePos)
       {
         float bs = mpColmatage->getBlockSize();
-        generateNewTarget(w, h, bs);
+        retarget(bs);
       }
       mLastPhrasePos = phrasePos;
 
       mTime += 0.015f;
 
-      if (mMorphProgress < 1.0f)
+      for (int i = 0; i < kMaxNodes; i++)
       {
-        mMorphProgress += 0.04f;
-        if (mMorphProgress >= 1.0f)
-        {
-          mMorphProgress = 1.0f;
-          for (int i = 0; i < mNumTargetCells; i++)
-            mCurrent[i] = mTarget[i];
-          mNumCurrentCells = mNumTargetCells;
-        }
+        BSPNode &n = mTree[i];
+        n.splitProgress += (n.splitTarget - n.splitProgress) * 0.045f;
+        if (n.splitProgress < 0.005f) n.splitProgress = 0.0f;
+        if (n.splitProgress > 0.995f) n.splitProgress = 1.0f;
       }
 
+      collectLeaves();
+
       int curCut = mpColmatage->getCurrentCut();
-      if (curCut != mLastCut)
+      if (curCut != mLastCut && mNumLeaves > 0)
       {
-        int n = (mMorphProgress < 1.0f) ? mNumTargetCells : mNumCurrentCells;
-        if (n > 0)
-        {
-          int cellIdx = curCut % n;
-          if (mMorphProgress < 1.0f)
-            mTarget[cellIdx].activeDecay = 12;
-          else
-            mCurrent[cellIdx].activeDecay = 12;
-        }
+        int leafIdx = curCut % mNumLeaves;
+        mTree[mLeafIndices[leafIdx]].activeDecay = 12;
         mLastCut = curCut;
       }
 
-      int numDraw = (mMorphProgress < 1.0f) ? mNumTargetCells : mNumCurrentCells;
-      if (numDraw > mNumCurrentCells)
-        numDraw = mNumTargetCells;
-
-      int maxCells = (mNumCurrentCells > mNumTargetCells) ? mNumCurrentCells : mNumTargetCells;
-
-      for (int c = 0; c < maxCells; c++)
-      {
-        float dl, db, dr, dt;
-        float noisePhase;
-        int activeDecay;
-
-        if (mMorphProgress >= 1.0f)
-        {
-          if (c >= mNumCurrentCells) continue;
-          CellRect &cur = mCurrent[c];
-          dl = (float)cur.left;
-          db = (float)cur.bottom;
-          dr = (float)cur.right;
-          dt = (float)cur.top;
-          noisePhase = cur.noisePhase;
-          activeDecay = cur.activeDecay;
-          if (cur.activeDecay > 0) cur.activeDecay--;
-        }
-        else
-        {
-          CellRect *src = (c < mNumCurrentCells) ? &mCurrent[c] : nullptr;
-          CellRect *dst = (c < mNumTargetCells) ? &mTarget[c] : nullptr;
-
-          if (src && dst)
-          {
-            float t = mMorphProgress;
-            dl = lerp((float)src->left, (float)dst->left, t);
-            db = lerp((float)src->bottom, (float)dst->bottom, t);
-            dr = lerp((float)src->right, (float)dst->right, t);
-            dt = lerp((float)src->top, (float)dst->top, t);
-            noisePhase = lerp(src->noisePhase, dst->noisePhase, t);
-            activeDecay = dst->activeDecay;
-            if (dst->activeDecay > 0) dst->activeDecay--;
-          }
-          else if (dst)
-          {
-            float t = mMorphProgress;
-            float cx = ((float)dst->left + (float)dst->right) * 0.5f;
-            float cy = ((float)dst->bottom + (float)dst->top) * 0.5f;
-            dl = lerp(cx, (float)dst->left, t);
-            db = lerp(cy, (float)dst->bottom, t);
-            dr = lerp(cx, (float)dst->right, t);
-            dt = lerp(cy, (float)dst->top, t);
-            noisePhase = dst->noisePhase;
-            activeDecay = dst->activeDecay;
-            if (dst->activeDecay > 0) dst->activeDecay--;
-          }
-          else if (src)
-          {
-            float t = 1.0f - mMorphProgress;
-            float cx = ((float)src->left + (float)src->right) * 0.5f;
-            float cy = ((float)src->bottom + (float)src->top) * 0.5f;
-            dl = lerp(cx, (float)src->left, t);
-            db = lerp(cy, (float)src->bottom, t);
-            dr = lerp(cx, (float)src->right, t);
-            dt = lerp(cy, (float)src->top, t);
-            noisePhase = src->noisePhase;
-            activeDecay = src->activeDecay;
-            if (src->activeDecay > 0) src->activeDecay--;
-          }
-          else
-            continue;
-        }
-
-        int cl = left + (int)(dl + 0.5f);
-        int cb = bot + (int)(db + 0.5f);
-        int cr = left + (int)(dr + 0.5f);
-        int ct = bot + (int)(dt + 0.5f);
-
-        if (cr <= cl || ct <= cb) continue;
-
-        float n = sampleNoise(noisePhase + mTime * 0.3f, mTime * 0.2f);
-
-        float cellCx = (dl + dr) * 0.5f / (float)w;
-        float cellCy = (db + dt) * 0.5f / (float)h;
-        float diag = (cellCx + (1.0f - cellCy)) * 0.5f;
-        float phraseSweep = phraseProgress - diag;
-        if (phraseSweep < 0.0f) phraseSweep = 0.0f;
-        if (phraseSweep > 1.0f) phraseSweep = 1.0f;
-        phraseSweep = phraseSweep * phraseSweep;
-
-        float base = phraseSweep * 0.25f + n * 0.08f;
-
-        float active = 0.0f;
-        if (activeDecay > 0)
-          active = 0.65f * ((float)activeDecay / 12.0f);
-
-        float b = base + active;
-        if (b > 1.0f) b = 1.0f;
-
-        int gray = (int)(b * 15.0f);
-        if (gray > 15) gray = 15;
-
-        if (cr - cl > 2 && ct - cb > 2)
-          fb.fill((od::Color)gray, cl + 1, cb + 1, cr - 1, ct - 1);
-        else if (cr - cl > 0 && ct - cb > 0)
-          fb.fill((od::Color)gray, cl, cb, cr, ct);
-
-        if (cr - cl > 2 && ct - cb > 2)
-          fb.box(GRAY3, cl, cb, cr, ct);
-      }
+      drawNode(fb, 0, left, bot, left + mWidth, bot + mHeight, phraseProgress);
     }
 
 #endif
 
   private:
-    static const int kMaxCells = 32;
+    static const int kTreeDepth = 5;
+    static const int kMaxNodes = 63;
+    static const int kMaxLeaves = 32;
     static const int kNoiseLUTSize = 64;
 
-    struct CellRect
+    struct BSPNode
     {
-      int left, bottom, right, top;
+      bool splitH;
+      float splitFrac;
+      float splitProgress;
+      float splitTarget;
+      float targetFrac;
       float noisePhase;
       int activeDecay;
     };
 
     Colmatage *mpColmatage = 0;
-    CellRect mCurrent[kMaxCells];
-    CellRect mTarget[kMaxCells];
-    int mNumCurrentCells;
-    int mNumTargetCells;
+    BSPNode mTree[kMaxNodes];
+    int mLeafIndices[kMaxLeaves];
+    int mNumLeaves;
     float mNoiseLUT[kNoiseLUTSize * kNoiseLUTSize];
     float mTime;
     int mLastPhrasePos;
     int mLastCut;
-    float mMorphProgress;
     uint32_t mRng;
 
     float rngFloat()
@@ -233,66 +119,198 @@ namespace stolmine
       return (float)(mRng >> 1) / (float)0x7FFFFFFF;
     }
 
-    void generateNewTarget(int w, int h, float blockSizeBias)
-    {
-      if (mMorphProgress >= 1.0f)
-      {
-        for (int i = 0; i < mNumCurrentCells; i++)
-          mCurrent[i] = mCurrent[i];
-      }
-      else
-      {
-        for (int i = 0; i < mNumTargetCells; i++)
-          mCurrent[i] = mTarget[i];
-        mNumCurrentCells = mNumTargetCells;
-      }
+    static inline int childA(int i) { return 2 * i + 1; }
+    static inline int childB(int i) { return 2 * i + 2; }
+    static inline bool hasChildren(int i) { return childA(i) < kMaxNodes; }
 
-      mNumTargetCells = 0;
-      mRng = mRng * 1664525u + 1013904223u;
-      int minArea = (int)(48.0f + blockSizeBias * 464.0f);
-      splitRect(mTarget, mNumTargetCells, 0, 0, w, h, 0, minArea);
-      mMorphProgress = 0.0f;
+    void initTree(int idx, int l, int b, int r, int t, int depth)
+    {
+      if (idx >= kMaxNodes) return;
+      BSPNode &n = mTree[idx];
+      n.splitH = (r - l) < (t - b);
+      n.splitFrac = 0.3f + rngFloat() * 0.4f;
+      n.targetFrac = n.splitFrac;
+      n.splitProgress = 0.0f;
+      n.splitTarget = 0.0f;
+      n.noisePhase = rngFloat() * 100.0f;
+      n.activeDecay = 0;
+
+      if (depth < kTreeDepth && hasChildren(idx))
+      {
+        int midH, midV;
+        if (n.splitH)
+        {
+          midH = b + (int)((float)(t - b) * n.splitFrac);
+          initTree(childA(idx), l, b, r, midH, depth + 1);
+          initTree(childB(idx), l, midH, r, t, depth + 1);
+        }
+        else
+        {
+          midV = l + (int)((float)(r - l) * n.splitFrac);
+          initTree(childA(idx), l, b, midV, t, depth + 1);
+          initTree(childB(idx), midV, b, r, t, depth + 1);
+        }
+      }
     }
 
-    void splitRect(CellRect *cells, int &count, int l, int b, int r, int t, int depth, int minArea)
+    void retarget(float blockSizeBias)
     {
+      mRng = mRng * 1664525u + 1013904223u;
+      int minArea = (int)(48.0f + blockSizeBias * 464.0f);
+      retargetNode(0, 0, 0, mWidth, mHeight, 0, minArea);
+    }
+
+    void retargetNode(int idx, int l, int b, int r, int t, int depth, int minArea)
+    {
+      if (idx >= kMaxNodes) return;
+      BSPNode &n = mTree[idx];
       int area = (r - l) * (t - b);
-      if (area < minArea || depth > 5 || count >= kMaxCells - 1)
+
+      bool canSplit = (depth < kTreeDepth) && hasChildren(idx) &&
+                      (area >= minArea) && (r - l > 4) && (t - b > 4);
+
+      if (canSplit)
       {
-        if (count < kMaxCells)
+        n.splitTarget = 1.0f;
+        n.targetFrac = 0.3f + rngFloat() * 0.4f;
+        n.splitH = (r - l) < (t - b);
+
+        if (n.splitH)
         {
-          CellRect &c = cells[count];
-          c.left = l;
-          c.bottom = b;
-          c.right = r;
-          c.top = t;
-          c.noisePhase = rngFloat() * 100.0f;
-          c.activeDecay = 0;
-          count++;
+          int mid = b + (int)((float)(t - b) * n.targetFrac);
+          retargetNode(childA(idx), l, b, r, mid, depth + 1, minArea);
+          retargetNode(childB(idx), l, mid, r, t, depth + 1, minArea);
         }
-        return;
-      }
-
-      bool splitH = (r - l) < (t - b);
-      float frac = 0.3f + rngFloat() * 0.4f;
-
-      if (splitH)
-      {
-        int mid = b + (int)((float)(t - b) * frac);
-        if (mid <= b + 2) mid = b + 3;
-        if (mid >= t - 2) mid = t - 3;
-        if (mid <= b || mid >= t) { mid = (b + t) / 2; }
-        splitRect(cells, count, l, b, r, mid, depth + 1, minArea);
-        splitRect(cells, count, l, mid, r, t, depth + 1, minArea);
+        else
+        {
+          int mid = l + (int)((float)(r - l) * n.targetFrac);
+          retargetNode(childA(idx), l, b, mid, t, depth + 1, minArea);
+          retargetNode(childB(idx), mid, b, r, t, depth + 1, minArea);
+        }
       }
       else
       {
-        int mid = l + (int)((float)(r - l) * frac);
-        if (mid <= l + 2) mid = l + 3;
-        if (mid >= r - 2) mid = r - 3;
-        if (mid <= l || mid >= r) { mid = (l + r) / 2; }
-        splitRect(cells, count, l, b, mid, t, depth + 1, minArea);
-        splitRect(cells, count, mid, b, r, t, depth + 1, minArea);
+        n.splitTarget = 0.0f;
+        collapseChildren(idx);
+      }
+
+      // no instant snap — let per-frame slew in drawNode handle it
+    }
+
+    void collapseChildren(int idx)
+    {
+      if (idx >= kMaxNodes || !hasChildren(idx)) return;
+      mTree[childA(idx)].splitTarget = 0.0f;
+      mTree[childB(idx)].splitTarget = 0.0f;
+      collapseChildren(childA(idx));
+      collapseChildren(childB(idx));
+    }
+
+    void collectLeaves()
+    {
+      mNumLeaves = 0;
+      collectLeavesR(0);
+    }
+
+    void collectLeavesR(int idx)
+    {
+      if (idx >= kMaxNodes) return;
+      BSPNode &n = mTree[idx];
+      if (n.splitProgress > 0.5f && hasChildren(idx))
+      {
+        collectLeavesR(childA(idx));
+        collectLeavesR(childB(idx));
+      }
+      else
+      {
+        if (mNumLeaves < kMaxLeaves)
+          mLeafIndices[mNumLeaves++] = idx;
+      }
+    }
+
+    void drawNode(od::FrameBuffer &fb, int idx, int l, int b, int r, int t, float phraseProgress)
+    {
+      if (idx >= kMaxNodes || r <= l || t <= b) return;
+
+      BSPNode &n = mTree[idx];
+
+      n.splitFrac += (n.targetFrac - n.splitFrac) * 0.045f;
+
+      if (n.splitProgress > 0.01f && hasChildren(idx))
+      {
+        float prog = n.splitProgress;
+        int midFull;
+        if (n.splitH)
+          midFull = b + (int)((float)(t - b) * n.splitFrac);
+        else
+          midFull = l + (int)((float)(r - l) * n.splitFrac);
+
+        int center;
+        if (n.splitH)
+          center = (b + t) / 2;
+        else
+          center = (l + r) / 2;
+
+        int mid = center + (int)((float)(midFull - center) * prog);
+
+        if (n.splitH)
+        {
+          if (mid <= b) mid = b + 1;
+          if (mid >= t) mid = t - 1;
+          drawNode(fb, childA(idx), l, b, r, mid, phraseProgress);
+          drawNode(fb, childB(idx), l, mid, r, t, phraseProgress);
+
+          int edgeGray = (int)(3.0f * prog);
+          if (edgeGray > 0)
+            fb.hline((od::Color)edgeGray, l, r - 1, mid);
+        }
+        else
+        {
+          if (mid <= l) mid = l + 1;
+          if (mid >= r) mid = r - 1;
+          drawNode(fb, childA(idx), l, b, mid, t, phraseProgress);
+          drawNode(fb, childB(idx), mid, b, r, t, phraseProgress);
+
+          int edgeGray = (int)(3.0f * prog);
+          if (edgeGray > 0)
+            fb.vline((od::Color)edgeGray, mid, b, t - 1);
+        }
+      }
+      else
+      {
+        float cx = ((float)(l + r) * 0.5f) / (float)mWidth;
+        float cy = ((float)(b + t) * 0.5f - (float)mWorldBottom) / (float)mHeight;
+        float diag = (cx + (1.0f - cy)) * 0.5f;
+        float sweep = phraseProgress * 1.4f - diag * 0.8f;
+        if (sweep < 0.0f) sweep = 0.0f;
+        if (sweep > 1.0f) sweep = 1.0f;
+        sweep = sweep * sweep;
+
+        float noise = sampleNoise(n.noisePhase + mTime * 0.3f, mTime * 0.2f);
+        float base = sweep * 0.25f + noise * 0.08f;
+
+        float active = 0.0f;
+        if (n.activeDecay > 0)
+        {
+          active = 0.65f * ((float)n.activeDecay / 12.0f);
+          n.activeDecay--;
+        }
+
+        float brightness = base + active;
+        if (brightness > 1.0f) brightness = 1.0f;
+
+        int gray = (int)(brightness * 15.0f);
+        if (gray > 15) gray = 15;
+
+        if (r - l > 2 && t - b > 2)
+        {
+          fb.fill((od::Color)gray, l + 1, b + 1, r - 1, t - 1);
+          fb.box(GRAY3, l, b, r, t);
+        }
+        else
+        {
+          fb.fill((od::Color)gray, l, b, r, t);
+        }
       }
     }
 
