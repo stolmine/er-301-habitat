@@ -189,6 +189,10 @@ namespace stolmine
 
   int Colmatage::getPhrasePosition() { return mpInternal->unitsDone; }
   int Colmatage::getPhraseLength() { return mpInternal->phraseUnits; }
+  int Colmatage::getCurrentCut() { return mpInternal->currentCut; }
+  int Colmatage::getNumCuts() { return mpInternal->numCuts; }
+  int Colmatage::getUnitsInBlock() { return mpInternal->unitsInBlock; }
+  float Colmatage::getBlockSize() { return CLAMP(0.0f, 1.0f, mBlockSize.value()); }
 
   float Colmatage::getOutputSample(int idx)
   {

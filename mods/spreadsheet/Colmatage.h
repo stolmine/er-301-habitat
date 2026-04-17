@@ -46,6 +46,10 @@ namespace stolmine
     int getPhraseBars();
     int getPhrasePosition();
     int getPhraseLength();
+    int getCurrentCut();
+    int getNumCuts();
+    int getUnitsInBlock();
+    float getBlockSize();
     float getOutputSample(int idx);
 
   private:

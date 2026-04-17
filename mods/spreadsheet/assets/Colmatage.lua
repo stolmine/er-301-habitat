@@ -115,6 +115,7 @@ function Colmatage:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.5,
+      op = self.objects.op,
       phraseMin = self.objects.phraseMin:getParameter("Bias"),
       phraseMax = self.objects.phraseMax:getParameter("Bias"),
       blockMax = self.objects.blockMax:getParameter("Bias")

@@ -34,6 +34,7 @@
 #include "Blanda.h"
 #include "BlandaInputGraphic.h"
 #include "Colmatage.h"
+#include "ColmatageOverviewGraphic.h"
 #define SWIGLUA
 %}
 
@@ -68,3 +69,4 @@
 %include "Blanda.h"
 %include "BlandaInputGraphic.h"
 %include "Colmatage.h"
+%include "ColmatageOverviewGraphic.h"

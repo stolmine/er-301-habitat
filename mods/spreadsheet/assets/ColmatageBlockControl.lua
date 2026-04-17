@@ -1,4 +1,5 @@
 local app = app
+local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
@@ -15,6 +16,13 @@ ColmatageBlockControl:include(GainBias)
 
 function ColmatageBlockControl:init(args)
   GainBias.init(self, args)
+
+  local overview = libspreadsheet.ColmatageOverviewGraphic(0, 0, ply, 64)
+  if args.op then overview:follow(args.op) end
+  local container = app.Graphic(0, 0, ply, 64)
+  container:addChild(overview)
+  self:setMainCursorController(overview)
+  self:setControlGraphic(container)
 
   self.paramMode = false
   self.shiftHeld = false
