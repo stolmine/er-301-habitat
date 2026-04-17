@@ -3,6 +3,7 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Gate = require "Unit.ViewControl.Gate"
 local MixControl = require "spreadsheet.MixControl"
 local LaretClockControl = require "spreadsheet.LaretClockControl"
 local ColmatageBlockControl = require "spreadsheet.ColmatageBlockControl"
@@ -62,6 +63,11 @@ function Colmatage:onLoadGraph(channelCount)
   connect(clock, "Out", op, "Clock")
   self:addMonoBranch("clock", clock, "In", clock, "Out")
 
+  local reset = self:addObject("reset", app.Comparator())
+  reset:setTriggerMode()
+  connect(reset, "Out", op, "Reset")
+  self:addMonoBranch("reset", reset, "In", reset, "Out")
+
   local function adapter(name, param, initial)
     local a = self:addObject(name, app.ParameterAdapter())
     a:hardSet("Bias", initial)
@@ -96,7 +102,7 @@ function Colmatage:onLoadViews()
       description = "Clock",
       branch = self.branches.clock,
       comparator = self.objects.clock,
-      resetComparator = self.objects.clock,
+      resetComparator = self.objects.reset,
       divParam = self.objects.subdiv:getParameter("Bias")
     },
     block = ColmatageBlockControl {
@@ -166,7 +172,24 @@ function Colmatage:onLoadViews()
       outputLevel = self.objects.outputLevel:getParameter("Bias"),
       tanhAmt = self.objects.tanhAmt:getParameter("Bias")
     },
-    -- Expansion faders
+    -- Expansion controls
+    resetGate = Gate {
+      button = "reset",
+      description = "Reset",
+      branch = self.branches.reset,
+      comparator = self.objects.reset
+    },
+    subdivFader = GainBias {
+      button = "subdv",
+      description = "Subdivision",
+      branch = self.branches.subdiv,
+      gainbias = self.objects.subdiv,
+      range = self.objects.subdiv,
+      biasMap = subdivMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 8
+    },
     blockFader = GainBias {
       button = "block",
       description = "Block Size",
@@ -255,17 +278,6 @@ function Colmatage:onLoadViews()
       biasPrecision = 3,
       initialBias = 0.9
     },
-    subdivFader = GainBias {
-      button = "subdv",
-      description = "Subdivision",
-      branch = self.branches.subdiv,
-      gainbias = self.objects.subdiv,
-      range = self.objects.subdiv,
-      biasMap = subdivMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 0,
-      initialBias = 8
-    },
     textureFader = GainBias {
       button = "duty",
       description = "Duty Cycle",
@@ -346,6 +358,7 @@ function Colmatage:onLoadViews()
   }, {
     expanded  = { "clock", "block", "density", "repeats", "texture", "mix" },
     collapsed = {},
+    clock     = { "clock", "resetGate", "subdivFader" },
     block     = { "blockFader", "phraseMin", "phraseMax", "blockMaxFader" },
     repeats   = { "repeatsFader", "ritardFader", "blendFader", "accelFader" },
     texture   = { "textureFader", "ampMinFader", "ampMaxFader", "fadeFader" },

@@ -17,6 +17,7 @@ namespace stolmine
 
     od::Inlet mIn{"In"};
     od::Inlet mClock{"Clock"};
+    od::Inlet mReset{"Reset"};
     od::Outlet mOut{"Out"};
 
     od::Parameter mDensity{"Density", 0.5f};
@@ -52,6 +53,7 @@ namespace stolmine
     Internal *mpInternal;
 
     bool mClockWasHigh = false;
+    bool mResetWasHigh = false;
     int mClockPeriodSamples = 24000;
     int mSamplesSinceLastClock = 0;
 

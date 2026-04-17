@@ -154,6 +154,7 @@ namespace stolmine
   {
     addInput(mIn);
     addInput(mClock);
+    addInput(mReset);
     addOutput(mOut);
     addParameter(mDensity);
     addParameter(mBlockSize);
@@ -318,6 +319,7 @@ namespace stolmine
 
     float *in = mIn.buffer();
     float *clk = mClock.buffer();
+    float *rst = mReset.buffer();
     float *out = mOut.buffer();
 
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
@@ -351,6 +353,17 @@ namespace stolmine
       }
       mClockWasHigh = clkHigh;
       mSamplesSinceLastClock++;
+
+      bool rstHigh = rst[i] > 0.0f;
+      if (rstHigh && !mResetWasHigh)
+      {
+        s.unitsDone = 0;
+        s.unitsInsideBlock = s.unitsInBlock;
+        s.currentCut = s.numCuts;
+        s.unitSampleCounter = 0;
+        s.crossfadeCounter = kCrossfadeSamples;
+      }
+      mResetWasHigh = rstHigh;
 
       s.unitSampleCounter++;
       if (s.unitSampleCounter >= s.samplesPerUnit)
