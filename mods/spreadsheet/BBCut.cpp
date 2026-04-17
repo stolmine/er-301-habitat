@@ -22,7 +22,7 @@ namespace stolmine
   static const int kCrossfadeSamples = 64;
   static const int kMaxCuts = 128;
   static const int kVizSize = 128;
-  static const int kMaxBlockUnits = 8;
+  static const int kMaxBlockUnits = 128;
 
   static const int kValidSubdivs[] = {6, 8, 12, 16, 24, 32};
   static const int kNumSubdivs = 6;
@@ -136,19 +136,15 @@ namespace stolmine
   static int chooseWeightedBlockSize(uint32_t &rng, float bias, int blockMax)
   {
     if (blockMax <= 1) return 1;
-    float weights[kMaxBlockUnits];
+    float invMax = 1.0f / (float)(blockMax - 1);
     float sum = 0.0f;
     for (int k = 0; k < blockMax; k++)
-    {
-      float t = (float)k / (float)(blockMax - 1);
-      weights[k] = expf(bias * 4.0f * t);
-      sum += weights[k];
-    }
+      sum += expf(bias * 4.0f * (float)k * invMax);
     float r = iRandFloat(rng) * sum;
     float cumul = 0.0f;
     for (int k = 0; k < blockMax; k++)
     {
-      cumul += weights[k];
+      cumul += expf(bias * 4.0f * (float)k * invMax);
       if (r < cumul) return k + 1;
     }
     return blockMax;
@@ -212,9 +208,13 @@ namespace stolmine
   void BBCut::chooseBlock(int unitsLeft)
   {
     Internal &s = *mpInternal;
+    int subdiv = snapSubdiv(mSubdiv.value());
+    double spu = (double)s.samplesPerUnit;
     float density = CLAMP(0.0f, 1.0f, mDensity.value());
     float blockSizeBias = CLAMP(0.0f, 1.0f, mBlockSize.value());
-    int blockMax = CLAMP(1, kMaxBlockUnits, (int)(mBlockMax.value() + 0.5f));
+    int blockMaxBeats = CLAMP(1, 16, (int)(mBlockMax.value() + 0.5f));
+    int blockMax = CLAMP(1, kMaxBlockUnits, blockMaxBeats * subdiv / 4);
+    if (blockMax < 1) blockMax = 1;
     int repeatCount = CLAMP(2, 64, (int)(mRepeatCount.value() + 0.5f));
     float ritardBias = CLAMP(0.0f, 1.0f, mRitardBias.value());
     float blend = CLAMP(0.0f, 1.0f, mBlend.value());
@@ -224,8 +224,6 @@ namespace stolmine
     if (dutyMag < 0.01f) dutyMag = 0.01f;
     float ampMin = CLAMP(0.0f, 1.0f, mAmpMin.value());
     float ampMax = CLAMP(ampMin, 1.0f, mAmpMax.value());
-    int subdiv = snapSubdiv(mSubdiv.value());
-    double spu = (double)s.samplesPerUnit;
 
     s.sliceOrigin = s.writePos;
 

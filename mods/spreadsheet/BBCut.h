@@ -21,8 +21,8 @@ namespace stolmine
 
     od::Parameter mDensity{"Density", 0.5f};
     od::Parameter mBlockSize{"BlockSize", 0.5f};
-    od::Parameter mBlockMax{"BlockMax", 4.0f};
-    od::Parameter mRepeatCount{"RepeatCount", 8.0f};
+    od::Parameter mBlockMax{"BlockMax", 8.0f};
+    od::Parameter mRepeatCount{"RepeatCount", 4.0f};
     od::Parameter mRitardBias{"RitardBias", 0.5f};
     od::Parameter mBlend{"Blend", 0.5f};
     od::Parameter mAccel{"Accel", 0.9f};

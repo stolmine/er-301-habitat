@@ -25,7 +25,7 @@ end
 
 local densityMap = floatMap(0, 1)
 local blockSizeMap = floatMap(0, 1)
-local blockMaxMap = intMap(1, 8)
+local blockMaxMap = intMap(1, 16)
 local repeatCountMap = intMap(2, 64)
 local ritardMap = floatMap(0, 1)
 local blendMap = floatMap(0, 1)
@@ -71,8 +71,8 @@ function BBCut:onLoadGraph(channelCount)
 
   adapter("density",      "Density",      0.5)
   adapter("blockSize",    "BlockSize",    0.5)
-  adapter("blockMax",     "BlockMax",     4)
-  adapter("repeatCount",  "RepeatCount",  8)
+  adapter("blockMax",     "BlockMax",     8)
+  adapter("repeatCount",  "RepeatCount",  4)
   adapter("ritardBias",   "RitardBias",   0.5)
   adapter("blend",        "Blend",        0.5)
   adapter("accel",        "Accel",        0.9)
@@ -209,7 +209,7 @@ function BBCut:onLoadViews()
       biasMap = blockMaxMap,
       biasUnits = app.unitNone,
       biasPrecision = 0,
-      initialBias = 4
+      initialBias = 8
     },
     repeatsFader = GainBias {
       button = "rep",
@@ -220,7 +220,7 @@ function BBCut:onLoadViews()
       biasMap = repeatCountMap,
       biasUnits = app.unitNone,
       biasPrecision = 0,
-      initialBias = 8
+      initialBias = 4
     },
     ritardFader = GainBias {
       button = "rit",

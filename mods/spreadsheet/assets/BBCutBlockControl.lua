@@ -31,8 +31,8 @@ function BBCutBlockControl:init(args)
   end)()
 
   local blockMaxMap = (function()
-    local m = app.LinearDialMap(1, 8)
-    m:setSteps(1, 1, 1, 1)
+    local m = app.LinearDialMap(1, 16)
+    m:setSteps(4, 1, 1, 1)
     m:setRounding(1)
     return m
   end)()
