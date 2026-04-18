@@ -1,5 +1,5 @@
 PKGNAME ?= biome
-PKGVERSION ?= 2.0.0
+PKGVERSION ?= 2.1.0
 
 include scripts/env.mk
 

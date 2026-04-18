@@ -114,6 +114,20 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 
 ## Changelog
 
+### v2.3.0
+
+**New unit + audio quality + CPU optimization.** See [RELEASE-2.3.0.md](RELEASE-2.3.0.md) for full details. spreadsheet v2.2.0 -> v2.3.1; biome v2.0.0 -> v2.1.0; all other packages unchanged.
+
+**Colmatage** -- new clock-driven breakbeat cutter in the spreadsheet package. WarpCut-derived algorithm with parameterized block size, repeat count, geometric accel/ritard, bipolar duty cycle (reverse on negative), and BSP mosaic overview graphic. Based on Nick Collins' BBCut library via Livecut.
+
+**Blanda** -- three-input scan mixer ships complete with per-input bell shape, territory-based ghost occlusion, global Skew macro, and expansion views.
+
+**Helicase** -- anti-alias discontinuity shaping with polyBLEP + full 2x oversample in hi-fi mode. Breakpoint-gated DC blocker.
+
+**Petrichor** -- Hann envelope + 50% overlap granular rebuild, upfront parallel prefetch, time fader throw restriction.
+
+**Pecto** -- NEON 3-pass tap loop optimization (stereo ~50% -> ~6% CPU). DC blocker. Bipolar feedback.
+
 ### v2.2.0
 
 **Hardware viz fix + serialization overhaul + Petrichor pitch macro.** See [RELEASE-2.2.0.md](RELEASE-2.2.0.md) for full details. spreadsheet v2.1.0 -> v2.2.0; all other packages unchanged.
