@@ -191,17 +191,6 @@ function Colmatage:onLoadViews()
       biasPrecision = 0,
       initialBias = 8
     },
-    blockFader = GainBias {
-      button = "block",
-      description = "Block Size",
-      branch = self.branches.blockSize,
-      gainbias = self.objects.blockSize,
-      range = self.objects.blockSize,
-      biasMap = blockSizeMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.5
-    },
     phraseMin = GainBias {
       button = "pMin",
       description = "Phrase Min",
@@ -360,7 +349,7 @@ function Colmatage:onLoadViews()
     expanded  = { "clock", "block", "density", "repeats", "texture", "mix" },
     collapsed = {},
     clock     = { "clock", "resetGate", "subdivFader" },
-    block     = { "blockFader", "phraseMin", "phraseMax", "blockMaxFader" },
+    block     = { "block", "phraseMin", "phraseMax", "blockMaxFader" },
     repeats   = { "repeatsFader", "ritardFader", "blendFader", "accelFader" },
     texture   = { "textureFader", "ampMinFader", "ampMaxFader", "fadeFader" },
     mix       = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
