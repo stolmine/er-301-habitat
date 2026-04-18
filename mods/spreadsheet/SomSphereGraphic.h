@@ -3,7 +3,6 @@
 #include <od/graphics/Graphic.h>
 #include "Som.h"
 #include <math.h>
-#include <string.h>
 
 namespace stolmine
 {
@@ -16,30 +15,23 @@ namespace stolmine
 
     virtual ~SomSphereGraphic()
     {
-      if (mpSom)
-        mpSom->release();
+      if (mpSom) mpSom->release();
     }
 
     void follow(Som *p)
     {
-      if (mpSom)
-        mpSom->release();
+      if (mpSom) mpSom->release();
       mpSom = p;
-      if (mpSom)
-        mpSom->attach();
+      if (mpSom) mpSom->attach();
     }
 
   private:
     Som *mpSom;
-    float mRotX = 0.0f, mRotY = 0.0f, mRotZ = 0.0f;
+    float mRotX = 0.0f, mRotY = 0.0f;
     float mTargetRotX = 0.0f, mTargetRotY = 0.0f;
-    int mFrameToggle = 1;
-    uint8_t mCache[64 * 64] = {};
-    // Cached projected positions + cell data
-    float mProjX[64], mProjY[64];
-    int mCellGray[64];
-    int mLastScanNode = -1;
-    float mRotDelta = 0.0f; // integrator for rotation momentum
+
+    // Precomputed sphere distances from scan node (updated per frame)
+    float mScanDist[64];
 
 #ifndef SWIGLUA
   public:
@@ -48,8 +40,7 @@ namespace stolmine
       int w = mWidth, h = mHeight;
       int left = mWorldLeft, bot = mWorldBottom;
 
-      if (!mpSom)
-        return;
+      if (!mpSom) return;
 
       int scanNode = mpSom->getScanNode();
 
@@ -58,184 +49,164 @@ namespace stolmine
         float sx = mpSom->getNodeX(scanNode);
         float sy = mpSom->getNodeY(scanNode);
         float sz = mpSom->getNodeZ(scanNode);
-        mTargetRotX = asinf(sy < -1.0f ? -1.0f : (sy > 1.0f ? 1.0f : sy));
-        mTargetRotY = atan2f(sx, sz);
+        mTargetRotX = asinf(CLAMP(-1.0f, 1.0f, sy)) - 0.3f;
+        mTargetRotY = atan2f(sx, sz) + 0.25f;
 
         float dx = mTargetRotX - mRotX;
         float dy = mTargetRotY - mRotY;
-        // Wrap Y delta to shortest path
         if (dy > 3.14159f) dy -= 6.28318f;
         if (dy < -3.14159f) dy += 6.28318f;
         float dist = sqrtf(dx * dx + dy * dy);
-
-        // Integrator: small jumps = slow walks, large jumps = snappier
         float slewRate = 0.02f + dist * 0.12f;
         mRotX += dx * slewRate;
         mRotY += dy * slewRate;
       }
-      // Z-axis: static (no constant drift)
 
       float cosRx = cosf(mRotX), sinRx = sinf(mRotX);
       float cosRy = cosf(mRotY), sinRy = sinf(mRotY);
-      float cosRz = cosf(mRotZ), sinRz = sinf(mRotZ);
 
       int minDim = w < h ? w : h;
-      float baseRadius = (float)minDim * 0.40f;
-      float liftAmount = (float)minDim * 0.12f;
+      float baseRadius = (float)minDim * 0.37f;
+      float liftAmount = 0.4f;
       float cx = (float)w * 0.5f;
       float cy = (float)h * 0.5f;
+      float nbrRadius = 0.5f; // visual neighborhood for brightness falloff
 
-      // Compute lift per node (proximity to scan position in chain)
-      float lift[64];
-      float nbrRadius = 0.3f; // visual neighborhood for lifting
+      // Compute sphere distances from scan node + scan proximity brightness per node
+      float scanSphereX = mpSom->getNodeX(scanNode);
+      float scanSphereY = mpSom->getNodeY(scanNode);
+      float scanSphereZ = mpSom->getNodeZ(scanNode);
+
+      float lift[64], proxBright[64], richness[64];
       for (int n = 0; n < 64; n++)
       {
-        // Use sphere distance to scan node for lift falloff
-        float ndx = mpSom->getNodeX(n) - mpSom->getNodeX(scanNode);
-        float ndy = mpSom->getNodeY(n) - mpSom->getNodeY(scanNode);
-        float ndz = mpSom->getNodeZ(n) - mpSom->getNodeZ(scanNode);
-        float sphereDist = sqrtf(ndx * ndx + ndy * ndy + ndz * ndz);
-        float lf = 1.0f - sphereDist / nbrRadius;
-        lift[n] = (lf > 0.0f) ? lf * lf : 0.0f; // quadratic falloff
+        float dx = mpSom->getNodeX(n) - scanSphereX;
+        float dy = mpSom->getNodeY(n) - scanSphereY;
+        float dz = mpSom->getNodeZ(n) - scanSphereZ;
+        float sd = sqrtf(dx * dx + dy * dy + dz * dz);
+        mScanDist[n] = sd;
+
+        float lf = 1.0f - sd / nbrRadius;
+        lift[n] = (lf > 0.0f) ? lf * lf : 0.0f;
+
+        float pb = 1.0f - sd / (nbrRadius * 1.5f);
+        proxBright[n] = (pb > 0.0f) ? pb * pb : 0.0f;
+
+        float r = mpSom->getNodeRichness(n);
+        richness[n] = r / (r + 2.0f); // sigmoid normalize
       }
 
       // Project all 64 nodes
+      float projX[64], projY[64], projZ[64];
       for (int n = 0; n < 64; n++)
       {
         float x = mpSom->getNodeX(n);
         float y = mpSom->getNodeY(n);
         float z = mpSom->getNodeZ(n);
 
-        // Lift: push outward from sphere center
-        float r = 1.0f + lift[n] * 0.4f;
-        x *= r; y *= r; z *= r;
-
-        // Y-axis rotation
         float rx = x * cosRy - z * sinRy;
         float rz = x * sinRy + z * cosRy;
-        // X-axis tilt
         float ty = y * cosRx - rz * sinRx;
         float tz = y * sinRx + rz * cosRx;
-        // Z-axis roll
-        float fx = rx * cosRz - ty * sinRz;
-        float fy = rx * sinRz + ty * cosRz;
 
-        mProjX[n] = cx + fx * baseRadius;
-        mProjY[n] = cy + fy * baseRadius;
-
-        // Cell brightness: training richness (weight vector variance)
-        float variance = 0.0f;
-        for (int d = 0; d < 6; d++)
+        // Screen-space outward push: lifted cells move away from sphere center on screen
+        float screenRx = rx * baseRadius;
+        float screenTy = ty * baseRadius;
+        float screenDist = sqrtf(screenRx * screenRx + screenTy * screenTy);
+        if (screenDist > 0.1f && lift[n] > 0.0f)
         {
-          float w = mpSom->getNodeWeight(n, d);
-          variance += w * w;
+          float pushAmount = lift[n] * liftAmount * baseRadius;
+          screenRx += (screenRx / screenDist) * pushAmount;
+          screenTy += (screenTy / screenDist) * pushAmount;
         }
-        variance = sqrtf(variance / 6.0f);
 
-        // Depth shading
-        float depth = (tz + 1.5f) / 3.0f;
-        if (depth < 0.0f) depth = 0.0f;
-        if (depth > 1.0f) depth = 1.0f;
-
-        // Brightness from training richness + depth + lift bonus
-        float bright = depth * (0.2f + variance * 0.8f) + lift[n] * 0.3f;
-        int gray = 1 + (int)(bright * 12.0f);
-        if (gray < 1) gray = 1;
-        if (gray > 13) gray = 13;
-
-        mCellGray[n] = gray;
+        projX[n] = cx + screenRx;
+        projY[n] = cy + screenTy;
+        projZ[n] = tz;
       }
 
-      // Frame caching on the Voronoi assignment
-      mFrameToggle ^= 1;
-      if (mFrameToggle == 0)
-      {
-        for (int py = 0; py < h && py < 64; py++)
-          for (int px = 0; px < w && px < 64; px++)
-          {
-            int gray = mCache[py * 64 + px];
-            if (gray > 0)
-              fb.pixel(gray, left + px, bot + py);
-          }
-        return;
-      }
+      // Per-pixel Voronoi rendering
+      float sphereR = baseRadius * (1.0f + liftAmount * 0.5f);
+      float sphereR2 = sphereR * sphereR;
 
-      // Per-pixel Voronoi: find nearest projected node
-      memset(mCache, 0, sizeof(mCache));
-
-      for (int py = 0; py < h && py < 64; py++)
+      for (int py = 0; py < h; py++)
       {
         float screenY = (float)py;
-        for (int px = 0; px < w && px < 64; px++)
+        for (int px = 0; px < w; px++)
         {
           float screenX = (float)px;
 
-          // Check if pixel is within sphere silhouette (rough circle test)
-          float dx = screenX - cx;
-          float dy = screenY - cy;
-          float d2 = dx * dx + dy * dy;
-          float maxR = baseRadius + liftAmount;
-          if (d2 > maxR * maxR) continue;
+          // Sphere silhouette
+          float sdx = screenX - cx;
+          float sdy = screenY - cy;
+          if (sdx * sdx + sdy * sdy > sphereR2) continue;
 
-          // Find nearest node
-          float bestDist = 1e10f;
-          int bestNode = 0;
+          // Find two nearest front-facing nodes (projZ >= -0.1)
+          float bestDist = 1e10f, secondDist = 1e10f;
+          int bestNode = -1, secondNode = -1;
           for (int n = 0; n < 64; n++)
           {
-            float ndx = screenX - mProjX[n];
-            float ndy = screenY - mProjY[n];
+            if (projZ[n] < -0.1f) continue; // back-face cull
+            float ndx = screenX - projX[n];
+            float ndy = screenY - projY[n];
             float nd2 = ndx * ndx + ndy * ndy;
-            if (nd2 < bestDist) { bestDist = nd2; bestNode = n; }
+            if (nd2 < bestDist)
+            {
+              secondDist = bestDist; secondNode = bestNode;
+              bestDist = nd2; bestNode = n;
+            }
+            else if (nd2 < secondDist)
+            {
+              secondDist = nd2; secondNode = n;
+            }
           }
+          if (bestNode < 0) continue; // no front-facing nodes near this pixel
 
-          int gray = mCellGray[bestNode];
+          // Depth shading from best node's Z
+          float depth = (projZ[bestNode] + 1.5f) / 3.0f;
+          depth = CLAMP(0.15f, 1.0f, depth);
 
-          // Find second-closest node for Voronoi edge detection
-          float secondBest = 1e10f;
-          int secondNode = 0;
-          for (int n = 0; n < 64; n++)
-          {
-            if (n == bestNode) continue;
-            float ndx = screenX - mProjX[n];
-            float ndy = screenY - mProjY[n];
-            float nd2 = ndx * ndx + ndy * ndy;
-            if (nd2 < secondBest) { secondBest = nd2; secondNode = n; }
-          }
-
-          // Voronoi edge: ratio of distances to two nearest nodes
+          // Edge detection: distance ratio
           float d1 = sqrtf(bestDist);
-          float d2s = sqrtf(secondBest);
-          float ratio = d1 / (d2s + 0.01f);
+          float d2 = sqrtf(secondDist);
+          float ratio = d1 / (d2 + 0.01f);
+          bool isEdge = ratio > 0.85f;
 
-          // Tight edge band with bead stipple (Helicase pattern)
-          if (ratio > 0.80f)
+          float rich = richness[bestNode];
+
+          int gray = 0;
+
+          if (isEdge)
           {
-            float edgeBright = (ratio - 0.80f) / 0.20f;
-            edgeBright = edgeBright * edgeBright;
-            // Bead stipple texture along edge
-            float bead = 0.6f + 0.4f * sinf((screenX + screenY) * 80.0f);
-            // Contour: bright edge line on darker cell fill
-            int edgeGray = 2 + (int)(edgeBright * bead * 8.0f);
-            if (edgeGray > 10) edgeGray = 10;
-            gray = (gray > edgeGray) ? gray - edgeGray / 2 : 1;
+            // Voronoi contour: always visible
+            float edgeBright = (ratio - 0.85f) / 0.15f;
+            if (edgeBright > 1.0f) edgeBright = 1.0f;
+            gray = 5 + (int)(edgeBright * 7.0f);
+          }
+          else
+          {
+            // Solid fill: training richness only
+            gray = (int)(rich * 10.0f);
           }
 
-          // Sphere edge fade
-          float edgeDist = sqrtf(d2) / baseRadius;
-          float maxEdge = 1.0f + liftAmount / baseRadius;
-          if (edgeDist > 0.85f && edgeDist <= maxEdge)
-          {
-            float fade = 1.0f - (edgeDist - 0.85f) / (maxEdge - 0.85f);
-            if (fade < 0.0f) fade = 0.0f;
-            gray = (int)((float)gray * fade);
-          }
+          // Apply depth shading
+          gray = (int)((float)gray * depth);
 
+          if (gray > 13) gray = 13;
           if (gray > 0)
-          {
-            mCache[py * 64 + px] = (uint8_t)gray;
             fb.pixel(gray, left + px, bot + py);
-          }
         }
+      }
+
+      // Sphere outline circle
+      int steps = 64;
+      for (int i = 0; i < steps; i++)
+      {
+        float a = (float)i / (float)steps * 6.28318f;
+        int ox = left + (int)(cx + cosf(a) * sphereR);
+        int oy = bot + (int)(cy + sinf(a) * sphereR);
+        if (ox >= left && ox < left + w && oy >= bot && oy < bot + h)
+          fb.pixel(GRAY5, ox, oy);
       }
     }
 #endif

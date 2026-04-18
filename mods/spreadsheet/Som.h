@@ -46,6 +46,7 @@ namespace stolmine
     float getVoiceStateA();
     float getVoiceStateB();
     int getScanNode();
+    float getNodeRichness(int node);
 
 #ifndef SWIGLUA
   private:

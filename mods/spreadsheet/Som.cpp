@@ -58,6 +58,9 @@ namespace stolmine
     // Mux routing tables: 64 nodes x 8 slots x 3 values (source, dest, attenuation)
     float muxRouting[64][8][3];
 
+    // Training accumulator per node (richness heuristic)
+    float trainAccum[kNumNodes];
+
     // Current voice output for feedback
     float voiceOutA, voiceOutB;
 
@@ -124,6 +127,7 @@ namespace stolmine
       dividerBits[0] = dividerBits[1] = 0;
       dividerJitter[0] = dividerJitter[1] = 0;
       staircase[0] = staircase[1] = 0.0f;
+      memset(trainAccum, 0, sizeof(trainAccum));
       voiceOutA = voiceOutB = 0.0f;
 
       for (int n = 0; n < kNumNodes; n++) {
@@ -213,6 +217,7 @@ namespace stolmine
   float Som::getVoiceStateA() { return mpInternal->voiceOutA; }
   float Som::getVoiceStateB() { return mpInternal->voiceOutB; }
   int Som::getScanNode() { return mScanNode; }
+  float Som::getNodeRichness(int node) { return mpInternal->trainAccum[CLAMP(0, kNumNodes - 1, node)]; }
 
   void Som::process()
   {
@@ -376,6 +381,7 @@ namespace stolmine
         float rate = plasticity * lr * h;
         for (int d = 0; d < kNumDims; d++)
           s.weights[n][d] += rate * (s.features[d] - s.weights[n][d]);
+        s.trainAccum[n] += rate;
       }
     }
 
