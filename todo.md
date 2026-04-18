@@ -746,6 +746,23 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 ### Gated Slew
 - [x] Per-sample slew limiter with gate activation. Up/both/down modes. Stereo.
 
+### Device Randomizer
+- [ ] Gate input + depth control. On gate, randomizes all parameters of the unit to its right in the chain.
+- [ ] Depth scales randomization range (0 = no change, 1 = full range).
+- [ ] Research: SDK chain traversal API — can a unit access its neighbor's parameters?
+
+### SOM (Self-Organizing Map)
+- [ ] 64-node Kohonen map, 6 dimensions. Feed audio/CV features, map self-organizes into learned timbral prototypes. Spreadsheet package (many-to-one, complex viz) but NOT a spreadsheet-paradigm editor — nodes are learned, not user-programmed.
+- [ ] Two interactive visual plies:
+  - **Scan** (icosphere viz): Fibonacci-distributed sphere, 64 Voronoi cells. Per-cell brightness = activation, BMU glows, slow rotation. CV-modulatable scan position sweeps through topologically coherent node chain.
+  - **Plasticity** (viz TBD): continuous fader (0=frozen, 1=full learning). Learning pressure applied locally to neighborhood around current scan position. Patch envelope for transient-responsive learning, LFO for breathing adaptation.
+- [ ] Localized learning: scan position determines WHERE on map adapts, plasticity determines HOW MUCH. Scan to a bad region, crank plasticity, feed better material — reshapes just that area.
+- [ ] Input dimensions: block-rate features (RMS, zero-crossings, spectral centroid, etc.) or raw signal.
+- [ ] Output: reconstructed signal from nearest nodes' weight vectors, interpolated from neighbors.
+- [ ] Plies: input, scan (icosphere), plasticity, output mix. Feature extraction / rate on sub-displays.
+- [ ] CPU: ~3-4% NEON at 64 nodes, 6 dims, per-sample BMU lookup. Training at block rate negligible. Buffer = 384 floats (1.5 KB).
+- [ ] Usable structure in ~1-3 seconds of training, fully converged ~15 seconds.
+
 ### Goniometer / Lissajous
 - [ ] XY scope display: goniometer (L+R vs L-R stereo field) or Lissajous (arbitrary XY)
 - [ ] Correlation readout (+1 mono to -1 out of phase)
@@ -753,6 +770,11 @@ N allpass stages with per-stage control. Build custom modulation effects from fi
 
 ### Integrator / Location Tracker
 - [x] Running accumulator with rate, leak (decay toward zero), trigger reset. Clipped +/-5V.
+
+### Constant Random
+- [ ] White noise → sample-and-hold with adjustable clock rate + slew for smoothness. Biome package.
+- [ ] Plies: rate (S&H clock speed), slew (smoothing on output), level/range
+- [ ] Simple utility: always-running random CV source, no gate input needed
 
 ### PSR (Pingable Scaled Random)
 - [x] C++ rewrite (1 object vs 11 in Lua original). Trigger, scale, offset, quantize levels.

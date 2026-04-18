@@ -25,6 +25,7 @@
 #include "VarishapeOsc.h"
 #include "Pecto.h"
 #include "Transport.h"
+#include "ConstantRandom.h"
 #define SWIGLUA
 %}
 
@@ -50,3 +51,4 @@
 %include "VarishapeOsc.h"
 %include "Pecto.h"
 %include "Transport.h"
+%include "ConstantRandom.h"

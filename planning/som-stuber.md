@@ -178,6 +178,17 @@ Front of sphere bright (WHITE), back dim (GRAY3). Use post-rotation Z for screen
 
 Voronoi per-pixel nearest-neighbor search across 64 nodes is expensive. Cache the cell assignment map — only recompute when rotation changes significantly (threshold on rotation delta). The brightness/lift values update every frame (cheap — just 64 lookups), but the Voronoi tessellation itself is cached.
 
+## Stereo Routing
+
+Natural stereo from the architecture — no dual instance needed.
+
+- **Filter A → Left channel, Filter B → Right channel**
+- Cross-coupling creates correlation (shared influence), different frequencies/routing create difference
+- Mono chain: sum A+B to single output
+- Stereo chain: L=A, R=B. Input: mono feeds both, or L→A / R→B if stereo input
+- SOM: single map, mono feature extraction from summed input
+- Zero additional CPU cost for stereo — filters already exist and do different things
+
 ## Open Questions
 
 - Name for this unit (Som is placeholder)
