@@ -6,6 +6,7 @@ return {
   units = {
     { title = "Sfera",  moduleName = "Sfera",  category = "Experimental", keywords = "filter, morph, zplane, pole, zero, formant, effect, sfera" },
     { title = "Lambda", moduleName = "Lambda", category = "Experimental", keywords = "synthesizer, wavetable, procedural, generator, seed, source" },
-    { title = "Flakes", moduleName = "Flakes", category = "Experimental", keywords = "freeze, shimmer, delay, granular, effect, flakes" }
+    { title = "Flakes", moduleName = "Flakes", category = "Experimental", keywords = "freeze, shimmer, delay, granular, effect, flakes" },
+    { title = "Som",    moduleName = "Som",    category = "Experimental", keywords = "map, cluster, neural, feature, som, learn, scan" }
   }
 }

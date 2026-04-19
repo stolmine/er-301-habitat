@@ -42,6 +42,9 @@
 ### Step-list units (Excel, Ballot, Larets, Etcher)
 - [x] Count reduction below current cursor: graphic now clamps mSelectedStep to listLen-1 at top of draw() (viewport follows automatically). Lua controls reconcile currentStep on onCursorEnter so edit-buffer params track the clamped step.
 
+### Colmatage
+- [ ] Xform control: add an xform ply (func + paramA/B/scope) mirroring the Excel/Ballot/Petrichor pattern so the cutting behavior can be algorithmically randomized/shuffled across presets. Candidate targets: block-size weights, repeat counts, texture, density, accel ratio. Decide whether scope is per-phrase or per-block.
+
 ### Serialization & stale-label inventory (spreadsheet package)
 
 Progress this session:

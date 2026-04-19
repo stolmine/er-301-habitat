@@ -1,5 +1,5 @@
 local app = app
-local libspreadsheet = require "spreadsheet.libspreadsheet"
+local libcatchall = require "catchall.libcatchall"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
@@ -17,7 +17,7 @@ SomScanControl:include(GainBias)
 function SomScanControl:init(args)
   GainBias.init(self, args)
 
-  local sphere = libspreadsheet.SomSphereGraphic(0, 0, ply, 64)
+  local sphere = libcatchall.SomSphereGraphic(0, 0, ply, 64)
   sphere:follow(args.op)
   local container = app.Graphic(0, 0, ply, 64)
   container:addChild(sphere)

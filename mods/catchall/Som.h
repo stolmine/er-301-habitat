@@ -48,6 +48,7 @@ namespace stolmine
     float getVoiceStateB();
     int getScanNode();
     float getNodeRichness(int node);
+    void setChannelCount(int n) { mChannelCount = (n > 1) ? 2 : 1; }
 
 #ifndef SWIGLUA
   private:
@@ -56,6 +57,7 @@ namespace stolmine
 
     int mBMU = 0;
     int mScanNode = 0;
+    int mChannelCount = 1;
 #endif
   };
 

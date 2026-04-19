@@ -35,8 +35,6 @@
 #include "BlandaInputGraphic.h"
 #include "Colmatage.h"
 #include "ColmatageOverviewGraphic.h"
-#include "Som.h"
-#include "SomSphereGraphic.h"
 #define SWIGLUA
 %}
 
@@ -72,5 +70,3 @@
 %include "BlandaInputGraphic.h"
 %include "Colmatage.h"
 %include "ColmatageOverviewGraphic.h"
-%include "Som.h"
-%include "SomSphereGraphic.h"

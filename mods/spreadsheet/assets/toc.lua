@@ -15,7 +15,6 @@ return {
     { title = "Helicase", moduleName = "Helicase",           category = "Spreadsheet", keywords = "oscillator, FM, synthesis, OPL3, generator, source, helicase" },
     { title = "Larets",   moduleName = "Larets",             category = "Spreadsheet", keywords = "effect, step, sequencer, multi, processor, larets" },
     { title = "Blanda",   moduleName = "Blanda",             category = "Spreadsheet", keywords = "mixer, scan, morph, fade, three, input, blanda" },
-    { title = "Colmatage", moduleName = "Colmatage",          category = "Spreadsheet", keywords = "effect, rhythm, breakbeat, slicer, stutter, warp, colmatage" },
-    { title = "Som",       moduleName = "Som",                category = "Spreadsheet", keywords = "map, cluster, neural, feature, som, learn, scan" }
+    { title = "Colmatage", moduleName = "Colmatage",          category = "Spreadsheet", keywords = "effect, rhythm, breakbeat, slicer, stutter, warp, colmatage" }
   }
 }

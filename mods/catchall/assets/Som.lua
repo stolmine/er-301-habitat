@@ -1,10 +1,10 @@
 local app = app
-local libspreadsheet = require "spreadsheet.libspreadsheet"
+local libcatchall = require "catchall.libcatchall"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
-local SomScanControl = require "spreadsheet.SomScanControl"
-local SomModControl = require "spreadsheet.SomModControl"
+local SomScanControl = require "catchall.SomScanControl"
+local SomModControl = require "catchall.SomModControl"
 
 local function floatMap(min, max)
   local map = app.LinearDialMap(min, max)
@@ -45,7 +45,8 @@ function Som:init(args)
 end
 
 function Som:onLoadGraph(channelCount)
-  local op = self:addObject("op", libspreadsheet.Som())
+  local op = self:addObject("op", libcatchall.Som())
+  op:setChannelCount(channelCount)
 
   connect(self, "In1", op, "In")
   connect(op, "Out1", self, "Out1")
