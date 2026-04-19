@@ -44,18 +44,23 @@ namespace stolmine
     float gendyPts[4];
     int gendyAge;
 
-    // TPT SVF state (2 filters)
-    float svfIc1[2], svfIc2[2];
+    // TPT SVF state (4 filters: 0,1=chA; 2,3=chB)
+    float svfIc1[4], svfIc2[4];
 
-    // Binary divider state
+    // Binary divider state (6-bit, /2 through /64)
     bool sqWasHigh[2];
-    int dividerBits[2];
+    int dividerBits[2];     // 0-63
     int dividerJitter[2];
 
-    // Staircase DAC output
+    // Staircase DAC output (64 levels)
     float staircase[2];
 
+    // Temperature drift per filter
+    float tempDrift[4];
+    uint32_t driftCounter;
+
     // Mux routing tables: 64 nodes x 8 slots x 3 values (source, dest, attenuation)
+    // 16 sources, 12 destinations
     float muxRouting[64][8][3];
 
     // Training accumulator per node (richness heuristic)
@@ -121,22 +126,23 @@ namespace stolmine
       }
       gendyAge = 0;
 
-      svfIc1[0] = svfIc1[1] = 0.0f;
-      svfIc2[0] = svfIc2[1] = 0.0f;
+      for (int f = 0; f < 4; f++) { svfIc1[f] = svfIc2[f] = 0.0f; tempDrift[f] = 0.0f; }
       sqWasHigh[0] = sqWasHigh[1] = false;
       dividerBits[0] = dividerBits[1] = 0;
       dividerJitter[0] = dividerJitter[1] = 0;
       staircase[0] = staircase[1] = 0.0f;
+      driftCounter = 0;
       memset(trainAccum, 0, sizeof(trainAccum));
       voiceOutA = voiceOutB = 0.0f;
 
+      // Generate routing tables: 16 sources, 12 destinations
       for (int n = 0; n < kNumNodes; n++) {
         float latitude = fabsf(sphereY[n]);
         float complexity = 1.0f - latitude;
         for (int slot = 0; slot < 8; slot++) {
           uint32_t h = (n * 374761393u + slot * 668265263u) ^ 0x85ebca6bu;
-          int src = (int)((h >> 8) & 0xF) % 12;
-          int dst = (int)((h >> 16) & 0x7) % 8;
+          int src = (int)((h >> 4) & 0xF);        // 0-15 (16 sources)
+          int dst = (int)((h >> 12) & 0xF) % 12;  // 0-11 (12 destinations)
           float atten = complexity * ((float)((h >> 24) & 0xFF) / 255.0f) * 0.5f;
           muxRouting[n][slot][0] = (float)src;
           muxRouting[n][slot][1] = (float)dst;
@@ -403,8 +409,9 @@ namespace stolmine
     for (int d = 0; d < 6; d++)
       vp[d] = s.weights[node0][d] + (s.weights[node1][d] - s.weights[node0][d]) * frac;
 
-    float freqA = 40.0f + vp[0] * 8000.0f;
-    float freqB = 40.0f + vp[1] * 8000.0f;
+    // Voice parameters from SOM
+    float freqPrimary = 40.0f + vp[0] * 8000.0f;
+    float freqRatio = 0.5f + vp[1] * 3.0f; // secondary filter ratio 0.5-3.5x
     float Q = 0.5f + vp[2] * 49.5f;
     float coupling = vp[3];
     float divBias = vp[4];
@@ -420,100 +427,139 @@ namespace stolmine
     float dryScale = 1.0f - selfOsc;
     float dryMix = 1.0f - mix;
 
-    // Block-rate base SVF coefficients (avoid per-sample tanf)
-    float baseGA = fastTan(3.14159f * CLAMP(20.0f, sr * 0.49f, freqA) / sr);
-    float baseGB = fastTan(3.14159f * CLAMP(20.0f, sr * 0.49f, freqB) / sr);
+    // Temperature drift update (block-rate random walk per filter)
+    s.driftCounter++;
+    for (int f = 0; f < 4; f++) {
+      uint32_t h = (s.driftCounter * 374761393u + f * 668265263u) ^ 0x85ebca6bu;
+      float step = (float)((int32_t)(h >> 16) & 0xFFFF) / 65535.0f - 0.5f;
+      s.tempDrift[f] += step * 0.001f;
+      s.tempDrift[f] *= 0.999f;
+      s.tempDrift[f] = CLAMP(-0.02f, 0.02f, s.tempDrift[f]);
+    }
 
-    // Divider jitter threshold influenced by divBias
-    int jitterA = 1 + (int)(divBias * 4.0f);
-    int jitterB = jitterA + 2; // prime offset between channels
+    // 4 filter base coefficients with drift
+    // Ch A: filter 0 = primary freq, filter 1 = primary * ratio
+    // Ch B: filter 2 = primary freq, filter 3 = primary * ratio
+    float filterFreq[4] = {
+      freqPrimary * (1.0f + s.tempDrift[0]),
+      freqPrimary * freqRatio * (1.0f + s.tempDrift[1]),
+      freqPrimary * (1.0f + s.tempDrift[2]),
+      freqPrimary * freqRatio * (1.0f + s.tempDrift[3])
+    };
+    float baseG[4];
+    for (int f = 0; f < 4; f++)
+      baseG[f] = fastTan(3.14159f * CLAMP(20.0f, sr * 0.49f, filterFreq[f]) / sr);
+
+    // 6-bit divider jitter threshold
+    int jitterA = 1 + (int)(divBias * 6.0f);
+    int jitterB = jitterA + 3; // prime offset
 
     for (int i = 0; i < FRAMELENGTH; i++) {
       float dry = in[i];
+      float inA = dry * dryScale;
+      float inB = dry * dryScale;
 
-      float inputA = dry * dryScale;
-      float inputB = dry * dryScale;
-
-      // HP outputs use the actual filter input (includes coupling from previous sample)
-      float hpA = inputA - k * s.svfIc1[0] - s.svfIc2[0];
-      float hpB = inputB - k * s.svfIc1[1] - s.svfIc2[1];
-
-      float sources[12] = {
-        s.svfIc2[0],                                         // 0: LP A
-        s.svfIc1[0],                                         // 1: BP A
-        hpA,                                                 // 2: HP A
-        s.svfIc2[1],                                         // 3: LP B
-        s.svfIc1[1],                                         // 4: BP B
-        hpB,                                                 // 5: HP B
-        (s.dividerBits[0] & 1) ? 1.0f : -1.0f,              // 6: Div A /2
-        (s.dividerBits[0] & 2) ? 1.0f : -1.0f,              // 7: Div A /4
-        (s.dividerBits[0] & 4) ? 1.0f : -1.0f,              // 8: Div A /8
-        s.staircase[0],                                      // 9: Staircase A
-        (s.dividerBits[1] & 1) ? 1.0f : -1.0f,              // 10: Div B /2
-        s.staircase[1]                                       // 11: Staircase B
+      // 16-source array from 4 filters + dividers + input
+      float sources[16] = {
+        s.svfIc2[0], s.svfIc1[0], inA - k * s.svfIc1[0] - s.svfIc2[0],  // 0-2: Filt0 LP/BP/HP
+        s.svfIc2[1], s.svfIc1[1], inA - k * s.svfIc1[1] - s.svfIc2[1],  // 3-5: Filt1 LP/BP/HP
+        s.svfIc2[2], s.svfIc1[2], inB - k * s.svfIc1[2] - s.svfIc2[2],  // 6-8: Filt2 LP/BP/HP
+        s.svfIc2[3], s.svfIc1[3], inB - k * s.svfIc1[3] - s.svfIc2[3],  // 9-11: Filt3 LP/BP/HP
+        s.staircase[0], s.staircase[1],                                    // 12-13: Staircases
+        dry, 0.0f                                                          // 14: Input, 15: Ground
       };
 
-      float dstAccum[8] = {};
+      // Hard-switched Sh'mance: only ONE active routing per divider state
+      float dstAccum[12] = {};
       int muxState = s.dividerBits[0] & 7;
-      for (int slot = 0; slot < 8; slot++) {
-        int src = (int)s.muxRouting[muxNode][slot][0];
-        int dst = (int)s.muxRouting[muxNode][slot][1];
-        float att = s.muxRouting[muxNode][slot][2];
-        float emphasis = (slot == muxState) ? 1.0f : 0.2f;
-        if (src < 12 && dst < 8)
-          dstAccum[dst] += sources[src] * att * emphasis * coupling;
+      int src = (int)s.muxRouting[muxNode][muxState][0];
+      int dst = (int)s.muxRouting[muxNode][muxState][1];
+      float att = s.muxRouting[muxNode][muxState][2];
+      if (src < 16 && dst < 12)
+        dstAccum[dst] += sources[src] * att * coupling;
+
+      // Also apply the complementary channel's mux state for richer interaction
+      int muxStateB = s.dividerBits[1] & 7;
+      src = (int)s.muxRouting[muxNode][(muxStateB + 4) & 7][0]; // offset slot
+      dst = (int)s.muxRouting[muxNode][(muxStateB + 4) & 7][1];
+      att = s.muxRouting[muxNode][(muxStateB + 4) & 7][2];
+      if (src < 16 && dst < 12)
+        dstAccum[dst] += sources[src] * att * coupling * 0.5f;
+
+      // Differential CV: verso (even) - inverso (odd) per filter
+      float freqMod[4];
+      freqMod[0] = dstAccum[0] - dstAccum[1];   // Filter 0 verso - inverso
+      freqMod[1] = dstAccum[2] - dstAccum[3];   // Filter 1
+      freqMod[2] = dstAccum[4] - dstAccum[5];   // Filter 2
+      freqMod[3] = dstAccum[6] - dstAccum[7];   // Filter 3
+
+      // Cross-coupling
+      inA += dstAccum[8] * coupling;   // Coupling A→B into A
+      inB += dstAccum[9] * coupling;   // Coupling B→A into B
+
+      // Process 4 SVFs: cascade within channel
+      // Channel A: input → filter 0 → filter 1
+      float lpOut[4], bpOut[4];
+      float filterIn = inA;
+      for (int f = 0; f < 2; f++) {
+        float mg = baseG[f] * (1.0f + CLAMP(-0.9f, 4.0f, freqMod[f] * 0.5f));
+        float a1 = 1.0f / (1.0f + mg * (mg + k));
+        float a2 = mg * a1;
+        float a3 = mg * a2;
+        float v3 = filterIn - s.svfIc2[f];
+        float v1 = a1 * s.svfIc1[f] + a2 * v3;
+        float v2 = s.svfIc2[f] + a2 * s.svfIc1[f] + a3 * v3;
+        s.svfIc1[f] = 2.0f * v1 - s.svfIc1[f];
+        s.svfIc2[f] = 2.0f * v2 - s.svfIc2[f];
+        bpOut[f] = v1;
+        lpOut[f] = v2;
+        filterIn = v2; // cascade: LP output feeds next filter
       }
 
-      // Modulate SVF coefficients from base (linear scaling, no per-sample tanf)
-      float mgA = baseGA * (1.0f + CLAMP(-0.9f, 4.0f, dstAccum[0] * 0.5f));
-      float mgB = baseGB * (1.0f + CLAMP(-0.9f, 4.0f, dstAccum[1] * 0.5f));
-      float modKA = k * (1.0f + dstAccum[2] * 0.3f);
-      float modKB = k * (1.0f + dstAccum[3] * 0.3f);
+      // Channel B: input → filter 2 → filter 3
+      filterIn = inB;
+      for (int f = 2; f < 4; f++) {
+        float mg = baseG[f] * (1.0f + CLAMP(-0.9f, 4.0f, freqMod[f] * 0.5f));
+        float a1 = 1.0f / (1.0f + mg * (mg + k));
+        float a2 = mg * a1;
+        float a3 = mg * a2;
+        float v3 = filterIn - s.svfIc2[f];
+        float v1 = a1 * s.svfIc1[f] + a2 * v3;
+        float v2 = s.svfIc2[f] + a2 * s.svfIc1[f] + a3 * v3;
+        s.svfIc1[f] = 2.0f * v1 - s.svfIc1[f];
+        s.svfIc2[f] = 2.0f * v2 - s.svfIc2[f];
+        bpOut[f] = v1;
+        lpOut[f] = v2;
+        filterIn = v2;
+      }
 
-      inputA += dstAccum[4] * coupling;
-      inputB += dstAccum[5] * coupling;
-
-      float a1A = 1.0f / (1.0f + mgA * (mgA + modKA));
-      float a2A = mgA * a1A;
-      float a3A = mgA * a2A;
-      float v3A = inputA - s.svfIc2[0];
-      float v1A = a1A * s.svfIc1[0] + a2A * v3A;
-      float v2A = s.svfIc2[0] + a2A * s.svfIc1[0] + a3A * v3A;
-      s.svfIc1[0] = 2.0f * v1A - s.svfIc1[0];
-      s.svfIc2[0] = 2.0f * v2A - s.svfIc2[0];
-
-      float a1B = 1.0f / (1.0f + mgB * (mgB + modKB));
-      float a2B = mgB * a1B;
-      float a3B = mgB * a2B;
-      float v3B = inputB - s.svfIc2[1];
-      float v1B = a1B * s.svfIc1[1] + a2B * v3B;
-      float v2B = s.svfIc2[1] + a2B * s.svfIc1[1] + a3B * v3B;
-      s.svfIc1[1] = 2.0f * v1B - s.svfIc1[1];
-      s.svfIc2[1] = 2.0f * v2B - s.svfIc2[1];
-
-      for (int f = 0; f < 2; f++) {
-        float bp = (f == 0) ? v1A : v1B;
+      // Squarewaveifier + 6-bit binary divider (from filter 1 and filter 3 BP)
+      for (int ch = 0; ch < 2; ch++) {
+        float bp = bpOut[ch * 2 + 1]; // filter 1 (chA) or filter 3 (chB)
         bool high = bp > 0.0f;
-        if (high && !s.sqWasHigh[f]) {
-          s.dividerJitter[f]++;
-          int jThresh = (f == 0) ? jitterA : jitterB;
-          if (s.dividerJitter[f] >= jThresh) {
-            s.dividerJitter[f] = 0;
-            s.dividerBits[f] = (s.dividerBits[f] + 1) & 7;
-            s.staircase[f] = (float)s.dividerBits[f] / 7.0f * 2.0f - 1.0f;
+        if (high && !s.sqWasHigh[ch]) {
+          s.dividerJitter[ch]++;
+          // Divider rate modulated by routing matrix destinations 10-11
+          float divMod = dstAccum[10 + ch] * 4.0f;
+          int jThresh = (ch == 0) ? jitterA : jitterB;
+          jThresh = MAX(1, jThresh + (int)divMod);
+          if (s.dividerJitter[ch] >= jThresh) {
+            s.dividerJitter[ch] = 0;
+            s.dividerBits[ch] = (s.dividerBits[ch] + 1) & 63; // 6-bit
+            s.staircase[ch] = (float)s.dividerBits[ch] / 63.0f * 2.0f - 1.0f;
           }
         }
-        s.sqWasHigh[f] = high;
+        s.sqWasHigh[ch] = high;
       }
 
-      // Soft clip output to prevent runaway from coupled self-oscillation
-      float clampA = tanhf(v2A);
-      float clampB = tanhf(v2B);
-      s.voiceOutA = clampA;
-      s.voiceOutB = clampB;
+      // Output: last filter in each channel cascade
+      float outA = tanhf(lpOut[1]);
+      float outB = tanhf(lpOut[3]);
+      s.voiceOutA = outA;
+      s.voiceOutB = outB;
 
-      outL[i] = dry * dryMix + clampA * outputLevel * mix;
-      outR[i] = dry * dryMix + clampB * outputLevel * mix;
+      outL[i] = dry * dryMix + outA * outputLevel * mix;
+      outR[i] = dry * dryMix + outB * outputLevel * mix;
 
       if (++s.vizDecimCounter >= 8) {
         s.vizDecimCounter = 0;
