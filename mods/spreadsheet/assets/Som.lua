@@ -112,6 +112,11 @@ function Som:onLoadGraph(channelCount)
   feedback:hardSet("Bias", 0.0)
   tie(op, "Feedback", feedback, "Out")
   self:addMonoBranch("feedback", feedback, "In", feedback, "Out")
+
+  local decay = self:addObject("decay", app.ParameterAdapter())
+  decay:hardSet("Bias", 0.995)
+  tie(op, "Decay", decay, "Out")
+  self:addMonoBranch("decay", decay, "In", decay, "Out")
 end
 
 function Som:onLoadViews(objects, branches)
@@ -129,7 +134,8 @@ function Som:onLoadViews(objects, branches)
     initialBias = 0.0,
     op = objects.op,
     nbrParam = objects.neighborhoodRadius:getParameter("Bias"),
-    rateParam = objects.learningRate:getParameter("Bias")
+    rateParam = objects.learningRate:getParameter("Bias"),
+    decayParam = objects.decay:getParameter("Bias")
   }
 
   controls.plasticity = GainBias {
@@ -267,10 +273,26 @@ function Som:onLoadViews(objects, branches)
     initialBias = 1.0
   }
 
+  controls.decay = GainBias {
+    button = "decay",
+    description = "Decay",
+    branch = branches.decay,
+    gainbias = objects.decay,
+    range = objects.decay,
+    biasMap = (function()
+      local m = app.LinearDialMap(0.9, 1.0)
+      m:setSteps(0.01, 0.001, 0.0001, 0.0001)
+      return m
+    end)(),
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.995
+  }
+
   local views = {
     expanded = { "scan", "plasticity", "parallax", "mod", "feedback", "mix" },
     collapsed = {},
-    scan = { "scan", "neighborhood", "rate" },
+    scan = { "scan", "neighborhood", "rate", "decay" },
     mod = { "mod", "modRate", "modShape", "modFeedback" }
   }
 
@@ -279,7 +301,7 @@ end
 
 local adapterBiases = {
   "scanPos", "plasticity", "parallax", "modAmount", "modRate", "modShape", "modFeedback",
-  "mix", "outputLevel", "neighborhoodRadius", "learningRate", "feedback"
+  "mix", "outputLevel", "neighborhoodRadius", "learningRate", "feedback", "decay"
 }
 
 function Som:serialize()

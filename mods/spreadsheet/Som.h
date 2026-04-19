@@ -33,6 +33,7 @@ namespace stolmine
     od::Parameter mNeighborhoodRadius{"NeighborhoodRadius", 0.06f};
     od::Parameter mLearningRate{"LearningRate", 0.1f};
     od::Parameter mFeedback{"Feedback", 0.0f};
+    od::Parameter mDecay{"Decay", 0.995f};
 #endif
 
     float getNodeWeight(int node, int dim);

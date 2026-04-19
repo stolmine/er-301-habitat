@@ -226,7 +226,7 @@ namespace stolmine
             {
               // BASE SURFACE: un-lifted cell
               float edgeRatio = secondDot / (bestDot + 0.001f);
-              bool isEdge = edgeRatio > 0.95f;
+              bool isEdge = edgeRatio > 0.98f;
               float sb = scanBright[cell];
 
               if (isEdge)

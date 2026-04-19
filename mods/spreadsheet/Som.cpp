@@ -167,6 +167,7 @@ namespace stolmine
     addParameter(mNeighborhoodRadius);
     addParameter(mLearningRate);
     addParameter(mFeedback);
+    addParameter(mDecay);
     mpInternal = new Internal();
     mpInternal->Init();
   }
@@ -364,6 +365,11 @@ namespace stolmine
     float plasticity = CLAMP(0.0f, 1.0f, mPlasticity.value());
     float lr = CLAMP(0.01f, 1.0f, mLearningRate.value());
     float radius = CLAMP(0.05f, 0.5f, mNeighborhoodRadius.value());
+
+    // Decay training accumulator (nodes sink back to surface over time)
+    float decay = CLAMP(0.9f, 1.0f, mDecay.value());
+    for (int n = 0; n < kNumNodes; n++)
+      s.trainAccum[n] *= decay;
 
     if (plasticity > 0.001f) {
       float parallax = CLAMP(-1.0f, 1.0f, mParallax.value());
