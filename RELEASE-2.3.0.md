@@ -8,7 +8,7 @@ Package updates: **spreadsheet 2.2.0 -> 2.3.1**, **biome 2.0.0 -> 2.1.0**. All o
 
 ## Highlights
 
-New unit: Colmatage (breakbeat cutter). Blanda (three-input scan mixer) ships as a complete unit after extensive viz and control work. Major audio quality improvements on Helicase and Petrichor. Pecto gets a substantial CPU reduction via NEON optimization.
+Two new units: **Colmatage** (breakbeat cutter) and **Blanda** (three-input scan mixer). Major audio quality improvements on Helicase and Petrichor. Pecto gets a substantial CPU reduction via NEON optimization.
 
 ## New unit: Colmatage
 
@@ -24,9 +24,17 @@ Core mechanic: records incoming audio into a circular buffer, then algorithmical
 - **texture** -- bipolar duty cycle (-1 = full reverse, 0 = gated, +1 = full forward). Shift sub: amp min / amp max / fade
 - **mix** -- dry/wet. Shift sub: input level / output level / tanh saturation
 
-## Blanda -- three-input scan mixer
+## New unit: Blanda
 
-Blanda ships complete with per-input bell shape controls, territory-based ghost occlusion for clean butt-joint visualization, global Skew macro, expansion views for all custom controls, and a continuous polyline bell landscape with per-segment shading.
+Three-input scan mixer in the spreadsheet package. Pure mixer -- no onboard filtering; bring your own Canals / Three Sisters. Each input has a bell-shaped response curve along a global Scan axis; sweeping Scan crossfades between the three inputs, with bell width, position and shape controllable per input.
+
+Core mechanic: Scan (0..1) picks a point on a shared axis; each input's contribution is that input's bell evaluated at the Scan position. Focus scales all three bell widths together (bipolar). Skew warps the Scan axis so the crossover points between inputs are not evenly spaced. A continuous polyline bell landscape with per-segment shading and territory-based ghost occlusion keeps the visualization clean at bell butt-joints.
+
+6 plies:
+- **in1 / in2 / in3** -- per-input level with integrated Solo/Mute. Expansion: Level / Weight (bell width) / Offset (bell position on Scan axis)
+- **scan** -- global Scan position across the three bells. Expansion: Skew (global Scan-axis warp)
+- **focus** -- bipolar global bell width scaler (negative narrows, positive broadens). Expansion: per-input Shape (per-bell curve shape)
+- **lvl** -- output level
 
 ## Helicase -- audio quality
 
