@@ -127,10 +127,9 @@ function LaretOverviewControl:onCursorEnter(spot)
 end
 
 function LaretOverviewControl:onCursorLeave(spot)
-  if not self.paramMode then
-    self:removeSubGraphic(self.subGraphic)
-    self.paramMode = true
-    self.subGraphic = self.paramSubGraphic
+  if self.paramMode then
+    self.paramFocusedReadout = nil
+    self:setSubCursorController(nil)
   end
   self:releaseFocus("shiftPressed", "shiftReleased")
   GainBias.onCursorLeave(self, spot)

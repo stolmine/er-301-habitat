@@ -27,14 +27,16 @@ function CompBandControl:init(args)
   self:setControlGraphic(container)
 
   -- Default sub-display = comp params (threshold/ratio/speed)
-  -- Shift toggles to normal GainBias sub-display (gain/bias for level)
-  self.compMode = true
+  -- Shift toggles to normal GainBias sub-display (gain/bias for level).
+  -- Init preserved per Decision 7 grandfather list: paramMode=true
+  -- (custom comp params) is the default view on insert.
+  self.paramMode = true
   self.shiftHeld = false
   self.shiftUsed = false
-  self.levelSubGraphic = self.subGraphic -- save the GainBias sub-display
+  self.normalSubGraphic = self.subGraphic -- save the GainBias sub-display
 
   -- Build comp params sub-display
-  self.compSubGraphic = app.Graphic(0, 0, 128, 64)
+  self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
   local desc = app.Label(args.description or "Band", 10)
   desc:fitToText(3)
@@ -42,7 +44,7 @@ function CompBandControl:init(args)
   desc:setBorder(1)
   desc:setCornerRadius(3, 0, 0, 3)
   desc:setCenter(col2, center1 + 1)
-  self.compSubGraphic:addChild(desc)
+  self.paramSubGraphic:addChild(desc)
 
   local function makeReadout(param, map, precision, x)
     local g = app.Readout(0, 0, ply, 10)
@@ -73,31 +75,26 @@ function CompBandControl:init(args)
   self.ratioReadout = makeReadout(args.ratioParam, ratioMap, 1, col2)
   self.speedReadout = makeReadout(args.speedParam, speedMap, 2, col3)
 
-  self.compSubGraphic:addChild(self.threshReadout)
-  self.compSubGraphic:addChild(self.ratioReadout)
-  self.compSubGraphic:addChild(self.speedReadout)
-  self.compSubGraphic:addChild(app.SubButton("thresh", 1))
-  self.compSubGraphic:addChild(app.SubButton("ratio", 2))
-  self.compSubGraphic:addChild(app.SubButton("speed", 3))
+  self.paramSubGraphic:addChild(self.threshReadout)
+  self.paramSubGraphic:addChild(self.ratioReadout)
+  self.paramSubGraphic:addChild(self.speedReadout)
+  self.paramSubGraphic:addChild(app.SubButton("thresh", 1))
+  self.paramSubGraphic:addChild(app.SubButton("ratio", 2))
+  self.paramSubGraphic:addChild(app.SubButton("speed", 3))
 
-  -- Start in comp mode
-  self:setCompMode(true)
-
-  -- Defensive: GainBias-side focusedReadout always points at Level so
-  -- onFocused/cancel/zero don't hit nil when entering the ply in
-  -- compMode. (setCompMode(true) doesn't initialize it.)
-  self.focusedReadout = self.bias
+  -- Start in paramMode (custom comp params visible).
+  self:setParamMode(true)
 end
 
-function CompBandControl:setCompMode(enabled)
+function CompBandControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
-  self.compMode = enabled
-  self.compFocusedReadout = nil
+  self.paramMode = enabled
+  self.paramFocusedReadout = nil
   self:setSubCursorController(nil)
   if enabled then
-    self.subGraphic = self.compSubGraphic
+    self.subGraphic = self.paramSubGraphic
   else
-    self.subGraphic = self.levelSubGraphic
+    self.subGraphic = self.normalSubGraphic
     self:setFocusedReadout(self.bias)
   end
   self:addSubGraphic(self.subGraphic)
@@ -109,10 +106,9 @@ function CompBandControl:onCursorEnter(spot)
 end
 
 function CompBandControl:onCursorLeave(spot)
-  if not self.compMode then
-    self:removeSubGraphic(self.subGraphic)
-    self.compMode = true
-    self.subGraphic = self.compSubGraphic
+  if self.paramMode then
+    self.paramFocusedReadout = nil
+    self:setSubCursorController(nil)
   end
   self:releaseFocus("shiftPressed", "shiftReleased")
   GainBias.onCursorLeave(self, spot)
@@ -121,8 +117,8 @@ end
 function CompBandControl:shiftPressed()
   self.shiftHeld = true
   self.shiftUsed = false
-  if self.compFocusedReadout then
-    self.shiftSnapshot = self.compFocusedReadout:getValueInUnits()
+  if self.paramFocusedReadout then
+    self.shiftSnapshot = self.paramFocusedReadout:getValueInUnits()
   else
     self.shiftSnapshot = nil
   end
@@ -131,42 +127,46 @@ end
 
 function CompBandControl:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
-    if self.compFocusedReadout and self.shiftSnapshot then
-      local cur = self.compFocusedReadout:getValueInUnits()
+    if self.paramFocusedReadout and self.shiftSnapshot then
+      local cur = self.paramFocusedReadout:getValueInUnits()
       if cur ~= self.shiftSnapshot then
         self.shiftHeld = false
         self.shiftSnapshot = nil
         return true
       end
     end
-    self:setCompMode(not self.compMode)
+    self:setParamMode(not self.paramMode)
   end
   self.shiftHeld = false
   self.shiftSnapshot = nil
   return true
 end
 
+function CompBandControl:setParamFocusedReadout(readout)
+  if readout then readout:save() end
+  self.paramFocusedReadout = readout
+  self:setSubCursorController(readout)
+end
+
 function CompBandControl:spotReleased(spot, shifted)
-  if not self.compMode then
-    self.compFocusedReadout = nil
+  if self.paramMode then
+    self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
-    self:setCompMode(true)
+    self:setParamMode(false)
   end
   return GainBias.spotReleased(self, spot, shifted)
 end
 
 function CompBandControl:subReleased(i, shifted)
   if shifted then return false end
-  if self.compMode then
+  if self.paramMode then
     local readout = nil
     if i == 1 then readout = self.threshReadout
     elseif i == 2 then readout = self.ratioReadout
     elseif i == 3 then readout = self.speedReadout
     end
     if readout then
-      readout:save()
-      self.compFocusedReadout = readout
-      self:setSubCursorController(readout)
+      self:setParamFocusedReadout(readout)
       if not self:hasFocus("encoder") then self:focus() end
     end
     return true
@@ -178,24 +178,24 @@ function CompBandControl:encoder(change, shifted)
   if shifted and self.shiftHeld then
     self.shiftUsed = true
   end
-  if self.compMode and self.compFocusedReadout then
-    self.compFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+  if self.paramMode and self.paramFocusedReadout then
+    self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
     return true
   end
   return GainBias.encoder(self, change, shifted)
 end
 
 function CompBandControl:zeroPressed()
-  if self.compMode and self.compFocusedReadout then
-    self.compFocusedReadout:zero()
+  if self.paramMode and self.paramFocusedReadout then
+    self.paramFocusedReadout:zero()
     return true
   end
   return GainBias.zeroPressed(self)
 end
 
 function CompBandControl:cancelReleased(shifted)
-  if self.compMode and self.compFocusedReadout then
-    self.compFocusedReadout:restore()
+  if self.paramMode and self.paramFocusedReadout then
+    self.paramFocusedReadout:restore()
     return true
   end
   return GainBias.cancelReleased(self, shifted)

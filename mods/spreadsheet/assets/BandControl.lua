@@ -163,9 +163,8 @@ end
 
 function BandControl:onCursorLeave(spot)
   if self.paramMode ~= 0 then
-    self:removeSubGraphic(self.subGraphic)
-    self.paramMode = 0
-    self.subGraphic = self.normalSubGraphic
+    self.paramFocusedReadout = nil
+    self:setSubCursorController(nil)
   end
   self:releaseFocus("shiftPressed", "shiftReleased")
   GainBias.onCursorLeave(self, spot)

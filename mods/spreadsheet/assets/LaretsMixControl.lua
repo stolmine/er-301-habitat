@@ -100,9 +100,8 @@ end
 
 function LaretsMixControl:onCursorLeave(spot)
   if self.paramMode then
-    self:removeSubGraphic(self.subGraphic)
-    self.paramMode = false
-    self.subGraphic = self.normalSubGraphic
+    self.paramFocusedReadout = nil
+    self:setSubCursorController(nil)
   end
   self:releaseFocus("shiftPressed", "shiftReleased")
   GainBias.onCursorLeave(self, spot)

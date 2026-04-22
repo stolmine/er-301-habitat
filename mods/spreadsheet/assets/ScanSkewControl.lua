@@ -21,10 +21,9 @@ function ScanSkewControl:init(args)
 
   self:setClassName("ScanSkewControl")
 
-  self.defaultSubGraphic = self.subGraphic
+  self.normalSubGraphic = self.subGraphic
 
-  -- Skew sub-display.
-  self.skewSubGraphic = app.Graphic(0, 0, 128, 64)
+  self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
   local desc = app.Label("Skew", 10)
   desc:fitToText(3)
@@ -32,7 +31,7 @@ function ScanSkewControl:init(args)
   desc:setBorder(1)
   desc:setCornerRadius(3, 0, 0, 3)
   desc:setCenter(col2, center1 + 1)
-  self.skewSubGraphic:addChild(desc)
+  self.paramSubGraphic:addChild(desc)
 
   local skewMap = args.skewMap or (function()
     local m = app.LinearDialMap(-1, 1)
@@ -45,31 +44,24 @@ function ScanSkewControl:init(args)
   self.skewReadout:setAttributes(app.unitNone, skewMap)
   self.skewReadout:setPrecision(2)
   self.skewReadout:setCenter(col2, center4)
-  self.skewSubGraphic:addChild(self.skewReadout)
-  self.skewSubGraphic:addChild(app.SubButton("skew", 2))
+  self.paramSubGraphic:addChild(self.skewReadout)
+  self.paramSubGraphic:addChild(app.SubButton("skew", 2))
 
-  self.scanMode = true
+  self.paramMode = false
   self.shiftHeld = false
   self.shiftUsed = false
-
-  -- Defensive: keep focusedReadout pointing at Scan's bias via the
-  -- proper method so the sub cursor controller and encoder state are
-  -- installed too. GainBias.init already did this at line 197 of
-  -- GainBias.lua; redundant but explicit. See
-  -- feedback_gainbias_dual_mode_focus.md.
-  self:setFocusedReadout(self.bias)
 end
 
-function ScanSkewControl:setScanMode(enabled)
+function ScanSkewControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
-  self.scanMode = enabled
-  self.skewFocusedReadout = nil
+  self.paramMode = enabled
+  self.paramFocusedReadout = nil
   self:setSubCursorController(nil)
   if enabled then
-    self.subGraphic = self.defaultSubGraphic
-    self:setFocusedReadout(self.bias)
+    self.subGraphic = self.paramSubGraphic
   else
-    self.subGraphic = self.skewSubGraphic
+    self.subGraphic = self.normalSubGraphic
+    self:setFocusedReadout(self.bias)
   end
   self:addSubGraphic(self.subGraphic)
 end
@@ -80,13 +72,9 @@ function ScanSkewControl:onCursorEnter(spot)
 end
 
 function ScanSkewControl:onCursorLeave(spot)
-  if not self.scanMode then
-    self:removeSubGraphic(self.subGraphic)
-    self.scanMode = true
-    self.subGraphic = self.defaultSubGraphic
-    self:addSubGraphic(self.subGraphic)
-    self.skewFocusedReadout = nil
-    self:setFocusedReadout(self.bias)
+  if self.paramMode then
+    self.paramFocusedReadout = nil
+    self:setSubCursorController(nil)
   end
   self:releaseFocus("shiftPressed", "shiftReleased")
   GainBias.onCursorLeave(self, spot)
@@ -95,8 +83,8 @@ end
 function ScanSkewControl:shiftPressed()
   self.shiftHeld = true
   self.shiftUsed = false
-  if self.skewFocusedReadout then
-    self.shiftSnapshot = self.skewFocusedReadout:getValueInUnits()
+  if self.paramFocusedReadout then
+    self.shiftSnapshot = self.paramFocusedReadout:getValueInUnits()
   else
     self.shiftSnapshot = nil
   end
@@ -105,46 +93,45 @@ end
 
 function ScanSkewControl:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
-    if self.skewFocusedReadout and self.shiftSnapshot then
-      local cur = self.skewFocusedReadout:getValueInUnits()
+    if self.paramFocusedReadout and self.shiftSnapshot then
+      local cur = self.paramFocusedReadout:getValueInUnits()
       if cur ~= self.shiftSnapshot then
         self.shiftHeld = false
         self.shiftSnapshot = nil
         return true
       end
     end
-    self:setScanMode(not self.scanMode)
+    self:setParamMode(not self.paramMode)
   end
   self.shiftHeld = false
   self.shiftSnapshot = nil
   return true
 end
 
-function ScanSkewControl:setSkewFocusedReadout(readout)
+function ScanSkewControl:setParamFocusedReadout(readout)
   if readout then readout:save() end
-  self.skewFocusedReadout = readout
+  self.paramFocusedReadout = readout
   self:setSubCursorController(readout)
 end
 
 function ScanSkewControl:subReleased(i, shifted)
   if shifted then return false end
-  if self.scanMode then
-    return GainBias.subReleased(self, i, shifted)
-  else
+  if self.paramMode then
     if i == 2 then
       if not self:hasFocus("encoder") then self:focus() end
-      self:setSkewFocusedReadout(self.skewReadout)
+      self:setParamFocusedReadout(self.skewReadout)
       return true
     end
+    return false
   end
-  return false
+  return GainBias.subReleased(self, i, shifted)
 end
 
 function ScanSkewControl:spotReleased(spot, shifted)
-  if not self.scanMode then
-    self.skewFocusedReadout = nil
+  if self.paramMode then
+    self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
-    self:setScanMode(true)
+    self:setParamMode(false)
   end
   return GainBias.spotReleased(self, spot, shifted)
 end
@@ -153,32 +140,32 @@ function ScanSkewControl:encoder(change, shifted)
   if shifted and self.shiftHeld then
     self.shiftUsed = true
   end
-  if self.skewFocusedReadout then
-    self.skewFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+  if self.paramMode and self.paramFocusedReadout then
+    self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
     return true
   end
   return GainBias.encoder(self, change, shifted)
 end
 
 function ScanSkewControl:zeroPressed()
-  if self.skewFocusedReadout then
-    self.skewFocusedReadout:zero()
+  if self.paramMode and self.paramFocusedReadout then
+    self.paramFocusedReadout:zero()
     return true
   end
   return GainBias.zeroPressed(self)
 end
 
 function ScanSkewControl:cancelReleased(shifted)
-  if self.skewFocusedReadout then
-    self.skewFocusedReadout:restore()
+  if self.paramMode and self.paramFocusedReadout then
+    self.paramFocusedReadout:restore()
     return true
   end
   return GainBias.cancelReleased(self, shifted)
 end
 
 function ScanSkewControl:upReleased(shifted)
-  if self.skewFocusedReadout then
-    self.skewFocusedReadout = nil
+  if self.paramMode and self.paramFocusedReadout then
+    self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
     return true
   end
