@@ -737,3 +737,63 @@ edit per file using the shared helper.
 - `er-301-stolmine/xroot/Base/Widget.lua:56-66` -- `setSubCursorController`.
 - `er-301-stolmine/xroot/Base/Widget.lua:87-140` -- `addSubGraphic` / `removeSubGraphic` / `grabFocus` / `releaseFocus`.
 - `er-301-stolmine/xroot/Encoder.lua` -- `Encoder.Fine` constant.
+
+## Per-unit test matrix
+
+Unit-by-unit checklist for running the emulator smoke test. Each unit
+below contains one or more affected controls; the key column lists the
+specific things to probe so units that expose more surface area get more
+attention. The shorthand in the "test focus" column maps to the
+`verification checklist per control` section above:
+
+- **F**: fresh-insert default side correct
+- **T**: tap-shift toggles on release
+- **N**: nudge-encoder-during-shift does NOT toggle (Decision 1 B)
+- **SP**: shift+spot does NOT toggle on Pattern C (Decision 2)
+- **K**: shift+sub opens keyboard in paramMode (Decision 5)
+- **P**: paramMode persists across cursor leave/return (Decision 7)
+- **Q**: paramMode does NOT persist across quicksave/reload
+- **D**: no heap corruption / nil-deref on unit delete
+- **Tog**: discrete-toggle sub branches still toggle on plain tap, don't
+  open keyboard on shift+tap
+
+Pattern C controls are **C** rows. Everything else is Pattern A.
+
+### spreadsheet package
+
+| Unit | Controls | Test focus |
+|---|---|---|
+| **TrackerSeq (Excel)** | TransformGateControl (xform ply) | F(gate), T, N, SP, P, Q, D; in math mode tap sub1/sub2/sub3 focuses func/factor/fire — no keyboard on shift (xform sub-buttons are discrete-valued, Decision 5 does not apply to Pattern C). Verify xform gate ply still fires on shift+sub or func-encoder. |
+| **GateSeq (Ballot)** | RatchetControl (ratch ply), TransformGateControl (xform ply) | F(RatchetControl=paramMode/ratch, TransformGate=gate), T on both, N on both, SP on both, P on both, D. Ratchet sub2/sub3 toggle len/vel options — shift+sub2/sub3 should NOT open keyboard (discrete toggles). |
+| **Etcher** | TransformGateControl (xform ply) | Same as TrackerSeq xform. Also verify the per-segment step list still edits unaffected by this refactor. |
+| **Filterbank** | MixControl (mix ply) | F(fader), T, N, K(input/output/tanh subs), P, Q, D. |
+| **MultitapDelay (Petrichor)** | FeedbackControl, MixControl, TimeControl, TransformGateControl (xform ply) | Highest surface-area unit. F across all four; T on all four; K on Feedback(tone), Mix(input/output/tanh), Time(grid/reverse/skew); xform ply same as Excel. Persist paramMode independently per ply (leaving Feedback paramMode on, cursor to Mix, back to Feedback → still on). Verify xform randomization still fires. |
+| **MultibandSaturator (Parfait)** | DriveControl, BandControl (×3), ParfaitMixControl | F across all five plies; T on all five; K on Drive(tone/freq), each Band(amt/bias/type OR wt/freq/morph depending on cycle), Mix(comp/output/tanh). **BandControl 3-mode cycle** -- confirm cycling stops on shift-release with no encoder activity, and the cycle position persists across cursor leave. Watch for ghost-child visuals if cycling fast. |
+| **MultibandCompressor (Impasto)** | DriveControl, CompBandControl (×3, grandfathered paramMode=true), CompMixControl | F(Drive=fader, CompBand=paramMode/comp, CompMix=fader); T on all; K on Drive(tone/freq), each CompBand(threshold/ratio/speed), CompMix(output only — sub1 is auto toggle, shift+sub1 should no-op). Tog on CompMix sub1 and CompSidechain subs. Also: stereo re-sync (existing Impasto bug is out of scope but worth verifying no regression). |
+| **Rauschen** | RauschenCutoffControl | F(fader), T, N, K(morph/Q), P, Q, D. Verify algo fader label still refreshes on deserialize. |
+| **Helicase** | HelicaseModControl (grandfathered paramMode=true), HelicaseOverviewControl (grandfathered paramMode=true), HelicaseShapingControl (grandfathered paramMode=true) | F(all three show custom on insert), T on all three, K on ModControl(ratio/feedback/shape), OverviewControl(mix/carrier — sub2 is lin/expo toggle, shift+sub2 no-op), ShapingControl(index/disc/type). Pattern's headline viz: overview phase-space viz still renders across cursor moves. Persistence critical here — leaving mid-edit should not snap back to stock. |
+| **Larets** | LaretOverviewControl (grandfathered paramMode=true), LaretsMixControl, TransformGateControl (xform ply) | F(LaretOverview=paramMode, LaretsMix=fader, TransformGate=gate); T on all; K on LaretOverview(skew/steps/loop), LaretsMix(output/comp — sub3 auto is Tog), xform ply same as Excel. Step list chaselight unaffected. |
+| **Colmatage** | ColmatageBlockControl, ColmatageRepeatsControl, ColmatageTextureControl, MixControl | F(all fader); T on all four; K on BlockControl(phrase min/max, block max), Repeats(ritard/blend/accel), Texture(amp min/max, fade), Mix(input/output/tanh). BSP tile-field overview viz unaffected. |
+| **Blanda** | FocusShapeControl, MixInputControl (×3), ScanSkewControl | F(all fader/mix-mode default); T on all five; K on FocusShape(shape1/2/3), MixInput(level/weight/offset in paramMode — sub1/2/3 in mix mode are branch/solo/mute, Tog), ScanSkew(skew only, sub2). Bell landscape viz unaffected. |
+
+### biome package
+
+| Unit | Controls | Test focus |
+|---|---|---|
+| **Pecto** | MixControl, TransformGateControl, DensityControl (plus stock GainBias / Pitch plies unaffected: size, feedback, inputLevel, outputLevel, tanhAmt, tune) | **Biggest biome risk.** Pecto imports three spreadsheet controls directly. F across all three; T; K on Mix(input/output/tanh), Density(pattern/slope/resonator); xform ply same as Excel. NEON 3-pass gather path unchanged — CPU should still sit at ~6% stereo. |
+
+### Other packages (MI ports, legacy)
+
+Not touched by this refactor. Listed here only so nothing is missed on a regression sweep:
+
+- **Plaits / Clouds / Warps / Rings / Stratos / Grids / Commotio / Marbles / Kryos** — no modified controls imported. Rings uses its own `rings.MixControl` (not `spreadsheet.MixControl`).
+- **scope** — not touched.
+- **catchall** (Sfera / Lambda / Flakes / Som) — experimental. Not in audit scope; Som uses its own Pattern-A-style controls that are structurally similar but not refactored. If time permits, sanity-check Sfera/Flakes still load.
+
+### Cross-cutting verification (run once after all units tested)
+
+- [ ] Quicksave a patch with every unit above inserted and with paramMode left in various states. Reload. Every unit should restore in its init-default mode (paramMode NOT serialized per Decision 7).
+- [ ] Rapid insert/delete of Pecto, Petrichor, Parfait, Impasto 10x each. No heap corruption, no `malloc(): invalid size`, no nil-deref.
+- [ ] `grep "self.focusedReadout = " mods/spreadsheet/assets/*.lua mods/biome/assets/*.lua` — every hit should be a read, never a write (writes must go through `self:setFocusedReadout(...)`). The one intentional exception is `self.focusedReadout = nil` in `onCursorLeave` / `upReleased`, which is safe.
+- [ ] No `shiftDeferred` occurrences remain in spreadsheet or biome (legacy Pattern C idiom; replaced by `shiftHeld` / `shiftUsed`).
+- [ ] No `show()` / `hide()` on ratchet-params or xform-params children in TransformGate / Ratchet (replaced by subGraphic swap).

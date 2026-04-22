@@ -82,11 +82,6 @@ function HelicaseShapingControl:init(args)
   self.paramSubGraphic:addChild(app.SubButton("type", 3))
 
   self:setParamMode(true)
-
-  -- Defensive: keep the GainBias-side focusedReadout pointing at Level so
-  -- that onFocused/cancel/zero never hits nil when the user cursor-enters
-  -- while paramMode is active.
-  self.focusedReadout = self.bias
 end
 
 function HelicaseShapingControl:setParamMode(enabled)
