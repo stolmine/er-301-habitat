@@ -585,6 +585,35 @@ Input: GainBias branch (no inlet). Output: 10Vpp (-5V to +5V).
 - [x] Fix skew asymmetry: symmetric linear shift (same approach as Parfait), bipolar -1 to +1
 - [x] Fix SWIG crash on delete: private members were inside #ifndef SWIGLUA, moved outside
 
+## Analog Macro Drum Voice
+
+Spreadsheet unit -- single-voice drum synth with a sine/triangle core, pitch-sweep envelope, noise grit, and a T-bridge-style overlay oscillator. Many params, all CV-addressable, matching the spreadsheet convention (Excel/Ballot/Petrichor/Larets) for per-param CV + xform gate eligibility.
+
+Signal flow: Trigger -> pitch env (rate = Time, amount = Sweep) feeds Pitch. Oscillator core (Character, Shape, Grit) -> Clipper waveshaper -> EQ (bipolar single-knob LPF/HPF, center bypass) -> VCA with amp env (Hold, Decay) -> Out.
+
+### Params
+
+- [ ] Character: 0..0.5 crossfade Triangle -> Sine, 0.5..1 triangle wavefolding. Virtual-analog triangle, low aliasing.
+- [ ] Pitch: base pitch, V/Oct input.
+- [ ] Sweep: pitch envelope depth into pitch.
+- [ ] Time: pitch envelope decay rate.
+- [ ] Grit: FM noise amount. Past ~0.75 crossfades the main oscillator out and a short noise burst in (envelope shortens as Grit approaches 1.0, relative to amp Decay). 808-snare territory.
+- [ ] Shape: overlays a second oscillator with a slightly shorter decay than the main. 808/909 T-bridge dual-osc trick; useful for snare phase and bass tone.
+- [ ] Clipper: post-oscillator waveshape drive (start tanh + drive, evaluate against 94 Discont folds if needed).
+- [ ] EQ: bipolar single-knob SVF, 0 = LPF fully swept, 0.5 = bypass (center detent), 1 = HPF fully swept.
+- [ ] Hold: amp envelope pre-decay plateau.
+- [ ] Decay: amp envelope decay rate.
+- [ ] Vol: output VCA.
+- [ ] Trigger: Gate control via Comparator (per CONTEXT.md gate filtering).
+- [ ] Serialization: Excel-pattern ParameterAdapter Bias round-trip for every top-level fader.
+
+### Open questions
+
+- [ ] Character fold curve (>0.5): reflecting fold vs. polyfold -- pick by ear once a first cut is audible.
+- [ ] Grit topology: noise FM-ing the osc frequency vs. noise mixed post-oscillator vs. parallel short-enveloped noise burst. Confirm by listening tests.
+- [ ] Shape overlay decay ratio relative to main (~0.7-0.85x initial guess).
+- [ ] xform gate ply (func + paramA/B + scope) over Character/Shape/Grit/Sweep/Time/Decay. Defer if first cut is unwieldy; not a v1 blocker.
+
 ## Gridlock (Priority Gate Router)
 
 - [x] 3 gate inputs with descending priority, bipolar CV values, latching output
@@ -606,6 +635,20 @@ Raw POLYBLEP oscillator extracted from VarishapeVoice. No envelope, no gate -- p
 - [x] Biome package
 - [x] Fix crash on delete: SWIG class size mismatch (private pointers inside #ifndef SWIGLUA)
 - [x] VarishapeVoice: same SWIG fix applied
+
+## 2D/3D Wavetable Oscillator
+
+Spreadsheet unit -- wavetable oscillator with X/Y position across a 2D table (columns = wavetables, rows = frames within each table), CV-addressable on both axes. V/Oct pitch, FM input, sync.
+
+Overview viz: **3D stacked single-cycle view** -- render ~8-16 adjacent frames around the current Y position as stacked single-cycle outlines with parallax offset (front-to-back Z-fade, each frame shifted on X/Y by a small projection constant). Current frame highlighted at the front; neighbours dim behind it. Reads as a pseudo-3D slab you scrub through with the Y control. Leverage the existing wavetable-frame pattern from Bletchley Park / SingleCycle for waveform acquisition.
+
+- [ ] Core DSP: 2D table lookup, bilinear interpolation between frames, anti-alias via mipmap or polyBLEP at frame edges
+- [ ] Top-level params: X (table), Y (frame), Pitch (V/Oct + Bias), FM, Sync, Level
+- [ ] Table source: start with a bundled set of classic wavetables; user loadable via file chooser in a later pass (Bletchley Park pattern)
+- [ ] StackedFrameGraphic overview: 8-16 adjacent frames, configurable Z-spacing, dim-to-back gradient, current-frame highlight
+- [ ] Serialization: Excel-pattern round-trip for X/Y/Pitch/FM/Sync/Level + table-set selection
+- [ ] Open: 2D vs 3D addressing -- decide whether to ship a single-axis morph control (2D) first and defer the stacked multi-table X axis, or commit to both axes from the start
+- [ ] Open: frame interpolation cost on am335x -- benchmark bilinear vs nearest+xfade before committing
 
 ## Flakes (granular shimmer/freeze)
 
@@ -894,6 +937,63 @@ Grid-based sequencer where placement rules from board games drive step generatio
 - [ ] Norns-inspired generative visual + audio units
 - [ ] Glitchy eye candy: generative visuals driven by audio/CV (ref: Paratek modules)
 - [ ] Pseudo-3D waveform viz: wavetable frames stacked serially for 3D view
+
+## Multi-Output Units
+
+Framework: `planning/redesign/07-multi-output-units.md`. Gating test is **derivability at destination** -- if the relationship between outputs can be reconstructed downstream from one output, decompose to parallel chains instead. Primary output author-declared, sub-outs via local picker (Rolodex stack, author-declared semantic order), controls macro-only at top level, sub-view nav must be mechanically distinct from main-chain nav. See memory `project_multi_output_framework.md` for the full charter. All entries below pass the derivability test.
+
+### Quadrature LFO -- proof-of-concept
+
+Start here. Four phase-locked LFO outputs at 0 / 90 / 180 / 270 degrees. Simplest possible multi-out unit -- forces the framework into existence (primary out, sub-out declaration, author-ordered picker, macro rate/shape controls) without DSP complexity obscuring the UI work.
+
+- [ ] Core: single phase accumulator, four samplers at fixed offsets. Sine, tri, ramp, and random-smoothed shape selector.
+- [ ] Top-level controls (macro, affect all outs): rate (V/Oct + Bias), shape, amplitude, sync/reset gate input.
+- [ ] Primary output = 0 degree phase. Sub-outs in author-declared order: 90, 180, 270. Labels must be meaningful (not "out 2 / 3 / 4"); use the phase angle.
+- [ ] UI build-out: ships together with the first multi-out picker / sub-view nav implementation. Driver unit for that framework work.
+- [ ] Defer: fancier waveshapes, bipolar/unipolar toggle -- basic shape set first.
+
+### Polyphonic clocked burst generator (Just Friends Geode style)
+
+Multi-voice clocked burst unit with internal voice allocation driven by busy-state. Input clock + density/probability params drive a pool of N voices; each voice fires a short enveloped CV-at-pitch burst. Voice allocation is the unit's contribution -- the distribution across voices cannot be reconstructed from a single summed output. Reference the Just Friends **Technical Map** for density/sync/voice-stealing behaviour.
+
+- [ ] Read the Just Friends Technical Map; capture exact voice-allocation rules in a planning doc before DSP work starts. User can hand over the PDF when ready.
+- [ ] Voice pool: N=6 initial target. Per voice: pitch, amp envelope, trigger state.
+- [ ] Allocation policy: prefer idle voices; under load, steal oldest or quietest (to match Geode behaviour).
+- [ ] Top-level macro controls: clock in, density/probability, pitch distribution range, envelope time macro, voice count, per-voice detune or ratio spread.
+- [ ] Outputs: primary = summed mix. Sub-outs = N per-voice outs, author-ordered by voice index. Sub-out labels e.g. "voice 1..6".
+- [ ] Open: whether to also expose a gate sub-out per voice (paired CV+gate per voice) -- doubles sub-out count but matches Geode's dual-output character. Decide after framework lands.
+- [ ] Open: Geode's "smart distribution" needs its internal algorithm captured verbatim from the technical map before we approximate it. Don't guess -- the behaviour is the unit's identity.
+
+### Coupled CV+gate envelope
+
+Envelope generator producing a paired CV contour and a gate at a declared transition point. Gate timing is internal to the envelope's evolution (e.g. gate high during attack, gate low at sustain entry, or gate pulse at peak). Cannot be reconstructed downstream because the gate references internal envelope state.
+
+- [ ] Envelope core: AD / AHD / ADSR with shape (linear/exp/log) control.
+- [ ] Primary output: CV contour.
+- [ ] Sub-outs (author-ordered): "peak gate" (pulse at attack->decay transition), "busy gate" (high while envelope is non-zero), optional "decay gate" (pulse at decay end / sustain entry).
+- [ ] Top-level macro controls: stage times, shape, trigger input.
+- [ ] Open: which gate variants ship. Start with busy+peak; add decay gate if musically useful.
+
+### Multichannel sequencer with shared step pointer
+
+N-channel sequencer where all channels share a single step pointer advanced by one clock input. Channel values cannot be reconstructed from any single channel because the per-channel patterns are independent. The shared step is the coupling.
+
+- [ ] Core: shared step index, N channels of per-step CV (start with N=4).
+- [ ] Top-level controls: clock in, reset in, step count, shared transforms (randomize all, shift all, clear all).
+- [ ] Primary output = channel 1 CV. Sub-outs = channels 2..N, author-ordered by channel index.
+- [ ] Optional: per-channel gate outs (pair with CV outs as sub-outs) -- doubles sub-out count. Decide after framework lands.
+- [ ] UI: reuse Excel/Ballot step-list patterns per channel, with a channel selector at top level (or channel select via shift + fader).
+
+### Additional candidates that pass the derivability test
+
+Evaluate these once the framework is live. Each one has semantic output coupling that can't be reconstructed downstream.
+
+- [ ] **Shift-register sequencer** (Turing Machine style): N taps from a shared looping register. Tap values come from the same bit/word stream; the tap positions are the semantic siblings. Primary = tap 1, sub-outs = taps 2..N.
+- [ ] **Coupled chaos generator** (Lorenz / Rossler / Henon): internal state vector (x, y, z) exposed as three siblings. Phase-space relationship is the entire contribution. Primary = x, sub-outs = y, z. Good second proof-of-concept after the quadrature LFO -- same 3-4 sibling pattern, more interesting DSP.
+- [ ] **Polyrhythmic clock divider**: shared master phase, N divisions at declared ratios (e.g. /1, /2, /3, /5, /8). Ratios are semantic; coherent phase alignment across them is the point. Primary = /1, sub-outs in ratio order.
+- [ ] **Multi-segment envelope/LFO** (Stages-style): shared phase accumulator with author-declared segment-boundary outputs (segment-start gates, segment-active gates, segment-complete gates). Segment boundaries are internal state. Primary = shaped CV, sub-outs = segment gates in time order.
+- [ ] **Coupled-oscillator pair with internal FM** (complex oscillator family): main + modulator outs where the modulator state is influenced by the carrier via shared FM bus. Cannot be reconstructed without the same cross-coupling topology. Primary = carrier, sub-out = modulator.
+- [ ] **Dual-stream random sampler** (Marbles t+X analogue): shared deja-vu buffer driving a gate stream and a CV stream that reference the same internal RNG state. Primary = CV, sub-out = gate (or vice versa); the coupling is the shared loop buffer.
 
 ## Port Candidates
 
