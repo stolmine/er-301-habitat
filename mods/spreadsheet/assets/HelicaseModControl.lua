@@ -71,6 +71,10 @@ function HelicaseModControl:init(args)
   self.fbReadout = makeReadout(args.feedbackParam, fbMap, 2, col2)
   self.shapeReadout = makeReadout(args.modShapeParam, shapeMap, 0, col3)
 
+  -- Sub1 (ratioReadout) is bound to the same Bias parameter as self.bias;
+  -- highlight it on paramMode entry so the user sees what the encoder edits.
+  self.paramModeDefaultSub = self.ratioReadout
+
   self.paramSubGraphic:addChild(self.ratioReadout)
   self.paramSubGraphic:addChild(self.fbReadout)
   self.paramSubGraphic:addChild(self.shapeReadout)
@@ -99,7 +103,7 @@ function HelicaseModControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
   if self.paramMode then
-    self:setSubCursorController(nil)
+    self:setSubCursorController(self.paramModeDefaultSub)
   end
 end
 

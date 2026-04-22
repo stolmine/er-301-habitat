@@ -74,6 +74,10 @@ function HelicaseShapingControl:init(args)
   self.discReadout = makeReadout(args.discIndexParam, discMap, 2, col2)
   self.typeReadout = makeReadout(args.discTypeParam, typeMap, 1, col3)
 
+  -- Sub1 (indexReadout) is bound to the same Bias parameter as self.bias;
+  -- highlight it on paramMode entry so the user sees what the encoder edits.
+  self.paramModeDefaultSub = self.indexReadout
+
   self.paramSubGraphic:addChild(self.indexReadout)
   self.paramSubGraphic:addChild(self.discReadout)
   self.paramSubGraphic:addChild(self.typeReadout)
@@ -102,7 +106,7 @@ function HelicaseShapingControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
   if self.paramMode then
-    self:setSubCursorController(nil)
+    self:setSubCursorController(self.paramModeDefaultSub)
   end
 end
 

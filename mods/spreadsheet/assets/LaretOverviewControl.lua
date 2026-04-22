@@ -70,6 +70,10 @@ function LaretOverviewControl:init(args)
     return g
   end)()
 
+  -- Sub1 (skewReadout) is bound to the same Bias parameter as self.bias;
+  -- highlight it on paramMode entry so the user sees what the encoder edits.
+  self.paramModeDefaultSub = self.skewReadout
+
   self.stepCountReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
     g:setParameter(args.stepCountParam)
@@ -126,7 +130,7 @@ function LaretOverviewControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
   if self.paramMode then
-    self:setSubCursorController(nil)
+    self:setSubCursorController(self.paramModeDefaultSub)
   end
 end
 

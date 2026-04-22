@@ -114,6 +114,13 @@ function MixInputControl:init(args)
   self.weightReadout = makeReadout(args.weightParam, weightMap, 2, col2)
   self.offsetReadout = makeReadout(args.offsetParam, offsetMap, 2, col3)
 
+  -- Sub1 (levelReadout) typically binds to the same Bias parameter as
+  -- self.bias (fallback path above); highlight it on paramMode entry so
+  -- the user sees what the encoder edits. If an explicit levelParam was
+  -- passed that differs from gainbias:Bias, the caller should null this
+  -- out after construction -- none of the current callers do.
+  self.paramModeDefaultSub = self.levelReadout
+
   self.paramSubGraphic:addChild(self.levelReadout)
   self.paramSubGraphic:addChild(self.weightReadout)
   self.paramSubGraphic:addChild(self.offsetReadout)
@@ -212,7 +219,7 @@ function MixInputControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
   if self.paramMode then
-    self:setSubCursorController(nil)
+    self:setSubCursorController(self.paramModeDefaultSub)
   end
 end
 

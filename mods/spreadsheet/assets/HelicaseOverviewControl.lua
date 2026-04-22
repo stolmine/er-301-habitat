@@ -59,6 +59,10 @@ function HelicaseOverviewControl:init(args)
   end)()
   self.paramSubGraphic:addChild(self.mixReadout)
 
+  -- Sub1 (mixReadout) is bound to the same Bias parameter as self.bias;
+  -- highlight it on paramMode entry so the user sees what the encoder edits.
+  self.paramModeDefaultSub = self.mixReadout
+
   -- Lin/Expo label
   self.helicase = args.helicase
   local linOption = args.helicase:getOption("LinExpo")
@@ -120,7 +124,7 @@ function HelicaseOverviewControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
   if self.paramMode then
-    self:setSubCursorController(nil)
+    self:setSubCursorController(self.paramModeDefaultSub)
   end
 end
 
