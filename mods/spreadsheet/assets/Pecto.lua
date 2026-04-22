@@ -1,13 +1,13 @@
 local app = app
-local libstolmine = require "biome.libbiome"
+local libstolmine = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Pitch = require "Unit.ViewControl.Pitch"
 local MixControl = require "spreadsheet.MixControl"
 local TransformGateControl = require "spreadsheet.TransformGateControl"
-local DensityControl = require "biome.DensityControl"
-local ModeSelector = require "biome.ModeSelector"
+local DensityControl = require "spreadsheet.DensityControl"
+local ModeSelector = require "spreadsheet.ModeSelector"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max)

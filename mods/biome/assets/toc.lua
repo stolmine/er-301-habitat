@@ -22,7 +22,6 @@ return {
     { title = "Fade Mixer",       moduleName = "FadeMixer",             category = "Biome", keywords = "mixer, crossfade, fade, utility" },
     { title = "Varishape Voice", moduleName = "VarishapeVoice",       category = "Biome", keywords = "oscillator, voice, synth, varishape, generator" },
     { title = "Varishape Osc",  moduleName = "VarishapeOsc",        category = "Biome", keywords = "oscillator, varishape, polyblep, generator" },
-    { title = "Pecto",          moduleName = "Pecto",                category = "Biome", keywords = "comb, resonator, filter, delay, karplus, pecto" },
     { title = "Transport",     moduleName = "Transport",            category = "Biome", keywords = "clock, transport, gate, trigger, utility" },
     { title = "Constant Random", moduleName = "ConstantRandom",  category = "Biome", keywords = "random, noise, cv, utility, modulation, sample and hold, lfo" }
   }

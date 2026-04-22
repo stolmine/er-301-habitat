@@ -35,6 +35,7 @@
 #include "BlandaInputGraphic.h"
 #include "Colmatage.h"
 #include "ColmatageOverviewGraphic.h"
+#include "Pecto.h"
 #define SWIGLUA
 %}
 
@@ -70,3 +71,4 @@
 %include "BlandaInputGraphic.h"
 %include "Colmatage.h"
 %include "ColmatageOverviewGraphic.h"
+%include "Pecto.h"

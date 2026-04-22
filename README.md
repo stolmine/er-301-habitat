@@ -93,7 +93,6 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Fade Mixer | 4-input crossfader with BranchMeter controls |
 | | Varishape Voice | Simple synth voice -- POLYBLEP oscillator (tri/saw/square), gate-triggered decay envelope |
 | | Varishape Osc | Raw POLYBLEP oscillator -- continuously variable sine/tri/saw/square/pulse, V/Oct, sync |
-| | Pecto | Comb resonator -- 16 tap patterns, 4 resonator types (raw/guitar/clarinet/sitar), V/Oct, xform gate randomization |
 | | Transport | Gated clock generator -- BPM control, 4 ppqn (16th note) output, toggle run/stop with phase reset |
 | **spreadsheet** | Excel | 64-step CV tracker sequencer with math transforms |
 | | Ballot | 64-step gate sequencer with chaselight display and algorithmic transforms |
@@ -106,6 +105,7 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Helicase | 2-op FM oscillator -- OPL3 carrier + modulator with 16 fold shapes, JF-style phase-receptivity sync, lin/expo FM, lo-fi/hi-fi toggle, k-means phase-space viz |
 | | Larets | Stepped multi-effect -- 10 effects (stutter/reverse/bitcrush/downsample/filter/pitch shift/distortion/shuffle/delay/comb) with clock-locked buffer tricks, CPR single-band compressor, bipolar global param offset, 16-step sequencer with xform gate |
 | | Colmatage | Clock-driven breakbeat cutter -- WarpCut-derived algorithm with parameterized block size, repeat count, accel/ritard geometric series, bipolar duty cycle (reverse on negative), tanh saturation. Based on Nick Collins' BBCut library via Livecut |
+| | Pecto | Comb resonator -- 16 tap patterns, 4 resonator types (raw/guitar/clarinet/sitar), V/Oct, xform gate randomization |
 | **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization -- stereo-aware passthrough with waveform display |
 | | Spectrogram | Inline FFT spectrum analyzer -- 256-point pffft, stereo passthrough, peak hold + RMS gradient |
 | **catchall** | Sfera | Z-plane morphing filter -- 32 configs, audio-reactive ferrofluid visualization (experimental) |
