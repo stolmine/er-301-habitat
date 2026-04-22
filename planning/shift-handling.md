@@ -368,31 +368,22 @@ HelicaseSyncControl, LaretClockControl): leave as-is. They have no second
 submenu and no shift toggle is needed. Document them as the canonical
 "single static submenu" pattern.
 
-## Recommended execution order
+## Open questions (resolved)
 
-1. Land decisions 1, 2, 3, 4 together as a single refactor PR. Affects
-   Pattern A controls (only #4 touches the inverted-flag three) and
-   Pattern C controls (TransformGateControl, RatchetControl).
-2. Decision 5 as a follow-up touching every Pattern A subReleased.
-3. Decision 6 deferred. Move Pecto package only after the spec has settled
-   on hardware. Defer (c) until use cases for additional surfacing emerge.
-
-## Open questions
-
-- Does the framework guarantee `addSubGraphic` is called after every
-  `removeSubGraphic`? The current `onCursorLeave` reset path in some
-  controls calls remove without re-add (the next onCursorEnter or the next
-  setParamMode does it). Verify before relying on this.
-- For Pattern C → A migration: what does the main graphic look like for
-  TransformGateControl and RatchetControl in normal mode? Today their main
-  graphic is a ComparatorView; "normal submenu" is the gate/clock view.
-  Without a host bias param these controls cannot adopt GainBias as a
-  parent. The spec above accepts this and keeps them on EncoderControl
-  with Pattern A's shift mechanics.
-- Should `paramFocusedReadout` be unified with `focusedReadout`? Today
-  Pattern A controls maintain two parallel fields. Merging them risks
-  reintroducing the nil-deref class of bug because GainBias hooks deref
-  `self.focusedReadout` unconditionally. Safer to keep them separate.
+- **Framework subGraphic lifecycle:** verified. `ViewControl.onCursorEnter`
+  at `er-301-stolmine/xroot/Unit/ViewControl/init.lua:130-135` auto-calls
+  `addSubGraphic(self.subGraphic)`; `onCursorLeave` at `:141-147` auto-calls
+  `removeSubGraphic(self.subGraphic)`. This is precisely what makes the
+  persistence fix simple: stop fighting the base class, leave
+  `self.subGraphic` pointing at the correct mode's graphic across
+  leave/return, and let the base class handle attach/detach.
+- **Pattern C → A migration:** Pattern C controls (TransformGate, Ratchet)
+  keep their EncoderControl parent. Their normal side is a ComparatorView
+  (gate visualization), not a fader. Canonical Pattern A mechanics
+  (shiftHeld/shiftUsed/snapshot + subGraphic swap) adopted.
+- **paramFocusedReadout unification:** not pursued. Keep
+  `paramFocusedReadout` separate from `focusedReadout` per the heap-
+  corruption class-of-bug captured in `feedback_gainbias_dual_mode_focus.md`.
 
 ## Decisions locked (2026-04-21)
 
@@ -562,16 +553,187 @@ and every conditional (Decision 4). Behavior unchanged.
 ## Verification checklist per control
 
 After each refactor, manually verify:
-- [ ] Fresh insert: lands on normal GainBias sub-display (Case 1) or normal
-      gate view (Pattern C).
+- [ ] Fresh insert: sub-display shows the correct side per the
+      grandfather list (fader for 14 Pattern A non-inverted + FocusShape +
+      ScanSkew + MixInput + TransformGate; custom for 4 Larets/Helicase
+      overviews + CompBand + Ratchet).
 - [ ] Tap shift with nothing focused -> toggles on release.
 - [ ] Tap shift with readout focused and no encoder activity -> toggles on
       release.
 - [ ] Hold shift, nudge encoder, release -> does NOT toggle (Decision 1 B).
-- [ ] Hold shift, tap spot -> no toggle (Decision 2).
-- [ ] In paramMode, shift+sub opens keyboard (Decision 5 B).
+- [ ] Hold shift, encoder +3 then -3, release -> does NOT toggle (this is
+      the Pattern C footgun; verify Pattern C controls no longer exhibit
+      it).
+- [ ] Hold shift, tap spot (Pattern C only) -> no toggle (Decision 2).
+- [ ] In paramMode, shift+sub opens keyboard (Decision 5 B; verify after
+      PR 2).
 - [ ] In paramMode, navigate cursor away and back -> mode preserved,
       no readout focused (Decision 7).
 - [ ] Quicksave + reload: paramMode NOT persisted (Decision 7); unit
-      restores in normal mode.
+      restores in init-default mode.
 - [ ] Cancel/zero/delete: preserve existing semantics; no regressions.
+
+## Grandfathered defaults (user-confirmed, 2026-04-21)
+
+The "default to stock GainBias on first entry" principle applies only to
+controls that already do so. Current init values are preserved for
+these controls (they already default to their custom sub-display and
+there is a good UX reason -- each one's custom view is the unit's
+headline UI or the primary parameter surface):
+
+| Control | Init | Rationale |
+|---|---|---|
+| LaretOverviewControl | `paramMode = true` | step overview is the Larets viz |
+| HelicaseOverviewControl | `paramMode = true` | phase-space + transfer curve is the Helicase viz |
+| HelicaseModControl | `paramMode = true` | modulator params are the primary edit surface |
+| HelicaseShapingControl | `paramMode = true` | disc-shape params are the primary edit surface |
+| CompBandControl | `paramMode = true` (renamed from `compMode`) | comp threshold/ratio/speed is the unit's value; users come to edit these |
+| RatchetControl | `paramMode = true` (renamed from `ratchetMode`) | ratchet params are the unit's identity; the gate is a secondary view |
+
+The rule "Decision 7 default to GainBias" therefore applies to the 14
+Pattern A non-inverted controls plus the three inverted-flag renames
+(FocusShape, ScanSkew, MixInput -- all already effectively default to
+stock) plus TransformGateControl (already defaults to gate-side stock).
+Net: no init value flips in this refactor. Decision 7's contribution is
+pure persistence.
+
+## Execution plan (detailed)
+
+### Affected files (21 total)
+
+**Pattern A non-inverted (14 files)** -- persistence fix only (PR 1) plus
+shift+sub keyboard branch (PR 2). No rename.
+
+- `mods/spreadsheet/assets/DriveControl.lua`
+- `mods/spreadsheet/assets/FeedbackControl.lua`
+- `mods/spreadsheet/assets/MixControl.lua`
+- `mods/spreadsheet/assets/RauschenCutoffControl.lua`
+- `mods/spreadsheet/assets/TimeControl.lua`
+- `mods/spreadsheet/assets/ParfaitMixControl.lua`
+- `mods/spreadsheet/assets/CompMixControl.lua`
+- `mods/spreadsheet/assets/LaretsMixControl.lua`
+- `mods/biome/assets/DensityControl.lua`
+
+Plus the four inverted-init controls already using `paramMode` (default
+`true`, grandfathered):
+
+- `mods/spreadsheet/assets/LaretOverviewControl.lua`
+- `mods/spreadsheet/assets/HelicaseModControl.lua`
+- `mods/spreadsheet/assets/HelicaseOverviewControl.lua`
+- `mods/spreadsheet/assets/HelicaseShapingControl.lua`
+
+Plus the 3-mode cycle variant:
+
+- `mods/spreadsheet/assets/BandControl.lua` -- keep `paramMode = 0`
+  cycle; add persistence; adopt `shiftUsed`.
+
+**Pattern A flag rename (4 files)** -- field rename + persistence + Decision 5.
+
+- `mods/spreadsheet/assets/FocusShapeControl.lua` -- `focusMode` -> `paramMode` (polarity flip to `paramMode=true=custom`; init flips `true -> false`).
+- `mods/spreadsheet/assets/ScanSkewControl.lua` -- `scanMode` -> `paramMode` (same).
+- `mods/spreadsheet/assets/MixInputControl.lua` -- `mixMode` -> `paramMode` (same).
+- `mods/spreadsheet/assets/CompBandControl.lua` -- `compMode` -> `paramMode` (polarity preserved: `paramMode=true=comp-params-custom`; init stays `true` per grandfather rule).
+
+**Pattern C migration (2 files)** -- rename + show/hide -> swap + shift-mechanics overhaul + drop shift+spot + persistence.
+
+- `mods/spreadsheet/assets/TransformGateControl.lua` -- `mathMode` -> `paramMode` (init `false`, gate view stock).
+- `mods/spreadsheet/assets/RatchetControl.lua` -- `ratchetMode` -> `paramMode` (init `true`, ratchet params default per grandfather).
+
+**Pattern B (5 files, no change, documented as canonical static-submenu pattern)**
+
+- `mods/spreadsheet/assets/BandListControl.lua`
+- `mods/spreadsheet/assets/ChaselightControl.lua`
+- `mods/spreadsheet/assets/DelayInfoControl.lua`
+- `mods/spreadsheet/assets/HelicaseSyncControl.lua`
+- `mods/spreadsheet/assets/LaretClockControl.lua`
+
+### Shared helper for Decision 5 (numeric keyboard open)
+
+Rather than duplicate the Keyboard.Decimal instantiation across 18
+Pattern A controls, extract a helper. Based on `GainBias:doGainSet` at
+`er-301-stolmine/xroot/Unit/ViewControl/GainBias.lua:705-721`:
+
+```lua
+local Decimal = require "Keyboard.Decimal"
+
+local function openKeyboardFor(readout, desc)
+  local kb = Decimal {
+    message = string.format("Set '%s'.", desc or readout.name or "value"),
+    commitMessage = string.format("%s updated.", desc or readout.name or "value"),
+    initialValue = readout:getValueInUnits()
+  }
+  local task = function(value)
+    if value then
+      readout:save()
+      readout:setValueInUnits(value)
+    end
+  end
+  kb:subscribe("done", task)
+  kb:subscribe("commit", task)
+  kb:show()
+end
+```
+
+Lives at `mods/spreadsheet/assets/shared/ShiftHelpers.lua` (new file),
+required by each Pattern A control. Each control provides a small
+`_paramReadoutForButton(i)` dispatcher that returns the Readout for
+sub1/sub2/sub3 in paramMode.
+
+### PR sequencing
+
+**PR 1 -- persistence + renames + Pattern C migration** (decisions 1, 2, 3, 4, 7).
+All 21 affected controls touched. Do not split further -- mid-migration
+state would mean Pattern C and Pattern A behaving differently, which is
+the status quo we are eliminating.
+
+Within the PR, work in this order (smallest blast radius first):
+
+1. Land the shared `openKeyboardFor` helper (`mods/spreadsheet/assets/shared/ShiftHelpers.lua`). No behavior change; preps the surface for PR 2.
+2. Apply the persistence fix to the 14 Pattern A non-inverted controls. Only `onCursorLeave` changes.
+3. Apply persistence to the 4 inverted-init (Larets/Helicase) controls.
+4. Rename `CompBandControl.compMode` -> `paramMode` (polarity preserved, init `true`).
+5. Rename + polarity-flip + persistence on the three inverted-flag controls (FocusShape, ScanSkew, MixInput).
+6. Refactor BandControl: keep 3-mode cycle, add persistence, adopt `shiftUsed`.
+7. Migrate TransformGateControl: build dual subGraphics, replace show/hide with swap, adopt Pattern A shift mechanics, drop shift+spot, apply persistence.
+8. Migrate RatchetControl: same as TransformGate; preserve `paramMode=true` init.
+
+Test at every step. Smoke test per control per the checklist above.
+
+**PR 2 -- Decision 5 rollout.** Add `shift+sub -> keyboard` branch to
+`subReleased` across the 18 Pattern A controls (not Pattern C --
+TransformGate/Ratchet have discrete-valued sub-buttons like xform-func
+and ratchet-len toggles where numeric entry is meaningless). One-method
+edit per file using the shared helper.
+
+### Critical gotchas
+
+1. **Never assign `self.focusedReadout` directly.** Use `self:setFocusedReadout(self.bias)`. Direct assignment is the class-of-bug in `feedback_gainbias_dual_mode_focus.md` that caused heap corruption on delete.
+2. **`paramFocusedReadout` can be nulled safely** (not a GainBias base-class field).
+3. **`setParamMode` must guard `addSubGraphic` / `removeSubGraphic` on visibility.** Only call attach/detach when `self:getWindow()` is non-nil; otherwise just update state and let the next `onCursorEnter` re-attach.
+4. **Shift release is dispatched to the last `grabFocus("shiftReleased")` caller.** If cursor moves mid-shift-hold, the release still goes to the original grabber. `releaseFocus` in `onCursorLeave` correctly clears that grab; do not skip it.
+5. **BandControl's 3-mode cycle** needs a tiny wrapper: `setParamMode((paramMode + 1) % 3)` rather than boolean toggle. Verify that persistence-across-leave preserves the intermediate mode (user may end up on mode 2 after a cycle-away).
+6. **Serialization is NOT affected.** `paramMode` is session-only per Decision 7. Existing ParameterAdapter Bias round-trips untouched.
+
+### Risks
+
+- **Heap corruption regression** if any `self.focusedReadout = ...` direct assignment sneaks in. Mitigation: grep the diff for `self.focusedReadout =` before merge; every hit should use the method.
+- **Pattern C subGraphic swap** is new territory. Building two separate subGraphic instances for TransformGate and Ratchet at init is non-trivial. Budget the most time here. Toggle mode repeatedly during focus and verify no ghost children.
+- **BandControl cycle + persistence** may surprise users (come back in mode 2 after leaving in mode 2). If that's not desired, special-case BandControl to reset to mode 0 on leave.
+- **Pecto uses MixControl / TransformGateControl / DensityControl directly.** PR 1 touches all three. Pecto is NOT on the migration list (Decision 6 deferred), but must keep working. Verify Pecto on emulator after PR 1.
+
+### Verification scope
+
+- Per-control smoke test (this doc's checklist) after every file edit.
+- Package-level regression on emulator after PR 1 and after PR 2, using `docs/test-procedures.md`.
+- Hardware sign-off (am335x build + install) on one representative unit per affected package (Helicase for spreadsheet, Pecto for biome) before closing the task.
+
+### Reference files (SDK)
+
+- `er-301-stolmine/xroot/Unit/ViewControl/init.lua:130-147` -- ViewControl auto-attach/detach of subGraphic.
+- `er-301-stolmine/xroot/Unit/ViewControl/GainBias.lua:635-646` -- `setFocusedReadout` (only safe way to assign).
+- `er-301-stolmine/xroot/Unit/ViewControl/GainBias.lua:705-743` -- `doGainSet` / `doBiasSet` template for Decision 5.
+- `er-301-stolmine/xroot/Unit/ViewControl/GainBias.lua:745-784` -- `subReleased` shift+sub reference.
+- `er-301-stolmine/xroot/Keyboard/Decimal.lua` -- keyboard constructor + signals.
+- `er-301-stolmine/xroot/Base/Widget.lua:56-66` -- `setSubCursorController`.
+- `er-301-stolmine/xroot/Base/Widget.lua:87-140` -- `addSubGraphic` / `removeSubGraphic` / `grabFocus` / `releaseFocus`.
+- `er-301-stolmine/xroot/Encoder.lua` -- `Encoder.Fine` constant.
