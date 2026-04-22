@@ -394,8 +394,9 @@ submenu and no shift toggle is needed. Document them as the canonical
 | 3 | show/hide vs subGraphic swap | **Swap** -- Pattern C unified with Pattern A mechanics |
 | 4 | Inverted mode-flag polarity | **Normalize to `paramMode`** -- rename FocusShapeControl / ScanSkewControl / MixInputControl |
 | 5 | shift+sub in paramMode | **Option B -- opens keyboard for that readout** (uniform with stock GainBias) |
-| 6 | Pecto migration | **Deferred** -- leave Pecto in biome with current pattern mix; revisit after the spec has settled on hardware |
+| 6 | Pecto migration | **Deferred** -- leave Pecto in biome with current pattern mix; revisit after the spec has settled on hardware. (Superseded 2026-04-21: Pecto moved to spreadsheet to collapse the cross-package ShiftHelpers require.) |
 | 7 | Sub-display default + persistence | **Default to GainBias sub-display on first entry. Preserve `paramMode` across cursor leave/return within a session. Do NOT serialize `paramMode` across quicksave. Reset `paramFocusedReadout = nil` on leave (vanilla convention: user must deliberately focus to edit). Pattern C mirrors: default to normal comparator view, persist mode across leaves, reset focused readout.** |
+| 8 | Suppress inherited sub3 highlight in paramMode | **On `onCursorEnter`, if `self.paramMode` is active, call `self:setSubCursorController(nil)`.** GainBias.init points the stock sub-cursor-controller at `self.bias` (sub3 position in stock sub-display); that reference persists and renders a spurious highlight at the sub3 position of whatever subGraphic is currently attached when paramMode swaps in `paramSubGraphic`. Clearing the controller on entry in paramMode lets the user's "deliberate focus to edit" convention (Decision 7) actually show up visually. Encoder routing is independent of the controller (governed by `focusedReadout`, `GainBias.lua:786-793`) so this is a pure visual fix. Applied to all 21 Pattern A controls; Pattern C untouched (EncoderControl doesn't init `subCursorController` to any readout). BandControl's 3-mode variant uses `paramMode ~= 0` as the guard. |
 
 ## Canonical Pattern A (amended for decisions 1-5 and 7)
 

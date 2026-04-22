@@ -160,6 +160,9 @@ end
 function BandControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
+  if self.paramMode ~= 0 then
+    self:setSubCursorController(nil)
+  end
 end
 
 function BandControl:onCursorLeave(spot)
