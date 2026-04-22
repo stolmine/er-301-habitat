@@ -1021,6 +1021,7 @@ Evaluate these once the framework is live. Each one has semantic output coupling
 
 - [ ] ProCo Rat emulation -- distortion circuit modeling
 - [ ] Polyphonic sample playback -- manual grains based
+- [ ] Open303 implementation -- open-source TB-303 model (Robin Schmidt / rs-met, GPLv3 clean-room reimplementation path). Ladder filter w/ characteristic resonance sweep, accent + slide behaviour, envelope modulator, square/saw osc. Good candidate for a single-voice synth unit alongside the Analog Macro Drum Voice in the spreadsheet package. Verify license and implementation route (direct port likely unavailable; algorithm reference is the clean path).
 
 ## Video
 
