@@ -91,7 +91,9 @@ function TransformGateControl:init(args)
   self.seq = seq
   self.branch = branch
   self.comparator = comparator
-  self.mathMode = false
+  self.paramMode = false
+  self.shiftHeld = false
+  self.shiftUsed = false
   self.funcNames = args.funcNames or defaultFuncNames
   local funcMap = args.funcMap or defaultFuncMap
 
@@ -103,60 +105,53 @@ function TransformGateControl:init(args)
   self:setControlGraphic(graphic)
   self:addSpotDescriptor { center = 0.5 * ply }
 
-  -- Single sub-graphic with both modes
-  self.subGraphic = app.Graphic(0, 0, 128, 64)
+  -- Two separate sub-graphics; swap via setParamMode (Decision 3).
+  self.normalSubGraphic = app.Graphic(0, 0, 128, 64)
+  self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  ---- GATE MODE ELEMENTS ----
+  ---- GATE (normal) MODE ELEMENTS ----
 
-  -- Flow diagram
   self.gateDrawing = app.Drawing(0, 0, 128, 64)
   self.gateDrawing:add(gateInstructions)
-  self.subGraphic:addChild(self.gateDrawing)
+  self.normalSubGraphic:addChild(self.gateDrawing)
 
-  -- "or" label
   self.gateOrLabel = app.Label("or", 10)
   self.gateOrLabel:fitToText(0)
   self.gateOrLabel:setCenter(col3, center3 + 1)
-  self.subGraphic:addChild(self.gateOrLabel)
+  self.normalSubGraphic:addChild(self.gateOrLabel)
 
-  -- Scope watching branch input
   self.gateScope = app.MiniScope(col1 - 20, line4, 40, 45)
   self.gateScope:setBorder(1)
   self.gateScope:setCornerRadius(3, 3, 3, 3)
-  self.subGraphic:addChild(self.gateScope)
+  self.normalSubGraphic:addChild(self.gateScope)
 
-  -- Threshold readout
   local threshParam = comparator:getParameter("Threshold")
   threshParam:enableSerialization()
   self.threshReadout = app.Readout(0, 0, ply, 10)
   self.threshReadout:setParameter(threshParam)
   self.threshReadout:setAttributes(app.unitNone, Encoder.getMap("default"))
   self.threshReadout:setCenter(col2, center4)
-  self.subGraphic:addChild(self.threshReadout)
+  self.normalSubGraphic:addChild(self.threshReadout)
 
-  -- Description label
   self.gateDesc = app.Label(description, 10)
   self.gateDesc:fitToText(3)
   self.gateDesc:setSize(ply * 2, self.gateDesc.mHeight)
   self.gateDesc:setBorder(1)
   self.gateDesc:setCornerRadius(3, 0, 0, 3)
   self.gateDesc:setCenter(0.5 * (col2 + col3), center1 + 1)
-  self.subGraphic:addChild(self.gateDesc)
+  self.normalSubGraphic:addChild(self.gateDesc)
 
-  -- Gate sub-buttons
   self.gateSub1 = app.SubButton("input", 1)
   self.gateSub2 = app.SubButton("thresh", 2)
   self.gateSub3 = app.SubButton("fire", 3)
-  self.subGraphic:addChild(self.gateSub1)
-  self.subGraphic:addChild(self.gateSub2)
-  self.subGraphic:addChild(self.gateSub3)
+  self.normalSubGraphic:addChild(self.gateSub1)
+  self.normalSubGraphic:addChild(self.gateSub2)
+  self.normalSubGraphic:addChild(self.gateSub3)
 
-  ---- MATH MODE ELEMENTS ----
+  ---- MATH (param) MODE ELEMENTS ----
 
-  -- Fire flow graphic
   self.mathDrawing = app.Drawing(0, 0, 128, 64)
   self.mathDrawing:add(mathInstructions)
-  self.subGraphic:addChild(self.mathDrawing)
 
   self.funcReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
@@ -178,11 +173,9 @@ function TransformGateControl:init(args)
     return g
   end)()
 
-  -- Func label (shows name instead of number)
   self.funcLabel = app.Label(self.funcNames[0] or "add", 10)
   self.funcLabel:fitToText(0)
   self.funcLabel:setCenter(col1, center3 + 1)
-  self.subGraphic:addChild(self.funcLabel)
 
   self.mathDesc = app.Label("Transform", 10)
   self.mathDesc:fitToText(3)
@@ -191,7 +184,6 @@ function TransformGateControl:init(args)
   self.mathDesc:setCornerRadius(3, 0, 0, 3)
   self.mathDesc:setCenter(0.5 * (col2 + col3), center1 + 1)
 
-  -- Optional paramB readout (replaces fire button on sub3)
   self.hasParamB = args.paramBParam ~= nil
   if self.hasParamB then
     self.paramBReadout = (function()
@@ -208,18 +200,23 @@ function TransformGateControl:init(args)
   self.mathSub2 = app.SubButton(args.paramALabel or "factor", 2)
   self.mathSub3 = app.SubButton(self.hasParamB and (args.paramBLabel or "prm B") or "fire!", 3)
 
-  self.subGraphic:addChild(self.funcReadout)
-  self.subGraphic:addChild(self.factorReadout)
-  if self.hasParamB then
-    self.subGraphic:addChild(self.paramBReadout)
+  if not self.hasParamB then
+    self.paramSubGraphic:addChild(self.mathDrawing)
   end
-  self.subGraphic:addChild(self.mathDesc)
-  self.subGraphic:addChild(self.mathSub1)
-  self.subGraphic:addChild(self.mathSub2)
-  self.subGraphic:addChild(self.mathSub3)
+  self.paramSubGraphic:addChild(self.funcReadout)
+  self.paramSubGraphic:addChild(self.factorReadout)
+  if self.hasParamB then
+    self.paramSubGraphic:addChild(self.paramBReadout)
+  end
+  self.paramSubGraphic:addChild(self.funcLabel)
+  self.paramSubGraphic:addChild(self.mathDesc)
+  self.paramSubGraphic:addChild(self.mathSub1)
+  self.paramSubGraphic:addChild(self.mathSub2)
+  self.paramSubGraphic:addChild(self.mathSub3)
 
-  -- Start in gate mode
-  self:setMathMode(false)
+  -- Start in normal (gate) mode. Decision 7: default preserved.
+  -- EncoderControl.init built a default subGraphic; replace with normalSubGraphic.
+  self.subGraphic = self.normalSubGraphic
 
   -- Subscribe to branch changes for scope updates
   branch:subscribe("contentChanged", self)
@@ -238,55 +235,17 @@ function TransformGateControl:contentChanged(chain)
   end
 end
 
-function TransformGateControl:setMathMode(enabled)
-  self.mathMode = enabled
-
-  -- Gate elements
-  if enabled then
-    self.gateDrawing:hide()
-    self.gateOrLabel:hide()
-    self.gateScope:hide()
-    self.threshReadout:hide()
-    self.gateDesc:hide()
-    self.gateSub1:hide()
-    self.gateSub2:hide()
-    self.gateSub3:hide()
-  else
-    self.gateDrawing:show()
-    self.gateOrLabel:show()
-    self.gateScope:show()
-    self.threshReadout:show()
-    self.gateDesc:show()
-    self.gateSub1:show()
-    self.gateSub2:show()
-    self.gateSub3:show()
-  end
-
-  -- Math elements
-  if enabled then
-    if not self.hasParamB then self.mathDrawing:show() end
-    self.funcReadout:show()
-    self.factorReadout:show()
-    if self.hasParamB and self.paramBReadout then self.paramBReadout:show() end
-    self.funcLabel:show()
-    self.mathDesc:show()
-    self.mathSub1:show()
-    self.mathSub2:show()
-    self.mathSub3:show()
-  else
-    self.mathDrawing:hide()
-    self.funcReadout:hide()
-    self.factorReadout:hide()
-    if self.hasParamB and self.paramBReadout then self.paramBReadout:hide() end
-    self.funcLabel:hide()
-    self.mathDesc:hide()
-    self.mathSub1:hide()
-    self.mathSub2:hide()
-    self.mathSub3:hide()
-  end
-
+function TransformGateControl:setParamMode(enabled)
+  self:removeSubGraphic(self.subGraphic)
+  self.paramMode = enabled
   self.focusedReadout = nil
   self:setSubCursorController(nil)
+  if enabled then
+    self.subGraphic = self.paramSubGraphic
+  else
+    self.subGraphic = self.normalSubGraphic
+  end
+  self:addSubGraphic(self.subGraphic)
 end
 
 function TransformGateControl:setFocusedReadout(readout)
@@ -311,42 +270,44 @@ function TransformGateControl:onCursorEnter(spot)
 end
 
 function TransformGateControl:onCursorLeave(spot)
+  -- Decision 7: paramMode persists across leave/return. Clear only the
+  -- per-session focus so the user has to deliberately re-focus to edit.
+  self.focusedReadout = nil
+  self:setSubCursorController(nil)
   self:releaseFocus("shiftPressed", "shiftReleased")
   Base.onCursorLeave(self, spot)
 end
 
 function TransformGateControl:shiftPressed()
+  self.shiftHeld = true
+  self.shiftUsed = false
   if self.focusedReadout then
-    self.shiftDeferred = true
     self.shiftSnapshot = self.focusedReadout:getValueInUnits()
-    return true
-  end
-  self.shiftDeferred = false
-  self:setMathMode(not self.mathMode)
-  return true
-end
-
-function TransformGateControl:shiftReleased()
-  if self.shiftDeferred then
-    self.shiftDeferred = false
-    if self.focusedReadout and self.shiftSnapshot then
-      local cur = self.focusedReadout:getValueInUnits()
-      if cur == self.shiftSnapshot then
-        self:setMathMode(not self.mathMode)
-      end
-    else
-      self:setMathMode(not self.mathMode)
-    end
+  else
     self.shiftSnapshot = nil
   end
   return true
 end
 
-function TransformGateControl:spotReleased(spot, shifted)
-  if shifted then
-    self:setMathMode(not self.mathMode)
-    return true
+function TransformGateControl:shiftReleased()
+  if self.shiftHeld and not self.shiftUsed then
+    if self.focusedReadout and self.shiftSnapshot then
+      local cur = self.focusedReadout:getValueInUnits()
+      if cur ~= self.shiftSnapshot then
+        self.shiftHeld = false
+        self.shiftSnapshot = nil
+        return true
+      end
+    end
+    self:setParamMode(not self.paramMode)
   end
+  self.shiftHeld = false
+  self.shiftSnapshot = nil
+  return true
+end
+
+function TransformGateControl:spotReleased(spot, shifted)
+  -- Decision 2: no secondary toggle path on shift+spot. Just delegate.
   if Base.spotReleased(self, spot, shifted) then
     self:setFocusedReadout(nil)
     return true
@@ -356,7 +317,7 @@ end
 
 function TransformGateControl:subPressed(i, shifted)
   if shifted then return false end
-  if self.mathMode then
+  if self.paramMode then
     if i == 3 and not self.hasParamB then
       self.seq:fireTransform()
     end
@@ -371,7 +332,7 @@ end
 function TransformGateControl:subReleased(i, shifted)
   if shifted then return false end
 
-  if self.mathMode then
+  if self.paramMode then
     if i == 1 then
       if self:hasFocus("encoder") then
         self:setFocusedReadout(self.funcReadout)
@@ -418,6 +379,9 @@ function TransformGateControl:subReleased(i, shifted)
 end
 
 function TransformGateControl:encoder(change, shifted)
+  if shifted and self.shiftHeld then
+    self.shiftUsed = true
+  end
   if self.focusedReadout then
     self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
     if self.focusedReadout == self.funcReadout then

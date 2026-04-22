@@ -60,7 +60,10 @@ function RatchetControl:init(args)
   self.seq = seq
   self.branch = branch
   self.comparator = comparator
-  self.ratchetMode = true -- default to ratchet params
+  -- Decision 7 grandfather: default to ratchet params visible (paramMode=true=custom).
+  self.paramMode = true
+  self.shiftHeld = false
+  self.shiftUsed = false
 
   -- Main graphic
   local graphic = app.ComparatorView(0, 0, ply, 64, comparator)
@@ -70,22 +73,24 @@ function RatchetControl:init(args)
   self:setControlGraphic(graphic)
   self:addSpotDescriptor { center = 0.5 * ply }
 
-  self.subGraphic = app.Graphic(0, 0, 128, 64)
+  -- Two separate sub-graphics; swap via setParamMode (Decision 3).
+  self.normalSubGraphic = app.Graphic(0, 0, 128, 64)
+  self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  ---- GATE MODE ELEMENTS ----
+  ---- GATE (normal) MODE ELEMENTS ----
   self.gateDrawing = app.Drawing(0, 0, 128, 64)
   self.gateDrawing:add(gateInstructions)
-  self.subGraphic:addChild(self.gateDrawing)
+  self.normalSubGraphic:addChild(self.gateDrawing)
 
   self.gateOrLabel = app.Label("or", 10)
   self.gateOrLabel:fitToText(0)
   self.gateOrLabel:setCenter(col3, center3 + 1)
-  self.subGraphic:addChild(self.gateOrLabel)
+  self.normalSubGraphic:addChild(self.gateOrLabel)
 
   self.gateScope = app.MiniScope(col1 - 20, line4, 40, 45)
   self.gateScope:setBorder(1)
   self.gateScope:setCornerRadius(3, 3, 3, 3)
-  self.subGraphic:addChild(self.gateScope)
+  self.normalSubGraphic:addChild(self.gateScope)
 
   local threshParam = comparator:getParameter("Threshold")
   threshParam:enableSerialization()
@@ -93,7 +98,7 @@ function RatchetControl:init(args)
   self.threshReadout:setParameter(threshParam)
   self.threshReadout:setAttributes(app.unitNone, Encoder.getMap("default"))
   self.threshReadout:setCenter(col2, center4)
-  self.subGraphic:addChild(self.threshReadout)
+  self.normalSubGraphic:addChild(self.threshReadout)
 
   self.gateDesc = app.Label(description, 10)
   self.gateDesc:fitToText(3)
@@ -101,16 +106,16 @@ function RatchetControl:init(args)
   self.gateDesc:setBorder(1)
   self.gateDesc:setCornerRadius(3, 0, 0, 3)
   self.gateDesc:setCenter(0.5 * (col2 + col3), center1 + 1)
-  self.subGraphic:addChild(self.gateDesc)
+  self.normalSubGraphic:addChild(self.gateDesc)
 
   self.gateSub1 = app.SubButton("input", 1)
   self.gateSub2 = app.SubButton("thresh", 2)
   self.gateSub3 = app.SubButton("fire", 3)
-  self.subGraphic:addChild(self.gateSub1)
-  self.subGraphic:addChild(self.gateSub2)
-  self.subGraphic:addChild(self.gateSub3)
+  self.normalSubGraphic:addChild(self.gateSub1)
+  self.normalSubGraphic:addChild(self.gateSub2)
+  self.normalSubGraphic:addChild(self.gateSub3)
 
-  ---- RATCHET MODE ELEMENTS ----
+  ---- RATCHET (param) MODE ELEMENTS ----
   self.multReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
     local param = args.multParam
@@ -124,12 +129,12 @@ function RatchetControl:init(args)
   self.lenLabel = app.Label("len:off", 10)
   self.lenLabel:fitToText(0)
   self.lenLabel:setCenter(col2, center3 + 1)
-  self.subGraphic:addChild(self.lenLabel)
+  self.paramSubGraphic:addChild(self.lenLabel)
 
   self.velLabel = app.Label("vel:off", 10)
   self.velLabel:fitToText(0)
   self.velLabel:setCenter(col3, center3 + 1)
-  self.subGraphic:addChild(self.velLabel)
+  self.paramSubGraphic:addChild(self.velLabel)
 
   self.ratchetDesc = app.Label("Ratchet", 10)
   self.ratchetDesc:fitToText(3)
@@ -142,11 +147,11 @@ function RatchetControl:init(args)
   self.ratchetSub2 = app.SubButton("len", 2)
   self.ratchetSub3 = app.SubButton("vel", 3)
 
-  self.subGraphic:addChild(self.multReadout)
-  self.subGraphic:addChild(self.ratchetDesc)
-  self.subGraphic:addChild(self.ratchetSub1)
-  self.subGraphic:addChild(self.ratchetSub2)
-  self.subGraphic:addChild(self.ratchetSub3)
+  self.paramSubGraphic:addChild(self.multReadout)
+  self.paramSubGraphic:addChild(self.ratchetDesc)
+  self.paramSubGraphic:addChild(self.ratchetSub1)
+  self.paramSubGraphic:addChild(self.ratchetSub2)
+  self.paramSubGraphic:addChild(self.ratchetSub3)
 
   -- Store references for toggle
   self.lenToggleOption = args.lenToggleOption
@@ -154,7 +159,11 @@ function RatchetControl:init(args)
   if self.lenToggleOption then self.lenToggleOption:enableSerialization() end
   if self.velToggleOption then self.velToggleOption:enableSerialization() end
 
-  self:setRatchetMode(true)
+  -- Start in paramMode=true (ratchet params visible). EncoderControl.init
+  -- built a default subGraphic; replace with paramSubGraphic for the
+  -- grandfathered custom-default.
+  self.subGraphic = self.paramSubGraphic
+
   branch:subscribe("contentChanged", self)
 end
 
@@ -171,51 +180,17 @@ function RatchetControl:contentChanged(chain)
   end
 end
 
-function RatchetControl:setRatchetMode(enabled)
-  self.ratchetMode = enabled
-
-  -- Gate elements
-  if enabled then
-    self.gateDrawing:hide()
-    self.gateOrLabel:hide()
-    self.gateScope:hide()
-    self.threshReadout:hide()
-    self.gateDesc:hide()
-    self.gateSub1:hide()
-    self.gateSub2:hide()
-    self.gateSub3:hide()
-  else
-    self.gateDrawing:show()
-    self.gateOrLabel:show()
-    self.gateScope:show()
-    self.threshReadout:show()
-    self.gateDesc:show()
-    self.gateSub1:show()
-    self.gateSub2:show()
-    self.gateSub3:show()
-  end
-
-  -- Ratchet elements
-  if enabled then
-    self.multReadout:show()
-    self.lenLabel:show()
-    self.velLabel:show()
-    self.ratchetDesc:show()
-    self.ratchetSub1:show()
-    self.ratchetSub2:show()
-    self.ratchetSub3:show()
-  else
-    self.multReadout:hide()
-    self.lenLabel:hide()
-    self.velLabel:hide()
-    self.ratchetDesc:hide()
-    self.ratchetSub1:hide()
-    self.ratchetSub2:hide()
-    self.ratchetSub3:hide()
-  end
-
+function RatchetControl:setParamMode(enabled)
+  self:removeSubGraphic(self.subGraphic)
+  self.paramMode = enabled
   self.focusedReadout = nil
   self:setSubCursorController(nil)
+  if enabled then
+    self.subGraphic = self.paramSubGraphic
+  else
+    self.subGraphic = self.normalSubGraphic
+  end
+  self:addSubGraphic(self.subGraphic)
 end
 
 function RatchetControl:updateToggleLabels()
@@ -247,42 +222,44 @@ function RatchetControl:onCursorEnter(spot)
 end
 
 function RatchetControl:onCursorLeave(spot)
+  -- Decision 7: paramMode persists across leave/return. Clear only the
+  -- per-session focus so the user has to deliberately re-focus to edit.
+  self.focusedReadout = nil
+  self:setSubCursorController(nil)
   self:releaseFocus("shiftPressed", "shiftReleased")
   Base.onCursorLeave(self, spot)
 end
 
 function RatchetControl:shiftPressed()
+  self.shiftHeld = true
+  self.shiftUsed = false
   if self.focusedReadout then
-    self.shiftDeferred = true
     self.shiftSnapshot = self.focusedReadout:getValueInUnits()
-    return true
-  end
-  self.shiftDeferred = false
-  self:setRatchetMode(not self.ratchetMode)
-  return true
-end
-
-function RatchetControl:shiftReleased()
-  if self.shiftDeferred then
-    self.shiftDeferred = false
-    if self.focusedReadout and self.shiftSnapshot then
-      local cur = self.focusedReadout:getValueInUnits()
-      if cur == self.shiftSnapshot then
-        self:setRatchetMode(not self.ratchetMode)
-      end
-    else
-      self:setRatchetMode(not self.ratchetMode)
-    end
+  else
     self.shiftSnapshot = nil
   end
   return true
 end
 
-function RatchetControl:spotReleased(spot, shifted)
-  if shifted then
-    self:setRatchetMode(not self.ratchetMode)
-    return true
+function RatchetControl:shiftReleased()
+  if self.shiftHeld and not self.shiftUsed then
+    if self.focusedReadout and self.shiftSnapshot then
+      local cur = self.focusedReadout:getValueInUnits()
+      if cur ~= self.shiftSnapshot then
+        self.shiftHeld = false
+        self.shiftSnapshot = nil
+        return true
+      end
+    end
+    self:setParamMode(not self.paramMode)
   end
+  self.shiftHeld = false
+  self.shiftSnapshot = nil
+  return true
+end
+
+function RatchetControl:spotReleased(spot, shifted)
+  -- Decision 2: no secondary toggle path on shift+spot. Just delegate.
   if Base.spotReleased(self, spot, shifted) then
     self:setFocusedReadout(nil)
     return true
@@ -292,7 +269,7 @@ end
 
 function RatchetControl:subPressed(i, shifted)
   if shifted then return false end
-  if not self.ratchetMode then
+  if not self.paramMode then
     if i == 3 then
       self.comparator:simulateRisingEdge()
     end
@@ -303,7 +280,7 @@ end
 function RatchetControl:subReleased(i, shifted)
   if shifted then return false end
 
-  if self.ratchetMode then
+  if self.paramMode then
     if i == 1 then
       -- Mult readout
       if self:hasFocus("encoder") then
@@ -349,6 +326,9 @@ function RatchetControl:subReleased(i, shifted)
 end
 
 function RatchetControl:encoder(change, shifted)
+  if shifted and self.shiftHeld then
+    self.shiftUsed = true
+  end
   if self.focusedReadout then
     self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
   end
