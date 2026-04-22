@@ -393,3 +393,185 @@ submenu and no shift toggle is needed. Document them as the canonical
   Pattern A controls maintain two parallel fields. Merging them risks
   reintroducing the nil-deref class of bug because GainBias hooks deref
   `self.focusedReadout` unconditionally. Safer to keep them separate.
+
+## Decisions locked (2026-04-21)
+
+| # | Decision | Chosen |
+|---|---|---|
+| 1 | Encoder suppression vs snapshot-only | **B -- shiftUsed flag suppresses toggle on any encoder touch during shift-hold** (Pattern C adopts it) |
+| 2 | Pattern C shift+spot secondary toggle | **Drop** -- tap-shift-alone is the only toggle path; shift+spot reserved for stock semantics |
+| 3 | show/hide vs subGraphic swap | **Swap** -- Pattern C unified with Pattern A mechanics |
+| 4 | Inverted mode-flag polarity | **Normalize to `paramMode`** -- rename FocusShapeControl / ScanSkewControl / MixInputControl |
+| 5 | shift+sub in paramMode | **Option B -- opens keyboard for that readout** (uniform with stock GainBias) |
+| 6 | Pecto migration | **Deferred** -- leave Pecto in biome with current pattern mix; revisit after the spec has settled on hardware |
+| 7 | Sub-display default + persistence | **Default to GainBias sub-display on first entry. Preserve `paramMode` across cursor leave/return within a session. Do NOT serialize `paramMode` across quicksave. Reset `paramFocusedReadout = nil` on leave (vanilla convention: user must deliberately focus to edit). Pattern C mirrors: default to normal comparator view, persist mode across leaves, reset focused readout.** |
+
+## Canonical Pattern A (amended for decisions 1-5 and 7)
+
+```lua
+self.paramMode = false               -- Decision 7: default to stock GainBias sub-display
+self.normalSubGraphic = self.subGraphic
+self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
+-- ... build paramSubGraphic ...
+
+function C:setParamMode(enabled)
+  self:removeSubGraphic(self.subGraphic)
+  self.paramMode = enabled
+  self.paramFocusedReadout = nil
+  self:setSubCursorController(nil)
+  if enabled then
+    self.subGraphic = self.paramSubGraphic
+  else
+    self.subGraphic = self.normalSubGraphic
+    self:setFocusedReadout(self.bias)
+  end
+  self:addSubGraphic(self.subGraphic)
+end
+
+function C:onCursorEnter(spot)
+  GainBias.onCursorEnter(self, spot)
+  self:grabFocus("shiftPressed", "shiftReleased")
+  -- Decision 7: do NOT reset paramMode here. Mode persists from last leave.
+  -- subGraphic is whatever we left it as; paramFocusedReadout is nil
+  -- (cleared on leave), so GainBias.onCursorEnter has already refocused
+  -- self.bias if we're in normal mode.
+end
+
+function C:onCursorLeave(spot)
+  -- Decision 7: preserve paramMode + subGraphic ref. Clear only the
+  -- per-session focus so re-entry lands in neutral "no readout focused".
+  if self.paramMode then
+    self.paramFocusedReadout = nil
+    self:setSubCursorController(nil)
+  end
+  self:releaseFocus("shiftPressed", "shiftReleased")
+  GainBias.onCursorLeave(self, spot)
+end
+
+function C:shiftPressed()
+  self.shiftHeld = true
+  self.shiftUsed = false                            -- Decision 1 (B)
+  if self.paramFocusedReadout then
+    self.shiftSnapshot = self.paramFocusedReadout:getValueInUnits()
+  else
+    self.shiftSnapshot = nil
+  end
+  return true
+end
+
+function C:shiftReleased()
+  if self.shiftHeld and not self.shiftUsed then     -- Decision 1 (B)
+    if self.paramFocusedReadout and self.shiftSnapshot then
+      local cur = self.paramFocusedReadout:getValueInUnits()
+      if cur ~= self.shiftSnapshot then
+        self.shiftHeld = false
+        self.shiftSnapshot = nil
+        return true
+      end
+    end
+    self:setParamMode(not self.paramMode)
+  end
+  self.shiftHeld = false
+  self.shiftSnapshot = nil
+  return true
+end
+
+function C:encoder(change, shifted)
+  if shifted and self.shiftHeld then self.shiftUsed = true end  -- Decision 1 (B)
+  if self.paramMode and self.paramFocusedReadout then
+    self.paramFocusedReadout:encoder(change, shifted,
+      self.encoderState == Encoder.Fine)
+    return true
+  end
+  return GainBias.encoder(self, change, shifted)
+end
+
+function C:subReleased(i, shifted)
+  if self.paramMode then
+    if shifted then
+      -- Decision 5 (B): shift+sub opens keyboard for that readout
+      local r = self:_paramReadoutForButton(i)
+      if r then self:_openKeyboardFor(r) end
+      return true
+    end
+    local r = self:_paramReadoutForButton(i)
+    if r then
+      r:save()
+      self.paramFocusedReadout = r
+      self:setSubCursorController(r)
+      if not self:hasFocus("encoder") then self:focus() end
+    end
+    return true
+  end
+  return GainBias.subReleased(self, i, shifted)
+end
+
+function C:spotReleased(spot, shifted)
+  -- Decision 2: no secondary toggle path. Just delegate when shifted
+  -- is set so stock semantics apply. paramMode exit still happens on
+  -- deliberate spot press in paramMode (cursor moves away).
+  if self.paramMode then
+    self.paramFocusedReadout = nil
+    self:setSubCursorController(nil)
+    self:setParamMode(false)
+  end
+  return GainBias.spotReleased(self, spot, shifted)
+end
+
+function C:zeroPressed()
+  if self.paramMode and self.paramFocusedReadout then
+    self.paramFocusedReadout:zero()
+    return true
+  end
+  return GainBias.zeroPressed(self)
+end
+
+function C:cancelReleased(shifted)
+  if self.paramMode and self.paramFocusedReadout then
+    self.paramFocusedReadout:restore()
+    return true
+  end
+  return GainBias.cancelReleased(self, shifted)
+end
+```
+
+**Pattern C (TransformGateControl, RatchetControl):** same shift mechanics
+(shiftHeld / shiftUsed / snapshot, per Decision 1 B) and same
+subGraphic-swap mechanics (per Decision 3). Default side is the normal
+gate/comparator view (Decision 7 mirror). `spotReleased` no longer has a
+secondary toggle path (Decision 2).
+
+**Inverted-flag trio (FocusShape, ScanSkew, MixInput):** rename
+`focusMode` / `scanMode` / `mixMode` to `paramMode`, flip the initializer
+and every conditional (Decision 4). Behavior unchanged.
+
+## Refactor execution plan
+
+1. **PR 1 -- canonical Pattern A landing + inverted-flag normalization**
+   (decisions 1, 3, 4, 7). Touches: 14 non-inverted Pattern A controls
+   (shift mechanics sweep; persistence added); 3 inverted controls
+   (renamed + Pattern A shift mechanics); 2 Pattern C controls
+   (TransformGateControl, RatchetControl -- shift mechanics + subGraphic
+   swap + drop-secondary-toggle per Decision 2). Tag Decision 2's
+   shift+spot removal into this PR since it's a one-liner per Pattern C
+   control.
+2. **PR 2 -- Decision 5 rollout.** Touches every Pattern A subReleased to
+   add the shift+sub -> keyboard-open branch. Single method per control.
+3. **Decision 6 deferred.** No Pecto migration in this pass.
+
+## Verification checklist per control
+
+After each refactor, manually verify:
+- [ ] Fresh insert: lands on normal GainBias sub-display (Case 1) or normal
+      gate view (Pattern C).
+- [ ] Tap shift with nothing focused -> toggles on release.
+- [ ] Tap shift with readout focused and no encoder activity -> toggles on
+      release.
+- [ ] Hold shift, nudge encoder, release -> does NOT toggle (Decision 1 B).
+- [ ] Hold shift, tap spot -> no toggle (Decision 2).
+- [ ] In paramMode, shift+sub opens keyboard (Decision 5 B).
+- [ ] In paramMode, navigate cursor away and back -> mode preserved,
+      no readout focused (Decision 7).
+- [ ] Quicksave + reload: paramMode NOT persisted (Decision 7); unit
+      restores in normal mode.
+- [ ] Cancel/zero/delete: preserve existing semantics; no regressions.
