@@ -2,6 +2,7 @@ local app = app
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -136,12 +137,17 @@ function ColmatageRepeatsControl:spotReleased(spot, shifted)
 end
 
 function ColmatageRepeatsControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode then
-    local readout = i == 1 and self.ritardReadout
-        or i == 2 and self.blendReadout
-        or i == 3 and self.accelReadout or nil
+    local readout, label
+    if i == 1 then readout, label = self.ritardReadout, "ritard"
+    elseif i == 2 then readout, label = self.blendReadout, "blend"
+    elseif i == 3 then readout, label = self.accelReadout, "accel"
+    end
     if readout then
+      if shifted then
+        ShiftHelpers.openKeyboardFor(readout, label)
+        return true
+      end
       readout:save()
       self.paramFocusedReadout = readout
       self:setSubCursorController(readout)

@@ -2,6 +2,7 @@ local app = app
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -124,13 +125,16 @@ function FeedbackControl:spotReleased(spot, shifted)
 end
 
 function FeedbackControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode then
     if i == 1 then
-      self.toneReadout:save()
-      self.paramFocusedReadout = self.toneReadout
-      self:setSubCursorController(self.toneReadout)
-      if not self:hasFocus("encoder") then self:focus() end
+      if shifted then
+        ShiftHelpers.openKeyboardFor(self.toneReadout, "tone")
+      else
+        self.toneReadout:save()
+        self.paramFocusedReadout = self.toneReadout
+        self:setSubCursorController(self.toneReadout)
+        if not self:hasFocus("encoder") then self:focus() end
+      end
     end
     return true
   end

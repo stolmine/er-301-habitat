@@ -3,6 +3,7 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -158,22 +159,30 @@ function HelicaseOverviewControl:shiftReleased()
 end
 
 function HelicaseOverviewControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode then
     if i == 1 then
-      self.mixReadout:save()
-      self.paramFocusedReadout = self.mixReadout
-      self:setSubCursorController(self.mixReadout)
-      if not self:hasFocus("encoder") then self:focus() end
+      if shifted then
+        ShiftHelpers.openKeyboardFor(self.mixReadout, "mix")
+      else
+        self.mixReadout:save()
+        self.paramFocusedReadout = self.mixReadout
+        self:setSubCursorController(self.mixReadout)
+        if not self:hasFocus("encoder") then self:focus() end
+      end
     elseif i == 2 then
-      -- Toggle lin/expo
+      -- lin/expo toggle: shift has no keyboard meaning on a discrete toggle
+      if shifted then return true end
       self.helicase:toggleLinFM()
       self:updateLinExpo()
     elseif i == 3 then
-      self.shapeReadout:save()
-      self.paramFocusedReadout = self.shapeReadout
-      self:setSubCursorController(self.shapeReadout)
-      if not self:hasFocus("encoder") then self:focus() end
+      if shifted then
+        ShiftHelpers.openKeyboardFor(self.shapeReadout, "carrier")
+      else
+        self.shapeReadout:save()
+        self.paramFocusedReadout = self.shapeReadout
+        self:setSubCursorController(self.shapeReadout)
+        if not self:hasFocus("encoder") then self:focus() end
+      end
     end
     return true
   end

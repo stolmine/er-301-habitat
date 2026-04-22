@@ -2,6 +2,7 @@ local app = app
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -126,15 +127,20 @@ function DriveControl:spotReleased(spot, shifted)
 end
 
 function DriveControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode then
-    local readout = i == 1 and self.toneReadout
-        or i == 2 and self.freqReadout or nil
+    local readout, label
+    if i == 1 then readout, label = self.toneReadout, "tone"
+    elseif i == 2 then readout, label = self.freqReadout, "freq"
+    end
     if readout then
-      readout:save()
-      self.paramFocusedReadout = readout
-      self:setSubCursorController(readout)
-      if not self:hasFocus("encoder") then self:focus() end
+      if shifted then
+        ShiftHelpers.openKeyboardFor(readout, label)
+      else
+        readout:save()
+        self.paramFocusedReadout = readout
+        self:setSubCursorController(readout)
+        if not self:hasFocus("encoder") then self:focus() end
+      end
     end
     return true
   end

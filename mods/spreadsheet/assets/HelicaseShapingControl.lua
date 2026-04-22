@@ -3,6 +3,7 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -145,18 +146,21 @@ function HelicaseShapingControl:shiftReleased()
 end
 
 function HelicaseShapingControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode then
-    local readout = nil
-    if i == 1 then readout = self.indexReadout
-    elseif i == 2 then readout = self.discReadout
-    elseif i == 3 then readout = self.typeReadout
+    local readout, label
+    if i == 1 then readout, label = self.indexReadout, "index"
+    elseif i == 2 then readout, label = self.discReadout, "disc"
+    elseif i == 3 then readout, label = self.typeReadout, "type"
     end
     if readout then
-      readout:save()
-      self.paramFocusedReadout = readout
-      self:setSubCursorController(readout)
-      if not self:hasFocus("encoder") then self:focus() end
+      if shifted then
+        ShiftHelpers.openKeyboardFor(readout, label)
+      else
+        readout:save()
+        self.paramFocusedReadout = readout
+        self:setSubCursorController(readout)
+        if not self:hasFocus("encoder") then self:focus() end
+      end
     end
     return true
   end

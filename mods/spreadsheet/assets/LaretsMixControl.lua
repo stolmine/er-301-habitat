@@ -2,6 +2,7 @@ local app = app
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -145,19 +146,28 @@ function LaretsMixControl:spotReleased(spot, shifted)
 end
 
 function LaretsMixControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode then
     if i == 1 then
-      self.outputReadout:save()
-      self.paramFocusedReadout = self.outputReadout
-      self:setSubCursorController(self.outputReadout)
-      if not self:hasFocus("encoder") then self:focus() end
+      if shifted then
+        ShiftHelpers.openKeyboardFor(self.outputReadout, "output")
+      else
+        self.outputReadout:save()
+        self.paramFocusedReadout = self.outputReadout
+        self:setSubCursorController(self.outputReadout)
+        if not self:hasFocus("encoder") then self:focus() end
+      end
     elseif i == 2 then
-      self.compReadout:save()
-      self.paramFocusedReadout = self.compReadout
-      self:setSubCursorController(self.compReadout)
-      if not self:hasFocus("encoder") then self:focus() end
+      if shifted then
+        ShiftHelpers.openKeyboardFor(self.compReadout, "comp")
+      else
+        self.compReadout:save()
+        self.paramFocusedReadout = self.compReadout
+        self:setSubCursorController(self.compReadout)
+        if not self:hasFocus("encoder") then self:focus() end
+      end
     elseif i == 3 then
+      -- auto-makeup toggle: shift has no keyboard meaning on a discrete toggle
+      if shifted then return true end
       self.op:toggleAutoMakeup()
       self:updateAutoIndicator()
     end

@@ -16,6 +16,7 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -260,28 +261,34 @@ end
 -- Sub-button dispatch depending on mode ----------------------------------
 
 function MixInputControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode then
-    local r = (i == 1) and self.levelReadout
-          or  (i == 2) and self.weightReadout
-          or  (i == 3) and self.offsetReadout
+    local r, label
+    if i == 1 then r, label = self.levelReadout, "level"
+    elseif i == 2 then r, label = self.weightReadout, "weight"
+    elseif i == 3 then r, label = self.offsetReadout, "offset"
+    end
     if r then
-      if not self:hasFocus("encoder") then self:focus() end
-      self:setParamFocusedReadout(r)
+      if shifted then
+        ShiftHelpers.openKeyboardFor(r, label)
+      else
+        if not self:hasFocus("encoder") then self:focus() end
+        self:setParamFocusedReadout(r)
+      end
       return true
     end
     return false
-  else
-    if i == 1 then
-      self:unfocus()
-      self.branch:show()
-    elseif i == 2 then
-      self:callUp("toggleSoloOnControl", self)
-    elseif i == 3 then
-      self:callUp("toggleMuteOnControl", self)
-    end
-    return true
   end
+  -- Normal (mix) mode: branch / solo / mute; shift has no keyboard meaning.
+  if shifted then return false end
+  if i == 1 then
+    self:unfocus()
+    self.branch:show()
+  elseif i == 2 then
+    self:callUp("toggleSoloOnControl", self)
+  elseif i == 3 then
+    self:callUp("toggleMuteOnControl", self)
+  end
+  return true
 end
 
 function MixInputControl:spotReleased(spot, shifted)

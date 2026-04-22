@@ -3,6 +3,7 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -210,27 +211,38 @@ function BandControl:spotReleased(spot, shifted)
 end
 
 function BandControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode == 1 then
-    local readout = i == 1 and self.amtReadout
-        or i == 2 and self.biasReadout
-        or i == 3 and self.typeReadout or nil
+    local readout, label
+    if i == 1 then readout, label = self.amtReadout, "amount"
+    elseif i == 2 then readout, label = self.biasReadout, "bias"
+    elseif i == 3 then readout, label = self.typeReadout, "type"
+    end
     if readout then
-      readout:save()
-      self.paramFocusedReadout = readout
-      self:setSubCursorController(readout)
-      if not self:hasFocus("encoder") then self:focus() end
+      if shifted then
+        ShiftHelpers.openKeyboardFor(readout, label)
+      else
+        readout:save()
+        self.paramFocusedReadout = readout
+        self:setSubCursorController(readout)
+        if not self:hasFocus("encoder") then self:focus() end
+      end
     end
     return true
   elseif self.paramMode == 2 then
-    local readout = i == 1 and self.weightReadout
-        or i == 2 and self.freqReadout
-        or i == 3 and self.morphReadout or nil
+    local readout, label
+    if i == 1 then readout, label = self.weightReadout, "weight"
+    elseif i == 2 then readout, label = self.freqReadout, "freq"
+    elseif i == 3 then readout, label = self.morphReadout, "morph"
+    end
     if readout then
-      readout:save()
-      self.paramFocusedReadout = readout
-      self:setSubCursorController(readout)
-      if not self:hasFocus("encoder") then self:focus() end
+      if shifted then
+        ShiftHelpers.openKeyboardFor(readout, label)
+      else
+        readout:save()
+        self.paramFocusedReadout = readout
+        self:setSubCursorController(readout)
+        if not self:hasFocus("encoder") then self:focus() end
+      end
     end
     return true
   end

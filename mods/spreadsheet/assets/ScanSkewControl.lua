@@ -7,6 +7,7 @@ local app = app
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -115,11 +116,14 @@ function ScanSkewControl:setParamFocusedReadout(readout)
 end
 
 function ScanSkewControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode then
     if i == 2 then
-      if not self:hasFocus("encoder") then self:focus() end
-      self:setParamFocusedReadout(self.skewReadout)
+      if shifted then
+        ShiftHelpers.openKeyboardFor(self.skewReadout, "skew")
+      else
+        if not self:hasFocus("encoder") then self:focus() end
+        self:setParamFocusedReadout(self.skewReadout)
+      end
       return true
     end
     return false

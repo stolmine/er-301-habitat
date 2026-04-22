@@ -3,6 +3,7 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -171,11 +172,18 @@ function LaretOverviewControl:focusParamReadout(readout)
 end
 
 function LaretOverviewControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode then
-    if i == 1 then self:focusParamReadout(self.skewReadout)
-    elseif i == 2 then self:focusParamReadout(self.stepCountReadout)
-    elseif i == 3 then self:focusParamReadout(self.loopReadout)
+    local readout, label
+    if i == 1 then readout, label = self.skewReadout, "skew"
+    elseif i == 2 then readout, label = self.stepCountReadout, "steps"
+    elseif i == 3 then readout, label = self.loopReadout, "loop"
+    end
+    if readout then
+      if shifted then
+        ShiftHelpers.openKeyboardFor(readout, label)
+      else
+        self:focusParamReadout(readout)
+      end
     end
     return true
   end

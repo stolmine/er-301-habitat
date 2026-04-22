@@ -7,6 +7,7 @@ local app = app
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -128,14 +129,19 @@ function FocusShapeControl:setParamFocusedReadout(readout)
 end
 
 function FocusShapeControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode then
-    local r = (i == 1) and self.shape0Readout
-          or  (i == 2) and self.shape1Readout
-          or  (i == 3) and self.shape2Readout
+    local r, label
+    if i == 1 then r, label = self.shape0Readout, "shape 1"
+    elseif i == 2 then r, label = self.shape1Readout, "shape 2"
+    elseif i == 3 then r, label = self.shape2Readout, "shape 3"
+    end
     if r then
-      if not self:hasFocus("encoder") then self:focus() end
-      self:setParamFocusedReadout(r)
+      if shifted then
+        ShiftHelpers.openKeyboardFor(r, label)
+      else
+        if not self:hasFocus("encoder") then self:focus() end
+        self:setParamFocusedReadout(r)
+      end
       return true
     end
     return false

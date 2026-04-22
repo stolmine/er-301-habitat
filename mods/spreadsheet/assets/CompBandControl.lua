@@ -3,6 +3,7 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -158,16 +159,19 @@ function CompBandControl:spotReleased(spot, shifted)
 end
 
 function CompBandControl:subReleased(i, shifted)
-  if shifted then return false end
   if self.paramMode then
-    local readout = nil
-    if i == 1 then readout = self.threshReadout
-    elseif i == 2 then readout = self.ratioReadout
-    elseif i == 3 then readout = self.speedReadout
+    local readout, label
+    if i == 1 then readout, label = self.threshReadout, "threshold"
+    elseif i == 2 then readout, label = self.ratioReadout, "ratio"
+    elseif i == 3 then readout, label = self.speedReadout, "speed"
     end
     if readout then
-      self:setParamFocusedReadout(readout)
-      if not self:hasFocus("encoder") then self:focus() end
+      if shifted then
+        ShiftHelpers.openKeyboardFor(readout, label)
+      else
+        self:setParamFocusedReadout(readout)
+        if not self:hasFocus("encoder") then self:focus() end
+      end
     end
     return true
   end
