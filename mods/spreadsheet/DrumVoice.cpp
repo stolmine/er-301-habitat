@@ -276,9 +276,9 @@ namespace stolmine
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       // Xform gate: rising edge on CV input OR manual fire flag -> apply
-      // randomize. Done at the top so the perturbation lands on the same
-      // block as any coincident trigger rising edge below.
-      bool xformHigh = xgate[i] > 0.0f;
+      // randomize. Threshold matches Pecto (0.5) to ignore comparator
+      // residue between triggers.
+      bool xformHigh = xgate[i] > 0.5f;
       bool xformRise = xformHigh && !mXformGateWasHigh;
       mXformGateWasHigh = xformHigh;
       if (xformRise || mManualFire)
