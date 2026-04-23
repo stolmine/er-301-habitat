@@ -193,11 +193,11 @@ namespace stolmine
     rnd(mBiasDecay,      0.01f,  5.0f);
     rnd(mBiasSweep,      0.0f,   72.0f);
     rnd(mBiasSweepTime,  0.001f, 0.5f);
-    rnd(mBiasClipper,    0.0f,   1.0f);
-    rnd(mBiasEQ,        -1.0f,   1.0f);
-    rnd(mBiasLevel,      0.0f,   1.0f);
-    rnd(mBiasComp,       0.0f,   1.0f);
     rndInt(mBiasOctave, -4.0f,   4.0f);
+    // Output-chain params (Clipper, EQ, Level, Comp) deliberately NOT
+    // randomized -- they're user-mix decisions, randomizing them flips
+    // the perceived loudness / character on every fire which fights the
+    // user's mix. Bias-pointer registration retained for future opt-in.
   }
 
   void DrumVoice::process()
