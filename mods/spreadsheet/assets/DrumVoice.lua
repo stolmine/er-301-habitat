@@ -68,6 +68,15 @@ function DrumVoice:onLoadGraph(channelCount)
   makeup:hardSet("Bias", 0.0)
   octave:hardSet("Bias", 0.0)
 
+  -- Gain defaults on wide-range adapters so 1 V CV sweeps the useful
+  -- range. Identity (Gain = 1.0) is only meaningful for 0..1 params;
+  -- the rest need explicit per-param gain.
+  sweep:hardSet("Gain", 72.0)
+  sweepTime:hardSet("Gain", 0.5)
+  decay:hardSet("Gain", 5.0)
+  hold:hardSet("Gain", 0.5)
+  attack:hardSet("Gain", 0.05)
+
   tie(op, "Character", character, "Out")
   tie(op, "Shape",     shape,     "Out")
   tie(op, "Grit",      grit,      "Out")
