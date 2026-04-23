@@ -36,6 +36,8 @@
 #include "Colmatage.h"
 #include "ColmatageOverviewGraphic.h"
 #include "Pecto.h"
+#include "DrumVoice.h"
+#include "DrumCubeGraphic.h"
 #define SWIGLUA
 %}
 
@@ -72,3 +74,5 @@
 %include "Colmatage.h"
 %include "ColmatageOverviewGraphic.h"
 %include "Pecto.h"
+%include "DrumVoice.h"
+%include "DrumCubeGraphic.h"
