@@ -25,6 +25,7 @@ namespace stolmine
 
     float phase1 = 0.0f;
     float phase2 = 0.0f;
+    float phaseFm = 0.0f;
 
     float ampEnv = 0.0f;
     float punchEnv = 0.0f;
@@ -253,6 +254,7 @@ namespace stolmine
 
         s.phase1 = 0.0f;
         s.phase2 = 0.0f;
+        s.phaseFm = 0.0f;
 
         s.ampDecayCoeff   = expf(-1.0f / (effectiveDecay * sr));
         s.shapeDecayCoeff = expf(-1.0f / (effectiveDecay * 0.6f * sr));
@@ -288,73 +290,91 @@ namespace stolmine
       // Pitch droop: +1.5% at onset, decays with amplitude
       float droopFreq = s.currentFreq * (1.0f + s.ampEnv * 0.015f);
 
-      // === Osc2 (modulator) first ===
-      // Small detune so shape != 0 produces a subtle chorus beat on top
-      // of the FM; at shape = 0 both oscillators run at the same pitch.
-      float inc2 = droopFreq * (1.0f + shape * 0.0058f) / sr;
-      s.phase2 += inc2;
-      s.phase2 -= floorf(s.phase2);
+      // === Oscillator section at 2x rate (anti-alias for fold + FM) ===
+      //
+      // Osc1 (carrier) + osc2 (Shape FM modulator) + phaseFm (metallic
+      // inharmonic modulator at 2.71x ratio) all run at 2x sample rate so
+      // their harmonic content and FM sidebands stay below the 2x Nyquist.
+      // A 2-tap moving-average decimator (zero at 2x Nyquist) brings the
+      // pair back down to sr. NEON can't usefully parallelize the serial
+      // phase recurrence on a mono voice, so this is scalar x2.
+      float sr2 = sr * 2.0f;
+      float foldGain = 1.0f + (character > 0.5f ? (character - 0.5f) * 2.0f * 3.0f : 0.0f);
+      float tMorph   = character < 0.5f ? character * 2.0f : 0.0f;
+      float shapeFmDepth   = shape * shape * s.shapeEnv * 2.0f;
+      float metFmDepth     = grit * 3.0f * s.ampEnv;
+      float gritNoiseFmDev = grit * grit * 2000.0f * s.ampEnv;
 
-      float tri2 = 4.0f * (s.phase2 < 0.5f ? s.phase2 : 1.0f - s.phase2) - 1.0f;
-      float shapeSample;
-      if (character < 0.5f)
+      float osSamp[2];
+      for (int k = 0; k < 2; k++)
       {
-        float t = character * 2.0f;
-        float sine2 = lookupSine(s.sLUT, tri2);
-        shapeSample = tri2 + (sine2 - tri2) * t;
+        // Osc2 (Shape modulator): small detune, same character shaping
+        // as osc1 so the FM source has matching timbre.
+        float inc2 = droopFreq * (1.0f + shape * 0.0058f) / sr2;
+        s.phase2 += inc2;
+        s.phase2 -= floorf(s.phase2);
+        float tri2 = 4.0f * (s.phase2 < 0.5f ? s.phase2 : 1.0f - s.phase2) - 1.0f;
+        float shapeSample;
+        if (character < 0.5f)
+        {
+          float sine2 = lookupSine(s.sLUT, tri2);
+          shapeSample = tri2 + (sine2 - tri2) * tMorph;
+        }
+        else
+        {
+          shapeSample = lookupSine(s.sLUT, tri2 * foldGain);
+        }
+
+        // Metallic FM modulator: inharmonic (2.71x) sine osc. Clean sine
+        // via LUT gives coherent 808-clang spectra when the grit-driven
+        // modulation index climbs through ~1.5-3.
+        float incFm = droopFreq * 2.71f / sr2;
+        s.phaseFm += incFm;
+        s.phaseFm -= floorf(s.phaseFm);
+        float triFm = 4.0f * (s.phaseFm < 0.5f ? s.phaseFm : 1.0f - s.phaseFm) - 1.0f;
+        float fmMod = lookupSine(s.sLUT, triFm);
+
+        // Osc1 carrier: Shape FM + Metallic FM + broadband noise FM all
+        // injected into the phase increment.
+        float inc1 = droopFreq / sr2;
+        inc1 += shapeSample * shapeFmDepth * droopFreq / sr2;
+        inc1 += fmMod * metFmDepth * droopFreq / sr2;
+        if (grit > 0.0f)
+        {
+          s.noiseState = s.noiseState * 1664525u + 1013904223u;
+          float noise = (float)(int32_t)s.noiseState / 2147483648.0f;
+          inc1 += noise * gritNoiseFmDev / sr2;
+        }
+        s.phase1 += inc1;
+        s.phase1 -= floorf(s.phase1);
+        float tri1 = 4.0f * (s.phase1 < 0.5f ? s.phase1 : 1.0f - s.phase1) - 1.0f;
+        float toneSample;
+        if (character < 0.5f)
+        {
+          float sine1 = lookupSine(s.sLUT, tri1);
+          toneSample = tri1 + (sine1 - tri1) * tMorph;
+        }
+        else
+        {
+          toneSample = lookupSine(s.sLUT, tri1 * foldGain);
+        }
+        osSamp[k] = toneSample;
       }
-      else
-      {
-        float foldGain = 1.0f + (character - 0.5f) * 2.0f * 3.0f;
-        shapeSample = lookupSine(s.sLUT, tri2 * foldGain);
-      }
 
-      // === Osc1 (carrier) with Shape FM + Grit FM ===
-      float inc1 = droopFreq / sr;
+      // 2-tap moving-average halfband decimator: zero at the 2x Nyquist,
+      // good enough for drum-band content. Replace with a longer halfband
+      // FIR later if the residual aliasing above sr/2 is audible.
+      float sample = 0.5f * (osSamp[0] + osSamp[1]);
 
-      // Shape FM: deep phase modulation of osc1 by shape-shaped osc2.
-      // At shape = 1 (with shapeEnv = 1), modulation index ~ 2 -- sidebands
-      // broad enough to perceive octave-up character from extreme FM.
-      // Scales with shape^2 for musical response and with shapeEnv so the
-      // effect decays with the voice.
-      float shapeFmDepth = shape * shape * s.shapeEnv * 2.0f;
-      inc1 += shapeSample * shapeFmDepth * droopFreq / sr;
-
-      // Grit FM: noise modulation of osc1's phase increment.
-      if (grit > 0.0f)
-      {
-        s.noiseState = s.noiseState * 1664525u + 1013904223u;
-        float noise = (float)(int32_t)s.noiseState / 2147483648.0f;
-        float fmDev = grit * grit * 500.0f * s.ampEnv;
-        inc1 += noise * fmDev / sr;
-      }
-
-      s.phase1 += inc1;
-      s.phase1 -= floorf(s.phase1);
-
-      float tri1 = 4.0f * (s.phase1 < 0.5f ? s.phase1 : 1.0f - s.phase1) - 1.0f;
-      float toneSample;
-      if (character < 0.5f)
-      {
-        float t = character * 2.0f;
-        float sine1 = lookupSine(s.sLUT, tri1);
-        toneSample = tri1 + (sine1 - tri1) * t;
-      }
-      else
-      {
-        float foldGain = 1.0f + (character - 0.5f) * 2.0f * 3.0f;
-        toneSample = lookupSine(s.sLUT, tri1 * foldGain);
-      }
-
-      // Carrier only -- Shape's contribution is already imprinted via FM.
-      float sample = toneSample;
-
-      // Direct noise mix into signal
-      if (grit > 0.0f)
+      // Direct noise mix: kicks in above grit = 0.4 and climbs toward
+      // snare / hat territory at grit = 1.0. Stays at sr rate since
+      // broadband noise aliases to broadband noise regardless.
+      float gritNoiseGain = (grit - 0.4f) * 1.5f * s.ampEnv;
+      if (gritNoiseGain > 0.0f)
       {
         s.noiseState = s.noiseState * 1664525u + 1013904223u;
         float noiseSig = (float)(int32_t)s.noiseState / 2147483648.0f;
-        sample += noiseSig * grit * s.ampEnv * 0.3f;
+        sample += noiseSig * gritNoiseGain;
       }
 
       // Amp envelope state machine
