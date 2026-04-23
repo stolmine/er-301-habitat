@@ -633,10 +633,25 @@ Spreadsheet unit. Single-voice drum synth with sine/triangle core, pitch-sweep e
 
 ### Follow-ups from 2026-04-23 DSP tuning pass
 
-- [ ] Oversample the oscillator section. User flagged as tentative ("we may need"). Current osc runs at SR; Character fold at gain 4 + Shape FM at depth 2 + Grit FM can push the tone oscillator's instantaneous frequency high enough to alias at drum frequencies > ~500Hz. Candidate: 2x oversample just for the osc + fold stages (similar to Helicase hi-fi mode), with a halfband decimator on the way out. Defer until listening confirms audible aliasing.
-- [ ] Grit stage characterization. User observed "first 60% is 808-style clang, last 30% is noise-FM'd by carrier osc". Current Grit does hybrid FM-noise-into-phase-increment + post-osc direct noise mix, both scaled linearly by grit, with amp-envelope shortening above 0.75. Consider cleaner staging: first half pure FM (no direct noise), second half crossfade in direct noise + shortened envelope. Only if the current feel isn't working musically.
+- [x] Oversample the oscillator section. Landed 2026-04-23 commit `6490e28`. 2x scalar oversample over osc2 + phaseFm + osc1 with all FM paths + character fold; 2-tap MA halfband decimator. Downstream stays at sr. NEON packing ruled out for mono-voice serial recurrence.
+- [x] Grit stage characterization. Overhauled 2026-04-23 commit `6490e28`: new metallic FM modulator (inharmonic 2.71× osc, mod index `grit*3*ampEnv`), noise FM dev raised 500 Hz → 2 kHz at max, direct noise mix ramps in from grit=0.4 up to ~0.9× at grit=1. Progressive layering gives 808-clang at mid range and snare/hat at top.
 - [x] Shape FM depth deeper. Repurposed from mix-in-overlay to true phase FM on osc1 driven by osc2 (shape²·shapeEnv·2 modulation index, max ≈ 2 for octave-up-through-FM sidebands). Osc2 computed first then injected into osc1 phase. Dropped the `+ shape * shapeSample * shapeEnv` mix.
 - [x] Clipper replaced with simple tanhf + gain compensation. Drive range reduced from 1..100x (10^(clipper*2)) to 1..10x linear (1 + clipper*9). Output divided by tanh(drive) so loudness stays near unity across the drive range. `tanhRational` helper removed (unused after the swap).
+
+### Follow-ups from 2026-04-23 viz + sound feedback (second tuning pass)
+
+Viz (DrumCubeGraphic):
+
+- [ ] Overall scale down 0.85x. Cube's current radius sits too close to the ply edges -- give it breathing room. Apply uniform 0.85x to the projected vertex positions (or tighten the base-radius constant in `DrumCubeGraphic.cpp/.h`).
+- [ ] Face fill: use differing textures to represent state. "Of what?" is open -- candidate state-axes: Character morph (flat → stippled → crosshatched as fold deepens), Grit (dither density rises with grit), Shape (mirrored hatch for FM-heavy modes), ampEnv phase (attack = dense, decay = sparse). Pick one or two and wire into the hline stipple parameter already used for per-face fill.
+- [ ] Lean into the parallax effect. Something in the current rendering makes faces and edges/vertices drift relative to each other and it reads as pseudo-depth. Whatever is producing that -- differential shading curve, face-size oscillation, rotation-axis split between face centers and outer edges -- push it further (deliberate, exaggerated).
+- [ ] Lean into the face-shrink/edge-expand-on-hit response. On trigger pulses, faces visibly contract while edges and vertices expand outward -- it's a striking pulse envelope. Increase the coefficient driving face-area scale-down on trigger so the effect is more prominent.
+
+Sound tuning (second pass):
+
+- [ ] Parameters need more intertwining / emergent combinations. On hardware the user gets a huge variety of percussion sounds from randomize hits because the parameter combinations produce emergent states. In Ngoma today the axes feel too orthogonal -- each param changes its own thing, combinations sound predictable. Candidate cross-couplings to try: Grit ↔ Shape FM (high grit boosts shapeFmDepth so metallic FM goes even deeper at the noisy end); Character fold ↔ Grit (fold gain bumps up slightly with grit for clang+fold interaction); Punch ↔ Sweep depth (hard punch pushes the pitch sweep a touch higher momentarily); Shape ↔ Sweep time (deep shape FM shortens sweepTime a bit so the FM envelope and pitch envelope collapse together). Prototype one or two, listen for whether the randomize palette broadens.
+- [ ] Character fold depth deeper on the upper half. Currently foldGain = 1 + (character - 0.5) * 6 -- tops out at 4. At max character the fold stays audibly tame. Candidate: raise the 6 coefficient to 10 or 12 (foldGain 1..6 or 1..7) so character = 1 produces heavily-folded square-ish tones. Pair with 4x oversample if aliasing becomes problematic at max character + high pitch.
+- [ ] xform should not affect Sweep / SweepTime. Current randomize target list in `DrumVoice.cpp::applyRandomize` includes Sweep and SweepTime; these are pitch-envelope parameters that the user specifically wants to stay where set (they define the "drum role" and randomizing them wanders into different drum identities). Remove entries 4 and 5 from the setTopLevelBias table or comment-out their `rnd(...)` lines. Keep Character/Shape/Grit/Punch/Attack/Hold/Decay in the randomize set.
 
 ## Gridlock (Priority Gate Router)
 
