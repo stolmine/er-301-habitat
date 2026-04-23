@@ -29,7 +29,7 @@ function DrumVoiceLevelControl:init(args)
 
   local clipMap = app.LinearDialMap(0, 1)
   clipMap:setSteps(0.1, 0.01, 0.001, 0.001)
-  local eqMap = app.LinearDialMap(0, 1)
+  local eqMap = app.LinearDialMap(-1, 1)
   eqMap:setSteps(0.1, 0.01, 0.001, 0.001)
   local makeupMap = app.LinearDialMap(0, 1)
   makeupMap:setSteps(0.1, 0.01, 0.001, 0.001)

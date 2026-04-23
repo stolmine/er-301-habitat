@@ -130,7 +130,7 @@ namespace stolmine
     float hold      = CLAMP(0.0f, 0.5f, mHold.value());
     float decay     = CLAMP(0.01f, 5.0f, mDecay.value());
     float clipper   = CLAMP(0.0f, 1.0f, mClipper.value());
-    float eq        = CLAMP(0.0f, 1.0f, mEQ.value());
+    float eq        = CLAMP(-1.0f, 1.0f, mEQ.value());
     float level     = CLAMP(0.0f, 1.0f, mLevel.value());
     float makeup    = CLAMP(0.0f, 1.0f, mMakeup.value());
     float makeupGain = powf(10.0f, makeup * 6.0f / 20.0f);
@@ -149,8 +149,9 @@ namespace stolmine
     float driveLinear = (clipper > 0.01f) ? powf(10.0f, clipper * 2.0f) : 0.0f;
     float driveNorm   = (driveLinear > 0.0f) ? tanhRational(driveLinear) : 1.0f;
 
-    // DJ filter coefficients (block-rate)
-    float eqCut = (eq - 0.5f) * 2.0f;
+    // DJ filter coefficients (block-rate). EQ is bipolar: -1..0 = LP,
+    // 0 = bypass, 0..+1 = HP. Magnitude drives cutoff sweep.
+    float eqCut = eq;
     float absEqCut = fabsf(eqCut);
     bool filterActive = absEqCut >= 0.01f;
     bool isLP = (eqCut < 0.0f);

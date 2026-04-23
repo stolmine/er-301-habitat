@@ -36,7 +36,7 @@ namespace stolmine
     od::Parameter mHold{"Hold", 0.0f};
     od::Parameter mDecay{"Decay", 0.2f};
     od::Parameter mClipper{"Clipper", 0.0f};
-    od::Parameter mEQ{"EQ", 0.5f};
+    od::Parameter mEQ{"EQ", 0.0f};
     od::Parameter mLevel{"Level", 0.8f};
     od::Parameter mMakeup{"Makeup", 0.0f};
     od::Parameter mOctave{"Octave", 0.0f};

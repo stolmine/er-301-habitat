@@ -63,7 +63,7 @@ function DrumVoice:onLoadGraph(channelCount)
   hold:hardSet("Bias", 0.0)
   decay:hardSet("Bias", 0.2)
   clipper:hardSet("Bias", 0.0)
-  eq:hardSet("Bias", 0.5)
+  eq:hardSet("Bias", 0.0)
   level:hardSet("Bias", 0.8)
   makeup:hardSet("Bias", 0.0)
   octave:hardSet("Bias", 0.0)
@@ -209,6 +209,7 @@ local adapterBiases = {
 
 function DrumVoice:serialize()
   local t = Unit.serialize(self)
+  t.schema = 2 -- schema 2 = EQ is bipolar -1..1
   for _, name in ipairs(adapterBiases) do
     local obj = self.objects[name]
     if obj then
@@ -225,6 +226,13 @@ function DrumVoice:serialize()
 end
 
 function DrumVoice:deserialize(t)
+  -- Migration from schema 1 (pre-bipolar EQ): EQ was 0..1 with 0.5 bypass.
+  -- Remap to -1..1 with 0 bypass. Detect by absence of schema tag and a
+  -- value in the legacy range.
+  if t.schema == nil and t.eq ~= nil and t.eq >= 0.0 and t.eq <= 1.0 then
+    t.eq = (t.eq - 0.5) * 2.0
+  end
+
   Unit.deserialize(self, t)
   for _, name in ipairs(adapterBiases) do
     if t[name] ~= nil and self.objects[name] then
