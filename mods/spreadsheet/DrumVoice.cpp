@@ -190,7 +190,7 @@ namespace stolmine
     rnd(mBiasPunch,      0.0f,   1.0f);
     rnd(mBiasAttack,     0.0f,   0.05f);
     rnd(mBiasHold,       0.0f,   0.5f);
-    rnd(mBiasDecay,      0.01f,  5.0f);
+    rnd(mBiasDecay,      0.01f,  2.0f);
     rnd(mBiasSweep,      0.0f,   72.0f);
     rnd(mBiasSweepTime,  0.001f, 0.5f);
     rndInt(mBiasOctave, -4.0f,   4.0f);
@@ -218,7 +218,7 @@ namespace stolmine
     float sweepTime = CLAMP(0.001f, 0.5f, mSweepTime.value());
     float attack    = CLAMP(0.0f, 0.05f, mAttack.value());
     float hold      = CLAMP(0.0f, 0.5f, mHold.value());
-    float decay     = CLAMP(0.01f, 5.0f, mDecay.value());
+    float decay     = CLAMP(0.01f, 2.0f, mDecay.value());
     float clipper   = CLAMP(0.0f, 1.0f, mClipper.value());
     float eq        = CLAMP(-1.0f, 1.0f, mEQ.value());
     float level     = CLAMP(0.0f, 1.0f, mLevel.value());

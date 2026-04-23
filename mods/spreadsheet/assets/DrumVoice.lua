@@ -82,7 +82,7 @@ function DrumVoice:onLoadGraph(channelCount)
   -- the rest need explicit per-param gain.
   sweep:hardSet("Gain", 72.0)
   sweepTime:hardSet("Gain", 0.5)
-  decay:hardSet("Gain", 5.0)
+  decay:hardSet("Gain", 2.0)
   hold:hardSet("Gain", 0.5)
   attack:hardSet("Gain", 0.05)
 
@@ -165,7 +165,7 @@ function DrumVoice:onLoadViews(objects, branches)
   end)()
 
   local decayMap = (function()
-    local m = app.LinearDialMap(0.01, 5)
+    local m = app.LinearDialMap(0.01, 2)
     m:setSteps(0.5, 0.1, 0.01, 0.001)
     return m
   end)()
