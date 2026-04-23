@@ -638,6 +638,10 @@ Spreadsheet unit. Single-voice drum synth with sine/triangle core, pitch-sweep e
 - [x] Shape FM depth deeper. Repurposed from mix-in-overlay to true phase FM on osc1 driven by osc2 (shape²·shapeEnv·2 modulation index, max ≈ 2 for octave-up-through-FM sidebands). Osc2 computed first then injected into osc1 phase. Dropped the `+ shape * shapeSample * shapeEnv` mix.
 - [x] Clipper replaced with simple tanhf + gain compensation. Drive range reduced from 1..100x (10^(clipper*2)) to 1..10x linear (1 + clipper*9). Output divided by tanh(drive) so loudness stays near unity across the drive range. `tanhRational` helper removed (unused after the swap).
 
+### **BLOCKER (2026-04-23): Ngoma hangs hardware on load**
+
+- [ ] Ngoma locks up am335x hardware during unit load. Last known-good shipped build was 2.5.1 (Shape FM + tanh clipper). 2.5.2 introduced 2x scalar oversample of the osc section, the metallic FM modulator (new `phaseFm` phase accumulator at 2.71x ratio), Grit overhaul (noise FM dev 500→2000 Hz, direct noise ramp from grit=0.4, metallic FM depth scaled by grit*3*ampEnv), and the `tanhRational` removal. Any of these could trip the hang. Likely suspects: (a) the inner k=0..1 loop interacting poorly with compiler optimization or stack usage at -O3 -ffast-math on am335x; (b) the new `phaseFm` state uninitialized at some path (unlikely -- zero-initialized in Internal + reset on trigger); (c) rand()/RAND_MAX behavior on am335x under the package .so calling convention (unlikely to hang, more likely to miscompute); (d) a combination of metFmDepth + shapeFmDepth + gritNoiseFmDev at init producing NaN in inc1 and propagating. **First debug step**: bisect -- install spreadsheet-2.5.1.pkg, confirm it loads cleanly; then revert the oversample loop to sr (drop the k=0..1 inner loop, put everything back at sr) but keep metallic FM and Grit changes, rebuild as 2.5.3-probe and test. If that loads, the hang is the oversample; if not, it's Grit/metallic FM. Log bisect result here.
+
 ### Follow-ups from 2026-04-23 viz + sound feedback (second tuning pass)
 
 Viz (DrumCubeGraphic):
