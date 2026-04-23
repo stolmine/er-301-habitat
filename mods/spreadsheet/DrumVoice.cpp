@@ -2,6 +2,7 @@
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
+#include <stdlib.h>
 
 namespace stolmine
 {
