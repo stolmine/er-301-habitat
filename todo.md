@@ -591,34 +591,45 @@ Input: GainBias branch (no inlet). Output: 10Vpp (-5V to +5V).
 - [x] Fix skew asymmetry: symmetric linear shift (same approach as Parfait), bipolar -1 to +1
 - [x] Fix SWIG crash on delete: private members were inside #ifndef SWIGLUA, moved outside
 
-## Analog Macro Drum Voice
+## Ngoma (Analog Macro Drum Voice) -- SHIPPED 2026-04-23
 
-Spreadsheet unit -- single-voice drum synth with a sine/triangle core, pitch-sweep envelope, noise grit, and a T-bridge-style overlay oscillator. Many params, all CV-addressable, matching the spreadsheet convention (Excel/Ballot/Petrichor/Larets) for per-param CV + xform gate eligibility.
+Spreadsheet unit. Single-voice drum synth with sine/triangle core, pitch-sweep envelope, noise grit, T-bridge-style overlay oscillator. See `planning/drum-voice.md` for the full DSP + UI architecture and `mods/spreadsheet/DrumVoice.{h,cpp}` + `mods/spreadsheet/DrumCubeGraphic.{h,cpp}` for the implementation. Landed in commit `11893ad`.
 
-Signal flow: Trigger -> pitch env (rate = Time, amount = Sweep) feeds Pitch. Oscillator core (Character, Shape, Grit) -> Clipper waveshaper -> EQ (bipolar single-knob LPF/HPF, center bypass) -> VCA with amp env (Hold, Decay) -> Out.
+### Shipped params
 
-### Params
+- [x] Character: tri->sine morph at 0..0.5, sine shaper with foldGain 1->4 at 0.5..1 via 257-entry LUT.
+- [x] Pitch: V/Oct inlet + Octave offset param (-4..4 integer, separate sub-param).
+- [x] Sweep: pitch envelope depth (0..72 semitones).
+- [x] Time (renamed SweepTime): pitch envelope decay (0.001..0.5 s).
+- [x] Grit: hybrid topology -- FM-into-phase-increment AND post-osc noise mix, with envelope coupling above 0.75 shortening amp decay.
+- [x] Shape: second oscillator with shortened decay (shapeDecayCoeff = 0.6x main ampDecayCoeff). Small detune via shape factor.
+- [x] Clipper: rational tanh with drive (0..1 -> 0..20dB linear).
+- [x] EQ: bipolar single-knob TPT SVF, LP below 0.5, HP above, center bypass.
+- [x] Hold: amp envelope plateau (0..0.5 s).
+- [x] Decay: amp envelope decay (0.01..5 s).
+- [x] Attack: amp envelope attack (0..0.05 s) -- added beyond original todo spec.
+- [x] Punch: parallel fast transient envelope, ~3ms decay, added beyond original todo spec.
+- [x] Level (renamed from Vol): output VCA.
+- [x] Trigger: Comparator with setTriggerMode, rising-edge retrigger.
+- [x] Serialization: full Excel-pattern round-trip for all 13 ParameterAdapter Biases + trig threshold + tune offset in `DrumVoice:serialize/deserialize`.
 
-- [ ] Character: 0..0.5 crossfade Triangle -> Sine, 0.5..1 triangle wavefolding. Virtual-analog triangle, low aliasing.
-- [ ] Pitch: base pitch, V/Oct input.
-- [ ] Sweep: pitch envelope depth into pitch.
-- [ ] Time: pitch envelope decay rate.
-- [ ] Grit: FM noise amount. Past ~0.75 crossfades the main oscillator out and a short noise burst in (envelope shortens as Grit approaches 1.0, relative to amp Decay). 808-snare territory.
-- [ ] Shape: overlays a second oscillator with a slightly shorter decay than the main. 808/909 T-bridge dual-osc trick; useful for snare phase and bass tone.
-- [ ] Clipper: post-oscillator waveshape drive (start tanh + drive, evaluate against 94 Discont folds if needed).
-- [ ] EQ: bipolar single-knob SVF, 0 = LPF fully swept, 0.5 = bypass (center detent), 1 = HPF fully swept.
-- [ ] Hold: amp envelope pre-decay plateau.
-- [ ] Decay: amp envelope decay rate.
-- [ ] Vol: output VCA.
-- [ ] Trigger: Gate control via Comparator (per CONTEXT.md gate filtering).
-- [ ] Serialization: Excel-pattern ParameterAdapter Bias round-trip for every top-level fader.
+### Resolved open questions
 
-### Open questions
+- [x] Character fold curve: `sin(tri * foldGain)` via LUT shaper, foldGain range 1->4.
+- [x] Grit topology: hybrid. FM into the phase increment (pre-osc) AND post-osc noise mix. Both scaled by `ampEnv`.
+- [x] Shape overlay decay ratio: 0.6x. Tighter than the 0.7-0.85 guess; tuned by ear.
 
-- [ ] Character fold curve (>0.5): reflecting fold vs. polyfold -- pick by ear once a first cut is audible.
-- [ ] Grit topology: noise FM-ing the osc frequency vs. noise mixed post-oscillator vs. parallel short-enveloped noise burst. Confirm by listening tests.
-- [ ] Shape overlay decay ratio relative to main (~0.7-0.85x initial guess).
-- [ ] xform gate ply (func + paramA/B + scope) over Character/Shape/Grit/Sweep/Time/Decay. Defer if first cut is unwieldy; not a v1 blocker.
+### Remaining work (from commit msg + follow-ups)
+
+- [ ] **paramModeDefaultSub misuse across all five Ngoma controls.** Per `feedback_subcursor_inheritance.md`, `paramModeDefaultSub` should only be set when the sub-readout shares the underlying Parameter with `self.bias`. In Ngoma's controls the declared default points to a DIFFERENT parameter in every case: DrumVoicePitchControl (octaveReadout vs Pitch bias), DrumVoiceCharacterControl (shapeReadout vs Character bias), DrumVoiceSweepControl (timeReadout vs Sweep bias), DrumVoiceDecayControl (holdReadout vs Decay bias), DrumVoiceLevelControl (clipperReadout vs Level bias). Currently benign because Decision 8's visible-highlight pin means no highlight actually renders -- but if that pin ever lifts, Ngoma will show the user a sub highlighted that is NOT what the encoder is editing (encoder still routes to `self.bias` via GainBias fallback). Fix: nil out the `paramModeDefaultSub` assignments on all five, OR wait until the D8 visible-highlight investigation lands and re-decide.
+- [ ] Level third sub button. Current DrumVoiceLevelControl exposes clip (sub1) + eq (sub2) only; sub3 empty. Commit msg flagged this. Candidate: dry/wet mix, pan, or sub-output routing depending on desired scope.
+- [ ] Expanded views. `onLoadViews` returns `expanded = { "trig", "tune", "character", "sweep", "decay", "level" }` but each ply is the control itself -- no detail-view expansion graphics. Build per-ply expanded views (at minimum for Character where the cube viz would benefit from full-screen).
+- [ ] Cube viz refinement. Current DrumCubeGraphic has working orthographic cube with parameter-driven deformation; the commit flagged refinement as remaining. Candidate tweaks: shape-driven face pinch intensity, grit jitter curve tuning, trigger pulse visual character.
+- [ ] EQ range to -1..1. Currently 0..1 with 0.5 bypass. Bipolar surface (-1..1 with 0 bypass) is more intuitive and CV-friendly. Affects `mods/spreadsheet/DrumVoice.cpp` CLAMP + `eqCut` computation, plus the Level control's EQ sub-readout map and `initialBias`.
+- [ ] Sound profiling and default tuning. Kick/snare/hat/tom reference presets, characteristic-response tuning of Grit threshold, Shape detune, Punch depth. Listen-and-adjust pass.
+- [ ] xform gate ply (func + paramA/B + scope) over Character/Shape/Grit/Sweep/SweepTime/Decay. Deferred from the original spec -- not a v1 blocker but would fit the spreadsheet convention (Excel/Ballot/Petrichor/Larets) for randomization-driven drum variation.
+- [ ] Bias/mod-input range audit (cross-cutting -- see ## Controls Audit). Ngoma's Sweep (0..72) and Decay (0.01..5) are exactly the kind of wide-range param the audit was opened for. Expect to revisit defaults once the audit lands.
+- [ ] Package version bump on next build. `mods/spreadsheet/mod.mk` still at 2.4.2; Ngoma shipped without a version change. Per `feedback_package_version_bump.md`, bump to 2.5.0 before next hardware install so the device re-extracts.
 
 ## Gridlock (Priority Gate Router)
 
