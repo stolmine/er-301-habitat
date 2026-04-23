@@ -94,6 +94,7 @@ namespace stolmine
     addParameter(mClipper);
     addParameter(mEQ);
     addParameter(mLevel);
+    addParameter(mMakeup);
     addParameter(mOctave);
     mpInternal = new Internal();
     mpInternal->initLUT();
@@ -131,6 +132,8 @@ namespace stolmine
     float clipper   = CLAMP(0.0f, 1.0f, mClipper.value());
     float eq        = CLAMP(0.0f, 1.0f, mEQ.value());
     float level     = CLAMP(0.0f, 1.0f, mLevel.value());
+    float makeup    = CLAMP(0.0f, 1.0f, mMakeup.value());
+    float makeupGain = powf(10.0f, makeup * 6.0f / 20.0f);
 
     s.cachedCharacter = character;
     s.cachedShape = shape;
@@ -338,7 +341,7 @@ namespace stolmine
         sample = sample * (1.0f - absEqCut) + wet * absEqCut;
       }
 
-      out[i] = sample * level;
+      out[i] = sample * level * makeupGain;
     }
 
     s.vizEnvLevel = s.ampEnv;

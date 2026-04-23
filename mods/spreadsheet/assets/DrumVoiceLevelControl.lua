@@ -7,7 +7,7 @@ local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
 local center4 = app.GRID5_CENTER4
-local col1, col2 = app.BUTTON1_CENTER, app.BUTTON2_CENTER
+local col1, col2, col3 = app.BUTTON1_CENTER, app.BUTTON2_CENTER, app.BUTTON3_CENTER
 
 local DrumVoiceLevelControl = Class {}
 DrumVoiceLevelControl:include(GainBias)
@@ -19,7 +19,7 @@ function DrumVoiceLevelControl:init(args)
   self.normalSubGraphic = self.subGraphic
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  local desc = app.Label("Clipper / EQ", 10)
+  local desc = app.Label("Clipper / EQ / Mkup", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
@@ -31,6 +31,8 @@ function DrumVoiceLevelControl:init(args)
   clipMap:setSteps(0.1, 0.01, 0.001, 0.001)
   local eqMap = app.LinearDialMap(0, 1)
   eqMap:setSteps(0.1, 0.01, 0.001, 0.001)
+  local makeupMap = app.LinearDialMap(0, 1)
+  makeupMap:setSteps(0.1, 0.01, 0.001, 0.001)
 
   self.clipperReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
@@ -50,11 +52,22 @@ function DrumVoiceLevelControl:init(args)
     return g
   end)()
 
+  self.makeupReadout = (function()
+    local g = app.Readout(0, 0, ply, 10)
+    g:setParameter(args.makeupParam)
+    g:setAttributes(app.unitNone, makeupMap)
+    g:setPrecision(2)
+    g:setCenter(col3, center4)
+    return g
+  end)()
+
   local sg = self.paramSubGraphic
   sg:addChild(self.clipperReadout)
   sg:addChild(self.eqReadout)
+  sg:addChild(self.makeupReadout)
   sg:addChild(app.SubButton("clip", 1))
   sg:addChild(app.SubButton("eq", 2))
+  sg:addChild(app.SubButton("mkup", 3))
 end
 
 function DrumVoiceLevelControl:setParamMode(enabled)
@@ -98,8 +111,8 @@ end
 
 function DrumVoiceLevelControl:subReleased(i, shifted)
   if self.paramMode then
-    local rs = { self.clipperReadout, self.eqReadout }
-    local ls = { "clipper", "eq" }
+    local rs = { self.clipperReadout, self.eqReadout, self.makeupReadout }
+    local ls = { "clipper", "eq", "makeup" }
     local r = rs[i]
     if r then
       if shifted then ShiftHelpers.openKeyboardFor(r, ls[i])

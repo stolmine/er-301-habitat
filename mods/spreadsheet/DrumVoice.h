@@ -38,6 +38,7 @@ namespace stolmine
     od::Parameter mClipper{"Clipper", 0.0f};
     od::Parameter mEQ{"EQ", 0.5f};
     od::Parameter mLevel{"Level", 0.8f};
+    od::Parameter mMakeup{"Makeup", 0.0f};
     od::Parameter mOctave{"Octave", 0.0f};
 #endif
 

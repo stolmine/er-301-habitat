@@ -50,6 +50,7 @@ function DrumVoice:onLoadGraph(channelCount)
   local clipper    = self:addObject("clipper",    app.ParameterAdapter())
   local eq         = self:addObject("eq",         app.ParameterAdapter())
   local level      = self:addObject("level",      app.ParameterAdapter())
+  local makeup     = self:addObject("makeup",     app.ParameterAdapter())
   local octave     = self:addObject("octave",     app.ParameterAdapter())
 
   character:hardSet("Bias", 0.5)
@@ -64,6 +65,7 @@ function DrumVoice:onLoadGraph(channelCount)
   clipper:hardSet("Bias", 0.0)
   eq:hardSet("Bias", 0.5)
   level:hardSet("Bias", 0.8)
+  makeup:hardSet("Bias", 0.0)
   octave:hardSet("Bias", 0.0)
 
   tie(op, "Character", character, "Out")
@@ -78,6 +80,7 @@ function DrumVoice:onLoadGraph(channelCount)
   tie(op, "Clipper",   clipper,   "Out")
   tie(op, "EQ",        eq,        "Out")
   tie(op, "Level",     level,     "Out")
+  tie(op, "Makeup",    makeup,    "Out")
   tie(op, "Octave",    octave,    "Out")
 
   local characterRange = self:addObject("characterRange", app.MinMax())
@@ -108,6 +111,7 @@ function DrumVoice:onLoadGraph(channelCount)
   self:addMonoBranch("clipper",   clipper,   "In", clipper,   "Out")
   self:addMonoBranch("eq",        eq,        "In", eq,        "Out")
   self:addMonoBranch("level",     level,     "In", level,     "Out")
+  self:addMonoBranch("makeup",    makeup,    "In", makeup,    "Out")
 end
 
 function DrumVoice:onLoadViews(objects, branches)
@@ -189,7 +193,8 @@ function DrumVoice:onLoadViews(objects, branches)
       biasPrecision = 2,
       initialBias = 0.8,
       clipperParam = objects.clipper:getParameter("Bias"),
-      eqParam = objects.eq:getParameter("Bias")
+      eqParam = objects.eq:getParameter("Bias"),
+      makeupParam = objects.makeup:getParameter("Bias")
     }
   }, {
     expanded = { "trig", "tune", "character", "sweep", "decay", "level" },
@@ -199,7 +204,7 @@ end
 
 local adapterBiases = {
   "character", "shape", "grit", "punch", "sweep", "sweepTime",
-  "attack", "hold", "decay", "clipper", "eq", "level", "octave"
+  "attack", "hold", "decay", "clipper", "eq", "level", "makeup", "octave"
 }
 
 function DrumVoice:serialize()
