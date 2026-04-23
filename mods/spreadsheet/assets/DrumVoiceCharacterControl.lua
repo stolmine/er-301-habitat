@@ -44,7 +44,6 @@ function DrumVoiceCharacterControl:init(args)
   self.shapeReadout = readout01(args.shapeParam, col1)
   self.gritReadout  = readout01(args.gritParam,  col2)
   self.punchReadout = readout01(args.punchParam,  col3)
-  self.paramModeDefaultSub = self.shapeReadout
 
   local sg = self.paramSubGraphic
   sg:addChild(self.shapeReadout); sg:addChild(self.gritReadout); sg:addChild(self.punchReadout)

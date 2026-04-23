@@ -50,8 +50,6 @@ function DrumVoiceLevelControl:init(args)
     return g
   end)()
 
-  self.paramModeDefaultSub = self.clipperReadout
-
   local sg = self.paramSubGraphic
   sg:addChild(self.clipperReadout)
   sg:addChild(self.eqReadout)

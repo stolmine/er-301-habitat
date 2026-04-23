@@ -38,7 +38,6 @@ function DrumVoiceSweepControl:init(args)
     g:setCenter(col2, center4)
     return g
   end)()
-  self.paramModeDefaultSub = self.timeReadout
 
   self.paramSubGraphic:addChild(self.timeReadout)
   self.paramSubGraphic:addChild(app.SubButton("time", 2))

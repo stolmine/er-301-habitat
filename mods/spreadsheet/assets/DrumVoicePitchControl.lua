@@ -46,8 +46,6 @@ function DrumVoicePitchControl:init(args)
   self.paramSubGraphic:addChild(self.octaveReadout)
   self.paramSubGraphic:addChild(desc)
   self.paramSubGraphic:addChild(app.SubButton("oct", 2))
-
-  self.paramModeDefaultSub = self.octaveReadout
 end
 
 function DrumVoicePitchControl:setParamMode(enabled)

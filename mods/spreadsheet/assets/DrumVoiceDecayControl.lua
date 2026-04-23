@@ -38,7 +38,6 @@ function DrumVoiceDecayControl:init(args)
 
   self.holdReadout   = makeReadout(args.holdParam,   holdMap,   col1)
   self.attackReadout = makeReadout(args.attackParam,  attackMap, col2)
-  self.paramModeDefaultSub = self.holdReadout
 
   local sg = self.paramSubGraphic
   sg:addChild(self.holdReadout); sg:addChild(self.attackReadout)
