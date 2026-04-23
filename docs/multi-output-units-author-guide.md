@@ -93,6 +93,60 @@ Firmware-side code (anything in `app.bin`) is unaffected — the bug is specific
 
 The emulator on Linux is unaffected by this bug — it shows up only on actual hardware. So validate on hardware before declaring a multi-out unit done.
 
+## CPU cost and opt-in compute
+
+Multi-out units can fan out aggressively without pain *if* you follow one convention: **gate sub-out compute on `Outlet::isConnected()`**. Full cost model in stolmine `docs/planning/redesign/14-multi-output-cpu-cost.md`; the practitioner summary follows.
+
+### The cost shape
+
+- **Framework overhead per declared outlet is negligible** — ~0.0015% of one core per active outlet at 96k/64-frame. The outlet buffer is lazy-allocated from a pre-allocated pool, so unused outlets don't even take memory until someone writes into them.
+- **DSP cost is what you pay.** It splits into three categories:
+  - **Category A (free byproducts):** signals already held as internal state — inverted envelope, EOC trigger, play-position phase, gain-reduction signal, ladder pole taps, SVF multi-mode tap. A write-through of existing state. **<0.1% of parent CPU.**
+  - **Category B (derived outputs):** signals requiring trivial extra math — pre-divided clock taps, ZCD direction, counter rollover, quantizer note-changed. **1–5% of parent CPU per sub-out.**
+  - **Category C (new signal paths):** signals that duplicate a pipeline or restructure internal flow — early-reflections-only reverb, pre-feedback delay tap, per-band splits. **Highly variable; benchmark individually.**
+- **There is no automatic "skip if no consumers" gate.** `Object::process()` runs unconditionally. If you write into an outlet buffer unconditionally, you pay that cost regardless of whether anyone is listening.
+
+### The opt-in compute pattern
+
+```cpp
+void MyMultiOut::process() {
+  float *primary = getOutput(0);
+  float *sub1    = getOutput(1);
+  float *sub2    = getOutput(2);
+
+  // Primary is almost always consumed — don't gate it, the branch is waste.
+  computePrimary(primary);
+
+  // Gate Category B and C sub-outs. Cost-when-unused drops to ~1 ns/frame.
+  if (mSub1Outlet.isConnected()) {
+    computeSub1(sub1);
+  }
+  if (mSub2Outlet.isConnected()) {
+    computeSub2(sub2);
+  }
+}
+```
+
+With this gate in place, unused sub-outs cost essentially nothing. Users who don't wire a sub-out pay ~1 ns/frame per unused sub-out, amortized across the whole patch.
+
+### When to gate vs when to skip the gate
+
+| Category | Gate? | Reason |
+|---|---|---|
+| Primary output (sub-out 1) | **No** | Almost always consumed; the branch is pure waste. |
+| Category A on tight-loop parents (osc/filter) | **Yes** | Even 50 ns/frame adds up when the parent runs at sample rate. |
+| Category A on coarse parents (envelope/clock) | **Optional** | Compute is cheap enough that the branch can cost as much as the work. |
+| Category B | **Yes** | Real compute worth avoiding when unused. |
+| Category C | **Yes, always** | The whole point is that this is expensive. |
+
+### Heavy parents warrant more care
+
+If the parent unit is already a significant fraction of core — convolution reverb, granular stretcher, convolution — even small per-sub-out percentages become measurable. For parents >10% of core, benchmark the retrofit on-device rather than trusting the rule of thumb.
+
+### Avoid N-scaling sub-out counts
+
+A unit whose sub-out count scales with state (e.g. "one gate per slice" for a 64-slice sample) multiplies the cost by N. Prefer the **(index CV + boundary trigger)** two-outlet design and reconstruct per-item gates downstream with addressed switches or comparators. The framework today assumes fixed sub-out count declared at Unit init.
+
 ## Testing checklist
 
 For each multi-out unit you ship:
