@@ -29,12 +29,12 @@ namespace stolmine
     od::Parameter mCharacter{"Character", 0.5f};
     od::Parameter mShape{"Shape", 0.0f};
     od::Parameter mGrit{"Grit", 0.0f};
-    od::Parameter mPunch{"Punch", 0.3f};
-    od::Parameter mSweep{"Sweep", 12.0f};
-    od::Parameter mSweepTime{"SweepTime", 0.03f};
+    od::Parameter mPunch{"Punch", 0.4f};
+    od::Parameter mSweep{"Sweep", 18.0f};
+    od::Parameter mSweepTime{"SweepTime", 0.04f};
     od::Parameter mAttack{"Attack", 0.0f};
     od::Parameter mHold{"Hold", 0.0f};
-    od::Parameter mDecay{"Decay", 0.2f};
+    od::Parameter mDecay{"Decay", 0.25f};
     od::Parameter mClipper{"Clipper", 0.0f};
     od::Parameter mEQ{"EQ", 0.0f};
     od::Parameter mLevel{"Level", 0.8f};

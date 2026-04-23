@@ -59,12 +59,12 @@ function DrumVoice:onLoadGraph(channelCount)
   character:hardSet("Bias", 0.5)
   shape:hardSet("Bias", 0.0)
   grit:hardSet("Bias", 0.0)
-  punch:hardSet("Bias", 0.3)
-  sweep:hardSet("Bias", 12.0)
-  sweepTime:hardSet("Bias", 0.03)
+  punch:hardSet("Bias", 0.4)
+  sweep:hardSet("Bias", 18.0)
+  sweepTime:hardSet("Bias", 0.04)
   attack:hardSet("Bias", 0.0)
   hold:hardSet("Bias", 0.0)
-  decay:hardSet("Bias", 0.2)
+  decay:hardSet("Bias", 0.25)
   clipper:hardSet("Bias", 0.0)
   eq:hardSet("Bias", 0.0)
   level:hardSet("Bias", 0.8)
@@ -214,7 +214,7 @@ function DrumVoice:onLoadViews(objects, branches)
       biasMap = sweepMap,
       biasUnits = app.unitNone,
       biasPrecision = 1,
-      initialBias = 12,
+      initialBias = 18,
       sweepTimeParam = objects.sweepTime:getParameter("Bias")
     },
     decay = DrumVoiceDecayControl {
@@ -226,7 +226,7 @@ function DrumVoice:onLoadViews(objects, branches)
       biasMap = decayMap,
       biasUnits = app.unitSecs,
       biasPrecision = 2,
-      initialBias = 0.2,
+      initialBias = 0.25,
       holdParam = objects.hold:getParameter("Bias"),
       attackParam = objects.attack:getParameter("Bias")
     },
@@ -276,13 +276,13 @@ function DrumVoice:onLoadViews(objects, branches)
       button = "punch", description = "Punch",
       branch = branches.punch, gainbias = objects.punch, range = objects.punch,
       biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
-      biasPrecision = 2, initialBias = 0.3
+      biasPrecision = 2, initialBias = 0.4
     },
     sweepTime = GainBias {
       button = "time", description = "Sweep Time",
       branch = branches.sweepTime, gainbias = objects.sweepTime, range = objects.sweepTime,
       biasMap = sweepTimeMap, biasUnits = app.unitSecs,
-      biasPrecision = 3, initialBias = 0.03
+      biasPrecision = 3, initialBias = 0.04
     },
     decayHold = GainBias {
       button = "hold", description = "Hold",
