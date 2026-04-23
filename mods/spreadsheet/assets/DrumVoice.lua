@@ -126,6 +126,7 @@ function DrumVoice:onLoadGraph(channelCount)
   self:addMonoBranch("eq",        eq,        "In", eq,        "Out")
   self:addMonoBranch("level",     level,     "In", level,     "Out")
   self:addMonoBranch("makeup",    makeup,    "In", makeup,    "Out")
+  self:addMonoBranch("octave",    octave,    "In", octave,    "Out")
   self:addMonoBranch("depth",     depth,     "In", depth,     "Out")
   self:addMonoBranch("spread",    spread,    "In", spread,    "Out")
 end
@@ -140,6 +141,37 @@ function DrumVoice:onLoadViews(objects, branches)
   local decayMap = (function()
     local m = app.LinearDialMap(0.01, 5)
     m:setSteps(0.5, 0.1, 0.01, 0.001)
+    return m
+  end)()
+
+  local sweepTimeMap = (function()
+    local m = app.LinearDialMap(0.001, 0.5)
+    m:setSteps(0.05, 0.01, 0.001, 0.0001)
+    return m
+  end)()
+
+  local holdMap = (function()
+    local m = app.LinearDialMap(0, 0.5)
+    m:setSteps(0.05, 0.01, 0.001, 0.001)
+    return m
+  end)()
+
+  local attackMap = (function()
+    local m = app.LinearDialMap(0, 0.05)
+    m:setSteps(0.005, 0.001, 0.001, 0.0001)
+    return m
+  end)()
+
+  local octaveMap = (function()
+    local m = app.LinearDialMap(-4, 4)
+    m:setSteps(1, 1, 1, 1)
+    m:setRounding(1)
+    return m
+  end)()
+
+  local eqBipolarMap = (function()
+    local m = app.LinearDialMap(-1, 1)
+    m:setSteps(0.1, 0.01, 0.001, 0.001)
     return m
   end)()
 
@@ -223,9 +255,91 @@ function DrumVoice:onLoadViews(objects, branches)
       clipperParam = objects.clipper:getParameter("Bias"),
       eqParam = objects.eq:getParameter("Bias"),
       makeupParam = objects.makeup:getParameter("Bias")
+    },
+
+    -- Auxiliary controls for expanded view: expose sub-display params at
+    -- full width. Same ParameterAdapter as the headline control's shift
+    -- sub-display, so edits on either surface converge on the same Bias.
+    charShape = GainBias {
+      button = "shape", description = "Shape",
+      branch = branches.shape, gainbias = objects.shape, range = objects.shape,
+      biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
+      biasPrecision = 2, initialBias = 0.0
+    },
+    charGrit = GainBias {
+      button = "grit", description = "Grit",
+      branch = branches.grit, gainbias = objects.grit, range = objects.grit,
+      biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
+      biasPrecision = 2, initialBias = 0.0
+    },
+    charPunch = GainBias {
+      button = "punch", description = "Punch",
+      branch = branches.punch, gainbias = objects.punch, range = objects.punch,
+      biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
+      biasPrecision = 2, initialBias = 0.3
+    },
+    sweepTime = GainBias {
+      button = "time", description = "Sweep Time",
+      branch = branches.sweepTime, gainbias = objects.sweepTime, range = objects.sweepTime,
+      biasMap = sweepTimeMap, biasUnits = app.unitSecs,
+      biasPrecision = 3, initialBias = 0.03
+    },
+    decayHold = GainBias {
+      button = "hold", description = "Hold",
+      branch = branches.hold, gainbias = objects.hold, range = objects.hold,
+      biasMap = holdMap, biasUnits = app.unitSecs,
+      biasPrecision = 3, initialBias = 0.0
+    },
+    decayAttack = GainBias {
+      button = "atk", description = "Attack",
+      branch = branches.attack, gainbias = objects.attack, range = objects.attack,
+      biasMap = attackMap, biasUnits = app.unitSecs,
+      biasPrecision = 3, initialBias = 0.0
+    },
+    levelClipper = GainBias {
+      button = "clip", description = "Clipper",
+      branch = branches.clipper, gainbias = objects.clipper, range = objects.clipper,
+      biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
+      biasPrecision = 2, initialBias = 0.0
+    },
+    levelEQ = GainBias {
+      button = "eq", description = "EQ",
+      branch = branches.eq, gainbias = objects.eq, range = objects.eq,
+      biasMap = eqBipolarMap, biasUnits = app.unitNone,
+      biasPrecision = 2, initialBias = 0.0
+    },
+    levelMakeup = GainBias {
+      button = "mkup", description = "Makeup",
+      branch = branches.makeup, gainbias = objects.makeup, range = objects.makeup,
+      biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
+      biasPrecision = 2, initialBias = 0.0
+    },
+    tuneOctave = GainBias {
+      button = "oct", description = "Octave",
+      branch = branches.octave, gainbias = objects.octave, range = objects.octave,
+      biasMap = octaveMap, biasUnits = app.unitNone,
+      biasPrecision = 0, initialBias = 0
+    },
+    xformDepth = GainBias {
+      button = "dpth", description = "Depth",
+      branch = branches.depth, gainbias = objects.depth, range = objects.depth,
+      biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
+      biasPrecision = 2, initialBias = 0.3
+    },
+    xformSpread = GainBias {
+      button = "sprd", description = "Spread",
+      branch = branches.spread, gainbias = objects.spread, range = objects.spread,
+      biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
+      biasPrecision = 2, initialBias = 0.5
     }
   }, {
-    expanded = { "trig", "tune", "character", "sweep", "decay", "xform", "level" },
+    expanded  = { "trig", "tune", "character", "sweep", "decay", "xform", "level" },
+    tune      = { "tune", "tuneOctave" },
+    character = { "character", "charShape", "charGrit", "charPunch" },
+    sweep     = { "sweep", "sweepTime" },
+    decay     = { "decay", "decayHold", "decayAttack" },
+    xform     = { "xform", "xformDepth", "xformSpread" },
+    level     = { "level", "levelClipper", "levelEQ", "levelMakeup" },
     collapsed = {}
   }
 end
