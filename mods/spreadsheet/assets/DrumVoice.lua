@@ -34,6 +34,10 @@ function DrumVoice:onLoadGraph(channelCount)
   trig:setTriggerMode()
   connect(trig, "Out", op, "Trigger")
 
+  local xformTrig = self:addObject("xformTrig", app.Comparator())
+  xformTrig:setTriggerMode()
+  connect(xformTrig, "Out", op, "XformGate")
+
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
   connect(tune, "Out", tuneRange, "In")
@@ -96,6 +100,20 @@ function DrumVoice:onLoadGraph(channelCount)
   tie(op, "Level",     level,     "Out")
   tie(op, "Makeup",    makeup,    "Out")
   tie(op, "Octave",    octave,    "Out")
+  tie(op, "XformDepth",  depth,  "Out")
+  tie(op, "XformSpread", spread, "Out")
+
+  -- Register the ParameterAdapter Biases the C++ op should mutate on fire.
+  -- Order matches applyRandomize's switch in DrumVoice.cpp.
+  op:setTopLevelBias(0, character:getParameter("Bias"))
+  op:setTopLevelBias(1, shape:getParameter("Bias"))
+  op:setTopLevelBias(2, grit:getParameter("Bias"))
+  op:setTopLevelBias(3, punch:getParameter("Bias"))
+  op:setTopLevelBias(4, sweep:getParameter("Bias"))
+  op:setTopLevelBias(5, sweepTime:getParameter("Bias"))
+  op:setTopLevelBias(6, attack:getParameter("Bias"))
+  op:setTopLevelBias(7, hold:getParameter("Bias"))
+  op:setTopLevelBias(8, decay:getParameter("Bias"))
 
   local characterRange = self:addObject("characterRange", app.MinMax())
   local sweepRange     = self:addObject("sweepRange",     app.MinMax())
@@ -127,6 +145,7 @@ function DrumVoice:onLoadGraph(channelCount)
   self:addMonoBranch("level",     level,     "In", level,     "Out")
   self:addMonoBranch("makeup",    makeup,    "In", makeup,    "Out")
   self:addMonoBranch("octave",    octave,    "In", octave,    "Out")
+  self:addMonoBranch("xformTrig", xformTrig, "In", xformTrig, "Out")
   self:addMonoBranch("depth",     depth,     "In", depth,     "Out")
   self:addMonoBranch("spread",    spread,    "In", spread,    "Out")
 end
@@ -233,14 +252,11 @@ function DrumVoice:onLoadViews(objects, branches)
     xform = DrumVoiceRandomGateControl {
       button = "xform",
       description = "Randomize",
+      branch = branches.xformTrig,
+      comparator = objects.xformTrig,
+      op = objects.op,
       depthParam = objects.depth:getParameter("Bias"),
-      spreadParam = objects.spread:getParameter("Bias"),
-      fire = function()
-        self:randomize(
-          objects.depth:getParameter("Bias"):target(),
-          objects.spread:getParameter("Bias"):target()
-        )
-      end
+      spreadParam = objects.spread:getParameter("Bias")
     },
     level = DrumVoiceLevelControl {
       button = "level",
@@ -349,41 +365,6 @@ local adapterBiases = {
   "attack", "hold", "decay", "clipper", "eq", "level", "makeup", "octave",
   "depth", "spread"
 }
-
-local function randomizeValue(cur, min, max, depth, spread)
-  local range = max - min
-  local center = spread * (min + max) * 0.5 + (1 - spread) * cur
-  local dev = depth * range * 0.5
-  local r = math.random() * 2 - 1
-  local v = center + r * dev
-  if v < min then v = min end
-  if v > max then v = max end
-  return v
-end
-
--- Params safe to randomize: tone-shaping + envelope. Excludes user-intent
--- params (Pitch/Octave) and output chain (Clipper/EQ/Level/Makeup).
-local randomizeTargets = {
-  { "character", 0.0,   1.0  },
-  { "shape",     0.0,   1.0  },
-  { "grit",      0.0,   1.0  },
-  { "punch",     0.0,   1.0  },
-  { "sweep",     0.0,   72.0 },
-  { "sweepTime", 0.001, 0.5  },
-  { "attack",    0.0,   0.05 },
-  { "hold",      0.0,   0.5  },
-  { "decay",     0.01,  5.0  }
-}
-
-function DrumVoice:randomize(depth, spread)
-  for _, t in ipairs(randomizeTargets) do
-    local obj = self.objects[t[1]]
-    if obj then
-      local cur = obj:getParameter("Bias"):target()
-      obj:hardSet("Bias", randomizeValue(cur, t[2], t[3], depth, spread))
-    end
-  end
-end
 
 function DrumVoice:serialize()
   local t = Unit.serialize(self)

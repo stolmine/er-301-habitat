@@ -19,11 +19,15 @@ namespace stolmine
     float getEnvLevel();
     bool getGateState();
 
+    void fireRandomize();
+    void setTopLevelBias(int which, od::Parameter *param);
+
 #ifndef SWIGLUA
     virtual void process();
 
     od::Inlet mTrigger{"Trigger"};
     od::Inlet mVOct{"V/Oct"};
+    od::Inlet mXformGate{"XformGate"};
     od::Outlet mOut{"Out"};
 
     od::Parameter mCharacter{"Character", 0.5f};
@@ -40,9 +44,27 @@ namespace stolmine
     od::Parameter mLevel{"Level", 0.8f};
     od::Parameter mMakeup{"Makeup", 0.0f};
     od::Parameter mOctave{"Octave", 0.0f};
+    od::Parameter mXformDepth{"XformDepth", 0.3f};
+    od::Parameter mXformSpread{"XformSpread", 0.5f};
 #endif
 
   private:
+    void applyRandomize();
+
+    bool mXformGateWasHigh = false;
+    bool mManualFire = false;
+
+    // Registered via setTopLevelBias; the randomize function mutates these.
+    od::Parameter *mBiasCharacter = nullptr;
+    od::Parameter *mBiasShape = nullptr;
+    od::Parameter *mBiasGrit = nullptr;
+    od::Parameter *mBiasPunch = nullptr;
+    od::Parameter *mBiasSweep = nullptr;
+    od::Parameter *mBiasSweepTime = nullptr;
+    od::Parameter *mBiasAttack = nullptr;
+    od::Parameter *mBiasHold = nullptr;
+    od::Parameter *mBiasDecay = nullptr;
+
     struct Internal;
     Internal *mpInternal;
   };

@@ -81,6 +81,7 @@ namespace stolmine
   {
     addInput(mTrigger);
     addInput(mVOct);
+    addInput(mXformGate);
     addOutput(mOut);
     addParameter(mCharacter);
     addParameter(mShape);
@@ -96,6 +97,8 @@ namespace stolmine
     addParameter(mLevel);
     addParameter(mMakeup);
     addParameter(mOctave);
+    addParameter(mXformDepth);
+    addParameter(mXformSpread);
     mpInternal = new Internal();
     mpInternal->initLUT();
   }
@@ -111,11 +114,64 @@ namespace stolmine
   float DrumVoice::getEnvLevel()  { return mpInternal->vizEnvLevel; }
   bool  DrumVoice::getGateState() { return mpInternal->vizGateState; }
 
+  void DrumVoice::fireRandomize() { mManualFire = true; }
+
+  void DrumVoice::setTopLevelBias(int which, od::Parameter *param)
+  {
+    switch (which)
+    {
+    case 0: mBiasCharacter  = param; break;
+    case 1: mBiasShape      = param; break;
+    case 2: mBiasGrit       = param; break;
+    case 3: mBiasPunch      = param; break;
+    case 4: mBiasSweep      = param; break;
+    case 5: mBiasSweepTime  = param; break;
+    case 6: mBiasAttack     = param; break;
+    case 7: mBiasHold       = param; break;
+    case 8: mBiasDecay      = param; break;
+    }
+  }
+
+  // spread: 0 = stay near current value, 1 = recenter toward range midpoint.
+  // depth: scales the random perturbation magnitude (0..1).
+  static float randomizeValue(float cur, float mn, float mx, float depth, float spread)
+  {
+    float range = mx - mn;
+    float center = spread * (mn + mx) * 0.5f + (1.0f - spread) * cur;
+    float dev = depth * range * 0.5f;
+    float r = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f;
+    float v = center + r * dev;
+    if (v < mn) v = mn;
+    if (v > mx) v = mx;
+    return v;
+  }
+
+  void DrumVoice::applyRandomize()
+  {
+    float depth  = CLAMP(0.0f, 1.0f, mXformDepth.value());
+    float spread = CLAMP(0.0f, 1.0f, mXformSpread.value());
+
+    auto rnd = [&](od::Parameter *p, float mn, float mx) {
+      if (p) p->hardSet(randomizeValue(p->value(), mn, mx, depth, spread));
+    };
+
+    rnd(mBiasCharacter,  0.0f,   1.0f);
+    rnd(mBiasShape,      0.0f,   1.0f);
+    rnd(mBiasGrit,       0.0f,   1.0f);
+    rnd(mBiasPunch,      0.0f,   1.0f);
+    rnd(mBiasSweep,      0.0f,   72.0f);
+    rnd(mBiasSweepTime,  0.001f, 0.5f);
+    rnd(mBiasAttack,     0.0f,   0.05f);
+    rnd(mBiasHold,       0.0f,   0.5f);
+    rnd(mBiasDecay,      0.01f,  5.0f);
+  }
+
   void DrumVoice::process()
   {
     Internal &s = *mpInternal;
     float *trig = mTrigger.buffer();
     float *voct = mVOct.buffer();
+    float *xgate = mXformGate.buffer();
     float *out  = mOut.buffer();
 
     float sr = globalConfig.sampleRate;
@@ -170,6 +226,18 @@ namespace stolmine
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
+      // Xform gate: rising edge on CV input OR manual fire flag -> apply
+      // randomize. Done at the top so the perturbation lands on the same
+      // block as any coincident trigger rising edge below.
+      bool xformHigh = xgate[i] > 0.0f;
+      bool xformRise = xformHigh && !mXformGateWasHigh;
+      mXformGateWasHigh = xformHigh;
+      if (xformRise || mManualFire)
+      {
+        applyRandomize();
+        mManualFire = false;
+      }
+
       // Trigger detection: rising edge
       float trigVal = trig[i];
       if (trigVal > 0.1f && s.prevTrigger <= 0.1f)
