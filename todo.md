@@ -629,7 +629,14 @@ Spreadsheet unit. Single-voice drum synth with sine/triangle core, pitch-sweep e
 - [ ] Sound profiling and default tuning. Starting defaults adjusted in commit `06924eb` (Punch 0.3->0.4, Sweep 12->18, SweepTime 0.03->0.04, Decay 0.2->0.25). Per-drum preset library (kick/snare/hat/tom) deferred -- follow-up after hardware listen.
 - [x] xform gate ply. Commit `e87f97a`. Lua-only randomize with depth/spread/fire. Targets Character/Shape/Grit/Punch/Sweep/SweepTime/Attack/Hold/Decay; preserves user-intent params (Pitch/Octave/Clipper/EQ/Level/Makeup). New DrumVoiceRandomGateControl Pattern B control. Sub3 press-to-fire; CV trigger input deferred (would need C++ rising-edge → Lua dispatch).
 - [ ] Bias/mod-input range audit (cross-cutting -- see ## Controls Audit). Ngoma's Sweep/SweepTime/Decay/Hold/Attack adapter Gains now set proportionally in commit `eab4e98` (Sweep 72, SweepTime 0.5, Decay 5, Hold 0.5, Attack 0.05) so 1V CV sweeps each full range. Repo-wide audit still pending.
-- [x] Package version bump. Spreadsheet 2.4.2 → 2.5.0 in commit (below).
+- [x] Package version bump. Spreadsheet 2.4.2 → 2.5.0, then 2.5.1 after xform + DSP tuning pass.
+
+### Follow-ups from 2026-04-23 DSP tuning pass
+
+- [ ] Oversample the oscillator section. User flagged as tentative ("we may need"). Current osc runs at SR; Character fold at gain 4 + Shape FM at depth 2 + Grit FM can push the tone oscillator's instantaneous frequency high enough to alias at drum frequencies > ~500Hz. Candidate: 2x oversample just for the osc + fold stages (similar to Helicase hi-fi mode), with a halfband decimator on the way out. Defer until listening confirms audible aliasing.
+- [ ] Grit stage characterization. User observed "first 60% is 808-style clang, last 30% is noise-FM'd by carrier osc". Current Grit does hybrid FM-noise-into-phase-increment + post-osc direct noise mix, both scaled linearly by grit, with amp-envelope shortening above 0.75. Consider cleaner staging: first half pure FM (no direct noise), second half crossfade in direct noise + shortened envelope. Only if the current feel isn't working musically.
+- [x] Shape FM depth deeper. Repurposed from mix-in-overlay to true phase FM on osc1 driven by osc2 (shape²·shapeEnv·2 modulation index, max ≈ 2 for octave-up-through-FM sidebands). Osc2 computed first then injected into osc1 phase. Dropped the `+ shape * shapeSample * shapeEnv` mix.
+- [x] Clipper replaced with simple tanhf + gain compensation. Drive range reduced from 1..100x (10^(clipper*2)) to 1..10x linear (1 + clipper*9). Output divided by tanh(drive) so loudness stays near unity across the drive range. `tanhRational` helper removed (unused after the swap).
 
 ## Gridlock (Priority Gate Router)
 

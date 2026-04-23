@@ -7,14 +7,6 @@
 namespace stolmine
 {
 
-  static inline float tanhRational(float x)
-  {
-    if (x > 3.0f) return 1.0f;
-    if (x < -3.0f) return -1.0f;
-    float x2 = x * x;
-    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
-  }
-
   static inline float lookupSine(const float *lut, float tri)
   {
     float absTri = fabsf(tri);
@@ -202,9 +194,12 @@ namespace stolmine
     float baseFreq = 110.0f * powf(2.0f, pitch);
     baseFreq = CLAMP(10.0f, sr * 0.49f, baseFreq);
 
-    // Clipper drive (block-rate)
-    float driveLinear = (clipper > 0.01f) ? powf(10.0f, clipper * 2.0f) : 0.0f;
-    float driveNorm   = (driveLinear > 0.0f) ? tanhRational(driveLinear) : 1.0f;
+    // Clipper drive (block-rate). Simple tanh with moderate 1..10x range
+    // and gain compensation (divide by tanh(drive)) so output amplitude
+    // stays near unity as drive increases.
+    bool clipperActive = clipper > 0.001f;
+    float driveLinear = clipperActive ? (1.0f + clipper * 9.0f) : 1.0f;
+    float driveNorm   = clipperActive ? tanhf(driveLinear) : 1.0f;
 
     // DJ filter coefficients (block-rate). EQ is bipolar: -1..0 = LP,
     // 0 = bypass, 0..+1 = HP. Magnitude drives cutoff sweep.
@@ -293,43 +288,14 @@ namespace stolmine
       // Pitch droop: +1.5% at onset, decays with amplitude
       float droopFreq = s.currentFreq * (1.0f + s.ampEnv * 0.015f);
 
-      // Phase accumulate
-      float inc1 = droopFreq / sr;
+      // === Osc2 (modulator) first ===
+      // Small detune so shape != 0 produces a subtle chorus beat on top
+      // of the FM; at shape = 0 both oscillators run at the same pitch.
       float inc2 = droopFreq * (1.0f + shape * 0.0058f) / sr;
-
-      // FM noise into phase increment
-      if (grit > 0.0f)
-      {
-        s.noiseState = s.noiseState * 1664525u + 1013904223u;
-        float noise = (float)(int32_t)s.noiseState / 2147483648.0f;
-        float fmDev = grit * grit * 500.0f * s.ampEnv;
-        inc1 += noise * fmDev / sr;
-      }
-
-      s.phase1 += inc1;
-      s.phase1 -= floorf(s.phase1);
       s.phase2 += inc2;
       s.phase2 -= floorf(s.phase2);
 
-      // Triangle generation
-      float tri1 = 4.0f * (s.phase1 < 0.5f ? s.phase1 : 1.0f - s.phase1) - 1.0f;
       float tri2 = 4.0f * (s.phase2 < 0.5f ? s.phase2 : 1.0f - s.phase2) - 1.0f;
-
-      // Character morph for tone osc
-      float toneSample;
-      if (character < 0.5f)
-      {
-        float t = character * 2.0f;
-        float sine1 = lookupSine(s.sLUT, tri1);
-        toneSample = tri1 + (sine1 - tri1) * t;
-      }
-      else
-      {
-        float foldGain = 1.0f + (character - 0.5f) * 2.0f * 3.0f;
-        toneSample = lookupSine(s.sLUT, tri1 * foldGain);
-      }
-
-      // Shape osc with same character
       float shapeSample;
       if (character < 0.5f)
       {
@@ -343,8 +309,45 @@ namespace stolmine
         shapeSample = lookupSine(s.sLUT, tri2 * foldGain);
       }
 
-      // Mix tone + shape osc
-      float sample = toneSample + shape * shapeSample * s.shapeEnv;
+      // === Osc1 (carrier) with Shape FM + Grit FM ===
+      float inc1 = droopFreq / sr;
+
+      // Shape FM: deep phase modulation of osc1 by shape-shaped osc2.
+      // At shape = 1 (with shapeEnv = 1), modulation index ~ 2 -- sidebands
+      // broad enough to perceive octave-up character from extreme FM.
+      // Scales with shape^2 for musical response and with shapeEnv so the
+      // effect decays with the voice.
+      float shapeFmDepth = shape * shape * s.shapeEnv * 2.0f;
+      inc1 += shapeSample * shapeFmDepth * droopFreq / sr;
+
+      // Grit FM: noise modulation of osc1's phase increment.
+      if (grit > 0.0f)
+      {
+        s.noiseState = s.noiseState * 1664525u + 1013904223u;
+        float noise = (float)(int32_t)s.noiseState / 2147483648.0f;
+        float fmDev = grit * grit * 500.0f * s.ampEnv;
+        inc1 += noise * fmDev / sr;
+      }
+
+      s.phase1 += inc1;
+      s.phase1 -= floorf(s.phase1);
+
+      float tri1 = 4.0f * (s.phase1 < 0.5f ? s.phase1 : 1.0f - s.phase1) - 1.0f;
+      float toneSample;
+      if (character < 0.5f)
+      {
+        float t = character * 2.0f;
+        float sine1 = lookupSine(s.sLUT, tri1);
+        toneSample = tri1 + (sine1 - tri1) * t;
+      }
+      else
+      {
+        float foldGain = 1.0f + (character - 0.5f) * 2.0f * 3.0f;
+        toneSample = lookupSine(s.sLUT, tri1 * foldGain);
+      }
+
+      // Carrier only -- Shape's contribution is already imprinted via FM.
+      float sample = toneSample;
 
       // Direct noise mix into signal
       if (grit > 0.0f)
@@ -394,9 +397,9 @@ namespace stolmine
       s.punchEnv *= s.punchDecayCoeff;
       if (s.punchEnv < 1e-5f) s.punchEnv = 0.0f;
 
-      // Clipper
-      if (driveLinear > 0.0f)
-        sample = tanhRational(sample * driveLinear) / driveNorm;
+      // Clipper: simple tanh with gain compensation.
+      if (clipperActive)
+        sample = tanhf(sample * driveLinear) / driveNorm;
 
       // DJ filter (TPT SVF, Cytomic formulation)
       if (filterActive)
