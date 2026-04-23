@@ -42,7 +42,7 @@ namespace stolmine
     od::Parameter mClipper{"Clipper", 0.0f};
     od::Parameter mEQ{"EQ", 0.0f};
     od::Parameter mLevel{"Level", 0.8f};
-    od::Parameter mMakeup{"Makeup", 0.0f};
+    od::Parameter mCompAmt{"CompAmt", 0.0f};
     od::Parameter mOctave{"Octave", 0.0f};
     od::Parameter mXformDepth{"XformDepth", 0.3f};
     od::Parameter mXformSpread{"XformSpread", 0.5f};
@@ -62,6 +62,13 @@ namespace stolmine
     od::Parameter *mBiasAttack = nullptr;
     od::Parameter *mBiasHold = nullptr;
     od::Parameter *mBiasDecay = nullptr;
+    od::Parameter *mBiasSweep = nullptr;
+    od::Parameter *mBiasSweepTime = nullptr;
+    od::Parameter *mBiasClipper = nullptr;
+    od::Parameter *mBiasEQ = nullptr;
+    od::Parameter *mBiasLevel = nullptr;
+    od::Parameter *mBiasComp = nullptr;
+    od::Parameter *mBiasOctave = nullptr;
 
     struct Internal;
     Internal *mpInternal;

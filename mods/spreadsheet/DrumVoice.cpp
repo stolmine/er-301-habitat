@@ -12,6 +12,25 @@ namespace stolmine
     return x * (27.0f + x2) / (27.0f + 9.0f * x2);
   }
 
+  // IEEE 754 fast log2 / exp2 / dB helpers (from Larets/Parfait).
+  static inline float fast_log2(float x)
+  {
+    union { float f; int32_t i; } v;
+    v.f = x;
+    float y = (float)(v.i);
+    y *= 1.0f / (1 << 23);
+    y -= 127.0f;
+    return y;
+  }
+  static inline float fast_exp2(float x)
+  {
+    union { float f; int32_t i; } v;
+    v.i = (int32_t)((x + 127.0f) * (1 << 23));
+    return v.f;
+  }
+  static inline float fast_log10(float x) { return fast_log2(x) * 0.30103f; }
+  static inline float fast_fromDb(float db) { return fast_exp2(db * 0.16609640474f); }
+
   static inline float lookupSine(const float *lut, float tri)
   {
     float absTri = fabsf(tri);
@@ -52,6 +71,8 @@ namespace stolmine
 
     float ic1eq = 0.0f;
     float ic2eq = 0.0f;
+
+    float compDetector = 0.0f;
 
     float prevTrigger = 0.0f;
 
@@ -94,7 +115,7 @@ namespace stolmine
     addParameter(mClipper);
     addParameter(mEQ);
     addParameter(mLevel);
-    addParameter(mMakeup);
+    addParameter(mCompAmt);
     addParameter(mOctave);
     addParameter(mXformDepth);
     addParameter(mXformSpread);
@@ -119,13 +140,20 @@ namespace stolmine
   {
     switch (which)
     {
-    case 0: mBiasCharacter  = param; break;
-    case 1: mBiasShape      = param; break;
-    case 2: mBiasGrit       = param; break;
-    case 3: mBiasPunch      = param; break;
-    case 4: mBiasAttack     = param; break;
-    case 5: mBiasHold       = param; break;
-    case 6: mBiasDecay      = param; break;
+    case 0:  mBiasCharacter = param; break;
+    case 1:  mBiasShape     = param; break;
+    case 2:  mBiasGrit      = param; break;
+    case 3:  mBiasPunch     = param; break;
+    case 4:  mBiasAttack    = param; break;
+    case 5:  mBiasHold      = param; break;
+    case 6:  mBiasDecay     = param; break;
+    case 7:  mBiasSweep     = param; break;
+    case 8:  mBiasSweepTime = param; break;
+    case 9:  mBiasClipper   = param; break;
+    case 10: mBiasEQ        = param; break;
+    case 11: mBiasLevel     = param; break;
+    case 12: mBiasComp      = param; break;
+    case 13: mBiasOctave    = param; break;
     }
   }
 
@@ -152,6 +180,9 @@ namespace stolmine
     auto rnd = [&](od::Parameter *p, float mn, float mx) {
       if (p) p->hardSet(randomizeValue(p->value(), mn, mx, depth, spread));
     };
+    auto rndInt = [&](od::Parameter *p, float mn, float mx) {
+      if (p) p->hardSet(floorf(randomizeValue(p->value(), mn, mx, depth, spread) + 0.5f));
+    };
 
     rnd(mBiasCharacter,  0.0f,   1.0f);
     rnd(mBiasShape,      0.0f,   1.0f);
@@ -160,6 +191,13 @@ namespace stolmine
     rnd(mBiasAttack,     0.0f,   0.05f);
     rnd(mBiasHold,       0.0f,   0.5f);
     rnd(mBiasDecay,      0.01f,  5.0f);
+    rnd(mBiasSweep,      0.0f,   72.0f);
+    rnd(mBiasSweepTime,  0.001f, 0.5f);
+    rnd(mBiasClipper,    0.0f,   1.0f);
+    rnd(mBiasEQ,        -1.0f,   1.0f);
+    rnd(mBiasLevel,      0.0f,   1.0f);
+    rnd(mBiasComp,       0.0f,   1.0f);
+    rndInt(mBiasOctave, -4.0f,   4.0f);
   }
 
   void DrumVoice::process()
@@ -184,8 +222,20 @@ namespace stolmine
     float clipper   = CLAMP(0.0f, 1.0f, mClipper.value());
     float eq        = CLAMP(-1.0f, 1.0f, mEQ.value());
     float level     = CLAMP(0.0f, 1.0f, mLevel.value());
-    float makeup    = CLAMP(0.0f, 1.0f, mMakeup.value());
-    float makeupGain = powf(10.0f, makeup * 6.0f / 20.0f);
+    float compAmt   = CLAMP(0.0f, 1.0f, mCompAmt.value());
+    bool compActive = compAmt > 0.001f;
+
+    // CPR single-band one-knob comp (matches Larets pattern). Auto makeup
+    // is always on so the user gets compensated loudness as they push.
+    float compThresholdDb = -compAmt * 40.0f;            // 0 dB -> -40 dB
+    float compRatioI      = 1.0f / (1.0f + compAmt * 19.0f); // 1:1 -> 20:1
+    float compAttackSec   = 0.010f - compAmt * 0.009f;   // 10 ms -> 1 ms
+    float compReleaseSec  = 0.200f;
+    float compRiseCoeff   = expf(-1.0f / (compAttackSec * sr));
+    float compFallCoeff   = expf(-1.0f / (compReleaseSec * sr));
+    float compMakeupGain  = compActive
+        ? fast_fromDb(-compThresholdDb * (1.0f - compRatioI))
+        : 1.0f;
 
     s.cachedCharacter = character;
     s.cachedShape = shape;
@@ -305,11 +355,18 @@ namespace stolmine
       float sr2 = sr * 2.0f;
       float foldGain = 1.0f + (character > 0.5f ? (character - 0.5f) * 2.0f * 6.0f : 0.0f);
       float tMorph   = character < 0.5f ? character * 2.0f : 0.0f;
-      float shapeFmDepth   = shape * shape * s.shapeEnv * 2.0f;
+      // Shape FM ceiling raised 2.0 -> 6.0 so the fader reaches modulation
+      // index ~6 at max -- 3x deeper than the prior tuning, hits hard FM
+      // territory without needing extra range on the knob.
+      float shapeFmDepth   = shape * shape * s.shapeEnv * 6.0f;
       if (grit > 0.5f)
         shapeFmDepth += (grit - 0.5f) * 2.0f * shape * 0.5f;
-      float metFmDepth     = grit * 3.0f * s.ampEnv;
-      float gritNoiseFmDev = grit * grit * 2000.0f * s.ampEnv;
+
+      // Grit taming: lower FM and noise-FM ceilings (3 -> 2 and 2000 -> 1000)
+      // so high grit no longer blows the output up. The tail of the chain
+      // also applies a gritGainComp to walk loudness back further.
+      float metFmDepth     = grit * 2.0f * s.ampEnv;
+      float gritNoiseFmDev = grit * grit * 1000.0f * s.ampEnv;
       if (character > 0.7f)
         gritNoiseFmDev += (character - 0.7f) * 3.3f * grit * 500.0f;
 
@@ -375,15 +432,20 @@ namespace stolmine
       float sample = 0.5f * (osSamp[0] + osSamp[1]);
 
       // Direct noise mix: kicks in above grit = 0.4 and climbs toward
-      // snare / hat territory at grit = 1.0. Stays at sr rate since
-      // broadband noise aliases to broadband noise regardless.
-      float gritNoiseGain = (grit - 0.4f) * 1.5f * s.ampEnv;
+      // snare / hat territory at grit = 1.0. Tamed from 1.5x slope to 1.0x
+      // peak (~0.6 max) so high grit doesn't dominate the output.
+      float gritNoiseGain = (grit - 0.4f) * 1.0f * s.ampEnv;
       if (gritNoiseGain > 0.0f)
       {
         s.noiseState = s.noiseState * 1664525u + 1013904223u;
         float noiseSig = (float)(int32_t)s.noiseState / 2147483648.0f;
         sample += noiseSig * gritNoiseGain;
       }
+
+      // Gain compensation for the combined Grit contributions (FM index +
+      // metallic FM + noise mix). At grit = 1, drop the sample 30% so the
+      // clipper doesn't immediately slam into saturation.
+      sample *= (1.0f - grit * 0.3f);
 
       // Amp envelope state machine
       switch (s.envPhase)
@@ -408,10 +470,18 @@ namespace stolmine
         s.shapeEnv *= s.shapeDecayCoeff;
         if (s.ampEnv < 1e-5f)
         {
+          // Hard reset of every internal envelope and downstream tail
+          // state when the main amp envelope ends. Ensures nothing
+          // (punch tail, SVF ringing, comp detector) sneaks past the
+          // main amp env. Per the "amp env governs everything" rule.
           s.ampEnv = 0.0f;
           s.shapeEnv = 0.0f;
+          s.punchEnv = 0.0f;
           s.envPhase = 0;
           s.vizGateState = false;
+          s.ic1eq = 0.0f;
+          s.ic2eq = 0.0f;
+          s.compDetector = 0.0f;
         }
         break;
       default: // idle
@@ -442,7 +512,21 @@ namespace stolmine
         sample = sample * (1.0f - absEqCut) + wet * absEqCut;
       }
 
-      out[i] = sample * level * makeupGain;
+      // CPR single-band one-knob comp (replaces Makeup). Auto makeup
+      // built in. Bypassed when compAmt < 0.001.
+      if (compActive)
+      {
+        float absLevel = sample < 0.0f ? -sample : sample;
+        float coeff = absLevel > s.compDetector ? compRiseCoeff : compFallCoeff;
+        s.compDetector = coeff * s.compDetector + (1.0f - coeff) * absLevel;
+        float levelDb = 20.0f * fast_log10(s.compDetector + 1e-10f);
+        float overDb = levelDb - compThresholdDb;
+        if (overDb < 0.0f) overDb = 0.0f;
+        float reductionDb = overDb * (1.0f - compRatioI);
+        sample *= fast_fromDb(-reductionDb) * compMakeupGain;
+      }
+
+      out[i] = sample * level;
     }
 
     s.vizEnvLevel = s.ampEnv;

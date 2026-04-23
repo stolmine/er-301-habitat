@@ -19,7 +19,7 @@ function DrumVoiceLevelControl:init(args)
   self.normalSubGraphic = self.subGraphic
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  local desc = app.Label("Clipper / EQ / Mkup", 10)
+  local desc = app.Label("Clipper / EQ / Comp", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
@@ -31,8 +31,8 @@ function DrumVoiceLevelControl:init(args)
   clipMap:setSteps(0.1, 0.01, 0.001, 0.001)
   local eqMap = app.LinearDialMap(-1, 1)
   eqMap:setSteps(0.1, 0.01, 0.001, 0.001)
-  local makeupMap = app.LinearDialMap(0, 1)
-  makeupMap:setSteps(0.1, 0.01, 0.001, 0.001)
+  local compMap = app.LinearDialMap(0, 1)
+  compMap:setSteps(0.1, 0.01, 0.001, 0.001)
 
   self.clipperReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
@@ -52,10 +52,10 @@ function DrumVoiceLevelControl:init(args)
     return g
   end)()
 
-  self.makeupReadout = (function()
+  self.compReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
-    g:setParameter(args.makeupParam)
-    g:setAttributes(app.unitNone, makeupMap)
+    g:setParameter(args.compParam)
+    g:setAttributes(app.unitNone, compMap)
     g:setPrecision(2)
     g:setCenter(col3, center4)
     return g
@@ -64,10 +64,10 @@ function DrumVoiceLevelControl:init(args)
   local sg = self.paramSubGraphic
   sg:addChild(self.clipperReadout)
   sg:addChild(self.eqReadout)
-  sg:addChild(self.makeupReadout)
+  sg:addChild(self.compReadout)
   sg:addChild(app.SubButton("clip", 1))
   sg:addChild(app.SubButton("eq", 2))
-  sg:addChild(app.SubButton("mkup", 3))
+  sg:addChild(app.SubButton("comp", 3))
 end
 
 function DrumVoiceLevelControl:setParamMode(enabled)
@@ -111,8 +111,8 @@ end
 
 function DrumVoiceLevelControl:subReleased(i, shifted)
   if self.paramMode then
-    local rs = { self.clipperReadout, self.eqReadout, self.makeupReadout }
-    local ls = { "clipper", "eq", "makeup" }
+    local rs = { self.clipperReadout, self.eqReadout, self.compReadout }
+    local ls = { "clipper", "eq", "comp" }
     local r = rs[i]
     if r then
       if shifted then ShiftHelpers.openKeyboardFor(r, ls[i])

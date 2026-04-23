@@ -55,7 +55,7 @@ function DrumVoice:onLoadGraph(channelCount)
   local clipper    = self:addObject("clipper",    app.ParameterAdapter())
   local eq         = self:addObject("eq",         app.ParameterAdapter())
   local level      = self:addObject("level",      app.ParameterAdapter())
-  local makeup     = self:addObject("makeup",     app.ParameterAdapter())
+  local compAmt    = self:addObject("compAmt",    app.ParameterAdapter())
   local octave     = self:addObject("octave",     app.ParameterAdapter())
   local depth      = self:addObject("depth",      app.ParameterAdapter())
   local spread     = self:addObject("spread",     app.ParameterAdapter())
@@ -72,7 +72,7 @@ function DrumVoice:onLoadGraph(channelCount)
   clipper:hardSet("Bias", 0.0)
   eq:hardSet("Bias", 0.0)
   level:hardSet("Bias", 0.8)
-  makeup:hardSet("Bias", 0.0)
+  compAmt:hardSet("Bias", 0.0)
   octave:hardSet("Bias", 0.0)
   depth:hardSet("Bias", 0.3)
   spread:hardSet("Bias", 0.5)
@@ -98,20 +98,29 @@ function DrumVoice:onLoadGraph(channelCount)
   tie(op, "Clipper",   clipper,   "Out")
   tie(op, "EQ",        eq,        "Out")
   tie(op, "Level",     level,     "Out")
-  tie(op, "Makeup",    makeup,    "Out")
+  tie(op, "CompAmt",   compAmt,   "Out")
   tie(op, "Octave",    octave,    "Out")
   tie(op, "XformDepth",  depth,  "Out")
   tie(op, "XformSpread", spread, "Out")
 
-  -- Register the ParameterAdapter Biases the C++ op should mutate on fire.
-  -- Order matches applyRandomize's switch in DrumVoice.cpp.
-  op:setTopLevelBias(0, character:getParameter("Bias"))
-  op:setTopLevelBias(1, shape:getParameter("Bias"))
-  op:setTopLevelBias(2, grit:getParameter("Bias"))
-  op:setTopLevelBias(3, punch:getParameter("Bias"))
-  op:setTopLevelBias(4, attack:getParameter("Bias"))
-  op:setTopLevelBias(5, hold:getParameter("Bias"))
-  op:setTopLevelBias(6, decay:getParameter("Bias"))
+  -- Register every top-level Bias the C++ op should mutate on randomize.
+  -- Indices match the switch in applyRandomize. User asked to open
+  -- everything to xform; downstream chain (Clipper/EQ/Level/Comp) and
+  -- Sweep/SweepTime/Octave are now in the set.
+  op:setTopLevelBias(0,  character:getParameter("Bias"))
+  op:setTopLevelBias(1,  shape:getParameter("Bias"))
+  op:setTopLevelBias(2,  grit:getParameter("Bias"))
+  op:setTopLevelBias(3,  punch:getParameter("Bias"))
+  op:setTopLevelBias(4,  attack:getParameter("Bias"))
+  op:setTopLevelBias(5,  hold:getParameter("Bias"))
+  op:setTopLevelBias(6,  decay:getParameter("Bias"))
+  op:setTopLevelBias(7,  sweep:getParameter("Bias"))
+  op:setTopLevelBias(8,  sweepTime:getParameter("Bias"))
+  op:setTopLevelBias(9,  clipper:getParameter("Bias"))
+  op:setTopLevelBias(10, eq:getParameter("Bias"))
+  op:setTopLevelBias(11, level:getParameter("Bias"))
+  op:setTopLevelBias(12, compAmt:getParameter("Bias"))
+  op:setTopLevelBias(13, octave:getParameter("Bias"))
 
   local characterRange = self:addObject("characterRange", app.MinMax())
   local sweepRange     = self:addObject("sweepRange",     app.MinMax())
@@ -141,7 +150,7 @@ function DrumVoice:onLoadGraph(channelCount)
   self:addMonoBranch("clipper",   clipper,   "In", clipper,   "Out")
   self:addMonoBranch("eq",        eq,        "In", eq,        "Out")
   self:addMonoBranch("level",     level,     "In", level,     "Out")
-  self:addMonoBranch("makeup",    makeup,    "In", makeup,    "Out")
+  self:addMonoBranch("compAmt",   compAmt,   "In", compAmt,   "Out")
   self:addMonoBranch("octave",    octave,    "In", octave,    "Out")
   self:addMonoBranch("xformTrig", xformTrig, "In", xformTrig, "Out")
   self:addMonoBranch("depth",     depth,     "In", depth,     "Out")
@@ -268,7 +277,7 @@ function DrumVoice:onLoadViews(objects, branches)
       initialBias = 0.8,
       clipperParam = objects.clipper:getParameter("Bias"),
       eqParam = objects.eq:getParameter("Bias"),
-      makeupParam = objects.makeup:getParameter("Bias")
+      compParam = objects.compAmt:getParameter("Bias")
     },
 
     -- Auxiliary controls for expanded view: expose sub-display params at
@@ -322,9 +331,9 @@ function DrumVoice:onLoadViews(objects, branches)
       biasMap = eqBipolarMap, biasUnits = app.unitNone,
       biasPrecision = 2, initialBias = 0.0
     },
-    levelMakeup = GainBias {
-      button = "mkup", description = "Makeup",
-      branch = branches.makeup, gainbias = objects.makeup, range = objects.makeup,
+    levelComp = GainBias {
+      button = "comp", description = "Compressor",
+      branch = branches.compAmt, gainbias = objects.compAmt, range = objects.compAmt,
       biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
       biasPrecision = 2, initialBias = 0.0
     },
@@ -353,20 +362,20 @@ function DrumVoice:onLoadViews(objects, branches)
     sweep     = { "sweep", "sweepTime" },
     decay     = { "decay", "decayHold", "decayAttack" },
     xform     = { "xform", "xformDepth", "xformSpread" },
-    level     = { "level", "levelClipper", "levelEQ", "levelMakeup" },
+    level     = { "level", "levelClipper", "levelEQ", "levelComp" },
     collapsed = {}
   }
 end
 
 local adapterBiases = {
   "character", "shape", "grit", "punch", "sweep", "sweepTime",
-  "attack", "hold", "decay", "clipper", "eq", "level", "makeup", "octave",
+  "attack", "hold", "decay", "clipper", "eq", "level", "compAmt", "octave",
   "depth", "spread"
 }
 
 function DrumVoice:serialize()
   local t = Unit.serialize(self)
-  t.schema = 2 -- schema 2 = EQ is bipolar -1..1
+  t.schema = 3 -- schema 3 = Makeup replaced with one-knob CompAmt
   for _, name in ipairs(adapterBiases) do
     local obj = self.objects[name]
     if obj then
@@ -389,6 +398,10 @@ function DrumVoice:deserialize(t)
   if t.schema == nil and t.eq ~= nil and t.eq >= 0.0 and t.eq <= 1.0 then
     t.eq = (t.eq - 0.5) * 2.0
   end
+  -- Migration from schema 1 / 2 (pre-comp): Makeup is gone; legacy t.makeup
+  -- is silently dropped, compAmt defaults to 0 via the hardSet at init.
+  -- Saved CV bindings against the makeup branch will fail to resolve and
+  -- produce a log warning; user can re-bind to the compAmt branch.
 
   Unit.deserialize(self, t)
   for _, name in ipairs(adapterBiases) do

@@ -654,9 +654,17 @@ Viz (DrumCubeGraphic):
 
 Sound tuning (second pass):
 
-- [ ] Parameters need more intertwining / emergent combinations. On hardware the user gets a huge variety of percussion sounds from randomize hits because the parameter combinations produce emergent states. In Ngoma today the axes feel too orthogonal -- each param changes its own thing, combinations sound predictable. Candidate cross-couplings to try: Grit ↔ Shape FM (high grit boosts shapeFmDepth so metallic FM goes even deeper at the noisy end); Character fold ↔ Grit (fold gain bumps up slightly with grit for clang+fold interaction); Punch ↔ Sweep depth (hard punch pushes the pitch sweep a touch higher momentarily); Shape ↔ Sweep time (deep shape FM shortens sweepTime a bit so the FM envelope and pitch envelope collapse together). Prototype one or two, listen for whether the randomize palette broadens.
-- [ ] Character fold depth deeper on the upper half. Currently foldGain = 1 + (character - 0.5) * 6 -- tops out at 4. At max character the fold stays audibly tame. Candidate: raise the 6 coefficient to 10 or 12 (foldGain 1..6 or 1..7) so character = 1 produces heavily-folded square-ish tones. Pair with 4x oversample if aliasing becomes problematic at max character + high pitch.
-- [ ] xform should not affect Sweep / SweepTime. Current randomize target list in `DrumVoice.cpp::applyRandomize` includes Sweep and SweepTime; these are pitch-envelope parameters that the user specifically wants to stay where set (they define the "drum role" and randomizing them wanders into different drum identities). Remove entries 4 and 5 from the setTopLevelBias table or comment-out their `rnd(...)` lines. Keep Character/Shape/Grit/Punch/Attack/Hold/Decay in the randomize set.
+- [~] Parameters need more intertwining / emergent combinations. Two cross-couplings now in flight: (a) `if grit > 0.5: shapeFmDepth += (grit - 0.5) * 2 * shape * 0.5` (Grit boosts Shape FM at the noisy end); (b) `if character > 0.7: gritNoiseFmDev += (character - 0.7) * 3.3 * grit * 500` (high Character pushes Grit noise FM deeper). Listen across the randomize palette and decide if Punch↔Sweep / Shape↔SweepTime are worth adding.
+- [x] Character fold depth deeper on the upper half. foldGain coefficient bumped 6 → 12 in the inline calculation (fold range now 1..7) so character=1 hits hard square-ish folding territory. (Already in place when this todo was added; logged retroactively.)
+- [x] xform should not affect Sweep / SweepTime — **REVERSED 2026-04-23**: user requested the opposite, open everything to xform. Sweep/SweepTime back in the randomize set along with Clipper/EQ/Level/CompAmt/Octave. Pitch (V/Oct) is an inlet not a Bias so still excluded.
+
+### Follow-ups from 2026-04-23 third tuning pass (2.5.4)
+
+- [x] Grit taming. `metFmDepth` ceiling 3 → 2, `gritNoiseFmDev` ceiling 2000 → 1000, `gritNoiseGain` slope 1.5 → 1.0, plus a global `(1 - grit*0.3)` output-gain compensation pre-clipper so grit=1 doesn't slam the chain.
+- [x] Shape FM 3x deeper. `shapeFmDepth` ceiling 2 → 6 (modulation index ~6 at max). Fader stays 0..1.
+- [x] Replace Makeup with one-knob comp. CPR single-band (Larets pattern, auto-makeup baked in): threshold 0..-40 dB, ratio 1..20:1, attack 10..1 ms, fixed 200 ms release, post-EQ-filter pre-output. Replaces Makeup at sub3 of the Level ply ("comp" label). Schema bumped 2 → 3; legacy `t.makeup` silently dropped on load (CV bindings against the makeup branch will need re-binding to compAmt).
+- [x] Amp envelope governs the whole chain. Hard reset of `punchEnv`, SVF state (`ic1eq`, `ic2eq`), and `compDetector` in the env-end branch so SVF ringing, comp tail, and punch residue can't outlive the main amp envelope.
+- [x] Open everything to xform randomization. Bias-pointer table extended to 14 entries: Character/Shape/Grit/Punch/Attack/Hold/Decay/Sweep/SweepTime/Clipper/EQ/Level/CompAmt/Octave (Octave randomized as integer via `rndInt`).
 
 ## Gridlock (Priority Gate Router)
 
