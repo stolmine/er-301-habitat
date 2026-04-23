@@ -9,6 +9,7 @@ local DrumVoiceCharacterControl = require "spreadsheet.DrumVoiceCharacterControl
 local DrumVoiceSweepControl = require "spreadsheet.DrumVoiceSweepControl"
 local DrumVoiceDecayControl = require "spreadsheet.DrumVoiceDecayControl"
 local DrumVoiceLevelControl = require "spreadsheet.DrumVoiceLevelControl"
+local DrumVoiceRandomGateControl = require "spreadsheet.DrumVoiceRandomGateControl"
 local Encoder = require "Encoder"
 
 local function floatMap(min, max)
@@ -52,6 +53,8 @@ function DrumVoice:onLoadGraph(channelCount)
   local level      = self:addObject("level",      app.ParameterAdapter())
   local makeup     = self:addObject("makeup",     app.ParameterAdapter())
   local octave     = self:addObject("octave",     app.ParameterAdapter())
+  local depth      = self:addObject("depth",      app.ParameterAdapter())
+  local spread     = self:addObject("spread",     app.ParameterAdapter())
 
   character:hardSet("Bias", 0.5)
   shape:hardSet("Bias", 0.0)
@@ -67,6 +70,8 @@ function DrumVoice:onLoadGraph(channelCount)
   level:hardSet("Bias", 0.8)
   makeup:hardSet("Bias", 0.0)
   octave:hardSet("Bias", 0.0)
+  depth:hardSet("Bias", 0.3)
+  spread:hardSet("Bias", 0.5)
 
   -- Gain defaults on wide-range adapters so 1 V CV sweeps the useful
   -- range. Identity (Gain = 1.0) is only meaningful for 0..1 params;
@@ -121,6 +126,8 @@ function DrumVoice:onLoadGraph(channelCount)
   self:addMonoBranch("eq",        eq,        "In", eq,        "Out")
   self:addMonoBranch("level",     level,     "In", level,     "Out")
   self:addMonoBranch("makeup",    makeup,    "In", makeup,    "Out")
+  self:addMonoBranch("depth",     depth,     "In", depth,     "Out")
+  self:addMonoBranch("spread",    spread,    "In", spread,    "Out")
 end
 
 function DrumVoice:onLoadViews(objects, branches)
@@ -191,6 +198,18 @@ function DrumVoice:onLoadViews(objects, branches)
       holdParam = objects.hold:getParameter("Bias"),
       attackParam = objects.attack:getParameter("Bias")
     },
+    xform = DrumVoiceRandomGateControl {
+      button = "xform",
+      description = "Randomize",
+      depthParam = objects.depth:getParameter("Bias"),
+      spreadParam = objects.spread:getParameter("Bias"),
+      fire = function()
+        self:randomize(
+          objects.depth:getParameter("Bias"):target(),
+          objects.spread:getParameter("Bias"):target()
+        )
+      end
+    },
     level = DrumVoiceLevelControl {
       button = "level",
       description = "Level",
@@ -206,15 +225,51 @@ function DrumVoice:onLoadViews(objects, branches)
       makeupParam = objects.makeup:getParameter("Bias")
     }
   }, {
-    expanded = { "trig", "tune", "character", "sweep", "decay", "level" },
+    expanded = { "trig", "tune", "character", "sweep", "decay", "xform", "level" },
     collapsed = {}
   }
 end
 
 local adapterBiases = {
   "character", "shape", "grit", "punch", "sweep", "sweepTime",
-  "attack", "hold", "decay", "clipper", "eq", "level", "makeup", "octave"
+  "attack", "hold", "decay", "clipper", "eq", "level", "makeup", "octave",
+  "depth", "spread"
 }
+
+local function randomizeValue(cur, min, max, depth, spread)
+  local range = max - min
+  local center = spread * (min + max) * 0.5 + (1 - spread) * cur
+  local dev = depth * range * 0.5
+  local r = math.random() * 2 - 1
+  local v = center + r * dev
+  if v < min then v = min end
+  if v > max then v = max end
+  return v
+end
+
+-- Params safe to randomize: tone-shaping + envelope. Excludes user-intent
+-- params (Pitch/Octave) and output chain (Clipper/EQ/Level/Makeup).
+local randomizeTargets = {
+  { "character", 0.0,   1.0  },
+  { "shape",     0.0,   1.0  },
+  { "grit",      0.0,   1.0  },
+  { "punch",     0.0,   1.0  },
+  { "sweep",     0.0,   72.0 },
+  { "sweepTime", 0.001, 0.5  },
+  { "attack",    0.0,   0.05 },
+  { "hold",      0.0,   0.5  },
+  { "decay",     0.01,  5.0  }
+}
+
+function DrumVoice:randomize(depth, spread)
+  for _, t in ipairs(randomizeTargets) do
+    local obj = self.objects[t[1]]
+    if obj then
+      local cur = obj:getParameter("Bias"):target()
+      obj:hardSet("Bias", randomizeValue(cur, t[2], t[3], depth, spread))
+    end
+  end
+end
 
 function DrumVoice:serialize()
   local t = Unit.serialize(self)
