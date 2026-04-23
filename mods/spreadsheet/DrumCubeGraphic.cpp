@@ -24,7 +24,7 @@ void DrumCubeGraphic::follow(DrumVoice *p) {
     if (mpDrum) mpDrum->attach();
 }
 
-void DrumCubeGraphic::fillTriangle(od::FrameBuffer &fb, int gray,
+void DrumCubeGraphic::fillTriangle(od::FrameBuffer &fb, int gray, int dotting, int faceIdx, bool gritNoise,
                                     int x0, int y0, int x1, int y1, int x2, int y2) {
     if (y1 < y0) { int t; t=x0;x0=x1;x1=t; t=y0;y0=y1;y1=t; }
     if (y2 < y0) { int t; t=x0;x0=x2;x2=t; t=y0;y0=y2;y2=t; }
@@ -51,15 +51,17 @@ void DrumCubeGraphic::fillTriangle(od::FrameBuffer &fb, int gray,
         int xr = xa < xb ? xb : xa;
         if (xl < left) xl = left;
         if (xr > right) xr = right;
-        if (xl <= xr) fb.hline(gray, xl, xr, y);
+        int lineDotting = dotting;
+        if (gritNoise) lineDotting ^= ((y * 7 + faceIdx) & 1);
+        if (xl <= xr) fb.hline(gray, xl, xr, y, lineDotting);
     }
 }
 
-void DrumCubeGraphic::fillQuad(od::FrameBuffer &fb, int gray,
+void DrumCubeGraphic::fillQuad(od::FrameBuffer &fb, int gray, int dotting, int faceIdx, bool gritNoise,
                                 int x0, int y0, int x1, int y1,
                                 int x2, int y2, int x3, int y3) {
-    fillTriangle(fb, gray, x0, y0, x1, y1, x2, y2);
-    fillTriangle(fb, gray, x0, y0, x2, y2, x3, y3);
+    fillTriangle(fb, gray, dotting, faceIdx, gritNoise, x0, y0, x1, y1, x2, y2);
+    fillTriangle(fb, gray, dotting, faceIdx, gritNoise, x0, y0, x2, y2, x3, y3);
 }
 
 void DrumCubeGraphic::draw(od::FrameBuffer &fb) {
@@ -136,7 +138,7 @@ void DrumCubeGraphic::draw(od::FrameBuffer &fb) {
 
     int cx = mWorldLeft + mWidth / 2;
     int cy = mWorldBottom + mHeight / 2;
-    float punchScale = 1.0f + mPunchEnergy * 0.35f;
+    float punchScale = 1.0f + mPunchEnergy * 0.5f;
 
     int px[8], py[8];
     float pz[8];
@@ -146,8 +148,8 @@ void DrumCubeGraphic::draw(od::FrameBuffer &fb) {
         float rz  = -x * sinY + z * cosY;
         float ry  =  y * cosX - rz * sinX;
         float rzF =  y * sinX + rz * cosX;
-        px[i] = cx + (int)(rx * 14.0f * punchScale);
-        py[i] = cy + (int)(ry * 20.0f * punchScale);
+        px[i] = cx + (int)(rx * 12.0f * punchScale);
+        py[i] = cy + (int)(ry * 17.0f * punchScale);
         pz[i] = rzF;
     }
 
@@ -177,22 +179,30 @@ void DrumCubeGraphic::draw(od::FrameBuffer &fb) {
         }
     }
 
+    int dotting = (int)((1.0f - character) * 3.0f);
+    bool gritNoise = grit > 0.3f;
+
     for (int fi = 0; fi < visCount; fi++) {
         int f = visIdx[fi];
         float avgZ = visZ[fi];
         float depthT = (avgZ + 2.0f) * 0.25f;
         if (depthT < 0.0f) depthT = 0.0f;
         if (depthT > 1.0f) depthT = 1.0f;
-        int gray = 4 + (int)(depthT * 8.0f);
+        int gray = 3 + (int)(depthT * 11.0f);
         if (mPunchEnergy > 0.1f) {
             gray += (mPunchEnergy > 0.5f) ? 2 : 1;
         }
         if (gray > WHITE) gray = WHITE;
 
-        int i0 = kFaces[f][0], i1 = kFaces[f][1], i2 = kFaces[f][2], i3 = kFaces[f][3];
-        fillQuad(fb, gray, px[i0], py[i0], px[i1], py[i1], px[i2], py[i2], px[i3], py[i3]);
+        int faceGray = gray;
+        if (mPunchEnergy > 0.3f)
+            faceGray = gray - (int)(mPunchEnergy * 4.0f);
+        if (faceGray < 2) faceGray = 2;
 
-        int edgeGray = gray + 2;
+        int i0 = kFaces[f][0], i1 = kFaces[f][1], i2 = kFaces[f][2], i3 = kFaces[f][3];
+        fillQuad(fb, faceGray, dotting, f, gritNoise, px[i0], py[i0], px[i1], py[i1], px[i2], py[i2], px[i3], py[i3]);
+
+        int edgeGray = gray + 3;
         if (edgeGray > WHITE) edgeGray = WHITE;
         fb.line(edgeGray, px[i0], py[i0], px[i1], py[i1]);
         fb.line(edgeGray, px[i1], py[i1], px[i2], py[i2]);

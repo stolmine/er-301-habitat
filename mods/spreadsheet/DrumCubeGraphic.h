@@ -24,9 +24,9 @@ namespace stolmine
     float mAngleY = 0.3f;
     float mPunchEnergy = 0.0f;
 
-    void fillTriangle(od::FrameBuffer &fb, int gray,
+    void fillTriangle(od::FrameBuffer &fb, int gray, int dotting, int faceIdx, bool gritNoise,
                       int x0, int y0, int x1, int y1, int x2, int y2);
-    void fillQuad(od::FrameBuffer &fb, int gray,
+    void fillQuad(od::FrameBuffer &fb, int gray, int dotting, int faceIdx, bool gritNoise,
                   int x0, int y0, int x1, int y1,
                   int x2, int y2, int x3, int y3);
 #endif

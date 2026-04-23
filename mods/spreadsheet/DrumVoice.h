@@ -59,8 +59,6 @@ namespace stolmine
     od::Parameter *mBiasShape = nullptr;
     od::Parameter *mBiasGrit = nullptr;
     od::Parameter *mBiasPunch = nullptr;
-    od::Parameter *mBiasSweep = nullptr;
-    od::Parameter *mBiasSweepTime = nullptr;
     od::Parameter *mBiasAttack = nullptr;
     od::Parameter *mBiasHold = nullptr;
     od::Parameter *mBiasDecay = nullptr;

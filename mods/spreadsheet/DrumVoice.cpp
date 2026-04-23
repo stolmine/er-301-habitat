@@ -2,10 +2,15 @@
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
-#include <stdlib.h>
 
 namespace stolmine
 {
+
+  static inline float fast_tanh(float x)
+  {
+    float x2 = x * x;
+    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+  }
 
   static inline float lookupSine(const float *lut, float tri)
   {
@@ -118,22 +123,21 @@ namespace stolmine
     case 1: mBiasShape      = param; break;
     case 2: mBiasGrit       = param; break;
     case 3: mBiasPunch      = param; break;
-    case 4: mBiasSweep      = param; break;
-    case 5: mBiasSweepTime  = param; break;
-    case 6: mBiasAttack     = param; break;
-    case 7: mBiasHold       = param; break;
-    case 8: mBiasDecay      = param; break;
+    case 4: mBiasAttack     = param; break;
+    case 5: mBiasHold       = param; break;
+    case 6: mBiasDecay      = param; break;
     }
   }
 
-  // spread: 0 = stay near current value, 1 = recenter toward range midpoint.
-  // depth: scales the random perturbation magnitude (0..1).
+  static uint32_t sRandState = 48271u;
+
   static float randomizeValue(float cur, float mn, float mx, float depth, float spread)
   {
     float range = mx - mn;
     float center = spread * (mn + mx) * 0.5f + (1.0f - spread) * cur;
     float dev = depth * range * 0.5f;
-    float r = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f;
+    sRandState = sRandState * 1664525u + 1013904223u;
+    float r = (float)(int32_t)sRandState / 2147483648.0f;
     float v = center + r * dev;
     if (v < mn) v = mn;
     if (v > mx) v = mx;
@@ -153,8 +157,6 @@ namespace stolmine
     rnd(mBiasShape,      0.0f,   1.0f);
     rnd(mBiasGrit,       0.0f,   1.0f);
     rnd(mBiasPunch,      0.0f,   1.0f);
-    rnd(mBiasSweep,      0.0f,   72.0f);
-    rnd(mBiasSweepTime,  0.001f, 0.5f);
     rnd(mBiasAttack,     0.0f,   0.05f);
     rnd(mBiasHold,       0.0f,   0.5f);
     rnd(mBiasDecay,      0.01f,  5.0f);
@@ -200,7 +202,7 @@ namespace stolmine
     // stays near unity as drive increases.
     bool clipperActive = clipper > 0.001f;
     float driveLinear = clipperActive ? (1.0f + clipper * 9.0f) : 1.0f;
-    float driveNorm   = clipperActive ? tanhf(driveLinear) : 1.0f;
+    float driveNorm   = clipperActive ? fast_tanh(driveLinear) : 1.0f;
 
     // DJ filter coefficients (block-rate). EQ is bipolar: -1..0 = LP,
     // 0 = bypass, 0..+1 = HP. Magnitude drives cutoff sweep.
@@ -289,6 +291,8 @@ namespace stolmine
 
       // Pitch droop: +1.5% at onset, decays with amplitude
       float droopFreq = s.currentFreq * (1.0f + s.ampEnv * 0.015f);
+      if (s.punchEnv > 0.01f)
+        droopFreq *= (1.0f + s.punchEnv * 0.05f);
 
       // === Oscillator section at 2x rate (anti-alias for fold + FM) ===
       //
@@ -299,11 +303,15 @@ namespace stolmine
       // pair back down to sr. NEON can't usefully parallelize the serial
       // phase recurrence on a mono voice, so this is scalar x2.
       float sr2 = sr * 2.0f;
-      float foldGain = 1.0f + (character > 0.5f ? (character - 0.5f) * 2.0f * 3.0f : 0.0f);
+      float foldGain = 1.0f + (character > 0.5f ? (character - 0.5f) * 2.0f * 6.0f : 0.0f);
       float tMorph   = character < 0.5f ? character * 2.0f : 0.0f;
       float shapeFmDepth   = shape * shape * s.shapeEnv * 2.0f;
+      if (grit > 0.5f)
+        shapeFmDepth += (grit - 0.5f) * 2.0f * shape * 0.5f;
       float metFmDepth     = grit * 3.0f * s.ampEnv;
       float gritNoiseFmDev = grit * grit * 2000.0f * s.ampEnv;
+      if (character > 0.7f)
+        gritNoiseFmDev += (character - 0.7f) * 3.3f * grit * 500.0f;
 
       float osSamp[2];
       for (int k = 0; k < 2; k++)
@@ -419,7 +427,7 @@ namespace stolmine
 
       // Clipper: simple tanh with gain compensation.
       if (clipperActive)
-        sample = tanhf(sample * driveLinear) / driveNorm;
+        sample = fast_tanh(sample * driveLinear) / driveNorm;
 
       // DJ filter (TPT SVF, Cytomic formulation)
       if (filterActive)
