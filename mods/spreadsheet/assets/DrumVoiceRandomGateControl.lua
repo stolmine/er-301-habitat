@@ -3,7 +3,7 @@
 -- Pattern matches TransformGateControl's structure (main = ComparatorView,
 -- paramMode swap for the sub-display) but with simplified semantics:
 -- randomize-only (no function selector), two continuous faders
--- (depth, spread), fire on sub3. No paramB complication.
+-- (depth, destination), fire on sub3. No paramB complication.
 --
 -- Gate view (paramMode=false, default):
 --   Main: ComparatorView on the CV input.
@@ -13,16 +13,19 @@
 --
 -- Param view (paramMode=true, shift-toggled):
 --   Main: same ComparatorView; cube-style indicator drawn in sub area.
---   Sub-display: depth (sub1) / spread (sub2) / fire! (sub3).
+--   Sub-display: depth (sub1) / dest (sub2) / fire! (sub3). The dest
+--   readout is an integer 0..3 selecting which params get randomized:
+--   0=all, 1=-swp (no Sweep+SweepTime), 2=-pch (also no Octave),
+--   3=tmbr (Char/Shape/Grit/Punch only). C++ side branches on this.
 --   Sub3 fires via op:fireRandomize() which sets the manual-fire flag;
 --   C++ picks it up and randomizes on the next audio block.
 --
 -- Applies shift-audit Decision 1 (shiftUsed suppression), Decision 2
 -- (no shift+spot toggle), Decision 3 (subGraphic swap, no show/hide),
--- Decision 5 (shift+sub opens keyboard in paramMode for depth/spread),
+-- Decision 5 (shift+sub opens keyboard in paramMode for depth/dest),
 -- Decision 7 (persist paramMode across cursor leave, clear
 -- paramFocusedReadout on leave), Decision 8 (paramModeDefaultSub unset
--- since neither depth nor spread shares a Bias with any main-fader).
+-- since neither depth nor dest shares a Bias with any main-fader).
 
 local app = app
 local Class = require "Base.Class"
@@ -82,7 +85,7 @@ function DrumVoiceRandomGateControl:init(args)
   local comparator = args.comparator or app.logError("%s.init: comparator missing.", self)
   local op = args.op or app.logError("%s.init: op missing.", self)
   local depthParam = args.depthParam or app.logError("%s.init: depthParam missing.", self)
-  local spreadParam = args.spreadParam or app.logError("%s.init: spreadParam missing.", self)
+  local destParam = args.destParam or app.logError("%s.init: destParam missing.", self)
 
   Base.init(self, button)
   self:setClassName("DrumVoiceRandomGateControl")
@@ -167,7 +170,28 @@ function DrumVoiceRandomGateControl:init(args)
   end
 
   self.depthReadout = makeReadout(depthParam, col1)
-  self.spreadReadout = makeReadout(spreadParam, col2)
+
+  -- Destination readout: integer 0..3 with named labels indicating
+  -- which params get randomized. Mirrors the C++ applyRandomize switch.
+  local destMap = (function()
+    local m = app.LinearDialMap(0, 3)
+    m:setSteps(1, 1, 1, 1)
+    m:setRounding(1)
+    return m
+  end)()
+  self.destReadout = (function()
+    local g = app.Readout(0, 0, ply, 10)
+    g:setParameter(destParam)
+    g:setAttributes(app.unitNone, destMap)
+    g:setPrecision(0)
+    g:setCenter(col2, center4)
+    if g.addName then
+      for _, v in ipairs({"all", "-swp", "-pch", "tmbr"}) do
+        g:addName(v)
+      end
+    end
+    return g
+  end)()
 
   self.paramDesc = app.Label("Randomize", 10)
   self.paramDesc:fitToText(3)
@@ -178,10 +202,10 @@ function DrumVoiceRandomGateControl:init(args)
   self.paramSubGraphic:addChild(self.paramDesc)
 
   self.paramSub1 = app.SubButton("depth", 1)
-  self.paramSub2 = app.SubButton("spread", 2)
+  self.paramSub2 = app.SubButton("dest", 2)
   self.paramSub3 = app.SubButton("fire!", 3)
   self.paramSubGraphic:addChild(self.depthReadout)
-  self.paramSubGraphic:addChild(self.spreadReadout)
+  self.paramSubGraphic:addChild(self.destReadout)
   self.paramSubGraphic:addChild(self.paramSub1)
   self.paramSubGraphic:addChild(self.paramSub2)
   self.paramSubGraphic:addChild(self.paramSub3)
@@ -306,7 +330,7 @@ function DrumVoiceRandomGateControl:subReleased(i, shifted)
     local readout = nil
     local label = nil
     if i == 1 then readout, label = self.depthReadout, "depth"
-    elseif i == 2 then readout, label = self.spreadReadout, "spread"
+    elseif i == 2 then readout, label = self.destReadout, "destination"
     end
     if readout then
       if shifted then

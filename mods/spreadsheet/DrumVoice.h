@@ -45,7 +45,7 @@ namespace stolmine
     od::Parameter mCompAmt{"CompAmt", 0.0f};
     od::Parameter mOctave{"Octave", 0.0f};
     od::Parameter mXformDepth{"XformDepth", 0.3f};
-    od::Parameter mXformSpread{"XformSpread", 0.5f};
+    od::Parameter mXformDest{"XformDest", 0.0f};
 #endif
 
   private:

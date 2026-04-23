@@ -58,7 +58,7 @@ function DrumVoice:onLoadGraph(channelCount)
   local compAmt    = self:addObject("compAmt",    app.ParameterAdapter())
   local octave     = self:addObject("octave",     app.ParameterAdapter())
   local depth      = self:addObject("depth",      app.ParameterAdapter())
-  local spread     = self:addObject("spread",     app.ParameterAdapter())
+  local dest       = self:addObject("dest",       app.ParameterAdapter())
 
   character:hardSet("Bias", 0.5)
   shape:hardSet("Bias", 0.0)
@@ -75,7 +75,7 @@ function DrumVoice:onLoadGraph(channelCount)
   compAmt:hardSet("Bias", 0.0)
   octave:hardSet("Bias", 0.0)
   depth:hardSet("Bias", 0.3)
-  spread:hardSet("Bias", 0.5)
+  dest:hardSet("Bias", 0)
 
   -- Gain defaults on wide-range adapters so 1 V CV sweeps the useful
   -- range. Identity (Gain = 1.0) is only meaningful for 0..1 params;
@@ -100,8 +100,8 @@ function DrumVoice:onLoadGraph(channelCount)
   tie(op, "Level",     level,     "Out")
   tie(op, "CompAmt",   compAmt,   "Out")
   tie(op, "Octave",    octave,    "Out")
-  tie(op, "XformDepth",  depth,  "Out")
-  tie(op, "XformSpread", spread, "Out")
+  tie(op, "XformDepth", depth, "Out")
+  tie(op, "XformDest",  dest,  "Out")
 
   -- Register every top-level Bias the C++ op should mutate on randomize.
   -- Indices match the switch in applyRandomize. User asked to open
@@ -154,7 +154,7 @@ function DrumVoice:onLoadGraph(channelCount)
   self:addMonoBranch("octave",    octave,    "In", octave,    "Out")
   self:addMonoBranch("xformTrig", xformTrig, "In", xformTrig, "Out")
   self:addMonoBranch("depth",     depth,     "In", depth,     "Out")
-  self:addMonoBranch("spread",    spread,    "In", spread,    "Out")
+  self:addMonoBranch("dest",      dest,      "In", dest,      "Out")
 end
 
 function DrumVoice:onLoadViews(objects, branches)
@@ -263,7 +263,7 @@ function DrumVoice:onLoadViews(objects, branches)
       comparator = objects.xformTrig,
       op = objects.op,
       depthParam = objects.depth:getParameter("Bias"),
-      spreadParam = objects.spread:getParameter("Bias")
+      destParam = objects.dest:getParameter("Bias")
     },
     level = DrumVoiceLevelControl {
       button = "level",
@@ -349,11 +349,17 @@ function DrumVoice:onLoadViews(objects, branches)
       biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
       biasPrecision = 2, initialBias = 0.3
     },
-    xformSpread = GainBias {
-      button = "sprd", description = "Spread",
-      branch = branches.spread, gainbias = objects.spread, range = objects.spread,
-      biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
-      biasPrecision = 2, initialBias = 0.5
+    xformDest = GainBias {
+      button = "dest", description = "Destination",
+      branch = branches.dest, gainbias = objects.dest, range = objects.dest,
+      biasMap = (function()
+        local m = app.LinearDialMap(0, 3)
+        m:setSteps(1, 1, 1, 1)
+        m:setRounding(1)
+        return m
+      end)(),
+      biasUnits = app.unitNone,
+      biasPrecision = 0, initialBias = 0
     }
   }, {
     expanded  = { "trig", "tune", "character", "sweep", "decay", "xform", "level" },
@@ -361,7 +367,7 @@ function DrumVoice:onLoadViews(objects, branches)
     character = { "character", "charShape", "charGrit", "charPunch" },
     sweep     = { "sweep", "sweepTime" },
     decay     = { "decay", "decayHold", "decayAttack" },
-    xform     = { "xform", "xformDepth", "xformSpread" },
+    xform     = { "xform", "xformDepth", "xformDest" },
     level     = { "level", "levelClipper", "levelEQ", "levelComp" },
     collapsed = {}
   }
@@ -370,12 +376,12 @@ end
 local adapterBiases = {
   "character", "shape", "grit", "punch", "sweep", "sweepTime",
   "attack", "hold", "decay", "clipper", "eq", "level", "compAmt", "octave",
-  "depth", "spread"
+  "depth", "dest"
 }
 
 function DrumVoice:serialize()
   local t = Unit.serialize(self)
-  t.schema = 3 -- schema 3 = Makeup replaced with one-knob CompAmt
+  t.schema = 4 -- schema 4 = xform Spread replaced with Dest mode selector
   for _, name in ipairs(adapterBiases) do
     local obj = self.objects[name]
     if obj then
