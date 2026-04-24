@@ -173,87 +173,69 @@ namespace stolmine
     return v;
   }
 
+  // Non-capturing helpers. Used by applyRandomize's switch cases -- non-
+  // capturing because [&]-captured lambdas inlined into differential case
+  // bodies caused hardware-only crashes (2.5.5.92, 2.5.5.93).
+  static void doRnd(od::Parameter *p, float mn, float mx, float depth, float spread)
+  {
+    if (p) p->hardSet(randomizeValue(p->value(), mn, mx, depth, spread));
+  }
+  static void doRndInt(od::Parameter *p, float mn, float mx, float depth, float spread)
+  {
+    if (p) p->hardSet(floorf(randomizeValue(p->value(), mn, mx, depth, spread) + 0.5f));
+  }
+
   void DrumVoice::applyRandomize()
   {
-    // Target tiers (progressive opt-out from the noisiest):
-    //   0 "all"  : everything randomizable
-    //   1 "-swp" : drop pitch envelope (Sweep + SweepTime)
-    //   2 "-pch" : also drop Octave (full pitch identity locked)
-    //   3 "tmbr" : Char/Shape/Grit/Punch only
-    // Output-chain params (Clipper / EQ / Level / Comp) stay put across
-    // fires regardless of target -- they're user-mix decisions.
+    // Single-method, branchless tier masking. We always perform exactly
+    // 10 doRnd/doRndInt calls (matching the 2.5.5.91 / 2.5.5.94 working
+    // shape). Tier filtering is applied via per-group depth masks --
+    // when a group is excluded, its depth becomes 0.0f, which makes
+    // randomizeValue return cur unchanged (depth*range/2 = 0 → no
+    // deviation, center collapses to cur because spread is also 0.5).
+    // Ternaries compile to CMP+MOVCC on Cortex-A8 (conditional-move,
+    // not control-flow branch).
     //
-    // Switch/case with every case self-contained (no fallthrough, no
-    // compound predicates, no nested lambdas). Matches Pecto / Petrichor
-    // topology exactly -- 2.5.5.92's if-chain crashed hardware under
-    // -O3 -ffast-math on Cortex-A8.
+    // Tiers (target value increases as we opt out of more):
+    //   0 "all"  : all four groups active
+    //   1 "-swp" : drop Sweep + SweepTime (pitch envelope locked)
+    //   2 "-pch" : also drop Octave (full pitch identity locked)
+    //   3 "tmbr" : timbre only (Char/Shape/Grit/Punch)
+    //
+    // Function-pointer-table dispatch (2.5.5.96) and switch-with-
+    // differential-bodies (2.5.5.92, .93, .95) both crashed Cortex-A8
+    // hardware under -O3 -ffast-math. This single-method shape matches
+    // 2.5.5.94's known-loading topology while still providing per-tier
+    // behavior at runtime.
     int target = CLAMP(0, 3, (int)(mXformTarget.value() + 0.5f));
-
     float depth  = CLAMP(0.0f, 1.0f, mXformDepth.value());
     float spread = CLAMP(0.0f, 1.0f, mXformSpread.value());
 
-    auto rnd = [&](od::Parameter *p, float mn, float mx) {
-      if (p) p->hardSet(randomizeValue(p->value(), mn, mx, depth, spread));
-    };
-    auto rndInt = [&](od::Parameter *p, float mn, float mx) {
-      if (p) p->hardSet(floorf(randomizeValue(p->value(), mn, mx, depth, spread) + 0.5f));
-    };
+    // When a tier is masked out we need BOTH depth=0 AND spread=0 so
+    // randomizeValue collapses to (center=cur, dev=0) → returns cur
+    // unchanged. depth=0 alone leaves the spread-pulled center pulling
+    // the value toward range midpoint.
+    bool envOn   = (target <= 2);
+    bool octOn   = (target <= 1);
+    bool sweepOn = (target == 0);
 
-    // Probe 2.5.5.94: all four cases have identical bodies (the flat
-    // 10-write pattern from 2.5.5.91). If this loads, switch-with-
-    // different-bodies is the trigger. If it crashes, switch itself
-    // is (even though Pecto's switch works for its param set).
-    switch (target)
-    {
-    case 0:
-      rnd(mBiasCharacter, 0.0f,   1.0f);
-      rnd(mBiasShape,     0.0f,   1.0f);
-      rnd(mBiasGrit,      0.0f,   1.0f);
-      rnd(mBiasPunch,     0.0f,   1.0f);
-      rnd(mBiasAttack,    0.0f,   0.05f);
-      rnd(mBiasHold,      0.0f,   0.5f);
-      rnd(mBiasDecay,     0.01f,  2.0f);
-      rnd(mBiasSweep,     0.0f,   72.0f);
-      rnd(mBiasSweepTime, 0.001f, 0.5f);
-      rndInt(mBiasOctave, -4.0f,  4.0f);
-      break;
-    case 1:
-      rnd(mBiasCharacter, 0.0f,   1.0f);
-      rnd(mBiasShape,     0.0f,   1.0f);
-      rnd(mBiasGrit,      0.0f,   1.0f);
-      rnd(mBiasPunch,     0.0f,   1.0f);
-      rnd(mBiasAttack,    0.0f,   0.05f);
-      rnd(mBiasHold,      0.0f,   0.5f);
-      rnd(mBiasDecay,     0.01f,  2.0f);
-      rnd(mBiasSweep,     0.0f,   72.0f);
-      rnd(mBiasSweepTime, 0.001f, 0.5f);
-      rndInt(mBiasOctave, -4.0f,  4.0f);
-      break;
-    case 2:
-      rnd(mBiasCharacter, 0.0f,   1.0f);
-      rnd(mBiasShape,     0.0f,   1.0f);
-      rnd(mBiasGrit,      0.0f,   1.0f);
-      rnd(mBiasPunch,     0.0f,   1.0f);
-      rnd(mBiasAttack,    0.0f,   0.05f);
-      rnd(mBiasHold,      0.0f,   0.5f);
-      rnd(mBiasDecay,     0.01f,  2.0f);
-      rnd(mBiasSweep,     0.0f,   72.0f);
-      rnd(mBiasSweepTime, 0.001f, 0.5f);
-      rndInt(mBiasOctave, -4.0f,  4.0f);
-      break;
-    case 3:
-      rnd(mBiasCharacter, 0.0f,   1.0f);
-      rnd(mBiasShape,     0.0f,   1.0f);
-      rnd(mBiasGrit,      0.0f,   1.0f);
-      rnd(mBiasPunch,     0.0f,   1.0f);
-      rnd(mBiasAttack,    0.0f,   0.05f);
-      rnd(mBiasHold,      0.0f,   0.5f);
-      rnd(mBiasDecay,     0.01f,  2.0f);
-      rnd(mBiasSweep,     0.0f,   72.0f);
-      rnd(mBiasSweepTime, 0.001f, 0.5f);
-      rndInt(mBiasOctave, -4.0f,  4.0f);
-      break;
-    }
+    float depthEnv   = envOn   ? depth  : 0.0f;
+    float spreadEnv  = envOn   ? spread : 0.0f;
+    float depthOct   = octOn   ? depth  : 0.0f;
+    float spreadOct  = octOn   ? spread : 0.0f;
+    float depthSweep = sweepOn ? depth  : 0.0f;
+    float spreadSweep= sweepOn ? spread : 0.0f;
+
+    doRnd(mBiasCharacter, 0.0f,   1.0f,  depth,      spread);
+    doRnd(mBiasShape,     0.0f,   1.0f,  depth,      spread);
+    doRnd(mBiasGrit,      0.0f,   1.0f,  depth,      spread);
+    doRnd(mBiasPunch,     0.0f,   1.0f,  depth,      spread);
+    doRnd(mBiasAttack,    0.0f,   0.05f, depthEnv,   spreadEnv);
+    doRnd(mBiasHold,      0.0f,   0.5f,  depthEnv,   spreadEnv);
+    doRnd(mBiasDecay,     0.01f,  2.0f,  depthEnv,   spreadEnv);
+    doRndInt(mBiasOctave, -4.0f,  4.0f,  depthOct,   spreadOct);
+    doRnd(mBiasSweep,     0.0f,   72.0f, depthSweep, spreadSweep);
+    doRnd(mBiasSweepTime, 0.001f, 0.5f,  depthSweep, spreadSweep);
   }
 
   void DrumVoice::process()
