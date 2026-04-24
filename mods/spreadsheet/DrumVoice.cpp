@@ -175,6 +175,12 @@ namespace stolmine
 
   void DrumVoice::applyRandomize()
   {
+    // Step 2 bisect: read target via int cast but do not branch on it.
+    // If this still loads on hardware, the cast itself is hardware-safe
+    // and the crash is in switch-case branching or lambda-in-lambda.
+    int target = CLAMP(0, 3, (int)(mXformTarget.value() + 0.5f));
+    (void)target;  // suppress unused-variable warning until step 3 wires it
+
     float depth  = CLAMP(0.0f, 1.0f, mXformDepth.value());
     float spread = CLAMP(0.0f, 1.0f, mXformSpread.value());
 
