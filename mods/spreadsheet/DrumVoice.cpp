@@ -175,11 +175,19 @@ namespace stolmine
 
   void DrumVoice::applyRandomize()
   {
-    // Step 2 bisect: read target via int cast but do not branch on it.
-    // If this still loads on hardware, the cast itself is hardware-safe
-    // and the crash is in switch-case branching or lambda-in-lambda.
+    // Target tiers (progressive opt-out from the noisiest):
+    //   0 "all"  : everything randomizable
+    //   1 "-swp" : drop pitch envelope (Sweep + SweepTime)
+    //   2 "-pch" : also drop Octave (full pitch identity locked)
+    //   3 "tmbr" : Char/Shape/Grit/Punch only
+    // Output-chain params (Clipper / EQ / Level / Comp) stay put across
+    // fires regardless of target -- they're user-mix decisions.
+    //
+    // Switch/case with every case self-contained (no fallthrough, no
+    // compound predicates, no nested lambdas). Matches Pecto / Petrichor
+    // topology exactly -- 2.5.5.92's if-chain crashed hardware under
+    // -O3 -ffast-math on Cortex-A8.
     int target = CLAMP(0, 3, (int)(mXformTarget.value() + 0.5f));
-    (void)target;  // suppress unused-variable warning until step 3 wires it
 
     float depth  = CLAMP(0.0f, 1.0f, mXformDepth.value());
     float spread = CLAMP(0.0f, 1.0f, mXformSpread.value());
@@ -191,20 +199,61 @@ namespace stolmine
       if (p) p->hardSet(floorf(randomizeValue(p->value(), mn, mx, depth, spread) + 0.5f));
     };
 
-    rnd(mBiasCharacter,  0.0f,   1.0f);
-    rnd(mBiasShape,      0.0f,   1.0f);
-    rnd(mBiasGrit,       0.0f,   1.0f);
-    rnd(mBiasPunch,      0.0f,   1.0f);
-    rnd(mBiasAttack,     0.0f,   0.05f);
-    rnd(mBiasHold,       0.0f,   0.5f);
-    rnd(mBiasDecay,      0.01f,  2.0f);
-    rnd(mBiasSweep,      0.0f,   72.0f);
-    rnd(mBiasSweepTime,  0.001f, 0.5f);
-    rndInt(mBiasOctave, -4.0f,   4.0f);
-    // Output-chain params (Clipper, EQ, Level, Comp) deliberately NOT
-    // randomized -- they're user-mix decisions, randomizing them flips
-    // the perceived loudness / character on every fire which fights the
-    // user's mix. Bias-pointer registration retained for future opt-in.
+    // Probe 2.5.5.94: all four cases have identical bodies (the flat
+    // 10-write pattern from 2.5.5.91). If this loads, switch-with-
+    // different-bodies is the trigger. If it crashes, switch itself
+    // is (even though Pecto's switch works for its param set).
+    switch (target)
+    {
+    case 0:
+      rnd(mBiasCharacter, 0.0f,   1.0f);
+      rnd(mBiasShape,     0.0f,   1.0f);
+      rnd(mBiasGrit,      0.0f,   1.0f);
+      rnd(mBiasPunch,     0.0f,   1.0f);
+      rnd(mBiasAttack,    0.0f,   0.05f);
+      rnd(mBiasHold,      0.0f,   0.5f);
+      rnd(mBiasDecay,     0.01f,  2.0f);
+      rnd(mBiasSweep,     0.0f,   72.0f);
+      rnd(mBiasSweepTime, 0.001f, 0.5f);
+      rndInt(mBiasOctave, -4.0f,  4.0f);
+      break;
+    case 1:
+      rnd(mBiasCharacter, 0.0f,   1.0f);
+      rnd(mBiasShape,     0.0f,   1.0f);
+      rnd(mBiasGrit,      0.0f,   1.0f);
+      rnd(mBiasPunch,     0.0f,   1.0f);
+      rnd(mBiasAttack,    0.0f,   0.05f);
+      rnd(mBiasHold,      0.0f,   0.5f);
+      rnd(mBiasDecay,     0.01f,  2.0f);
+      rnd(mBiasSweep,     0.0f,   72.0f);
+      rnd(mBiasSweepTime, 0.001f, 0.5f);
+      rndInt(mBiasOctave, -4.0f,  4.0f);
+      break;
+    case 2:
+      rnd(mBiasCharacter, 0.0f,   1.0f);
+      rnd(mBiasShape,     0.0f,   1.0f);
+      rnd(mBiasGrit,      0.0f,   1.0f);
+      rnd(mBiasPunch,     0.0f,   1.0f);
+      rnd(mBiasAttack,    0.0f,   0.05f);
+      rnd(mBiasHold,      0.0f,   0.5f);
+      rnd(mBiasDecay,     0.01f,  2.0f);
+      rnd(mBiasSweep,     0.0f,   72.0f);
+      rnd(mBiasSweepTime, 0.001f, 0.5f);
+      rndInt(mBiasOctave, -4.0f,  4.0f);
+      break;
+    case 3:
+      rnd(mBiasCharacter, 0.0f,   1.0f);
+      rnd(mBiasShape,     0.0f,   1.0f);
+      rnd(mBiasGrit,      0.0f,   1.0f);
+      rnd(mBiasPunch,     0.0f,   1.0f);
+      rnd(mBiasAttack,    0.0f,   0.05f);
+      rnd(mBiasHold,      0.0f,   0.5f);
+      rnd(mBiasDecay,     0.01f,  2.0f);
+      rnd(mBiasSweep,     0.0f,   72.0f);
+      rnd(mBiasSweepTime, 0.001f, 0.5f);
+      rndInt(mBiasOctave, -4.0f,  4.0f);
+      break;
+    }
   }
 
   void DrumVoice::process()
