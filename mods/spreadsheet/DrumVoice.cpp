@@ -118,7 +118,8 @@ namespace stolmine
     addParameter(mCompAmt);
     addParameter(mOctave);
     addParameter(mXformDepth);
-    addParameter(mXformDest);
+    addParameter(mXformSpread);
+    addParameter(mXformTarget);
     mpInternal = new Internal();
     mpInternal->initLUT();
   }
@@ -174,10 +175,8 @@ namespace stolmine
 
   void DrumVoice::applyRandomize()
   {
-    float depth = CLAMP(0.0f, 1.0f, mXformDepth.value());
-    int dest    = (int)floorf(CLAMP(0.0f, 3.0f, mXformDest.value()) + 0.5f);
-    // spread baked at 0.5 (was a separate user fader; replaced by dest mode).
-    const float spread = 0.5f;
+    float depth  = CLAMP(0.0f, 1.0f, mXformDepth.value());
+    float spread = CLAMP(0.0f, 1.0f, mXformSpread.value());
 
     auto rnd = [&](od::Parameter *p, float mn, float mx) {
       if (p) p->hardSet(randomizeValue(p->value(), mn, mx, depth, spread));
@@ -186,42 +185,20 @@ namespace stolmine
       if (p) p->hardSet(floorf(randomizeValue(p->value(), mn, mx, depth, spread) + 0.5f));
     };
 
-    // Destination tiers (always-randomized + progressive opt-out):
-    //   0 "all"  : Char/Shape/Grit/Punch + Attack/Hold/Decay/SweepTime + Octave + Sweep
-    //   1 "-swp" : drops Sweep + SweepTime (pitch envelope locked)
-    //   2 "-pch" : also drops Octave (full pitch identity locked)
-    //   3 "tmbr" : Char/Shape/Grit/Punch only
-
-    // Always randomized.
-    rnd(mBiasCharacter,  0.0f, 1.0f);
-    rnd(mBiasShape,      0.0f, 1.0f);
-    rnd(mBiasGrit,       0.0f, 1.0f);
-    rnd(mBiasPunch,      0.0f, 1.0f);
-
-    // Modes 0-2: envelope params.
-    if (dest <= 2)
-    {
-      rnd(mBiasAttack, 0.0f,   0.05f);
-      rnd(mBiasHold,   0.0f,   0.5f);
-      rnd(mBiasDecay,  0.01f,  2.0f);
-    }
-
-    // Modes 0-1: octave hops.
-    if (dest <= 1)
-    {
-      rndInt(mBiasOctave, -4.0f, 4.0f);
-    }
-
-    // Mode 0 only: pitch envelope (depth + time).
-    if (dest == 0)
-    {
-      rnd(mBiasSweep,     0.0f,   72.0f);
-      rnd(mBiasSweepTime, 0.001f, 0.5f);
-    }
-
-    // Output-chain params (Clipper / EQ / Level / Comp) never randomized;
-    // user-mix decisions stay put across fires. Bias-pointer registration
-    // retained for future opt-in.
+    rnd(mBiasCharacter,  0.0f,   1.0f);
+    rnd(mBiasShape,      0.0f,   1.0f);
+    rnd(mBiasGrit,       0.0f,   1.0f);
+    rnd(mBiasPunch,      0.0f,   1.0f);
+    rnd(mBiasAttack,     0.0f,   0.05f);
+    rnd(mBiasHold,       0.0f,   0.5f);
+    rnd(mBiasDecay,      0.01f,  2.0f);
+    rnd(mBiasSweep,      0.0f,   72.0f);
+    rnd(mBiasSweepTime,  0.001f, 0.5f);
+    rndInt(mBiasOctave, -4.0f,   4.0f);
+    // Output-chain params (Clipper, EQ, Level, Comp) deliberately NOT
+    // randomized -- they're user-mix decisions, randomizing them flips
+    // the perceived loudness / character on every fire which fights the
+    // user's mix. Bias-pointer registration retained for future opt-in.
   }
 
   void DrumVoice::process()

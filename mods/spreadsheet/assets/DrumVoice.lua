@@ -9,8 +9,19 @@ local DrumVoiceCharacterControl = require "spreadsheet.DrumVoiceCharacterControl
 local DrumVoiceSweepControl = require "spreadsheet.DrumVoiceSweepControl"
 local DrumVoiceDecayControl = require "spreadsheet.DrumVoiceDecayControl"
 local DrumVoiceLevelControl = require "spreadsheet.DrumVoiceLevelControl"
-local DrumVoiceRandomGateControl = require "spreadsheet.DrumVoiceRandomGateControl"
+local TransformGateControl = require "spreadsheet.TransformGateControl"
 local Encoder = require "Encoder"
+
+local xformTargetNames = {
+  [0] = "all", "-swp", "-pch", "tmbr"
+}
+
+local function intMap(min, max)
+  local map = app.LinearDialMap(min, max)
+  map:setSteps(1, 1, 1, 1)
+  map:setRounding(1)
+  return map
+end
 
 local function floatMap(min, max)
   local map = app.LinearDialMap(min, max)
@@ -25,6 +36,10 @@ function DrumVoice:init(args)
   args.title = "Ngoma"
   args.mnemonic = "NG"
   Unit.init(self, args)
+end
+
+function DrumVoice:fireTransform()
+  self.objects.op:fireRandomize()
 end
 
 function DrumVoice:onLoadGraph(channelCount)
@@ -57,8 +72,9 @@ function DrumVoice:onLoadGraph(channelCount)
   local level      = self:addObject("level",      app.ParameterAdapter())
   local compAmt    = self:addObject("compAmt",    app.ParameterAdapter())
   local octave     = self:addObject("octave",     app.ParameterAdapter())
-  local depth      = self:addObject("depth",      app.ParameterAdapter())
-  local dest       = self:addObject("dest",       app.ParameterAdapter())
+  local depth       = self:addObject("depth",       app.ParameterAdapter())
+  local spread      = self:addObject("spread",      app.ParameterAdapter())
+  local xformTarget = self:addObject("xformTarget", app.ParameterAdapter())
 
   character:hardSet("Bias", 0.5)
   shape:hardSet("Bias", 0.0)
@@ -75,7 +91,8 @@ function DrumVoice:onLoadGraph(channelCount)
   compAmt:hardSet("Bias", 0.0)
   octave:hardSet("Bias", 0.0)
   depth:hardSet("Bias", 0.3)
-  dest:hardSet("Bias", 0)
+  spread:hardSet("Bias", 0.5)
+  xformTarget:hardSet("Bias", 0)
 
   -- Gain defaults on wide-range adapters so 1 V CV sweeps the useful
   -- range. Identity (Gain = 1.0) is only meaningful for 0..1 params;
@@ -100,8 +117,9 @@ function DrumVoice:onLoadGraph(channelCount)
   tie(op, "Level",     level,     "Out")
   tie(op, "CompAmt",   compAmt,   "Out")
   tie(op, "Octave",    octave,    "Out")
-  tie(op, "XformDepth", depth, "Out")
-  tie(op, "XformDest",  dest,  "Out")
+  tie(op, "XformDepth",  depth,       "Out")
+  tie(op, "XformSpread", spread,      "Out")
+  tie(op, "XformTarget", xformTarget, "Out")
 
   -- Register every top-level Bias the C++ op should mutate on randomize.
   -- Indices match the switch in applyRandomize. User asked to open
@@ -152,9 +170,10 @@ function DrumVoice:onLoadGraph(channelCount)
   self:addMonoBranch("level",     level,     "In", level,     "Out")
   self:addMonoBranch("compAmt",   compAmt,   "In", compAmt,   "Out")
   self:addMonoBranch("octave",    octave,    "In", octave,    "Out")
-  self:addMonoBranch("xformTrig", xformTrig, "In", xformTrig, "Out")
-  self:addMonoBranch("depth",     depth,     "In", depth,     "Out")
-  self:addMonoBranch("dest",      dest,      "In", dest,      "Out")
+  self:addMonoBranch("xformTrig",   xformTrig,   "In", xformTrig,   "Out")
+  self:addMonoBranch("depth",       depth,       "In", depth,       "Out")
+  self:addMonoBranch("spread",      spread,      "In", spread,      "Out")
+  self:addMonoBranch("xformTarget", xformTarget, "In", xformTarget, "Out")
 end
 
 function DrumVoice:onLoadViews(objects, branches)
@@ -256,14 +275,27 @@ function DrumVoice:onLoadViews(objects, branches)
       holdParam = objects.hold:getParameter("Bias"),
       attackParam = objects.attack:getParameter("Bias")
     },
-    xform = DrumVoiceRandomGateControl {
+    -- STEP 1 (2.5.5.9): xform ply wires funcParam to xformTarget (new),
+    -- factorParam to depth. spread is still tied (vestigial; C++ still
+    -- reads it) but unexposed at the ply. applyRandomize in C++ still
+    -- does the flat 10-param randomize -- target is read but ignored.
+    xform = TransformGateControl {
+      seq = self,
       button = "xform",
       description = "Randomize",
       branch = branches.xformTrig,
       comparator = objects.xformTrig,
-      op = objects.op,
-      depthParam = objects.depth:getParameter("Bias"),
-      destParam = objects.dest:getParameter("Bias")
+      funcNames = xformTargetNames,
+      funcMap = intMap(0, 3),
+      funcParam = objects.xformTarget:getParameter("Bias"),
+      paramALabel = "depth",
+      factorParam = objects.depth:getParameter("Bias"),
+      factorMap = (function()
+        local m = app.LinearDialMap(0, 1)
+        m:setSteps(0.1, 0.01, 0.001, 0.001)
+        return m
+      end)(),
+      factorPrecision = 2
     },
     level = DrumVoiceLevelControl {
       button = "level",
@@ -349,17 +381,11 @@ function DrumVoice:onLoadViews(objects, branches)
       biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
       biasPrecision = 2, initialBias = 0.3
     },
-    xformDest = GainBias {
-      button = "dest", description = "Destination",
-      branch = branches.dest, gainbias = objects.dest, range = objects.dest,
-      biasMap = (function()
-        local m = app.LinearDialMap(0, 3)
-        m:setSteps(1, 1, 1, 1)
-        m:setRounding(1)
-        return m
-      end)(),
-      biasUnits = app.unitNone,
-      biasPrecision = 0, initialBias = 0
+    xformSpread = GainBias {
+      button = "sprd", description = "Spread",
+      branch = branches.spread, gainbias = objects.spread, range = objects.spread,
+      biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
+      biasPrecision = 2, initialBias = 0.5
     }
   }, {
     expanded  = { "trig", "tune", "character", "sweep", "decay", "xform", "level" },
@@ -367,7 +393,7 @@ function DrumVoice:onLoadViews(objects, branches)
     character = { "character", "charShape", "charGrit", "charPunch" },
     sweep     = { "sweep", "sweepTime" },
     decay     = { "decay", "decayHold", "decayAttack" },
-    xform     = { "xform", "xformDepth", "xformDest" },
+    xform     = { "xform", "xformDepth", "xformSpread" },
     level     = { "level", "levelClipper", "levelEQ", "levelComp" },
     collapsed = {}
   }
@@ -376,12 +402,12 @@ end
 local adapterBiases = {
   "character", "shape", "grit", "punch", "sweep", "sweepTime",
   "attack", "hold", "decay", "clipper", "eq", "level", "compAmt", "octave",
-  "depth", "dest"
+  "depth", "spread"
 }
 
 function DrumVoice:serialize()
   local t = Unit.serialize(self)
-  t.schema = 4 -- schema 4 = xform Spread replaced with Dest mode selector
+  t.schema = 3 -- schema 3 = Makeup replaced with one-knob CompAmt
   for _, name in ipairs(adapterBiases) do
     local obj = self.objects[name]
     if obj then
