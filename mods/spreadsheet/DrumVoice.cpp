@@ -49,7 +49,9 @@ namespace stolmine
 
     float phase1 = 0.0f;
     float phase2 = 0.0f;
+    float phase3 = 0.0f;   // detuned unison sibling of osc1 (Pass 1)
     float phaseFm = 0.0f;
+    float wobblePhase = 0.0f;  // pitch-droop LFO (Pass 1)
 
     float ampEnv = 0.0f;
     float punchEnv = 0.0f;
@@ -68,6 +70,11 @@ namespace stolmine
     float attackIncr = 0.0f;
 
     uint32_t noiseState = 12345;
+    float noiseLP = 0.0f;  // 1-pole LP state for direct-noise mix (Pass 1)
+
+    // Per-trigger wobble parameters (computed at trigger time, used per-sample).
+    float wobbleHz = 12.0f;
+    float wobbleDepth = 0.0f;
 
     float ic1eq = 0.0f;
     float ic2eq = 0.0f;
@@ -337,14 +344,31 @@ namespace stolmine
 
         s.baseFreq = baseFreq;
         float freqStart = baseFreq * powf(2.0f, sweep / 12.0f);
-        float sweepSamples = sweepTime * sr;
+        // Pass 1 #1: 0.7x effective sweep time -> ~1.4x faster pitch drop
+        // to better match Trinity Block's snappier envelope.
+        float sweepSamples = sweepTime * sr * 0.7f;
         if (sweepSamples < 1.0f) sweepSamples = 1.0f;
         s.currentFreq = freqStart;
         s.sweepRatio = powf(baseFreq / freqStart, 1.0f / sweepSamples);
 
         s.phase1 = 0.0f;
         s.phase2 = 0.0f;
+        s.phase3 = 0.0f;
         s.phaseFm = 0.0f;
+        s.wobblePhase = 0.0f;
+
+        // Wobble depth responds to a composite of decay, sweep, and pitch.
+        // Pitch scalar gives deeper-pitched strikes more droop (bigger
+        // drums wobble more). Cap at 0.03 -- half of the pre-0.100 ceiling
+        // based on listening feedback.
+        float pitchScale = 110.0f / baseFreq;
+        if (pitchScale < 0.5f) pitchScale = 0.5f;
+        if (pitchScale > 1.5f) pitchScale = 1.5f;
+
+        float wobbleRaw = 0.005f + effectiveDecay * 0.010f + sweep * 0.00014f;
+        s.wobbleDepth = wobbleRaw * pitchScale;
+        if (s.wobbleDepth > 0.03f) s.wobbleDepth = 0.03f;
+        s.wobbleHz    = 14.0f / (1.0f + effectiveDecay * 8.0f);  // ~14 @ 0s, ~3.5 @ 0.5s
 
         s.ampDecayCoeff   = expf(-1.0f / (effectiveDecay * sr));
         s.shapeDecayCoeff = expf(-1.0f / (effectiveDecay * 0.6f * sr));
@@ -377,8 +401,15 @@ namespace stolmine
       else
         s.currentFreq = s.baseFreq;
 
-      // Pitch droop: +1.5% at onset, decays with amplitude
-      float droopFreq = s.currentFreq * (1.0f + s.ampEnv * 0.015f);
+      // Pitch droop: ampEnv-scaled static + decay-tied wobble LFO.
+      // Pass 1 #7: wobble LFO uses sLUT (sinf miscompute on package .so).
+      // Phase advance per-sample at sr rate; mapped via tri->sin lookup.
+      s.wobblePhase += s.wobbleHz / sr;
+      s.wobblePhase -= floorf(s.wobblePhase);
+      float wTri = 4.0f * (s.wobblePhase < 0.5f ? s.wobblePhase : 1.0f - s.wobblePhase) - 1.0f;
+      float wobble = lookupSine(s.sLUT, wTri) * s.wobbleDepth * s.ampEnv;
+
+      float droopFreq = s.currentFreq * (1.0f + s.ampEnv * 0.015f + wobble);
       if (s.punchEnv > 0.01f)
         droopFreq *= (1.0f + s.punchEnv * 0.05f);
 
@@ -461,7 +492,31 @@ namespace stolmine
         {
           toneSample = lookupSine(s.sLUT, tri1 * foldGain);
         }
-        osSamp[k] = toneSample;
+
+        // Pass 1 #4: osc3 unison sibling at +0.4% detune (~7 cents).
+        // Same FM injection as osc1 so it tracks identically -- adds
+        // beating thickness without spectral divergence.
+        float inc3 = droopFreq * 1.004f / sr2;
+        inc3 += shapeSample * shapeFmDepth * droopFreq * 1.004f / sr2;
+        inc3 += fmMod * metFmDepth * droopFreq * 1.004f / sr2;
+        s.phase3 += inc3;
+        s.phase3 -= floorf(s.phase3);
+        float tri3 = 4.0f * (s.phase3 < 0.5f ? s.phase3 : 1.0f - s.phase3) - 1.0f;
+        float toneSample3;
+        if (character < 0.5f)
+        {
+          float sine3 = lookupSine(s.sLUT, tri3);
+          toneSample3 = tri3 + (sine3 - tri3) * tMorph;
+        }
+        else
+        {
+          toneSample3 = lookupSine(s.sLUT, tri3 * foldGain);
+        }
+
+        // Mix: 1.0 * osc1 + 0.6 * osc3. Boosted per listening feedback;
+        // the high-grit attenuation applied after decimation + the post-
+        // chain (clipper/comp/level) keep the overall loudness in check.
+        osSamp[k] = toneSample * 1.0f + toneSample3 * 0.6f;
       }
 
       // 2-tap moving-average halfband decimator: zero at the 2x Nyquist,
@@ -469,21 +524,22 @@ namespace stolmine
       // FIR later if the residual aliasing above sr/2 is audible.
       float sample = 0.5f * (osSamp[0] + osSamp[1]);
 
-      // Direct noise mix: kicks in above grit = 0.4 and climbs toward
-      // snare / hat territory at grit = 1.0. Tamed from 1.5x slope to 1.0x
-      // peak (~0.6 max) so high grit doesn't dominate the output.
-      float gritNoiseGain = (grit - 0.4f) * 1.0f * s.ampEnv;
-      if (gritNoiseGain > 0.0f)
-      {
-        s.noiseState = s.noiseState * 1664525u + 1013904223u;
-        float noiseSig = (float)(int32_t)s.noiseState / 2147483648.0f;
-        sample += noiseSig * gritNoiseGain;
-      }
+      // Attenuate oscillator sum as grit rises so the noise path can
+      // dominate the output at full grit (Trinity Block's high-grit
+      // territory is mostly noise). At grit=1 the oscs drop to 0.4x.
+      sample *= (1.0f - grit * 0.6f);
 
-      // Gain compensation for the combined Grit contributions (FM index +
-      // metallic FM + noise mix). At grit = 1, drop the sample 30% so the
-      // clipper doesn't immediately slam into saturation.
-      sample *= (1.0f - grit * 0.3f);
+      // Direct noise mix, low-passed at ~7 kHz (Pass 1 #2).
+      // Slope bumped 1.0 -> 2.5 so noise dominates at high grit while
+      // the osc sum has been pre-attenuated above.
+      // Always advance the LP state so it stays warm across the gate;
+      // only mix in when grit is high enough to expose noise.
+      s.noiseState = s.noiseState * 1664525u + 1013904223u;
+      float rawNoiseSig = (float)(int32_t)s.noiseState / 2147483648.0f;
+      s.noiseLP += (rawNoiseSig - s.noiseLP) * 0.6f;
+      float gritNoiseGain = (grit - 0.4f) * 2.5f * s.ampEnv;
+      if (gritNoiseGain > 0.0f)
+        sample += s.noiseLP * gritNoiseGain;
 
       // Amp envelope state machine
       switch (s.envPhase)
@@ -520,6 +576,8 @@ namespace stolmine
           s.ic1eq = 0.0f;
           s.ic2eq = 0.0f;
           s.compDetector = 0.0f;
+          s.noiseLP = 0.0f;
+          s.wobblePhase = 0.0f;
         }
         break;
       default: // idle
