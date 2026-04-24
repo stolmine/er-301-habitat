@@ -407,26 +407,47 @@ Flat binary blob, little-endian floats, version header. Writer/reader in C++ (no
 
 ### What's wrong with the current one
 
-`SomSphereGraphic.h` does a per-pixel nearest-seed search over 64 nodes for every frame of a 128×64 viewport (with a half-frame toggle and a 64×64 cache). On hardware that's ~8K pixel ops/frame even when cached, and the cache invalidates whenever rotation moves. This is almost certainly why encoders capture and UI lag explodes — the draw call is blocking the event loop.
+`SomSphereGraphic.h` causes encoder capture, but the diagnosis is **mostly architectural, only partly CPU.** Three structural decisions the code doesn't make:
 
-### Principles for the new viz
+1. **Per-pixel granularity.** Iterates the full 128×64 = 8192 pixel grid, running a 64-node `nearestSeed` at each. Compare `ColmatageOverviewGraphic.h` (the "Perlin screensaver" in spreadsheet): 2×2 tile granularity, 21×32 = 672 tile ops/frame, ~12× less work at the same screen size.
+2. **No Voronoi partition cache.** The half-frame pixel cache is a weak optimization — it caches the _output_ of the partition for one frame but invalidates on any rotation change. The partition itself (which cell each tile belongs to) is never cached across rotation-bucket boundaries. Since the integrator slew advances rotation every frame, the cache is effectively never warm.
+3. **No time slicing.** Full Voronoi recompute happens in a single frame. Draw either runs the whole thing or skips (via the toggle). There's no "spread the work across 4–8 frames, draw partial state in between" path.
 
-1. **Never allocate or iterate per-pixel per-frame.** Precompute once. The voronoi tessellation for a given rotation is _fixed data_ — bake it, don't recompute.
-2. **Decouple visualization from input handling.** Draw can be throttled (every 2–4 frames, or on state change) without starving encoder events. The current implementation draws every frame regardless.
-3. **No sqrtf, sinf, cosf in the draw hot path.** LUTs or precomputed projections. (Memory: package-shipped sinf/cosf on am335x miscomputes — always LUT.)
+Colmatage proves this is the shape of the fix — it does more transcendentals per tile than the sphere would need (cosf+sinf inside the tile loop, 1344 calls/frame) and runs fine because tile granularity + state-machine evolution keep the per-frame op count bounded.
 
-### Proposed viz
+**CPU is the secondary factor.** `nearestSeed` is scalar, 64 iterations with a 3-wide dot product and branch per seed. Trivially vectorizable with NEON — 4 seeds per iteration via `vmlaq_f32` + max-tracking, ~4× speedup — but we won't need that speedup if the architectural fixes land first.
 
-A **stratified alchemical chart** rather than a rotating sphere:
+### Path A: rescue the sphere (preferred)
 
-- 64 nodes laid out on a fixed 2D projection (not a rotating 3D sphere — that was the cycle hog). Layout: concentric rings or a Fibonacci disk so the topology still reads.
-- Each node is a small glyph (4–6px). Glyph _shape_ encodes the node's reagent flag (which waveshaper family). Glyph _fill density_ encodes richness. Glyph _halo_ encodes how close the scan head is.
-- Active path is drawn as a short tracer: the last N scan positions as a fading line of lit nodes.
-- One live overlay: a thin spectrum bar or LFO trace along the top/bottom edge, rendered from voice output — keeps the display _alive_ without expensive compute.
+Keep the 3D Voronoi sphere — it was the right aesthetic — and apply four structural fixes + one optional CPU optimization:
 
-Cost budget: ≤ 500 pixel ops per frame. That's at least 10× the current budget headroom.
+| Fix                      | Details                                                                                                           |
+|--------------------------|-------------------------------------------------------------------------------------------------------------------|
+| Tile granularity         | 4×4 tile fills. 128/4 × 64/4 = 32×16 = **512 tile ops/frame** (16× fewer than per-pixel).                          |
+| Voronoi partition cache  | Cache the per-tile cell assignment keyed on `(rotation bucket, scan node)`. Quantize rotation to ~32 buckets per axis so small integrator slews don't invalidate. Full recompute only fires on bucket boundary crossings. |
+| Time slicing             | When recompute does fire, split into 4–8 frames: each frame updates 1/8 of the tile grid. Stale regions keep their previous assignment until their slice comes up. No frame ever runs the full 512-tile partition. |
+| Rotation/projection LUT  | Precompute at init: a projection LUT for quantized rotation buckets, so per-frame rotation work is a lookup + blend rather than trig + matrix multiply. |
+| `nearestSeed` NEON       | Optional, apply if budget is still tight. 4 seeds per iteration, 16 iterations for 64 seeds — float32x4 dot + max. ~4× scalar speedup. |
 
-**Fallback**: if the stratified chart feels static, the scan tracer plus slow global drift (rotating background tessellation texture, _not_ per-pixel recompute) can give it breathing motion without the Voronoi cost.
+**Expected cost:** 512 tiles × ~65 cycles/tile vectorized ≈ 33K cycles/frame — same order as Colmatage, which is known to be smooth. Even without NEON, 512 × ~250 cycles ≈ 128K cycles/frame is still well under the encoder-starvation threshold given time slicing is in place.
+
+### Path B: stratified chart (fallback)
+
+If the sphere rescue proves too intricate or if the time-slicing perceptibly shimmers, fall back to a flat layout:
+
+- 64 nodes on a fixed 2D Fibonacci disk or concentric rings. No rotation.
+- Glyph per node (4–6 px). Shape → reagent flag. Fill density → richness. Halo → scan proximity.
+- Scan tracer: last N scan positions as a fading lit-node trail.
+- Live edge overlay: thin spectrum or LFO trace along top/bottom edge.
+
+Costs ~50 glyph draws/frame at most. Dramatically cheaper than any sphere variant, but loses the alchemical-orb character.
+
+### Principles regardless of path
+
+1. **Architectural, not CPU.** If encoder input lags, the fix is in the draw _structure_ (granularity, caching, time slicing), not micro-optimization.
+2. **Work bounded per frame.** No frame should run a full 512-tile partition synchronously. Whatever the max per-frame cost is, it should be predictable and repeatable — not a bimodal "cache hit = cheap, cache miss = 10× cost" pattern.
+3. **LUT-first for trig.** Per-frame cosf/sinf for rotation is fine; per-tile or per-pixel transcendentals go through LUTs. Per memory: package-shipped sinf/cosf on am335x miscomputes in some code paths — always LUT.
+4. **Viz threads are display threads.** Encoder events dispatch on the same thread as draw. A long draw call starves input. Tile granularity and time slicing keep each draw call short enough that the event loop can service encoders between frames.
 
 ## UI / Plies
 
@@ -462,7 +483,7 @@ Sample-load control: handled as a sample slot on the header ply (same pattern as
 2. **Native 4-op C++ voice unit.** `AlembicVoice.cpp/h` — 4 phase accumulators, sin LUT, 4×4 matrix inner loop, reagent waveshaper. SWIG-wrap, expose as `od::Object`. Prove it A/B-matches the Lua reference from step 1 on static presets. **This is the step most susceptible to hardware/emu divergence** — validate early, per the _Identical means IDENTICAL_ memory.
 3. **Preset loader + crossfader.** C++ side: a 64-slot × 29-float preset table, K-weighted block-rate crossfade into the live voice state. Feed hand-authored presets (no training yet). Prove smooth scan between them.
 4. **Strip training params** from a forked Som → Alembic skeleton. Freeze weights. Wire scan-node-path + K weights to feed the preset crossfader.
-5. **New viz** (stratified chart, no per-pixel search, ≤500 pixel ops/frame). First thing the user interacts with; get it right before training complexity.
+5. **New viz.** First attempt: **rescue the sphere (Path A)** — port `SomSphereGraphic.h` with 4×4 tile granularity, partition cache keyed on (rotation bucket, scan node), 4–8 frame time slicing, rotation LUT. NEON `nearestSeed` if still tight. If the rescue proves intractable, fall back to Path B (stratified chart). First thing the user interacts with; get it right before training complexity.
 6. **Sample-slot wiring + difference-based sampling + offline feature extraction (audio-only).** Coarse-pass → farthest-point selection → 64-frame full feature extraction → Layer 0 + Layer 1 O0/O1 + mean-centered ratios. Smallest mapping that proves the pipeline end to end, with divergence sampling in place from day one (retrofitting uniform sampling → divergence sampling later would invalidate all cached state).
 7. **Serialization.** Sample reference + Layer 0 vectors + preset cache + user biases. Quicksave/quickload round-trip must preserve trained character even if the sample pool entry is missing.
 8. **Group fades.** wPitch, wStructure, wFeedback, wDynamics and their user-bias backing values.
