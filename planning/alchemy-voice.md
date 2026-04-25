@@ -484,7 +484,7 @@ The 13 build-order steps below consolidate into 9 execution phases. Each phase i
 | Phase | Steps | Deliverable |
 |---|---|---|
 | **1** | 1 | `AlembicRef` — 4-op Lua-graph PMM reference in `mods/spreadsheet/`, temporary. Ships under a distinct name (not `Alembic`) because Phase 2 replaces the DSP topology wholesale; a saved AlembicRef patch could not load into the native Alembic unit. AlembicRef stays in the package until Phase 2 A/B-verifies, then is removed. |
-| 2 | 2 | Native `AlembicVoice.cpp/.h` — C++ 4-op PMM with NEON-friendly inner loop. A/B-match AlembicRef. Highest-risk step (hardware codegen divergence per _feedback_identical_means_identical_). |
+| 2 | 2 | Native `AlembicVoice.cpp/.h` — C++ 4-op PMM with NEON-friendly inner loop. A/B-match AlembicRef. Highest-risk step (hardware codegen divergence per _feedback_identical_means_identical_). **Shipped in two sub-phases**: 2a = correctness (scalar per-op loop, `simd_sin` Cephes polynomial from `hal/simd.h` for bit-match to `libcore.SineOscillator`, 0.18 internal feedback scale, hard-reset sync, `[0,1)` phase wrap, class-member NEON banks sized for 2b); 2b = NEON vectorization (phase advance + matrix×prevOut + output sum all 4-wide, zero header changes vs 2a so SWIG stays valid). |
 | 3 | 3–4 | 64-slot × 29-float preset table + K-weighted block-rate crossfader. Fork Som skeleton, strip training params. First custom paramMode controls land here. |
 | 4 | 5 | Sphere viz, Path A (4×4 tiles, partition cache, time slicing, rotation LUT). |
 | 5 | 6 | Sample-slot wiring + difference-based sampling + audio-domain feature extraction + Layer 0/1 O0+O1. First end-to-end train-on-load pass. |
