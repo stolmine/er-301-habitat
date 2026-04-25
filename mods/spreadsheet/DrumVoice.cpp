@@ -3,6 +3,10 @@
 #include <hal/ops.h>
 #include <math.h>
 
+#ifdef __ARM_NEON
+#include <arm_neon.h>
+#endif
+
 namespace stolmine
 {
 
@@ -270,6 +274,19 @@ namespace stolmine
 
   void DrumVoice::process()
   {
+#ifdef __ARM_NEON
+    // Probe 2.5.5.107: smallest possible NEON op in DrumVoice. Two
+    // constant-splat vectors, add, extract one lane, throw away.
+    // No memory loads, no struct touches, no audio impact. Tests
+    // whether NEON intrinsics work AT ALL in this unit on hardware
+    // (2.5.5.105 crashed with a 4-lane struct-member load + sine).
+    {
+      volatile float neonProbeResult =
+        vgetq_lane_f32(vaddq_f32(vdupq_n_f32(1.0f), vdupq_n_f32(2.0f)), 0);
+      (void)neonProbeResult;
+    }
+#endif
+
     Internal &s = *mpInternal;
     float *trig = mTrigger.buffer();
     float *voct = mVOct.buffer();
