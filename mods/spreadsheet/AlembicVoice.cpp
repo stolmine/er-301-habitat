@@ -23,6 +23,63 @@ namespace stolmine
   // sum so the two units produce identical self-feedback math.
   static const float kFbScale = 0.18f;
 
+  // Phase 3 hand-authored preset gradient, stored at FILE scope (shared
+  // across all AlembicVoice instances; init-on-first-construction). Slot
+  // 0 is a clean sine on op A; slot 63 is 4-op chaos with all matrix
+  // entries ~0.45 and op detunes for beating. Linear interpolation
+  // across slots 1..62. Phase 5 replaces this with offline training
+  // output. ~7.4 KB total (not per-instance).
+  //
+  // Per-slot layout (29 floats):
+  //   [0..3]   ratios
+  //   [4..7]   levels
+  //   [8..11]  detunes (Hz)
+  //   [12..27] matrix[src*4 + dst], source-major
+  //   [28]     reagent flag (Phase 7+; ignored in Phase 3)
+  static float sPresetTable[64][29];
+  static bool sPresetTableInit = false;
+
+  // Disable auto-vectorization on this initializer. GCC otherwise emits
+  // NEON quad ops with `:64` alignment hints on the .rodata endA/endB
+  // and .bss sPresetTable accesses, plus a stack-spill quad write to
+  // `[sp :64]`. The runtime alignment doesn't match the hints on
+  // Cortex-A8 and the unit traps at construction time -- exactly the
+  // class of crash from feedback_neon_intrinsics_drumvoice but in the
+  // constructor instead of the per-sample loop. Scalar code path is
+  // perfectly fast for a one-shot 64*29 init.
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void fillPhase3Presets()
+  {
+    if (sPresetTableInit) return;
+    static const float endA[29] = {
+        1.0f, 2.0f, 3.0f, 5.0f,
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f,
+        0.0f};
+    static const float endB[29] = {
+        1.0f, 2.0f, 3.0f, 5.0f,
+        0.4f, 0.3f, 0.2f, 0.1f,
+        0.0f, 2.0f, 4.0f, 6.0f,
+        0.45f, 0.45f, 0.45f, 0.45f,
+        0.45f, 0.45f, 0.45f, 0.45f,
+        0.45f, 0.45f, 0.45f, 0.45f,
+        0.45f, 0.45f, 0.45f, 0.45f,
+        0.0f};
+    for (int slot = 0; slot < 64; slot++)
+    {
+      const float u = (float)slot / 63.0f;
+      for (int f = 0; f < 29; f++)
+      {
+        sPresetTable[slot][f] = endA[f] + u * (endB[f] - endA[f]);
+      }
+    }
+    sPresetTableInit = true;
+  }
+
   AlembicVoice::AlembicVoice()
   {
     addInput(mVOct);
@@ -31,6 +88,8 @@ namespace stolmine
 
     addParameter(mF0);
     addParameter(mGlobalLevel);
+    addParameter(mScanPos);
+    addParameter(mScanK);
 
     addParameter(mRatioA);
     addParameter(mRatioB);
@@ -72,6 +131,7 @@ namespace stolmine
     memset(mRatioFlat, 0, sizeof(mRatioFlat));
     memset(mDetuneFlat, 0, sizeof(mDetuneFlat));
     memset(mLevelFlat, 0, sizeof(mLevelFlat));
+    fillPhase3Presets();
     mSyncWasHigh = false;
   }
 
@@ -94,57 +154,72 @@ namespace stolmine
     const float f0 = CLAMP(0.01f, nyquist, mF0.value());
     const float lvl = mGlobalLevel.value();
 
-    // Populate block-rate scratch arrays (class members, heap-allocated
-    // with the instance). Per feedback_neon_intrinsics_drumvoice this is
-    // the storage class that guarantees the subsequent vld1q emits the
-    // unaligned-safe `vld1.32 [reg]` form (no `:64` hint) on Cortex-A8.
-    // Stack-local float[4] locals would trap via hint promotion under
-    // -O3 -ffast-math.
-    mRatioFlat[0] = mRatioA.value();
-    mRatioFlat[1] = mRatioB.value();
-    mRatioFlat[2] = mRatioC.value();
-    mRatioFlat[3] = mRatioD.value();
+    // Phase 3 K-weighted preset crossfade. Block-rate. Output buffers are
+    // class members (mMatrixFlat / mRatioFlat / mDetuneFlat / mLevelFlat),
+    // same arrays the per-sample NEON loop reads from in Phase 2b -- no
+    // changes to that loop. Rest of process() is identical to Phase 2b.
+    const float scanPos = CLAMP(0.0f, 1.0f, mScanPos.value());
+    const int K = (int)CLAMP(2.0f, 6.0f, mScanK.value() + 0.5f);
+    const float s = scanPos * 63.0f;
+    const float halfWidth = 0.5f * (float)K;
 
-    mLevelFlat[0] = mLevelA.value();
-    mLevelFlat[1] = mLevelB.value();
-    mLevelFlat[2] = mLevelC.value();
-    mLevelFlat[3] = mLevelD.value();
+    // Pick K nodes around s, clamping at table edges.
+    int n0 = (int)(s + 0.5f) - K / 2;
+    if (n0 < 0) n0 = 0;
+    if (n0 + K > 64) n0 = 64 - K;
 
-    mDetuneFlat[0] = mDetuneA.value();
-    mDetuneFlat[1] = mDetuneB.value();
-    mDetuneFlat[2] = mDetuneC.value();
-    mDetuneFlat[3] = mDetuneD.value();
+    // Triangular weights, normalize to sum=1. K up to 6.
+    float w[6];
+    float wSum = 0.0f;
+    for (int j = 0; j < K; j++)
+    {
+      const float dist = fabsf((float)(n0 + j) - s);
+      const float wRaw = halfWidth - dist;
+      w[j] = wRaw > 0.0f ? wRaw : 0.0f;
+      wSum += w[j];
+    }
+    if (wSum < 1e-9f)
+    {
+      w[0] = 1.0f;
+      wSum = 1.0f;
+    }
+    const float wInv = 1.0f / wSum;
 
-    // Source-major 4x4 matrix, mMatrixFlat[src*4 + dst]. User-facing name
-    // MatrixIJ means "I modulates J" (first letter source, second letter
-    // destination), matching AlembicRef's phaseIJ / "ItoJ" convention.
-    // Diagonals are pre-scaled by kFbScale here so the per-sample matrix
-    // sum path has no src==dst ternary.
-    mMatrixFlat[0] = mMatrixAA.value() * kFbScale;
-    mMatrixFlat[1] = mMatrixAB.value();
-    mMatrixFlat[2] = mMatrixAC.value();
-    mMatrixFlat[3] = mMatrixAD.value();
-    mMatrixFlat[4] = mMatrixBA.value();
-    mMatrixFlat[5] = mMatrixBB.value() * kFbScale;
-    mMatrixFlat[6] = mMatrixBC.value();
-    mMatrixFlat[7] = mMatrixBD.value();
-    mMatrixFlat[8] = mMatrixCA.value();
-    mMatrixFlat[9] = mMatrixCB.value();
-    mMatrixFlat[10] = mMatrixCC.value() * kFbScale;
-    mMatrixFlat[11] = mMatrixCD.value();
-    mMatrixFlat[12] = mMatrixDA.value();
-    mMatrixFlat[13] = mMatrixDB.value();
-    mMatrixFlat[14] = mMatrixDC.value();
-    mMatrixFlat[15] = mMatrixDD.value() * kFbScale;
+    // Blend the 29 per-slot floats into the working voice state buffers.
+    // Loop body is uniform across K (no differential dispatch per
+    // feedback_runtime_branched_dsp_dispatch).
+    for (int f = 0; f < 4; f++) mRatioFlat[f] = 0.0f;
+    for (int f = 0; f < 4; f++) mLevelFlat[f] = 0.0f;
+    for (int f = 0; f < 4; f++) mDetuneFlat[f] = 0.0f;
+    for (int f = 0; f < 16; f++) mMatrixFlat[f] = 0.0f;
+    for (int j = 0; j < K; j++)
+    {
+      const float wj = w[j] * wInv;
+      const float *p = sPresetTable[n0 + j];
+      for (int f = 0; f < 4; f++) mRatioFlat[f] += wj * p[f];
+      for (int f = 0; f < 4; f++) mLevelFlat[f] += wj * p[4 + f];
+      for (int f = 0; f < 4; f++) mDetuneFlat[f] += wj * p[8 + f];
+      for (int f = 0; f < 16; f++) mMatrixFlat[f] += wj * p[12 + f];
+    }
+    // Apply the diagonal kFbScale after the blend, matching Phase 2b's
+    // per-sample matrix-sum convention. Off-diagonal cross-mod stays 1x.
+    mMatrixFlat[0 * 4 + 0] *= kFbScale;
+    mMatrixFlat[1 * 4 + 1] *= kFbScale;
+    mMatrixFlat[2 * 4 + 2] *= kFbScale;
+    mMatrixFlat[3 * 4 + 3] *= kFbScale;
 
-    // Block-rate NEON loads off class-member scratch arrays.
-    const float32x4_t vRow0 = vld1q_f32(&mMatrixFlat[0]);
-    const float32x4_t vRow1 = vld1q_f32(&mMatrixFlat[4]);
-    const float32x4_t vRow2 = vld1q_f32(&mMatrixFlat[8]);
-    const float32x4_t vRow3 = vld1q_f32(&mMatrixFlat[12]);
-    const float32x4_t vDetuneSp = vmulq_n_f32(vld1q_f32(mDetuneFlat), sp);
-    const float32x4_t vRatioF0Sp = vmulq_n_f32(vld1q_f32(mRatioFlat), f0 * sp);
+    // Block-rate NEON loads. Only vLevel hoists across the per-sample
+    // loop -- it's used in the output-sum step *after* simd_sin so it
+    // can sit in a callee-save NEON register naturally. The other
+    // quads (vRow0..3, vRatioF0Sp, vDetuneSp) are loaded INSIDE the
+    // loop, just before their use, and become dead before simd_sin.
+    // This avoids GCC having to spill them to stack across the
+    // simd_sin call -- the spill emitted `vst1.64 {dN}, [sp :64]` hints
+    // which trap on misaligned stack offsets per
+    // feedback_neon_intrinsics_drumvoice. Per-sample re-load cost is
+    // ~6 quad ops, marginal vs the simd_sin and matrix-FMA cost.
     const float32x4_t vLevel = vld1q_f32(mLevelFlat);
+    const float f0Sp = f0 * sp;
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -160,6 +235,10 @@ namespace stolmine
 
       // Phase advance (NEON 4-wide):
       //   phase[op] += (f0 * ratio[op] * sp) * ex + (detune[op] * sp)
+      // Build vRatioF0Sp / vDetuneSp inside the loop so they don't
+      // need to survive simd_sin further down.
+      const float32x4_t vRatioF0Sp = vmulq_n_f32(vld1q_f32(mRatioFlat), f0Sp);
+      const float32x4_t vDetuneSp  = vmulq_n_f32(vld1q_f32(mDetuneFlat), sp);
       float32x4_t vPhase = vld1q_f32(mPhaseBank);
       vPhase = vaddq_f32(vPhase, vmlaq_n_f32(vDetuneSp, vRatioF0Sp, ex));
 
@@ -180,12 +259,14 @@ namespace stolmine
       vPhase = vsubq_f32(vPhase, vInt);
       vst1q_f32(mPhaseBank, vPhase);
 
-      // Matrix * prevOut via column-broadcast FMA chain. No horizontal
-      // reductions. Diagonal was pre-scaled by kFbScale at block setup,
-      // so the inner path applies no per-sample ternary. See plan for
-      // derivation: phaseArg[dst] = phase[dst] + sum_src M[src->dst] *
-      // prev[src], expressed as prev[0]*vRow0 + prev[1]*vRow1 + ... with
-      // vRow_src being the "source src broadcast to all 4 destinations."
+      // Matrix * prevOut via column-broadcast FMA chain. Load matrix
+      // rows inside the loop (block-invariant but cheap to re-load)
+      // so they don't have to survive simd_sin -- avoids the
+      // `[sp :64]` NEON spill trap.
+      const float32x4_t vRow0 = vld1q_f32(&mMatrixFlat[0]);
+      const float32x4_t vRow1 = vld1q_f32(&mMatrixFlat[4]);
+      const float32x4_t vRow2 = vld1q_f32(&mMatrixFlat[8]);
+      const float32x4_t vRow3 = vld1q_f32(&mMatrixFlat[12]);
       float32x4_t vArg = vmulq_n_f32(vRow0, mPrevOutBank[0]);
       vArg = vmlaq_n_f32(vArg, vRow1, mPrevOutBank[1]);
       vArg = vmlaq_n_f32(vArg, vRow2, mPrevOutBank[2]);

@@ -36,6 +36,12 @@ namespace stolmine
     od::Parameter mF0{"F0", 27.5f};
     od::Parameter mGlobalLevel{"Level", 0.5f};
 
+    // Phase 3 scan-driven preset playback. ScanPos walks the 64-slot
+    // preset table; ScanK is the path-window width (number of bracketing
+    // nodes blended per block, clamped to [2,6]).
+    od::Parameter mScanPos{"ScanPos", 0.0f};
+    od::Parameter mScanK{"ScanK", 4.0f};
+
     od::Parameter mRatioA{"RatioA", 1.0f};
     od::Parameter mRatioB{"RatioB", 1.0f};
     od::Parameter mRatioC{"RatioC", 1.0f};
@@ -90,7 +96,10 @@ namespace stolmine
     // stack-local float[4] arrays promote `vld1.32 [reg :64]` hints under
     // -O3 -ffast-math and trap on Cortex-A8 misalignment. Holding the
     // matrix, ratio, detune, and level buffers as class members ensures
-    // the block-rate vld1q emits the unaligned-safe no-hint form.
+    // the block-rate vld1q emits the unaligned-safe no-hint form. Phase 3
+    // also uses these as crossfader output buffers (the K-weighted preset
+    // blend writes here at block setup; per-sample NEON loop reads them
+    // unchanged).
     float mMatrixFlat[16];    // source-major, diagonal pre-scaled by 0.18
     float mRatioFlat[4];
     float mDetuneFlat[4];

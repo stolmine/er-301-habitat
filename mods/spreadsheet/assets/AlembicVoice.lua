@@ -1,7 +1,12 @@
--- Alembic (AlembicVoice): native 4-op phase-mod matrix voice.
--- A/B-equivalent to AlembicRef; see mods/spreadsheet/AlembicVoice.h for
--- the architecture notes. This Lua wiring is intentionally parallel to
--- AlembicRef.lua's view/menu layout so tester muscle memory transfers.
+-- Alembic (AlembicVoice): scan-driven 4-op phase-mod matrix voice.
+-- Phase 3a: user controls scan position; per-block the C++ unit blends a
+-- K-weighted window of preset slots into the live voice state. The 29
+-- Phase 2 user-direct Parameters (ratios, levels, detunes, matrix) stay
+-- on the C++ class but are dropped from the Lua UI; Phase 7 will
+-- re-expose them as user-bias adapters wired into the group fades.
+--
+-- AlembicRef remains alongside as the Lua-graph reference voice (still
+-- has its 16 user-direct matrix knobs).
 
 local app = app
 local libspreadsheet = require "spreadsheet.libspreadsheet"
@@ -10,8 +15,6 @@ local Unit = require "Unit"
 local Pitch = require "Unit.ViewControl.Pitch"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
-local Task = require "Unit.MenuControl.Task"
-local MenuHeader = require "Unit.MenuControl.Header"
 local Encoder = require "Encoder"
 
 local AlembicVoice = Class{}
@@ -28,15 +31,14 @@ function AlembicVoice:onLoadGraph(channelCount)
 
     -- V/Oct: ConstantOffset directly to op.V/Oct. AlembicVoice applies
     -- the FULLSCALE_IN_VOLTS*ln2 scaling internally, matching libcore
-    -- SineOscillator's convention (no external 10x ConstantGain).
+    -- SineOscillator's convention.
     local tune = self:addObject("tune", app.ConstantOffset())
     local tuneRange = self:addObject("tuneRange", app.MinMax())
     connect(tune, "Out", op, "V/Oct")
     connect(tune, "Out", tuneRange, "In")
     self:addMonoBranch("tune", tune, "In", tune, "Out")
 
-    -- Sync: Comparator in trigger mode feeds op.Sync; op detects the
-    -- rising edge with a 0.5f threshold in process().
+    -- Sync: rising-edge gate, op detects with >0.5f threshold.
     local sync = self:addObject("sync", app.Comparator())
     sync:setTriggerMode()
     connect(sync, "Out", op, "Sync")
@@ -48,8 +50,6 @@ function AlembicVoice:onLoadGraph(channelCount)
         connect(op, "Out", self, "Out2")
     end
 
-    -- ParameterAdapter helper. Each adapter exposes a Parameter as a
-    -- CV-modulatable ply control via addMonoBranch.
     local function adapter(name, paramName, initial)
         local a = self:addObject(name, app.ParameterAdapter())
         a:hardSet("Bias", initial)
@@ -60,94 +60,24 @@ function AlembicVoice:onLoadGraph(channelCount)
 
     adapter("f0", "F0", 27.5)
     adapter("level", "Level", 0.5)
-
-    local opNames = {"A", "B", "C", "D"}
-    for _, n in ipairs(opNames) do
-        adapter("ratio" .. n, "Ratio" .. n, 1.0)
-        adapter("outLevel" .. n, "Level" .. n, 0.0)
-        adapter("tune" .. n, "Detune" .. n, 0.0)
-    end
-    for _, i in ipairs(opNames) do
-        for _, j in ipairs(opNames) do
-            adapter("phase" .. i .. j, "Matrix" .. i .. j, 0.0)
-        end
-    end
+    adapter("scanPos", "ScanPos", 0.0)
+    adapter("scanK", "ScanK", 4.0)
 end
 
 local views = {
-    expanded = {"tune", "freq", "sync", "level"},
-    outputs = {"outLevelA", "outLevelB", "outLevelC", "outLevelD"},
-    ratios = {"ratioA", "ratioB", "ratioC", "ratioD"},
-    tune = {"tuneA", "tuneB", "tuneC", "tuneD"},
-    a = {"outLevelA", "ratioA", "tuneA", "phaseAA", "phaseAB", "phaseAC", "phaseAD"},
-    b = {"outLevelB", "ratioB", "tuneB", "phaseBA", "phaseBB", "phaseBC", "phaseBD"},
-    c = {"outLevelC", "ratioC", "tuneC", "phaseCA", "phaseCB", "phaseCC", "phaseCD"},
-    d = {"outLevelD", "ratioD", "tuneD", "phaseDA", "phaseDB", "phaseDC", "phaseDD"},
-    aIn = {"phaseAA", "phaseBA", "phaseCA", "phaseDA"},
-    bIn = {"phaseAB", "phaseBB", "phaseCB", "phaseDB"},
-    cIn = {"phaseAC", "phaseBC", "phaseCC", "phaseDC"},
-    dIn = {"phaseAD", "phaseBD", "phaseCD", "phaseDD"},
+    expanded = {"tune", "freq", "sync", "scan", "level"},
+    scan = {"scan", "scanK"},
     collapsed = {}
 }
 
-local function linMap(min, max, superCoarse, coarse, fine, superFine)
-    local map = app.LinearDialMap(min, max)
-    map:setSteps(superCoarse, coarse, fine, superFine)
-    return map
-end
-
-local ratioMap = linMap(0.0, 24.0, 1.0, 1.0, 0.1, 0.01)
+local kMap = (function()
+    local m = app.LinearDialMap(2, 6)
+    m:setSteps(1, 1, 1, 1) -- integer-only
+    return m
+end)()
 
 function AlembicVoice:onLoadViews(objects, branches)
     local controls = {}
-    local opNames = {"A", "B", "C", "D"}
-
-    for i, name in ipairs(opNames) do
-        controls["outLevel" .. name] = GainBias {
-            button = name .. " Out",
-            description = name .. "to Output Lvl",
-            branch = branches["outLevel" .. name],
-            gainbias = objects["outLevel" .. name],
-            range = objects["outLevel" .. name],
-            biasMap = Encoder.getMap("[0,1]"),
-            initialBias = 0.0
-        }
-
-        controls["ratio" .. name] = GainBias {
-            button = name .. " Ratio",
-            description = name .. "Freq Ratio",
-            branch = branches["ratio" .. name],
-            gainbias = objects["ratio" .. name],
-            range = objects["ratio" .. name],
-            biasMap = ratioMap,
-            initialBias = 1.0
-        }
-
-        controls["tune" .. name] = GainBias {
-            button = name .. " Fine",
-            description = name .. " Fine Freq",
-            branch = branches["tune" .. name],
-            gainbias = objects["tune" .. name],
-            range = objects["tune" .. name],
-            biasMap = Encoder.getMap("oscFreq"),
-            biasUnits = app.unitHertz,
-            initialBias = 0.0,
-            gainMap = Encoder.getMap("freqGain"),
-            scaling = app.octaveScaling
-        }
-
-        for j, name2 in ipairs(opNames) do
-            controls["phase" .. name .. name2] = GainBias {
-                button = name .. " to " .. name2,
-                description = name .. " to " .. name2 .. "Phase Index",
-                branch = branches["phase" .. name .. name2],
-                gainbias = objects["phase" .. name .. name2],
-                range = objects["phase" .. name .. name2],
-                biasMap = Encoder.getMap("[0,1]"),
-                initialBias = 0.0
-            }
-        end
-    end
 
     controls.tune = Pitch {
         button = "V/oct",
@@ -170,6 +100,37 @@ function AlembicVoice:onLoadViews(objects, branches)
         scaling = app.octaveScaling
     }
 
+    controls.sync = Gate {
+        button = "sync",
+        description = "Sync",
+        branch = branches.sync,
+        comparator = objects.sync
+    }
+
+    controls.scan = GainBias {
+        button = "scan",
+        description = "Scan Position",
+        branch = branches.scanPos,
+        gainbias = objects.scanPos,
+        range = objects.scanPos,
+        biasMap = Encoder.getMap("[0,1]"),
+        biasUnits = app.unitNone,
+        biasPrecision = 3,
+        initialBias = 0.0
+    }
+
+    controls.scanK = GainBias {
+        button = "K",
+        description = "Path Window K",
+        branch = branches.scanK,
+        gainbias = objects.scanK,
+        range = objects.scanK,
+        biasMap = kMap,
+        biasUnits = app.unitNone,
+        biasPrecision = 0,
+        initialBias = 4.0
+    }
+
     controls.level = GainBias {
         button = "level",
         description = "Level",
@@ -180,98 +141,13 @@ function AlembicVoice:onLoadViews(objects, branches)
         initialBias = 0.5
     }
 
-    controls.sync = Gate {
-        button = "sync",
-        description = "Sync",
-        branch = branches.sync,
-        comparator = objects.sync
-    }
-
     return controls, views
 end
 
-local menu = {
-    "title",
-    "changeViews",
-    "changeViewMain",
-    "changeViewOutputs",
-    "changeViewRatios",
-    "changeViewTune",
-    "operatorViews",
-    "changeViewA",
-    "changeViewB",
-    "changeViewC",
-    "changeViewD",
-    "changeViewPMIndex",
-    "changeViewAIn",
-    "changeViewBIn",
-    "changeViewCIn",
-    "changeViewDIn",
-    "infoHeader",
-    "rename",
-    "load",
-    "save"
-}
-
-local currentView = "expanded"
-function AlembicVoice:changeView(view)
-    currentView = view
-    self:switchView(view)
-end
-
-function AlembicVoice:onShowMenu(objects, branches)
-    local controls = {}
-
-    controls.title = MenuHeader {
-        description = "Alembic - 4 op phase mod voice"
-    }
-
-    controls.operatorViews = MenuHeader { description = "Operator Views:" }
-    controls.changeViewA = Task { description = "A", task = function() self:changeView("a") end }
-    controls.changeViewB = Task { description = "B", task = function() self:changeView("b") end }
-    controls.changeViewC = Task { description = "C", task = function() self:changeView("c") end }
-    controls.changeViewD = Task { description = "D", task = function() self:changeView("d") end }
-
-    controls.changeViewPMIndex = MenuHeader { description = "Phase Modulation Indices:" }
-    controls.changeViewAIn = Task { description = "@A", task = function() self:changeView("aIn") end }
-    controls.changeViewBIn = Task { description = "@B", task = function() self:changeView("bIn") end }
-    controls.changeViewCIn = Task { description = "@C", task = function() self:changeView("cIn") end }
-    controls.changeViewDIn = Task { description = "@D", task = function() self:changeView("dIn") end }
-
-    controls.changeViews = MenuHeader { description = "Aggregate Views:" }
-    controls.changeViewMain = Task {
-        description = "main",
-        task = function() self:changeView("expanded") end
-    }
-    controls.changeViewOutputs = Task {
-        description = "outputs",
-        task = function() self:changeView("outputs") end
-    }
-    controls.changeViewRatios = Task {
-        description = "ratios",
-        task = function() self:changeView("ratios") end
-    }
-    controls.changeViewTune = Task {
-        description = "freqs",
-        task = function() self:changeView("tune") end
-    }
-
-    return controls, menu
-end
-
--- Serialization: per feedback_serialize_deserialize_pattern, round-trip
--- every user-facing ParameterAdapter's Bias plus the ConstantOffset's
--- Offset and the Comparator's Threshold.
-local adapterBiases = {
-    "f0", "level",
-    "ratioA", "ratioB", "ratioC", "ratioD",
-    "outLevelA", "outLevelB", "outLevelC", "outLevelD",
-    "tuneA", "tuneB", "tuneC", "tuneD",
-    "phaseAA", "phaseAB", "phaseAC", "phaseAD",
-    "phaseBA", "phaseBB", "phaseBC", "phaseBD",
-    "phaseCA", "phaseCB", "phaseCC", "phaseCD",
-    "phaseDA", "phaseDB", "phaseDC", "phaseDD"
-}
+-- Serialize: 4 adapter biases + tune Offset + sync Threshold per
+-- feedback_serialize_deserialize_pattern. The 29 hidden Phase 2
+-- Parameters are inert in Phase 3 and not persisted.
+local adapterBiases = { "f0", "level", "scanPos", "scanK" }
 
 function AlembicVoice:serialize()
     local t = Unit.serialize(self)
