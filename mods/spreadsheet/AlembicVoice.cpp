@@ -68,6 +68,10 @@ namespace stolmine
     memset(mPrevOutBank, 0, sizeof(mPrevOutBank));
     memset(mPhaseArgBank, 0, sizeof(mPhaseArgBank));
     memset(mSineBank, 0, sizeof(mSineBank));
+    memset(mMatrixFlat, 0, sizeof(mMatrixFlat));
+    memset(mRatioFlat, 0, sizeof(mRatioFlat));
+    memset(mDetuneFlat, 0, sizeof(mDetuneFlat));
+    memset(mLevelFlat, 0, sizeof(mLevelFlat));
     mSyncWasHigh = false;
   }
 
@@ -90,102 +94,120 @@ namespace stolmine
     const float f0 = CLAMP(0.01f, nyquist, mF0.value());
     const float lvl = mGlobalLevel.value();
 
-    const float ratio[4] = {
-        mRatioA.value(), mRatioB.value(), mRatioC.value(), mRatioD.value()};
-    const float level[4] = {
-        mLevelA.value(), mLevelB.value(), mLevelC.value(), mLevelD.value()};
-    const float detune[4] = {
-        mDetuneA.value(), mDetuneB.value(), mDetuneC.value(), mDetuneD.value()};
+    // Populate block-rate scratch arrays (class members, heap-allocated
+    // with the instance). Per feedback_neon_intrinsics_drumvoice this is
+    // the storage class that guarantees the subsequent vld1q emits the
+    // unaligned-safe `vld1.32 [reg]` form (no `:64` hint) on Cortex-A8.
+    // Stack-local float[4] locals would trap via hint promotion under
+    // -O3 -ffast-math.
+    mRatioFlat[0] = mRatioA.value();
+    mRatioFlat[1] = mRatioB.value();
+    mRatioFlat[2] = mRatioC.value();
+    mRatioFlat[3] = mRatioD.value();
 
-    // Source-major 4x4 matrix, matrix[src*4 + dst]. The user-facing name
+    mLevelFlat[0] = mLevelA.value();
+    mLevelFlat[1] = mLevelB.value();
+    mLevelFlat[2] = mLevelC.value();
+    mLevelFlat[3] = mLevelD.value();
+
+    mDetuneFlat[0] = mDetuneA.value();
+    mDetuneFlat[1] = mDetuneB.value();
+    mDetuneFlat[2] = mDetuneC.value();
+    mDetuneFlat[3] = mDetuneD.value();
+
+    // Source-major 4x4 matrix, mMatrixFlat[src*4 + dst]. User-facing name
     // MatrixIJ means "I modulates J" (first letter source, second letter
     // destination), matching AlembicRef's phaseIJ / "ItoJ" convention.
-    // Diagonal entries (src == dst) are scaled by kFbScale at accumulation
-    // time to match the reference semantics; everything else is 1x
-    // cross-mod.
-    const float matrix[16] = {
-        mMatrixAA.value(), mMatrixAB.value(), mMatrixAC.value(), mMatrixAD.value(),
-        mMatrixBA.value(), mMatrixBB.value(), mMatrixBC.value(), mMatrixBD.value(),
-        mMatrixCA.value(), mMatrixCB.value(), mMatrixCC.value(), mMatrixCD.value(),
-        mMatrixDA.value(), mMatrixDB.value(), mMatrixDC.value(), mMatrixDD.value()};
+    // Diagonals are pre-scaled by kFbScale here so the per-sample matrix
+    // sum path has no src==dst ternary.
+    mMatrixFlat[0] = mMatrixAA.value() * kFbScale;
+    mMatrixFlat[1] = mMatrixAB.value();
+    mMatrixFlat[2] = mMatrixAC.value();
+    mMatrixFlat[3] = mMatrixAD.value();
+    mMatrixFlat[4] = mMatrixBA.value();
+    mMatrixFlat[5] = mMatrixBB.value() * kFbScale;
+    mMatrixFlat[6] = mMatrixBC.value();
+    mMatrixFlat[7] = mMatrixBD.value();
+    mMatrixFlat[8] = mMatrixCA.value();
+    mMatrixFlat[9] = mMatrixCB.value();
+    mMatrixFlat[10] = mMatrixCC.value() * kFbScale;
+    mMatrixFlat[11] = mMatrixCD.value();
+    mMatrixFlat[12] = mMatrixDA.value();
+    mMatrixFlat[13] = mMatrixDB.value();
+    mMatrixFlat[14] = mMatrixDC.value();
+    mMatrixFlat[15] = mMatrixDD.value() * kFbScale;
+
+    // Block-rate NEON loads off class-member scratch arrays.
+    const float32x4_t vRow0 = vld1q_f32(&mMatrixFlat[0]);
+    const float32x4_t vRow1 = vld1q_f32(&mMatrixFlat[4]);
+    const float32x4_t vRow2 = vld1q_f32(&mMatrixFlat[8]);
+    const float32x4_t vRow3 = vld1q_f32(&mMatrixFlat[12]);
+    const float32x4_t vDetuneSp = vmulq_n_f32(vld1q_f32(mDetuneFlat), sp);
+    const float32x4_t vRatioF0Sp = vmulq_n_f32(vld1q_f32(mRatioFlat), f0 * sp);
+    const float32x4_t vLevel = vld1q_f32(mLevelFlat);
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
-      // V/Oct: clamp to [-1,1] and apply FULLSCALE_IN_VOLTS*ln2 scaling,
-      // matching SineOscillator.cpp:57-59. Scalar expf here; Phase 2b
-      // uses the 4-wide simd_exp inline with the NEON phase advance.
+      // V/Oct: scalar expf per sample. Vectorizing expf via simd_exp
+      // would require a 4-sample unroll, which conflicts with the
+      // sample-serial feedback dependency (each sample's matrix*prev
+      // reads the previous sample's sine output). Scalar expf is ~50
+      // cycles/sample; total per-sample is well under budget.
       float q = vOct[i];
       if (q > 1.0f) q = 1.0f;
       if (q < -1.0f) q = -1.0f;
       const float ex = expf(q * glog2);
 
-      // Per-op phase advance. freq = f0 * ratio * exp(V/Oct) + detune.
-      // detune is added linearly (Hz), consistent with AlembicRef's
-      // per-op tune GainBias summed into tuneSum alongside ratioX*f0.
-      for (int op = 0; op < 4; op++)
-      {
-        const float freq = f0 * ratio[op] * ex + detune[op];
-        mPhaseBank[op] += sp * freq;
-      }
+      // Phase advance (NEON 4-wide):
+      //   phase[op] += (f0 * ratio[op] * sp) * ex + (detune[op] * sp)
+      float32x4_t vPhase = vld1q_f32(mPhaseBank);
+      vPhase = vaddq_f32(vPhase, vmlaq_n_f32(vDetuneSp, vRatioF0Sp, ex));
 
-      // Sync: hard reset all 4 phases to 0 on rising edge. Threshold
-      // > 0.5f per feedback_comparator_gate_threshold -- loose 0.0
-      // thresholds trip on uninitialized fuzz / DC residue and
-      // false-fire the reset handler.
+      // Sync: hard reset on rising edge. Threshold > 0.5f per
+      // feedback_comparator_gate_threshold.
       const bool high = sync[i] > 0.5f;
       if (high && !mSyncWasHigh)
       {
-        mPhaseBank[0] = 0.0f;
-        mPhaseBank[1] = 0.0f;
-        mPhaseBank[2] = 0.0f;
-        mPhaseBank[3] = 0.0f;
+        vPhase = vdupq_n_f32(0.0f);
       }
       mSyncWasHigh = high;
 
-      // Wrap phase to [0,1). Truncate-toward-zero cast is floor() for
-      // the non-negative phase regime we operate in.
-      for (int op = 0; op < 4; op++)
-      {
-        mPhaseBank[op] -= (int)mPhaseBank[op];
-      }
+      // Wrap phase to [0,1). vcvtq_s32_f32 truncates toward zero; equals
+      // floor only for non-negative inputs. Phases monotonically
+      // increase from 0 and are only reset to 0 via sync, so the
+      // non-negative invariant holds.
+      const float32x4_t vInt = vcvtq_f32_s32(vcvtq_s32_f32(vPhase));
+      vPhase = vsubq_f32(vPhase, vInt);
+      vst1q_f32(mPhaseBank, vPhase);
 
-      // Consolidated matrix sum. For destination dst, phaseArg[dst] is
-      // its own accumulated phase plus the weighted sum of all 4
-      // operators' previous outputs. Diagonal (src==dst) picks up
-      // kFbScale to match SineOscillator's internal feedback handling;
-      // off-diagonal cross-mod is 1x (matches AlembicRef's Phase-inlet
-      // path). The (src == dst) predicate is compile-time-known after
-      // loop unrolling so this produces no runtime branches per
-      // feedback_runtime_branched_dsp_dispatch.
-      for (int dst = 0; dst < 4; dst++)
-      {
-        float acc = mPhaseBank[dst];
-        for (int src = 0; src < 4; src++)
-        {
-          const float scale = (src == dst) ? kFbScale : 1.0f;
-          acc += matrix[src * 4 + dst] * mPrevOutBank[src] * scale;
-        }
-        mPhaseArgBank[dst] = acc;
-      }
+      // Matrix * prevOut via column-broadcast FMA chain. No horizontal
+      // reductions. Diagonal was pre-scaled by kFbScale at block setup,
+      // so the inner path applies no per-sample ternary. See plan for
+      // derivation: phaseArg[dst] = phase[dst] + sum_src M[src->dst] *
+      // prev[src], expressed as prev[0]*vRow0 + prev[1]*vRow1 + ... with
+      // vRow_src being the "source src broadcast to all 4 destinations."
+      float32x4_t vArg = vmulq_n_f32(vRow0, mPrevOutBank[0]);
+      vArg = vmlaq_n_f32(vArg, vRow1, mPrevOutBank[1]);
+      vArg = vmlaq_n_f32(vArg, vRow2, mPrevOutBank[2]);
+      vArg = vmlaq_n_f32(vArg, vRow3, mPrevOutBank[3]);
+      vArg = vaddq_f32(vArg, vPhase);
+      vst1q_f32(mPhaseArgBank, vArg);
 
-      // Vectorized sine over 4 packed args (one simd_sin call per
-      // sample). mPhaseArgBank is a class member so the vld1q emits
-      // the unaligned-safe `vld1.32 [reg]` form on Cortex-A8 under
-      // -O3 -ffast-math.
-      float32x4_t vArg = vld1q_f32(mPhaseArgBank);
+      // Vectorized sine via simd_sin over 4 packed args. Unchanged from
+      // phase 2a; this is the same Cephes polynomial libcore uses.
       float32x4_t vSine = simd_sin(vmulq_n_f32(vArg, kTwoPi));
       vst1q_f32(mSineBank, vSine);
 
-      // Output: per-op level-weighted sum, scaled by global level.
-      const float sum = mSineBank[0] * level[0] + mSineBank[1] * level[1] +
-                        mSineBank[2] * level[2] + mSineBank[3] * level[3];
-      out[i] = sum * lvl;
+      // Output sum: NEON mul then horizontal reduce to scalar, scaled by
+      // the global level. vadd(low, high) + vpadd is the 4->1 reduction
+      // pattern on ARMv7 NEON (no vaddvq_f32 on Cortex-A8).
+      float32x4_t vProd = vmulq_f32(vSine, vLevel);
+      float32x2_t vPair = vadd_f32(vget_low_f32(vProd), vget_high_f32(vProd));
+      vPair = vpadd_f32(vPair, vPair);
+      out[i] = vget_lane_f32(vPair, 0) * lvl;
 
-      // Advance prev-out for next sample's matrix/feedback computation.
-      mPrevOutBank[0] = mSineBank[0];
-      mPrevOutBank[1] = mSineBank[1];
-      mPrevOutBank[2] = mSineBank[2];
-      mPrevOutBank[3] = mSineBank[3];
+      // Prev update for next sample's matrix/feedback.
+      vst1q_f32(mPrevOutBank, vSine);
     }
   }
 

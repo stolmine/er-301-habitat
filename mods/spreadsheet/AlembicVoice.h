@@ -86,6 +86,16 @@ namespace stolmine
     float mPhaseArgBank[4];   // packed phase+matrix args for simd_sin
     float mSineBank[4];       // simd_sin output unpacked
 
+    // Block-rate NEON scratch arrays. Per feedback_neon_intrinsics_drumvoice,
+    // stack-local float[4] arrays promote `vld1.32 [reg :64]` hints under
+    // -O3 -ffast-math and trap on Cortex-A8 misalignment. Holding the
+    // matrix, ratio, detune, and level buffers as class members ensures
+    // the block-rate vld1q emits the unaligned-safe no-hint form.
+    float mMatrixFlat[16];    // source-major, diagonal pre-scaled by 0.18
+    float mRatioFlat[4];
+    float mDetuneFlat[4];
+    float mLevelFlat[4];
+
     bool mSyncWasHigh;
   };
 
