@@ -1,21 +1,25 @@
 // AlembicSphereGraphic -- 3D Voronoi sphere viz for the Alembic scan ply.
-// Path A from planning/alchemy-voice.md: preserves the alchemical-orb
-// aesthetic (Fibonacci nodes on a sphere, scan-following tumble, depth
-// shading) while adopting the Colmatage-style discipline that keeps
-// hardware draw cost bounded:
+// LITERAL line-for-line port of mods/catchall/SomSphereGraphic.h, with
+// the architectural fix from planning/alchemy-voice.md "Path A":
 //
-//   - 4x4 tile rendering (32x16 = 512 tiles), not per-pixel.
-//   - Voronoi partition cache keyed on (rotBucketX, rotBucketY, scanNode).
-//   - Time-sliced partition refresh on cache key change (4 rows/frame).
-//   - Pre-baked sin/cos LUT in the .cpp (no runtime sinf/cosf in draw
-//     per feedback_package_trig_lut).
+//   - The full per-pixel rendered grayscale is stored in mGrayCache[]
+//     and reused across frames as long as (rotBucketX, rotBucketY,
+//     scanNode) is unchanged. Steady-state per-frame work is just a
+//     cheap blit.
+//   - When the cache key changes, refresh is time-sliced over
+//     kRefreshFrames consecutive frames so no single frame does the
+//     expensive full recompute (~524K dot products at per-pixel scale).
 //
-// Phase 4a: architecture + basic sphere (this commit). Phase 4b layers
-// the lifted focused node, slow Z-roll drift, and scan-proximity
-// brightness modulation.
-//
-// All NEON-loadable / per-frame arrays are class members per
-// feedback_neon_intrinsics_drumvoice + feedback_neon_hint_surfaces.
+// All shell logic, gray formulas, edge thresholds, lift formulas,
+// and constants come bit-for-bit from SomSphereGraphic. The only
+// substitutions are:
+//   - sinf/cosf -> lutCos/lutSin (per feedback_package_trig_lut)
+//   - asinf/atan2f -> precomputed per-node target table at construction
+//   - mpSom->getNodeX/Y/Z(n) -> mNodeX0/Y0/Z0[n] (Fibonacci computed
+//     in the graphic; AlembicVoice doesn't carry node positions yet)
+//   - mpSom->getNodeRichness(n) -> mpAlembic->getNodeBrightness(n) * 4.0f
+//     as a Phase 4 placeholder; Phase 5 will swap getNodeBrightness
+//     for real training-derived richness and the *4.0 falls away.
 
 #pragma once
 
@@ -38,10 +42,18 @@ namespace stolmine
 #ifndef SWIGLUA
     virtual void draw(od::FrameBuffer &fb);
 
-    static const int kTileSize = 4;
-    static const int kGridW = 32; // 128 / 4
-    static const int kGridH = 16; // 64 / 4
+    // Worst-case dimensions; smaller graphics use a subset.
+    static const int kMaxPixels = 128 * 64;
+
+    // Rotation buckets. 64/axis = 0.098 rad granularity. Integrator slew
+    // (~0.02 rad/frame at small dist) takes ~5 frames to cross a bucket;
+    // large jumps cross immediately and the time-sliced refresh hides
+    // the spike.
     static const int kRotBuckets = 64;
+
+    // Refresh slice rate. h pixel rows refreshed over kRefreshFrames
+    // consecutive frames after a cache invalidation.
+    static const int kRefreshFrames = 8;
 #endif
 
   private:
@@ -63,31 +75,34 @@ namespace stolmine
     float mNodeY[64];
     float mNodeZ[64];
 
+    // Per-node lift + scan-proximity. Class members (not stack locals)
+    // per feedback_neon_intrinsics_drumvoice.
+    float mLiftVal[64];
+    float mScanBright[64];
+
     // Camera integrator (scan-following tumble).
     float mRotX;
     float mRotY;
     float mTargetRotX;
     float mTargetRotY;
 
-    // Cache key for the Voronoi partition. Sentinels (-1) force refresh
-    // on first draw.
+    // Full per-pixel rendered grayscale cache. Survives across frames
+    // until the cache key changes. Class member (not stack-local) per
+    // feedback_neon_intrinsics_drumvoice.
+    uint8_t mGrayCache[kMaxPixels];
+
+    // Cache key. Sentinels (-1) force refresh on first draw.
     int mRotBucketX;
     int mRotBucketY;
     int mScanNodeCached;
 
-    // Tile partition cache: for each tile, which node index covers its
-    // center. uint8_t is enough (64 nodes < 256).
-    uint8_t mPartition[kGridW * kGridH];
-
-    // Time-slice progress. < kGridH means partition refresh in flight.
+    // Time-slice progress: number of rows refreshed since the last cache
+    // invalidation. == mHeight means the cache is fresh.
     int mRefreshProgress;
 
-    // Slewed per-tile brightness, prevents hard transitions on partition
-    // updates.
-    float mTileBrightness[kGridW * kGridH];
-
 #ifndef SWIGLUA
-    void refreshPartitionSlice(int rowStart, int rowEnd);
+    void refreshCacheSlice(int rowStart, int rowEnd, float outerR2,
+                           float invOuterR);
 #endif
   };
 

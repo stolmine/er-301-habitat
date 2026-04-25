@@ -91,6 +91,16 @@ namespace stolmine
       else if (n > 63) n = 63;
       return n;
     }
+    // Fractional scan position in node-index space [0, 63]. Used by the
+    // viz for smooth chain-distance falloff (rounded scanNode would
+    // create stepped halos as scan crosses node boundaries).
+    inline float getScanNodeFloat()
+    {
+      float s = mScanPos.value() * 63.0f;
+      if (s < 0.0f) s = 0.0f;
+      else if (s > 63.0f) s = 63.0f;
+      return s;
+    }
     inline float getNodeBrightness(int n) const
     {
       if (n < 0 || n > 63) return 0.0f;
