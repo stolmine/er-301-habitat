@@ -13,7 +13,7 @@ local TransformGateControl = require "spreadsheet.TransformGateControl"
 local Encoder = require "Encoder"
 
 local xformTargetNames = {
-  [0] = "all", "-swp", "-pch", "tmbr"
+  [0] = "all", "-swp", "-env", "-pch", "tmbr"
 }
 
 local function intMap(min, max)
@@ -286,7 +286,7 @@ function DrumVoice:onLoadViews(objects, branches)
       branch = branches.xformTrig,
       comparator = objects.xformTrig,
       funcNames = xformTargetNames,
-      funcMap = intMap(0, 3),
+      funcMap = intMap(0, 4),
       funcParam = objects.xformTarget:getParameter("Bias"),
       paramALabel = "depth",
       factorParam = objects.depth:getParameter("Bias"),

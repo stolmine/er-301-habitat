@@ -288,18 +288,23 @@ namespace stolmine
     // Ternaries compile to CMP+MOVCC on Cortex-A8 (conditional-move,
     // not control-flow branch).
     //
-    // Tiers (target value increases as we opt out of more):
-    //   0 "all"  : all four groups active
-    //   1 "-swp" : drop Sweep + SweepTime (pitch envelope locked)
-    //   2 "-pch" : also drop Octave (full pitch identity locked)
-    //   3 "tmbr" : timbre only (Char/Shape/Grit/Punch)
+    // Tiers are orthogonal lock presets, NOT a strictly monotonic chain
+    // (after 2.5.5.118 added -env between -swp and -pch):
+    //   0 "all"  : nothing locked, full chaos
+    //   1 "-swp" : pitch sweep locked (env + oct + timbre vary)
+    //   2 "-env" : sweep + envelope locked (oct + timbre vary)
+    //   3 "-pch" : sweep + oct locked (env + timbre vary)
+    //   4 "tmbr" : sweep + env + oct locked (only timbre varies)
+    //
+    // -env preserves the *shape/length of the hit*; -pch preserves the
+    // *pitch identity*. Different musical results.
     //
     // Function-pointer-table dispatch (2.5.5.96) and switch-with-
     // differential-bodies (2.5.5.92, .93, .95) both crashed Cortex-A8
     // hardware under -O3 -ffast-math. This single-method shape matches
     // 2.5.5.94's known-loading topology while still providing per-tier
     // behavior at runtime.
-    int target = CLAMP(0, 3, (int)(mXformTarget.value() + 0.5f));
+    int target = CLAMP(0, 4, (int)(mXformTarget.value() + 0.5f));
     float depth  = CLAMP(0.0f, 1.0f, mXformDepth.value());
     float spread = CLAMP(0.0f, 1.0f, mXformSpread.value());
 
@@ -307,8 +312,14 @@ namespace stolmine
     // randomizeValue collapses to (center=cur, dev=0) → returns cur
     // unchanged. depth=0 alone leaves the spread-pulled center pulling
     // the value toward range midpoint.
-    bool envOn   = (target <= 2);
-    bool octOn   = (target <= 1);
+    //
+    // Group ON conditions per tier (branchless via comparisons that
+    // compile to CMP+MOVCC on Cortex-A8):
+    //   sweepOn: only tier 0
+    //   octOn:   tiers 0, 1, 2 (target <= 2)
+    //   envOn:   tiers 0, 1, 3 (NOT tier 2 or 4)
+    bool envOn   = (target != 2) && (target != 4);
+    bool octOn   = (target <= 2);
     bool sweepOn = (target == 0);
 
     float depthEnv   = envOn   ? depth  : 0.0f;
@@ -605,6 +616,17 @@ namespace stolmine
       if (s.punchEnv > 0.01f)
         droopFreq *= (1.0f + s.punchEnv * 0.05f);
 
+      // Partial droop tracker: uses currentSubFreq (gentler 0.3x sweep)
+      // as base, keeps the same droop/wobble character as the carrier.
+      // Without this, mode partials at 2-7x ratios get Doppler'd above
+      // Nyquist during high-sweep transients and the 2-tap decimator
+      // cancels them -- partials would silence themselves whenever sweep
+      // is engaged. Reusing the existing sub-sweep means partials stay
+      // audible across the full sweep range without a new pitch tracker.
+      float partialDroopFreq = s.currentSubFreq * (1.0f + s.ampEnv * 0.015f + wobble);
+      if (s.punchEnv > 0.01f)
+        partialDroopFreq *= (1.0f + s.punchEnv * 0.05f);
+
       // === Oscillator section at 2x rate (anti-alias for fold + FM) ===
       //
       // Osc1 (carrier) + osc2 (Shape FM modulator) + phaseFm (metallic
@@ -616,18 +638,26 @@ namespace stolmine
       float sr2 = sr * 2.0f;
       float foldGain = 1.0f + (character > 0.5f ? (character - 0.5f) * 2.0f * 6.0f : 0.0f);
       float tMorph   = character < 0.5f ? character * 2.0f : 0.0f;
-      // Shape FM ceiling raised 2.0 -> 6.0 so the fader reaches modulation
-      // index ~6 at max -- 3x deeper than the prior tuning, hits hard FM
-      // territory without needing extra range on the knob.
-      float shapeFmDepth   = shape * shape * s.shapeEnv * 6.0f;
-      if (grit > 0.5f)
-        shapeFmDepth += (grit - 0.5f) * 2.0f * shape * 0.5f;
+      // Shape FM ceiling reduced 6.0 -> 4.5 to dial back transient intensity
+      // at high sweep + high shape (was masking body decay). Grit boost on
+      // shape FM moved to upper grit range only (was triggering at 0.5,
+      // which compounded with other grit-driven stuff to blow up the
+      // bottom 2/3 of the grit fader).
+      float shapeFmDepth = shape * shape * s.shapeEnv * 4.5f;
+      if (grit > 0.7f)
+        shapeFmDepth += (grit - 0.7f) * 2.0f * shape * 0.4f;
 
-      // Grit taming: lower FM and noise-FM ceilings (3 -> 2 and 2000 -> 1000)
-      // so high grit no longer blows the output up. The tail of the chain
-      // also applies a gritGainComp to walk loudness back further.
-      float metFmDepth     = grit * 2.0f * s.ampEnv;
-      float gritNoiseFmDev = grit * grit * 1000.0f * s.ampEnv;
+      // Grit FM thresholds nudged down slightly for a more forgiving
+      // ramp up: the "blowing up" zone was the sharp transition where
+      // FM contributions kicked in. Smoother thresholds keep the early
+      // grit range usable while preserving the high-grit endpoint.
+      float gritMetNorm   = (grit - 0.25f);                   // 0 below 0.25
+      if (gritMetNorm < 0.0f) gritMetNorm = 0.0f;
+      float metFmDepth = gritMetNorm * 2.667f * s.ampEnv;     // 0 -> ~2.0 at grit=1.0
+
+      float gritNoiseNorm = (grit - 0.35f);                   // 0 below 0.35
+      if (gritNoiseNorm < 0.0f) gritNoiseNorm = 0.0f;
+      float gritNoiseFmDev = gritNoiseNorm * gritNoiseNorm * 2367.0f * s.ampEnv;
       if (character > 0.7f)
         gritNoiseFmDev += (character - 0.7f) * 3.3f * grit * 500.0f;
 
@@ -685,7 +715,7 @@ namespace stolmine
         mIncBank[0] = droopFreq * 2.71f / sr2;          // metallic FM
         mIncBank[1] = droopFreq * 2.0f / sr2;           // spacious FM mod
         mIncBank[2] = s.currentSubFreq / sr2;           // sub-sine fundamental
-        mIncBank[3] = droopFreq * 3.0f / sr2;           // 3rd-harmonic partial
+        mIncBank[3] = partialDroopFreq * 3.0f / sr2;    // 3rd-harmonic partial (gentler sweep)
         neonAdvanceSines(mPhaseBank, mIncBank, mSineBank);
         float fmMod        = mSineBank[0];
         float mod4         = mSineBank[1];
@@ -698,9 +728,9 @@ namespace stolmine
         //   Lane 2: membrane mode 2
         //   Lane 3: membrane mode 3
         mPartialInc[0] = 0.5f * s.currentSubFreq / sr2;
-        mPartialInc[1] = mode1Ratio * droopFreq / sr2;
-        mPartialInc[2] = mode2Ratio * droopFreq / sr2;
-        mPartialInc[3] = mode3Ratio * droopFreq / sr2;
+        mPartialInc[1] = mode1Ratio * partialDroopFreq / sr2;
+        mPartialInc[2] = mode2Ratio * partialDroopFreq / sr2;
+        mPartialInc[3] = mode3Ratio * partialDroopFreq / sr2;
         neonAdvanceSines(mPartialPhases, mPartialInc, mPartialSines);
         float subOctaveAt2x = mPartialSines[0];
         float mode1At2x     = mPartialSines[1];

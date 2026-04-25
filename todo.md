@@ -666,6 +666,42 @@ Sound tuning (second pass):
 - [x] Amp envelope governs the whole chain. Hard reset of `punchEnv`, SVF state (`ic1eq`, `ic2eq`), and `compDetector` in the env-end branch so SVF ringing, comp tail, and punch residue can't outlive the main amp envelope.
 - [x] Open everything to xform randomization. Bias-pointer table extended to 14 entries: Character/Shape/Grit/Punch/Attack/Hold/Decay/Sweep/SweepTime/Clipper/EQ/Level/CompAmt/Octave (Octave randomized as integer via `rndInt`).
 
+### Follow-ups from 2026-04-24 fourth tuning pass (2.5.5.92 → 2.5.5.119)
+
+Massive bisect + sound-design session. ~25 versions of incremental hardware probing yielded the canonical patterns now baked into `feedback_runtime_branched_dsp_dispatch.md`, `feedback_neon_intrinsics_drumvoice.md`, `feedback_identical_means_identical.md`, and `project_ngoma_codex.md`. Highlights:
+- Branchless arithmetic masking for runtime tier dispatch (replaces switch-with-different-bodies).
+- 5-tier xform randomization (`all` / `-swp` / `-env` / `-pch` / `tmbr`).
+- NEON 4-lane phasor + polynomial sine quad migration (lookupSine → polynomial sine, 6% CPU saved). Class-member arrays only — stack-locals trap on Cortex-A8.
+- Pitch-tracked SVF noise filter (LP→BP morph by pitch).
+- High-grit knee at grit > 0.7: oscs collapse, noise dominates, punch boosted.
+- Pitch-morphing inharmonic membrane partials (wide spread at low pitch, tight cluster at high pitch).
+- Per-partial decay envelopes scaled by pitch register (kick = short tails, cymbal = long).
+- Sub-octave additive partial for low-end weight regardless of shape.
+- Wobble LFO depth + rate composite of decay, sweep, and pitch.
+- Partials track gentler sub-sweep so they don't Doppler above Nyquist when sweep is engaged.
+- Grit FM contributions thresholded; first 30% of grit is now clean.
+
+Outstanding:
+
+- [ ] **UI: shift-state respect on V/O and viz ply.** Moving to V/Oct ply or any visualizer ply from a submenu doesn't respect the last shift state on those plies. Other plies preserve paramMode across moves; V/O and Character (cube viz) regress. Investigate the Pattern A custom controls' onCursorEnter / paramMode persistence vs. how the standard ply transitions reach them.
+- [ ] **Sound tuning, careful pass.** The voice is highly sculpted but there's room to push further. Listening targets:
+  - Cross-couplings between non-obvious params (Punch ↔ Sweep, Shape ↔ SweepTime suggested earlier and never implemented)
+  - Per-partial decay shape (currently exponential; could try linear-then-exp for a more drum-like envelope on modes)
+  - Mode ratios at intermediate pitch zones (current linear interp; smoothstep might feel more natural)
+  - Sub-octave mix balance (currently 0.3 fixed; consider gating by Punch or by amp-env phase to be punchy rather than constant)
+- [ ] **CPU optimization round 2.** ~33% on mono Cortex-A8 at idle is steep. Candidates to investigate:
+  - `floorf` per phase per oscillator — wraps phase to [0,1). 5+ scalar `floorf` calls per output sample per inner k-iter. Could be replaced by `(int)x * conditional sign correction` or NEON-vectorized for the scalar oscillators (osc1, osc2, osc3 currently scalar).
+  - `tanf` in EQ filter at block-rate — fine when EQ is engaged, but `tanf` from package .so is slow. Use a polynomial approximation (already proven safe via the polynomial sine).
+  - `expf` for envelope decay coeffs at trigger — 4 calls (+4 for partials = 8 total). Replace with `fast_exp2` (already in DrumVoice.cpp). Saves a few μs per trigger.
+  - `lookupSine` calls remaining: osc1 character morph (2x/sample), osc2 shape modulator (1x/sample), osc3 character morph (2x/sample), wobble LFO (1x/sample). Wobble could move to NEON polynomial; character morph requires the LUT for the fold path so harder to swap.
+  - 2x oversampling: re-evaluate whether all sources need it. The pure-sine modulators (FM 2.71x, FM 2.0x, mode partials, sub-octave) probably don't — they're band-limited. Only osc1+osc3 character-morph really needs it for the fold's harmonics. Splitting into a 1x bank + 2x bank would cut roughly half the NEON quad work.
+  - Auto-vectorization opportunities in scalar code: scalar phase advances on osc1/osc2/osc3 could be a third NEON quad now that we have the alignment-safe storage pattern. Adds 1 quad call per inner k-iter; saves the per-osc scalar floorf + min(p, 1-p) trick.
+  - Partial bank lane 1-3 could carry MORE partials by reusing one bank for two sequential 4-wide computations (8 partials per inner k-iter) — but only if we want more spectral content.
+  - SVF noise filter is already 2-pole; consider whether the BP is necessary at low pitch (where mix is 100% LP).
+  - The `if (gritNoiseGain > 0.0f) sample += s.noiseLP * gritNoiseGain;` guard could be branchless (`sample += noiseLP * max(0, gritNoiseGain)`).
+  - Consider reducing FRAMELENGTH iteration overhead by processing multiple samples per NEON quad (vectorize the per-sample envelope decay across 4 samples instead of 4 lanes of 1 sample each).
+- [ ] **Documentation pass.** `planning/drum-voice.md` is stale (predates the 2.5.5.92→.119 series). Either update or supersede with `project_ngoma_codex.md` reference.
+
 ## Gridlock (Priority Gate Router)
 
 - [x] 3 gate inputs with descending priority, bipolar CV values, latching output
