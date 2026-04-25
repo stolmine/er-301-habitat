@@ -576,6 +576,23 @@ namespace stolmine
       else
         s.currentSubFreq = s.baseFreq;
 
+      // Per-partial envelope decay via NEON quad. UNCONDITIONAL per-sample
+      // -- safe to decay always: envs are 0.0 in idle phase (0 * coeff =
+      // still 0), 1.0 from trigger reset, and decay monotonically.
+      // Placing this here (outside the envPhase switch) avoids inflating
+      // case 3's body, which would be the "switch with differential case
+      // bodies" pattern that crashes Cortex-A8 (see 2.5.5.92-.97 bisect).
+      {
+#ifdef __ARM_NEON
+        float32x4_t pe = vld1q_f32(mPartialEnvs);
+        float32x4_t pc = vld1q_f32(mPartialDecayCoeffs);
+        pe = vmulq_f32(pe, pc);
+        vst1q_f32(mPartialEnvs, pe);
+#else
+        for (int j = 0; j < 4; j++) mPartialEnvs[j] *= mPartialDecayCoeffs[j];
+#endif
+      }
+
       // Pitch droop: ampEnv-scaled static + decay-tied wobble LFO.
       // Pass 1 #7: wobble LFO uses sLUT (sinf miscompute on package .so).
       // Phase advance per-sample at sr rate; mapped via tri->sin lookup.
@@ -808,19 +825,6 @@ namespace stolmine
       case 3: // decay
         s.ampEnv   *= s.ampDecayCoeff;
         s.shapeEnv *= s.shapeDecayCoeff;
-        // Per-partial envelope decay via NEON quad. Same per-sample rate
-        // as ampEnv. Coefficients computed at trigger time, scaled by
-        // pitch register.
-        {
-#ifdef __ARM_NEON
-          float32x4_t pe = vld1q_f32(mPartialEnvs);
-          float32x4_t pc = vld1q_f32(mPartialDecayCoeffs);
-          pe = vmulq_f32(pe, pc);
-          vst1q_f32(mPartialEnvs, pe);
-#else
-          for (int j = 0; j < 4; j++) mPartialEnvs[j] *= mPartialDecayCoeffs[j];
-#endif
-        }
         if (s.ampEnv < 1e-5f)
         {
           // Hard reset of every internal envelope and downstream tail
