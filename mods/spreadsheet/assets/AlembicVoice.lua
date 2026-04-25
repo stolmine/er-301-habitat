@@ -112,7 +112,8 @@ function AlembicVoice:onLoadViews(objects, branches)
         biasUnits = app.unitNone,
         biasPrecision = 3,
         initialBias = 0.0,
-        kParam = objects.scanK:getParameter("Bias")
+        kParam = objects.scanK:getParameter("Bias"),
+        op = objects.op
     }
 
     controls.level = GainBias {

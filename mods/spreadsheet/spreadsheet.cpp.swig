@@ -39,6 +39,7 @@
 #include "DrumVoice.h"
 #include "DrumCubeGraphic.h"
 #include "AlembicVoice.h"
+#include "AlembicSphereGraphic.h"
 #define SWIGLUA
 %}
 
@@ -78,3 +79,4 @@
 %include "DrumVoice.h"
 %include "DrumCubeGraphic.h"
 %include "AlembicVoice.h"
+%include "AlembicSphereGraphic.h"

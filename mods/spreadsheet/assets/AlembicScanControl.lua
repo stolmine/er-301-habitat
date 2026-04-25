@@ -9,6 +9,7 @@
 -- per feedback_gainbias_dual_mode_focus.
 
 local app = app
+local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
@@ -24,6 +25,15 @@ AlembicScanControl:include(GainBias)
 
 function AlembicScanControl:init(args)
   GainBias.init(self, args)
+
+  -- Sphere viz attaches as the main cursor controller (mirrors
+  -- SomScanControl + ColmatageBlockControl pattern).
+  local sphere = libspreadsheet.AlembicSphereGraphic(0, 0, ply, 64)
+  if args.op then sphere:follow(args.op) end
+  local container = app.Graphic(0, 0, ply, 64)
+  container:addChild(sphere)
+  self:setMainCursorController(sphere)
+  self:setControlGraphic(container)
 
   self.paramMode = false
   self.shiftHeld = false

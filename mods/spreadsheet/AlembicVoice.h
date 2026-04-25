@@ -78,6 +78,24 @@ namespace stolmine
     od::Parameter mMatrixDB{"MatrixDB", 0.0f};
     od::Parameter mMatrixDC{"MatrixDC", 0.0f};
     od::Parameter mMatrixDD{"MatrixDD", 0.0f};
+
+    // Phase 4 viz hooks. Inline so the sphere's draw loop has no dispatch
+    // overhead. getNodeBrightness is a Phase 3 placeholder (linear gradient
+    // per slot index); Phase 5 will replace it with sample-trained richness.
+    // Not const: od::Parameter::value() is non-const in this SDK.
+    inline int getScanNode()
+    {
+      const float s = mScanPos.value() * 63.0f;
+      int n = (int)(s + 0.5f);
+      if (n < 0) n = 0;
+      else if (n > 63) n = 63;
+      return n;
+    }
+    inline float getNodeBrightness(int n) const
+    {
+      if (n < 0 || n > 63) return 0.0f;
+      return 0.2f + 0.8f * ((float)n / 63.0f);
+    }
 #endif
 
   private:
