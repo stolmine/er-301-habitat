@@ -50,6 +50,8 @@ namespace stolmine
     float phase1 = 0.0f;
     float phase2 = 0.0f;
     float phase3 = 0.0f;   // detuned unison sibling of osc1 (Pass 1)
+    float phase4 = 0.0f;   // second FM modulator at 2.0x ratio (Pass 2)
+    float phase5 = 0.0f;   // sub-sine fundamental (Pass 2)
     float phaseFm = 0.0f;
     float wobblePhase = 0.0f;  // pitch-droop LFO (Pass 1)
 
@@ -64,13 +66,21 @@ namespace stolmine
     float sweepRatio = 1.0f;
     float baseFreq = 110.0f;
 
+    // Sub-sine fundamental has its own pitch-sweep track scaled down to
+    // 0.3x the main sweep amount (Pass 2 #6 -- user observation: the
+    // fundamental takes pitch envelope at reduced strength).
+    float currentSubFreq = 110.0f;
+    float subSweepRatio = 1.0f;
+
     float ampDecayCoeff = 0.999f;
     float shapeDecayCoeff = 0.999f;
     float punchDecayCoeff = 0.999f;
     float attackIncr = 0.0f;
 
     uint32_t noiseState = 12345;
-    float noiseLP = 0.0f;  // 1-pole LP state for direct-noise mix (Pass 1)
+    float noiseLP = 0.0f;     // legacy 1-pole state (unused after Pass 2+)
+    float noiseIc1 = 0.0f;    // SVF state 1 for pitch-tracked LP/BP morph
+    float noiseIc2 = 0.0f;    // SVF state 2
 
     // Per-trigger wobble parameters (computed at trigger time, used per-sample).
     float wobbleHz = 12.0f;
@@ -292,6 +302,39 @@ namespace stolmine
     float baseFreq = 110.0f * powf(2.0f, pitch);
     baseFreq = CLAMP(10.0f, sr * 0.49f, baseFreq);
 
+    // Grit high-end knee: the last 30% of grit travel (grit > 0.7) should
+    // push oscs toward silence and noise toward dominance, with punch
+    // onset boosted. Below 0.7 grit does its baseline cross-fade; above
+    // 0.7 this aboveKnee term adds extra aggression. Branchless floor:
+    // aboveKnee >= 0 by construction.
+    float aboveKnee = grit - 0.7f;
+    if (aboveKnee < 0.0f) aboveKnee = 0.0f;
+
+    // Pitch-tracked 2-pole noise filter morphing LP -> BP as pitch rises.
+    // Low pitch (~55 Hz): pure LP, warm/broad. High pitch (>=440 Hz): pure
+    // BP, focused band. Morph between them gives Trinity-flavored scale-
+    // dependent noise character.
+    //
+    // SVF (Cytomic TPT) coefficients at block rate; state ic1/ic2 in
+    // Internal. Center cut tracks at ~25x fundamental, clamped; Q rises
+    // with pitch so higher pitches are more focused.
+    float noiseCut = baseFreq * 25.0f;
+    if (noiseCut < 400.0f)   noiseCut = 400.0f;
+    if (noiseCut > 8000.0f)  noiseCut = 8000.0f;
+    float noiseQ = 0.7f + (baseFreq - 55.0f) * 0.010f;  // 0.7 @ 55Hz, ~4.6 @ 440Hz
+    if (noiseQ < 0.7f) noiseQ = 0.7f;
+    if (noiseQ > 4.0f) noiseQ = 4.0f;
+    float noiseK = 1.0f / noiseQ;
+    float noiseG = tanf(3.14159f * noiseCut / sr);
+    float noiseA1 = 1.0f / (1.0f + noiseG * (noiseG + noiseK));
+    float noiseA2 = noiseG * noiseA1;
+    float noiseA3 = noiseG * noiseA2;
+    // BP mix: 0 at low pitch (LP only), 1 at high pitch (BP only).
+    float noiseBpMix = (baseFreq - 110.0f) / 330.0f;  // 0 @ 110Hz, 1 @ 440Hz
+    if (noiseBpMix < 0.0f) noiseBpMix = 0.0f;
+    if (noiseBpMix > 1.0f) noiseBpMix = 1.0f;
+    float noiseLpMix = 1.0f - noiseBpMix;
+
     // Clipper drive (block-rate). Simple tanh with moderate 1..10x range
     // and gain compensation (divide by tanh(drive)) so output amplitude
     // stays near unity as drive increases.
@@ -351,9 +394,17 @@ namespace stolmine
         s.currentFreq = freqStart;
         s.sweepRatio = powf(baseFreq / freqStart, 1.0f / sweepSamples);
 
+        // Sub-sine pitch sweep: 0.3x the main sweep amount. Fundamental
+        // gets a gentler pitch env per listening feedback.
+        float subFreqStart = baseFreq * powf(2.0f, sweep * 0.3f / 12.0f);
+        s.currentSubFreq = subFreqStart;
+        s.subSweepRatio  = powf(baseFreq / subFreqStart, 1.0f / sweepSamples);
+
         s.phase1 = 0.0f;
         s.phase2 = 0.0f;
         s.phase3 = 0.0f;
+        s.phase4 = 0.0f;
+        s.phase5 = 0.0f;
         s.phaseFm = 0.0f;
         s.wobblePhase = 0.0f;
 
@@ -390,7 +441,10 @@ namespace stolmine
         }
 
         s.holdCounter = (hold > 0.0001f) ? (int)(hold * sr) : 0;
-        s.punchEnv = punch;
+        // Punch boosted in the high-grit knee: aboveKnee at trigger time
+        // drives punchEnv up to 1.6x at grit=1.0, so the transient slap
+        // stays prominent even as the steady-state oscs are gone.
+        s.punchEnv = punch * (1.0f + aboveKnee * 2.0f);
         s.vizGateState = true;
       }
       s.prevTrigger = trigVal;
@@ -400,6 +454,12 @@ namespace stolmine
         s.currentFreq *= s.sweepRatio;
       else
         s.currentFreq = s.baseFreq;
+
+      // Sub-sine sweep: converge to baseFreq at its own (shallower) rate.
+      if (s.currentSubFreq > s.baseFreq + 0.01f || s.currentSubFreq < s.baseFreq - 0.01f)
+        s.currentSubFreq *= s.subSweepRatio;
+      else
+        s.currentSubFreq = s.baseFreq;
 
       // Pitch droop: ampEnv-scaled static + decay-tied wobble LFO.
       // Pass 1 #7: wobble LFO uses sLUT (sinf miscompute on package .so).
@@ -468,10 +528,23 @@ namespace stolmine
         float triFm = 4.0f * (s.phaseFm < 0.5f ? s.phaseFm : 1.0f - s.phaseFm) - 1.0f;
         float fmMod = lookupSine(s.sLUT, triFm);
 
-        // Osc1 carrier: Shape FM + Metallic FM + broadband noise FM all
-        // injected into the phase increment.
+        // Pass 2 #8: second FM modulator at 2.0x ratio for the "spacious"
+        // additive zone above shape=0.5. Below 0.5, spaciousDepth is 0
+        // via ternary (branchless CMP+MOVCC on Cortex-A8). At shape=1.0,
+        // second modulator contributes as much index as the main shape
+        // modulator does at mid-shape.
+        float inc4 = droopFreq * 2.0f / sr2;
+        s.phase4 += inc4;
+        s.phase4 -= floorf(s.phase4);
+        float tri4 = 4.0f * (s.phase4 < 0.5f ? s.phase4 : 1.0f - s.phase4) - 1.0f;
+        float mod4 = lookupSine(s.sLUT, tri4);
+        float spaciousDepth = (shape > 0.5f) ? (shape - 0.5f) * 2.0f * s.shapeEnv * 3.0f : 0.0f;
+
+        // Osc1 carrier: Shape FM + spacious 2x FM + Metallic FM + broadband
+        // noise FM all injected into the phase increment.
         float inc1 = droopFreq / sr2;
         inc1 += shapeSample * shapeFmDepth * droopFreq / sr2;
+        inc1 += mod4 * spaciousDepth * droopFreq / sr2;
         inc1 += fmMod * metFmDepth * droopFreq / sr2;
         if (grit > 0.0f)
         {
@@ -494,10 +567,12 @@ namespace stolmine
         }
 
         // Pass 1 #4: osc3 unison sibling at +0.4% detune (~7 cents).
-        // Same FM injection as osc1 so it tracks identically -- adds
-        // beating thickness without spectral divergence.
+        // Same FM injection as osc1 (including Pass 2 spacious 2x) so it
+        // tracks identically -- adds beating thickness without spectral
+        // divergence.
         float inc3 = droopFreq * 1.004f / sr2;
         inc3 += shapeSample * shapeFmDepth * droopFreq * 1.004f / sr2;
+        inc3 += mod4 * spaciousDepth * droopFreq * 1.004f / sr2;
         inc3 += fmMod * metFmDepth * droopFreq * 1.004f / sr2;
         s.phase3 += inc3;
         s.phase3 -= floorf(s.phase3);
@@ -524,22 +599,46 @@ namespace stolmine
       // FIR later if the residual aliasing above sr/2 is audible.
       float sample = 0.5f * (osSamp[0] + osSamp[1]);
 
-      // Attenuate oscillator sum as grit rises so the noise path can
-      // dominate the output at full grit (Trinity Block's high-grit
-      // territory is mostly noise). At grit=1 the oscs drop to 0.4x.
-      sample *= (1.0f - grit * 0.6f);
+      // Pass 2 #5: sub-sine fundamental at sr rate (pure sine, no need
+      // for 2x oversampling). Tracks currentSubFreq with shallower sweep.
+      // Mix scaled by (1 - shape) so pure-sine territory has full sub and
+      // heavy-FM territory pulls it back -- avoids muddy low end when
+      // the shape knob is pushing lots of high-freq content.
+      s.phase5 += s.currentSubFreq / sr;
+      s.phase5 -= floorf(s.phase5);
+      float tri5 = 4.0f * (s.phase5 < 0.5f ? s.phase5 : 1.0f - s.phase5) - 1.0f;
+      float subSig = lookupSine(s.sLUT, tri5);
+      float subMix = (1.0f - shape) * 0.5f * s.ampEnv;
+      sample += subSig * subMix;
 
-      // Direct noise mix, low-passed at ~7 kHz (Pass 1 #2).
-      // Slope bumped 1.0 -> 2.5 so noise dominates at high grit while
-      // the osc sum has been pre-attenuated above.
-      // Always advance the LP state so it stays warm across the gate;
-      // only mix in when grit is high enough to expose noise.
+      // Attenuate oscillator sum as grit rises. Two-piece curve:
+      //   grit 0.0..0.7: baseline drop -- (1 - grit*0.3) reaches 0.79.
+      //   grit 0.7..1.0: aggressive drop -- aboveKnee*2.0 takes another
+      //     0.6 off, leaving 0.19 at grit=1.0 (just a hint of transient).
+      // Sub-sine rides the same envelope, so high-grit hits stay clean
+      // of pitched body content.
+      sample *= ((1.0f - grit * 0.3f) - aboveKnee * 2.0f);
+
+      // Direct noise mix through pitch-tracked SVF. LP output at low
+      // pitch, BP output at high pitch, blended via noiseBpMix/noiseLpMix.
+      // Slope 2.5 so noise dominates at high grit while the osc sum has
+      // been pre-attenuated above. SVF state always advances (warm across
+      // the gate); mix only when grit is high enough to expose noise.
       s.noiseState = s.noiseState * 1664525u + 1013904223u;
       float rawNoiseSig = (float)(int32_t)s.noiseState / 2147483648.0f;
-      s.noiseLP += (rawNoiseSig - s.noiseLP) * 0.6f;
-      float gritNoiseGain = (grit - 0.4f) * 2.5f * s.ampEnv;
+      float nV3 = rawNoiseSig - s.noiseIc2;
+      float nV1 = noiseA1 * s.noiseIc1 + noiseA2 * nV3;
+      float nV2 = s.noiseIc2 + noiseA2 * s.noiseIc1 + noiseA3 * nV3;
+      s.noiseIc1 = 2.0f * nV1 - s.noiseIc1;
+      s.noiseIc2 = 2.0f * nV2 - s.noiseIc2;
+      float noiseOut = nV2 * noiseLpMix + nV1 * noiseK * noiseBpMix;
+      // Noise gain: baseline (grit-0.4)*2.5 hits 1.5 at grit=1.0, plus
+      // aboveKnee*2.0 boost for the top 30% (extra +0.6 at grit=1.0,
+      // bringing peak to ~2.1). Together with the harder osc drop above
+      // this gives the "mostly noise" feel at high grit.
+      float gritNoiseGain = ((grit - 0.4f) * 2.5f + aboveKnee * 2.0f) * s.ampEnv;
       if (gritNoiseGain > 0.0f)
-        sample += s.noiseLP * gritNoiseGain;
+        sample += noiseOut * gritNoiseGain;
 
       // Amp envelope state machine
       switch (s.envPhase)
@@ -577,7 +676,11 @@ namespace stolmine
           s.ic2eq = 0.0f;
           s.compDetector = 0.0f;
           s.noiseLP = 0.0f;
+          s.noiseIc1 = 0.0f;
+          s.noiseIc2 = 0.0f;
           s.wobblePhase = 0.0f;
+          s.phase4 = 0.0f;
+          s.phase5 = 0.0f;
         }
         break;
       default: // idle
