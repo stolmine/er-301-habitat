@@ -477,9 +477,25 @@ Sample-load control: handled as a sample slot on the header ply (same pattern as
 - **CPU budget (native C++, 4-op):** ~60–80 cycles/sample on Cortex-A8 ≈ 3.5–4 MHz at 48 kHz. Block-boundary crossfade adds ~1.4 FLOPs/sample amortized. Well under budget — leaves headroom for the scanning-mixer richness, the viz, and multiple instances. See **Optimization & Implementation**.
 - **How the viz communicates the scanning mixer:** visualizing crossfaded _routings_ (not just positions) is harder. Maybe a secondary ply shows active mod edges as animated lines between nodes, rendered only when that ply is focused.
 
+## Phasing
+
+The 13 build-order steps below consolidate into 9 execution phases. Each phase is independently demoable, commit-sized, and planned in detail before execution.
+
+| Phase | Steps | Deliverable |
+|---|---|---|
+| **1** | 1 | `AlembicRef` — 4-op Lua-graph PMM reference in `mods/spreadsheet/`, temporary. Ships under a distinct name (not `Alembic`) because Phase 2 replaces the DSP topology wholesale; a saved AlembicRef patch could not load into the native Alembic unit. AlembicRef stays in the package until Phase 2 A/B-verifies, then is removed. |
+| 2 | 2 | Native `AlembicVoice.cpp/.h` — C++ 4-op PMM with NEON-friendly inner loop. A/B-match AlembicRef. Highest-risk step (hardware codegen divergence per _feedback_identical_means_identical_). |
+| 3 | 3–4 | 64-slot × 29-float preset table + K-weighted block-rate crossfader. Fork Som skeleton, strip training params. First custom paramMode controls land here. |
+| 4 | 5 | Sphere viz, Path A (4×4 tiles, partition cache, time slicing, rotation LUT). |
+| 5 | 6 | Sample-slot wiring + difference-based sampling + audio-domain feature extraction + Layer 0/1 O0+O1. First end-to-end train-on-load pass. |
+| 6 | 7 | Serialization (sample ref + Layer 0 + preset cache + user biases). **Scheduled early**, before fades/globals, so all subsequent state lives in the save format from day one. |
+| 7 | 8–9 | Group fades (wPitch/wStructure/wFeedback/wDynamics) + Ferment / Crucible / Reagent globals. Plies 3–7. |
+| 8 | 10–12 | Order 2+3 derivations, binary-domain features (gated per "earns its complexity"), sample-pointer excitation. |
+| 9 | 13 | Final naming, polish, release. |
+
 ## Build Order
 
-1. **Port Xxxxxx as a 4-op Lua reference.** Into `mods/spreadsheet/` (or a dedicated pkg). Drop 2 operators, get the 4×4 matrix working with `libcore.SineOscillator` + GainBias graph. Pure Lua — no new DSP. This is the known-good listening reference, not the production voice.
+1. **Port Xxxxxx as a 4-op Lua reference.** Ships as `AlembicRef` in `mods/spreadsheet/assets/AlembicRef.lua`. Drop 2 operators, get the 4×4 matrix working with `libcore.SineOscillator` + `app.GainBias`/`Multiply`/`Sum` graph. Pure Lua — no new DSP. Two deliberate structural deviations vs Xxxxxx: phase-mixer cascade and output-mixer cascade each collapse from 5-deep (sized for 6 inputs) to 3-deep (binary tree for 4 inputs). Everything else is diff-close-to-zero per _feedback_identical_means_identical_. This is the known-good listening reference, not the production voice — retired after Phase 2.
 2. **Native 4-op C++ voice unit.** `AlembicVoice.cpp/h` — 4 phase accumulators, sin LUT, 4×4 matrix inner loop, reagent waveshaper. SWIG-wrap, expose as `od::Object`. Prove it A/B-matches the Lua reference from step 1 on static presets. **This is the step most susceptible to hardware/emu divergence** — validate early, per the _Identical means IDENTICAL_ memory.
 3. **Preset loader + crossfader.** C++ side: a 64-slot × 29-float preset table, K-weighted block-rate crossfade into the live voice state. Feed hand-authored presets (no training yet). Prove smooth scan between them.
 4. **Strip training params** from a forked Som → Alembic skeleton. Freeze weights. Wire scan-node-path + K weights to feed the preset crossfader.
