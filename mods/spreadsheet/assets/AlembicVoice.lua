@@ -15,6 +15,7 @@ local Unit = require "Unit"
 local Pitch = require "Unit.ViewControl.Pitch"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
+local AlembicScanControl = require "spreadsheet.AlembicScanControl"
 local Encoder = require "Encoder"
 
 local AlembicVoice = Class{}
@@ -66,15 +67,9 @@ end
 
 local views = {
     expanded = {"tune", "freq", "sync", "scan", "level"},
-    scan = {"scan", "scanK"},
+    scan = {"scan"},
     collapsed = {}
 }
-
-local kMap = (function()
-    local m = app.LinearDialMap(2, 6)
-    m:setSteps(1, 1, 1, 1) -- integer-only
-    return m
-end)()
 
 function AlembicVoice:onLoadViews(objects, branches)
     local controls = {}
@@ -107,7 +102,7 @@ function AlembicVoice:onLoadViews(objects, branches)
         comparator = objects.sync
     }
 
-    controls.scan = GainBias {
+    controls.scan = AlembicScanControl {
         button = "scan",
         description = "Scan Position",
         branch = branches.scanPos,
@@ -116,19 +111,8 @@ function AlembicVoice:onLoadViews(objects, branches)
         biasMap = Encoder.getMap("[0,1]"),
         biasUnits = app.unitNone,
         biasPrecision = 3,
-        initialBias = 0.0
-    }
-
-    controls.scanK = GainBias {
-        button = "K",
-        description = "Path Window K",
-        branch = branches.scanK,
-        gainbias = objects.scanK,
-        range = objects.scanK,
-        biasMap = kMap,
-        biasUnits = app.unitNone,
-        biasPrecision = 0,
-        initialBias = 4.0
+        initialBias = 0.0,
+        kParam = objects.scanK:getParameter("Bias")
     }
 
     controls.level = GainBias {
