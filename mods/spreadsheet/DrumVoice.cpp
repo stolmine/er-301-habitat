@@ -275,15 +275,25 @@ namespace stolmine
   void DrumVoice::process()
   {
 #ifdef __ARM_NEON
-    // Probe 2.5.5.107: smallest possible NEON op in DrumVoice. Two
-    // constant-splat vectors, add, extract one lane, throw away.
-    // No memory loads, no struct touches, no audio impact. Tests
-    // whether NEON intrinsics work AT ALL in this unit on hardware
-    // (2.5.5.105 crashed with a 4-lane struct-member load + sine).
+    // Probe 2.5.5.110: NEON load/store on CLASS-MEMBER arrays (heap-
+    // allocated, >=8-byte aligned by operator new). Pecto's working
+    // pattern. Disassembly of 2.5.5.109 showed GCC emitted vld1.32
+    // {q8}, [lr :64] (8-byte-aligned hint) on stack-local arrays
+    // whose actual runtime alignment was only 4 bytes -> Data Abort.
+    // Class members get more reliable alignment from new(), and GCC
+    // can emit appropriate hints based on offset analysis.
     {
-      volatile float neonProbeResult =
-        vgetq_lane_f32(vaddq_f32(vdupq_n_f32(1.0f), vdupq_n_f32(2.0f)), 0);
-      (void)neonProbeResult;
+      // Use input-buffer first samples to defeat constant-folding;
+      // we only care about NEON memory ops working, not the result.
+      mNeonProbeIn[0] = mTrigger.buffer()[0];
+      mNeonProbeIn[1] = mVOct.buffer()[0];
+      mNeonProbeIn[2] = mXformGate.buffer()[0];
+      mNeonProbeIn[3] = 1.0f;
+      float32x4_t v = vld1q_f32(mNeonProbeIn);
+      v = vmulq_f32(v, vdupq_n_f32(2.0f));
+      vst1q_f32(mNeonProbeOut, v);
+      volatile float r = mNeonProbeOut[0];
+      (void)r;
     }
 #endif
 

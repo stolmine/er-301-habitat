@@ -51,6 +51,12 @@ namespace stolmine
 
   private:
     void applyRandomize();
+    // Heap-allocated NEON probe buffers. Class members get >=8-byte
+    // alignment from operator new -- avoids the stack-local alignment
+    // trap (GCC emits `:64` hint, AAPCS only guarantees 8-byte stack;
+    // on Cortex-A8 NEON the misalign is a Data Abort that hangs RT).
+    float mNeonProbeIn[4];
+    float mNeonProbeOut[4];
 
     bool mXformGateWasHigh = false;
     bool mManualFire = false;
