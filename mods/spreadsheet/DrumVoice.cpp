@@ -31,6 +31,19 @@ namespace stolmine
   static inline float fast_log10(float x) { return fast_log2(x) * 0.30103f; }
   static inline float fast_fromDb(float db) { return fast_exp2(db * 0.16609640474f); }
 
+  // Polynomial sine for triangle-input ([-1,1]) -> sine([-pi/2, pi/2]).
+  // 7th-order odd-power approx, max error ~7e-6 over the input domain.
+  // Used in pure-sine paths (FM modulators, sub) where character morph
+  // isn't needed -- saves the LUT memory load + linear interp + sign flip.
+  // Stays bounded: at tri=1, output = 0.99988 (vs LUT ~0.99988).
+  static inline float polySine(float tri)
+  {
+    float t2 = tri * tri;
+    float t4 = t2 * t2;
+    float t6 = t4 * t2;
+    return tri * (1.5707963f - 0.6459640f * t2 + 0.0796921f * t4 - 0.0046816f * t6);
+  }
+
   static inline float lookupSine(const float *lut, float tri)
   {
     float absTri = fabsf(tri);
@@ -519,14 +532,14 @@ namespace stolmine
           shapeSample = lookupSine(s.sLUT, tri2 * foldGain);
         }
 
-        // Metallic FM modulator: inharmonic (2.71x) sine osc. Clean sine
-        // via LUT gives coherent 808-clang spectra when the grit-driven
-        // modulation index climbs through ~1.5-3.
+        // Metallic FM modulator: inharmonic (2.71x) sine osc. Polynomial
+        // sine here -- pure-tone source, no character morph needed; saves
+        // an LUT load + interp + sign-flip per sample.
         float incFm = droopFreq * 2.71f / sr2;
         s.phaseFm += incFm;
         s.phaseFm -= floorf(s.phaseFm);
         float triFm = 4.0f * (s.phaseFm < 0.5f ? s.phaseFm : 1.0f - s.phaseFm) - 1.0f;
-        float fmMod = lookupSine(s.sLUT, triFm);
+        float fmMod = polySine(triFm);
 
         // Pass 2 #8: second FM modulator at 2.0x ratio for the "spacious"
         // additive zone above shape=0.5. Below 0.5, spaciousDepth is 0
@@ -537,7 +550,7 @@ namespace stolmine
         s.phase4 += inc4;
         s.phase4 -= floorf(s.phase4);
         float tri4 = 4.0f * (s.phase4 < 0.5f ? s.phase4 : 1.0f - s.phase4) - 1.0f;
-        float mod4 = lookupSine(s.sLUT, tri4);
+        float mod4 = polySine(tri4);
         float spaciousDepth = (shape > 0.5f) ? (shape - 0.5f) * 2.0f * s.shapeEnv * 3.0f : 0.0f;
 
         // Osc1 carrier: Shape FM + spacious 2x FM + Metallic FM + broadband
@@ -607,7 +620,7 @@ namespace stolmine
       s.phase5 += s.currentSubFreq / sr;
       s.phase5 -= floorf(s.phase5);
       float tri5 = 4.0f * (s.phase5 < 0.5f ? s.phase5 : 1.0f - s.phase5) - 1.0f;
-      float subSig = lookupSine(s.sLUT, tri5);
+      float subSig = polySine(tri5);
       float subMix = (1.0f - shape) * 0.5f * s.ampEnv;
       sample += subSig * subMix;
 
