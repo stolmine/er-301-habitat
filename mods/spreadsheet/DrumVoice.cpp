@@ -182,9 +182,12 @@ namespace stolmine
     // Zero-init NEON working buffers (no in-class init in header to keep
     // the class layout simple).
     for (int i = 0; i < 4; i++) {
-      mPhaseBank[i] = 0.0f;
-      mIncBank[i]   = 0.0f;
-      mSineBank[i]  = 0.0f;
+      mPhaseBank[i]     = 0.0f;
+      mIncBank[i]       = 0.0f;
+      mSineBank[i]      = 0.0f;
+      mPartialPhases[i] = 0.0f;
+      mPartialInc[i]    = 0.0f;
+      mPartialSines[i]  = 0.0f;
     }
     addInput(mTrigger);
     addInput(mVOct);
@@ -476,7 +479,11 @@ namespace stolmine
         mPhaseBank[0] = 0.0f;  // phaseFm
         mPhaseBank[1] = 0.0f;  // phase4
         mPhaseBank[2] = 0.0f;  // phase5
-        mPhaseBank[3] = 0.0f;  // reserved
+        mPhaseBank[3] = 0.0f;  // 3rd harmonic
+        mPartialPhases[0] = 0.0f;  // sub-octave
+        mPartialPhases[1] = 0.0f;
+        mPartialPhases[2] = 0.0f;
+        mPartialPhases[3] = 0.0f;
         s.wobblePhase = 0.0f;
 
         // Wobble depth responds to a composite of decay, sweep, and pitch.
@@ -574,6 +581,16 @@ namespace stolmine
       // back. Hoisted (constant across 2 k-iters; ampEnv updates after).
       float subMix = (1.0f - shape) * 0.5f * s.ampEnv;
 
+      // 3rd-harmonic partial mix. Less than sub by half -- adds tonal
+      // body sheen without competing with the fundamental. Same
+      // (1-shape) gating so heavy-FM territory mutes the partial.
+      float partial3Mix = (1.0f - shape) * 0.25f * s.ampEnv;
+
+      // Sub-octave partial: bass weight regardless of shape, since deep
+      // body shouldn't fade when FM pushes the upper spectrum. Only
+      // ampEnv-scaled.
+      float subOctaveMix = 0.3f * s.ampEnv;
+
       float osSamp[2];
       for (int k = 0; k < 2; k++)
       {
@@ -604,11 +621,23 @@ namespace stolmine
         mIncBank[0] = droopFreq * 2.71f / sr2;          // metallic FM
         mIncBank[1] = droopFreq * 2.0f / sr2;           // spacious FM mod
         mIncBank[2] = s.currentSubFreq / sr2;           // sub-sine fundamental
-        mIncBank[3] = 0.0f;                             // reserved
+        mIncBank[3] = droopFreq * 3.0f / sr2;           // 3rd-harmonic partial
         neonAdvanceSines(mPhaseBank, mIncBank, mSineBank);
-        float fmMod      = mSineBank[0];
-        float mod4       = mSineBank[1];
-        float subSigAt2x = mSineBank[2];
+        float fmMod        = mSineBank[0];
+        float mod4         = mSineBank[1];
+        float subSigAt2x   = mSineBank[2];
+        float partial3At2x = mSineBank[3];
+
+        // Second NEON quad: additive partials. Lane 0 = sub-octave at
+        // 0.5x sub-sine pitch (so it tracks the gentler sub-sweep too).
+        // Lanes 1-3 reserved for inharmonic membrane-mode partials.
+        mPartialInc[0] = 0.5f * s.currentSubFreq / sr2; // sub-octave
+        mPartialInc[1] = 0.0f;
+        mPartialInc[2] = 0.0f;
+        mPartialInc[3] = 0.0f;
+        neonAdvanceSines(mPartialPhases, mPartialInc, mPartialSines);
+        float subOctaveAt2x = mPartialSines[0];
+
         float spaciousDepth = (shape > 0.5f) ? (shape - 0.5f) * 2.0f * s.shapeEnv * 3.0f : 0.0f;
 
         // Osc1 carrier: Shape FM + spacious 2x FM + Metallic FM + broadband
@@ -659,12 +688,13 @@ namespace stolmine
           toneSample3 = lookupSine(s.sLUT, tri3 * foldGain);
         }
 
-        // Mix: 1.0 * osc1 + 0.6 * osc3 + sub-sine. Sub now lives inside
-        // the 2x oversample loop (NEON-vectorized in lane 2 of the
-        // phasor bank); it gets decimated alongside oscs.
-        // subMix is hoisted just before the k-loop (constant across
-        // the 2 k-iters; ampEnv updates after decimation).
-        osSamp[k] = toneSample * 1.0f + toneSample3 * 0.6f + subSigAt2x * subMix;
+        // Mix: oscs + sub-sine + 3rd-harmonic partial + sub-octave.
+        // All NEON-derived sines decimate alongside the oscs at 2x rate.
+        osSamp[k] = toneSample * 1.0f
+                  + toneSample3 * 0.6f
+                  + subSigAt2x * subMix
+                  + partial3At2x * partial3Mix
+                  + subOctaveAt2x * subOctaveMix;
       }
 
       // 2-tap moving-average halfband decimator: zero at the 2x Nyquist,
@@ -744,6 +774,10 @@ namespace stolmine
           mPhaseBank[1] = 0.0f;
           mPhaseBank[2] = 0.0f;
           mPhaseBank[3] = 0.0f;
+          mPartialPhases[0] = 0.0f;
+          mPartialPhases[1] = 0.0f;
+          mPartialPhases[2] = 0.0f;
+          mPartialPhases[3] = 0.0f;
         }
         break;
       default: // idle

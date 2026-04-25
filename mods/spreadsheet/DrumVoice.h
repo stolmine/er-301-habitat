@@ -64,6 +64,13 @@ namespace stolmine
     float mIncBank[4];
     float mSineBank[4];
 
+    // Second NEON quad for additive partials. Lane 0 = sub-octave
+    // (0.5x sub fundamental); lanes 1-3 reserved for inharmonic
+    // membrane-mode partials (next pass).
+    float mPartialPhases[4];
+    float mPartialInc[4];
+    float mPartialSines[4];
+
     bool mXformGateWasHigh = false;
     bool mManualFire = false;
 
