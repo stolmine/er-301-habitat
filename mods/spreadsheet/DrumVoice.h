@@ -65,11 +65,18 @@ namespace stolmine
     float mSineBank[4];
 
     // Second NEON quad for additive partials. Lane 0 = sub-octave
-    // (0.5x sub fundamental); lanes 1-3 reserved for inharmonic
-    // membrane-mode partials (next pass).
+    // (0.5x sub fundamental); lanes 1-3 inharmonic membrane modes
+    // (pitch-morphed ratios).
     float mPartialPhases[4];
     float mPartialInc[4];
     float mPartialSines[4];
+
+    // Per-partial decay envelopes. NEON-vectorized decay update once
+    // per output sample. Decay coefficients computed at trigger time
+    // via expf, scaled by pitch register so kick-territory partials
+    // decay short and cymbal-territory partials decay long.
+    float mPartialEnvs[4];
+    float mPartialDecayCoeffs[4];
 
     bool mXformGateWasHigh = false;
     bool mManualFire = false;

@@ -182,12 +182,14 @@ namespace stolmine
     // Zero-init NEON working buffers (no in-class init in header to keep
     // the class layout simple).
     for (int i = 0; i < 4; i++) {
-      mPhaseBank[i]     = 0.0f;
-      mIncBank[i]       = 0.0f;
-      mSineBank[i]      = 0.0f;
-      mPartialPhases[i] = 0.0f;
-      mPartialInc[i]    = 0.0f;
-      mPartialSines[i]  = 0.0f;
+      mPhaseBank[i]          = 0.0f;
+      mIncBank[i]            = 0.0f;
+      mSineBank[i]           = 0.0f;
+      mPartialPhases[i]      = 0.0f;
+      mPartialInc[i]         = 0.0f;
+      mPartialSines[i]       = 0.0f;
+      mPartialEnvs[i]        = 0.0f;
+      mPartialDecayCoeffs[i] = 0.999f;
     }
     addInput(mTrigger);
     addInput(mVOct);
@@ -375,6 +377,19 @@ namespace stolmine
     float baseFreq = 110.0f * powf(2.0f, pitch);
     baseFreq = CLAMP(10.0f, sr * 0.49f, baseFreq);
 
+    // Pitch-morphing partial ratios (block-rate). Low pitch (~55 Hz):
+    // wide spread -- partials sit at 2.5/4.2/7.0x baseFreq, filling the
+    // audible band even when the fundamental is sub-audible (missing-
+    // fundamental psychoacoustics). High pitch (>=440 Hz): tight cluster
+    // at 1.7/2.0/2.4x baseFreq, creating cymbal-like phase-interference
+    // sheen. Linear interpolation in log-pitch space (3 octaves of range).
+    float pitchParam = fast_log2(baseFreq / 55.0f) * (1.0f / 3.0f);
+    if (pitchParam < 0.0f) pitchParam = 0.0f;
+    if (pitchParam > 1.0f) pitchParam = 1.0f;
+    float mode1Ratio = 2.5f + pitchParam * (1.7f - 2.5f);  // 2.5 -> 1.7
+    float mode2Ratio = 4.2f + pitchParam * (2.0f - 4.2f);  // 4.2 -> 2.0
+    float mode3Ratio = 7.0f + pitchParam * (2.4f - 7.0f);  // 7.0 -> 2.4
+
     // Grit high-end knee: the last 30% of grit travel (grit > 0.7) should
     // push oscs toward silence and noise toward dominance, with punch
     // onset boosted. Below 0.7 grit does its baseline cross-fade; above
@@ -503,6 +518,28 @@ namespace stolmine
         s.shapeDecayCoeff = expf(-1.0f / (effectiveDecay * 0.6f * sr));
         s.punchDecayCoeff = expf(-1.0f / (0.003f * sr));
 
+        // Per-partial decay times scaled by pitch register: kick-territory
+        // partials decay short, cymbal-territory long. Higher modes also
+        // fade faster than lower modes (real drum mode-amplitude falloff).
+        // pitchParam was computed at block-rate above (0 @ 55Hz, 1 @ 440Hz).
+        float pitchDecayScale = 0.5f + pitchParam * 1.5f;  // 0.5x kick, 2.0x cymbal
+        float pSubT   = effectiveDecay;
+        float pMode1T = effectiveDecay * pitchDecayScale * 1.0f;
+        float pMode2T = effectiveDecay * pitchDecayScale * 0.7f;
+        float pMode3T = effectiveDecay * pitchDecayScale * 0.5f;
+        if (pSubT   < 0.001f) pSubT   = 0.001f;
+        if (pMode1T < 0.001f) pMode1T = 0.001f;
+        if (pMode2T < 0.001f) pMode2T = 0.001f;
+        if (pMode3T < 0.001f) pMode3T = 0.001f;
+        mPartialDecayCoeffs[0] = expf(-1.0f / (pSubT   * sr));
+        mPartialDecayCoeffs[1] = expf(-1.0f / (pMode1T * sr));
+        mPartialDecayCoeffs[2] = expf(-1.0f / (pMode2T * sr));
+        mPartialDecayCoeffs[3] = expf(-1.0f / (pMode3T * sr));
+        mPartialEnvs[0] = 1.0f;
+        mPartialEnvs[1] = 1.0f;
+        mPartialEnvs[2] = 1.0f;
+        mPartialEnvs[3] = 1.0f;
+
         if (attack > 0.0001f)
         {
           s.ampEnv = 0.0f;
@@ -586,10 +623,20 @@ namespace stolmine
       // (1-shape) gating so heavy-FM territory mutes the partial.
       float partial3Mix = (1.0f - shape) * 0.25f * s.ampEnv;
 
-      // Sub-octave partial: bass weight regardless of shape, since deep
-      // body shouldn't fade when FM pushes the upper spectrum. Only
-      // ampEnv-scaled.
-      float subOctaveMix = 0.3f * s.ampEnv;
+      // Sub-octave + membrane modes: each has its OWN decay envelope
+      // (mPartialEnvs[0..3]) computed per-sample via NEON quad. Decay
+      // times scaled by pitch register at trigger time -- low pitch
+      // gets short tails (kick punch), high pitch gets long tails
+      // (cymbal sustain). Higher modes also fade faster than the lower
+      // ones, mirroring real drum mode amplitude falloff.
+      float subOctaveMix = 0.3f * mPartialEnvs[0];
+
+      // Modes lightly shape-gated -- heavy FM territory pulls back
+      // since the FM is its own spectrum.
+      float modeShapeGate = 1.0f - shape * 0.4f;     // 1.0 -> 0.6
+      float mode1Mix = 0.16f * mPartialEnvs[1] * modeShapeGate;
+      float mode2Mix = 0.13f * mPartialEnvs[2] * modeShapeGate;
+      float mode3Mix = 0.10f * mPartialEnvs[3] * modeShapeGate;
 
       float osSamp[2];
       for (int k = 0; k < 2; k++)
@@ -628,15 +675,20 @@ namespace stolmine
         float subSigAt2x   = mSineBank[2];
         float partial3At2x = mSineBank[3];
 
-        // Second NEON quad: additive partials. Lane 0 = sub-octave at
-        // 0.5x sub-sine pitch (so it tracks the gentler sub-sweep too).
-        // Lanes 1-3 reserved for inharmonic membrane-mode partials.
-        mPartialInc[0] = 0.5f * s.currentSubFreq / sr2; // sub-octave
-        mPartialInc[1] = 0.0f;
-        mPartialInc[2] = 0.0f;
-        mPartialInc[3] = 0.0f;
+        // Second NEON quad: additive partials.
+        //   Lane 0: sub-octave at 0.5x sub-sine pitch (gentler sweep)
+        //   Lane 1: membrane mode 1 (mode1Ratio x droopFreq, pitch-morphed)
+        //   Lane 2: membrane mode 2
+        //   Lane 3: membrane mode 3
+        mPartialInc[0] = 0.5f * s.currentSubFreq / sr2;
+        mPartialInc[1] = mode1Ratio * droopFreq / sr2;
+        mPartialInc[2] = mode2Ratio * droopFreq / sr2;
+        mPartialInc[3] = mode3Ratio * droopFreq / sr2;
         neonAdvanceSines(mPartialPhases, mPartialInc, mPartialSines);
         float subOctaveAt2x = mPartialSines[0];
+        float mode1At2x     = mPartialSines[1];
+        float mode2At2x     = mPartialSines[2];
+        float mode3At2x     = mPartialSines[3];
 
         float spaciousDepth = (shape > 0.5f) ? (shape - 0.5f) * 2.0f * s.shapeEnv * 3.0f : 0.0f;
 
@@ -688,13 +740,17 @@ namespace stolmine
           toneSample3 = lookupSine(s.sLUT, tri3 * foldGain);
         }
 
-        // Mix: oscs + sub-sine + 3rd-harmonic partial + sub-octave.
-        // All NEON-derived sines decimate alongside the oscs at 2x rate.
+        // Mix: oscs + sub-sine + 3rd-harmonic partial + sub-octave +
+        // 3 pitch-morphed inharmonic membrane modes. All NEON-derived
+        // sines decimate alongside the oscs at 2x rate.
         osSamp[k] = toneSample * 1.0f
                   + toneSample3 * 0.6f
                   + subSigAt2x * subMix
                   + partial3At2x * partial3Mix
-                  + subOctaveAt2x * subOctaveMix;
+                  + subOctaveAt2x * subOctaveMix
+                  + mode1At2x * mode1Mix
+                  + mode2At2x * mode2Mix
+                  + mode3At2x * mode3Mix;
       }
 
       // 2-tap moving-average halfband decimator: zero at the 2x Nyquist,
@@ -752,6 +808,19 @@ namespace stolmine
       case 3: // decay
         s.ampEnv   *= s.ampDecayCoeff;
         s.shapeEnv *= s.shapeDecayCoeff;
+        // Per-partial envelope decay via NEON quad. Same per-sample rate
+        // as ampEnv. Coefficients computed at trigger time, scaled by
+        // pitch register.
+        {
+#ifdef __ARM_NEON
+          float32x4_t pe = vld1q_f32(mPartialEnvs);
+          float32x4_t pc = vld1q_f32(mPartialDecayCoeffs);
+          pe = vmulq_f32(pe, pc);
+          vst1q_f32(mPartialEnvs, pe);
+#else
+          for (int j = 0; j < 4; j++) mPartialEnvs[j] *= mPartialDecayCoeffs[j];
+#endif
+        }
         if (s.ampEnv < 1e-5f)
         {
           // Hard reset of every internal envelope and downstream tail
@@ -778,6 +847,10 @@ namespace stolmine
           mPartialPhases[1] = 0.0f;
           mPartialPhases[2] = 0.0f;
           mPartialPhases[3] = 0.0f;
+          mPartialEnvs[0] = 0.0f;
+          mPartialEnvs[1] = 0.0f;
+          mPartialEnvs[2] = 0.0f;
+          mPartialEnvs[3] = 0.0f;
         }
         break;
       default: // idle
