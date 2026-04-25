@@ -48,6 +48,53 @@ namespace stolmine
     return tri * (1.5707963f - 0.6459640f * t2 + 0.0796921f * t4 - 0.0046816f * t6);
   }
 
+  // 4-lane phasor advance + polynomial sine. NEON-vectorized on am335x;
+  // scalar fallback on x86/emu. CRITICAL: phases/inc/outSines MUST be
+  // class member arrays (or otherwise heap-allocated) -- stack-locals
+  // trigger GCC `:64` alignment hint under -O3 -ffast-math which traps
+  // on Cortex-A8 (see feedback_neon_intrinsics_drumvoice memory).
+  static inline void neonAdvanceSines(float *phases, const float *inc, float *outSines)
+  {
+#ifdef __ARM_NEON
+    float32x4_t ph = vld1q_f32(phases);
+    float32x4_t in = vld1q_f32(inc);
+    ph = vaddq_f32(ph, in);
+    // Wrap to [0,1): subtract floor. inc is non-negative; ph stays in
+    // [0,1); after add ph in [0,2). vcvtq_s32_f32 truncates toward zero
+    // == floor for non-negative values.
+    int32x4_t   ipart = vcvtq_s32_f32(ph);
+    float32x4_t fpart = vcvtq_f32_s32(ipart);
+    ph = vsubq_f32(ph, fpart);
+    // Triangle: tri = 4 * min(p, 1-p) - 1
+    float32x4_t one  = vdupq_n_f32(1.0f);
+    float32x4_t inv  = vsubq_f32(one, ph);
+    float32x4_t mn   = vminq_f32(ph, inv);
+    float32x4_t tris = vsubq_f32(vmulq_n_f32(mn, 4.0f), one);
+    // 7th-order polynomial sine (matches scalar polySine):
+    //   tri * (1.5708 - 0.6460*t^2 + 0.0797*t^4 - 0.00468*t^6)
+    float32x4_t t2 = vmulq_f32(tris, tris);
+    float32x4_t t4 = vmulq_f32(t2, t2);
+    float32x4_t t6 = vmulq_f32(t4, t2);
+    float32x4_t poly = vmlsq_f32(vdupq_n_f32(1.5707963f), t2, vdupq_n_f32(0.6459640f));
+    poly = vmlaq_f32(poly, t4, vdupq_n_f32(0.0796921f));
+    poly = vmlsq_f32(poly, t6, vdupq_n_f32(0.0046816f));
+    float32x4_t sines = vmulq_f32(tris, poly);
+    vst1q_f32(phases, ph);
+    vst1q_f32(outSines, sines);
+#else
+    for (int j = 0; j < 4; j++) {
+      phases[j] += inc[j];
+      phases[j] -= floorf(phases[j]);
+      float p = phases[j];
+      float tri = 4.0f * (p < 0.5f ? p : 1.0f - p) - 1.0f;
+      float t2 = tri * tri;
+      float t4 = t2 * t2;
+      float t6 = t4 * t2;
+      outSines[j] = tri * (1.5707963f - 0.6459640f*t2 + 0.0796921f*t4 - 0.0046816f*t6);
+    }
+#endif
+  }
+
   static inline float lookupSine(const float *lut, float tri)
   {
     float absTri = fabsf(tri);
@@ -67,9 +114,8 @@ namespace stolmine
     float phase1 = 0.0f;
     float phase2 = 0.0f;
     float phase3 = 0.0f;   // detuned unison sibling of osc1 (Pass 1)
-    float phase4 = 0.0f;   // second FM modulator at 2.0x ratio (Pass 2)
-    float phase5 = 0.0f;   // sub-sine fundamental (Pass 2)
-    float phaseFm = 0.0f;
+    // phaseFm / phase4 / phase5 moved to DrumVoice::mPhaseBank for NEON
+    // class-member alignment safety (2.5.5.111).
     float wobblePhase = 0.0f;  // pitch-droop LFO (Pass 1)
 
     float ampEnv = 0.0f;
@@ -133,6 +179,13 @@ namespace stolmine
 
   DrumVoice::DrumVoice()
   {
+    // Zero-init NEON working buffers (no in-class init in header to keep
+    // the class layout simple).
+    for (int i = 0; i < 4; i++) {
+      mPhaseBank[i] = 0.0f;
+      mIncBank[i]   = 0.0f;
+      mSineBank[i]  = 0.0f;
+    }
     addInput(mTrigger);
     addInput(mVOct);
     addInput(mXformGate);
@@ -274,29 +327,6 @@ namespace stolmine
 
   void DrumVoice::process()
   {
-#ifdef __ARM_NEON
-    // Probe 2.5.5.110: NEON load/store on CLASS-MEMBER arrays (heap-
-    // allocated, >=8-byte aligned by operator new). Pecto's working
-    // pattern. Disassembly of 2.5.5.109 showed GCC emitted vld1.32
-    // {q8}, [lr :64] (8-byte-aligned hint) on stack-local arrays
-    // whose actual runtime alignment was only 4 bytes -> Data Abort.
-    // Class members get more reliable alignment from new(), and GCC
-    // can emit appropriate hints based on offset analysis.
-    {
-      // Use input-buffer first samples to defeat constant-folding;
-      // we only care about NEON memory ops working, not the result.
-      mNeonProbeIn[0] = mTrigger.buffer()[0];
-      mNeonProbeIn[1] = mVOct.buffer()[0];
-      mNeonProbeIn[2] = mXformGate.buffer()[0];
-      mNeonProbeIn[3] = 1.0f;
-      float32x4_t v = vld1q_f32(mNeonProbeIn);
-      v = vmulq_f32(v, vdupq_n_f32(2.0f));
-      vst1q_f32(mNeonProbeOut, v);
-      volatile float r = mNeonProbeOut[0];
-      (void)r;
-    }
-#endif
-
     Internal &s = *mpInternal;
     float *trig = mTrigger.buffer();
     float *voct = mVOct.buffer();
@@ -443,9 +473,10 @@ namespace stolmine
         s.phase1 = 0.0f;
         s.phase2 = 0.0f;
         s.phase3 = 0.0f;
-        s.phase4 = 0.0f;
-        s.phase5 = 0.0f;
-        s.phaseFm = 0.0f;
+        mPhaseBank[0] = 0.0f;  // phaseFm
+        mPhaseBank[1] = 0.0f;  // phase4
+        mPhaseBank[2] = 0.0f;  // phase5
+        mPhaseBank[3] = 0.0f;  // reserved
         s.wobblePhase = 0.0f;
 
         // Wobble depth responds to a composite of decay, sweep, and pitch.
@@ -539,6 +570,10 @@ namespace stolmine
       if (character > 0.7f)
         gritNoiseFmDev += (character - 0.7f) * 3.3f * grit * 500.0f;
 
+      // Sub-sine mix amount: pure-sine territory full, heavy-FM pulls
+      // back. Hoisted (constant across 2 k-iters; ampEnv updates after).
+      float subMix = (1.0f - shape) * 0.5f * s.ampEnv;
+
       float osSamp[2];
       for (int k = 0; k < 2; k++)
       {
@@ -559,25 +594,21 @@ namespace stolmine
           shapeSample = lookupSine(s.sLUT, tri2 * foldGain);
         }
 
-        // Metallic FM modulator: inharmonic (2.71x) sine osc. Polynomial
-        // sine here -- pure-tone source, no character morph needed; saves
-        // an LUT load + interp + sign-flip per sample.
-        float incFm = droopFreq * 2.71f / sr2;
-        s.phaseFm += incFm;
-        s.phaseFm -= floorf(s.phaseFm);
-        float triFm = 4.0f * (s.phaseFm < 0.5f ? s.phaseFm : 1.0f - s.phaseFm) - 1.0f;
-        float fmMod = polySine(triFm);
-
-        // Pass 2 #8: second FM modulator at 2.0x ratio for the "spacious"
-        // additive zone above shape=0.5. Below 0.5, spaciousDepth is 0
-        // via ternary (branchless CMP+MOVCC on Cortex-A8). At shape=1.0,
-        // second modulator contributes as much index as the main shape
-        // modulator does at mid-shape.
-        float inc4 = droopFreq * 2.0f / sr2;
-        s.phase4 += inc4;
-        s.phase4 -= floorf(s.phase4);
-        float tri4 = 4.0f * (s.phase4 < 0.5f ? s.phase4 : 1.0f - s.phase4) - 1.0f;
-        float mod4 = polySine(tri4);
+        // NEON-vectorized phasor + polynomial sine bank for the 3 pure-
+        // sine paths. Lane 3 (zero increment) reserved for a future
+        // additive partial. mPhaseBank/mIncBank/mSineBank are class
+        // members -> heap-allocated, GCC emits vld1.32 [reg] no-hint
+        // safe variant. Stack-locals would trap (see memory).
+        // Sub-sine (lane 2) now runs at 2x rate; gets decimated
+        // alongside oscs after the k-loop.
+        mIncBank[0] = droopFreq * 2.71f / sr2;          // metallic FM
+        mIncBank[1] = droopFreq * 2.0f / sr2;           // spacious FM mod
+        mIncBank[2] = s.currentSubFreq / sr2;           // sub-sine fundamental
+        mIncBank[3] = 0.0f;                             // reserved
+        neonAdvanceSines(mPhaseBank, mIncBank, mSineBank);
+        float fmMod      = mSineBank[0];
+        float mod4       = mSineBank[1];
+        float subSigAt2x = mSineBank[2];
         float spaciousDepth = (shape > 0.5f) ? (shape - 0.5f) * 2.0f * s.shapeEnv * 3.0f : 0.0f;
 
         // Osc1 carrier: Shape FM + spacious 2x FM + Metallic FM + broadband
@@ -628,28 +659,18 @@ namespace stolmine
           toneSample3 = lookupSine(s.sLUT, tri3 * foldGain);
         }
 
-        // Mix: 1.0 * osc1 + 0.6 * osc3. Boosted per listening feedback;
-        // the high-grit attenuation applied after decimation + the post-
-        // chain (clipper/comp/level) keep the overall loudness in check.
-        osSamp[k] = toneSample * 1.0f + toneSample3 * 0.6f;
+        // Mix: 1.0 * osc1 + 0.6 * osc3 + sub-sine. Sub now lives inside
+        // the 2x oversample loop (NEON-vectorized in lane 2 of the
+        // phasor bank); it gets decimated alongside oscs.
+        // subMix is hoisted just before the k-loop (constant across
+        // the 2 k-iters; ampEnv updates after decimation).
+        osSamp[k] = toneSample * 1.0f + toneSample3 * 0.6f + subSigAt2x * subMix;
       }
 
       // 2-tap moving-average halfband decimator: zero at the 2x Nyquist,
       // good enough for drum-band content. Replace with a longer halfband
       // FIR later if the residual aliasing above sr/2 is audible.
       float sample = 0.5f * (osSamp[0] + osSamp[1]);
-
-      // Pass 2 #5: sub-sine fundamental at sr rate (pure sine, no need
-      // for 2x oversampling). Tracks currentSubFreq with shallower sweep.
-      // Mix scaled by (1 - shape) so pure-sine territory has full sub and
-      // heavy-FM territory pulls it back -- avoids muddy low end when
-      // the shape knob is pushing lots of high-freq content.
-      s.phase5 += s.currentSubFreq / sr;
-      s.phase5 -= floorf(s.phase5);
-      float tri5 = 4.0f * (s.phase5 < 0.5f ? s.phase5 : 1.0f - s.phase5) - 1.0f;
-      float subSig = polySine(tri5);
-      float subMix = (1.0f - shape) * 0.5f * s.ampEnv;
-      sample += subSig * subMix;
 
       // Attenuate oscillator sum as grit rises. Two-piece curve:
       //   grit 0.0..0.7: baseline drop -- (1 - grit*0.3) reaches 0.79.
@@ -719,8 +740,10 @@ namespace stolmine
           s.noiseIc1 = 0.0f;
           s.noiseIc2 = 0.0f;
           s.wobblePhase = 0.0f;
-          s.phase4 = 0.0f;
-          s.phase5 = 0.0f;
+          mPhaseBank[0] = 0.0f;
+          mPhaseBank[1] = 0.0f;
+          mPhaseBank[2] = 0.0f;
+          mPhaseBank[3] = 0.0f;
         }
         break;
       default: // idle
