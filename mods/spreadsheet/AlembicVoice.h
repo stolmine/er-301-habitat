@@ -18,6 +18,10 @@
 #include <od/audio/Sample.h>
 #include <od/config.h>
 
+// Forward-declare pffft setup so AlembicVoice.h doesn't have to pull in
+// pffft.h. The .cpp includes pffft.h for the actual API.
+struct PFFFT_Setup;
+
 namespace stolmine
 {
 
@@ -148,11 +152,33 @@ namespace stolmine
     float mPresetTable[64][29];
 
     // Sample-pool slot. Lifetime managed via attach/release pairs in
-    // setSample. Phase 5a holds it; Phase 5b will read it once for
-    // offline feature extraction.
+    // setSample. Phase 5b reads it once during analyzeSample().
     od::Sample *mpSample;
 
     bool mSyncWasHigh;
+
+    // Phase 5b: offline feature-extraction kernel. Triggered from
+    // setSample() when a non-null sample arrives; populates mPresetTable
+    // from the sample's content. Synchronous on the calling thread
+    // (200ms-1.2s wall-clock per planning doc). All scratch is heap-
+    // allocated (never stack); helpers are noinline + no-tree-vectorize
+    // per feedback_neon_hint_surfaces.
+    void analyzeSample();
+
+    // pffft state for offline spectral analysis. Lazily allocated on
+    // first analyzeSample() call and reused thereafter; freed in
+    // destructor. Buffers must be 16-byte aligned (pffft_aligned_malloc).
+    PFFFT_Setup *mFftSetup;
+    float *mFftIn;
+    float *mFftOut;
+    float *mFftWork;
+    // Hann window precomputed at construction (256 entries for 256-pt FFT).
+    float mHannWindow[256];
+    // Magnitude spectrum scratch + previous-frame buffer for flux.
+    // Class members per feedback_neon_intrinsics_drumvoice; loops over
+    // these are scalar (noinline + no-tree-vectorize).
+    float mScratchMag[128];
+    float mPrevMag[128];
   };
 
 } // namespace stolmine

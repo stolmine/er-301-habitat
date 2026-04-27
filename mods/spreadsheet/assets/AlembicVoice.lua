@@ -184,24 +184,30 @@ function AlembicVoice:deserialize(t)
     end
 end
 
--- Sample-pool slot. Mirrors SampleScanner.lua:93-127. Phase 5a holds
--- the pointer; Phase 5b will trigger offline analysis on the C++ side.
+-- Sample-pool slot. Mirrors SampleScanner.lua:93-127 with an explicit
+-- detach-before-attach sequence: C++ setSample(nullptr) is fired first
+-- (resets analyzer state, restores placeholder presets) before the
+-- new pointer is set. Without this two-step transition, swapping
+-- directly between two non-null samples can leave analyzer state
+-- straddling the old and new buffer (observed: scan stops responding
+-- on second sample load if the buffer wasn't detached first).
 function AlembicVoice:setSample(sample)
+    -- Step 1: detach existing sample (if any).
     if self.sample then
+        self.objects.op:setSample(nil)
         self.sample:release(self)
         self.sample = nil
     end
-    self.sample = sample
-    if self.sample then
-        self.sample:claim(self)
-    end
 
-    if sample == nil or sample:getChannelCount() == 0 then
-        self.objects.op:setSample(nil)
-    else
-        -- Mono analysis only -- channel 0 of any sample. Stereo will
-        -- be summed to mono in Phase 5b's analyzer.
-        self.objects.op:setSample(sample.pSample)
+    -- Step 2: attach new sample (if non-nil).
+    if sample then
+        sample:claim(self)
+        self.sample = sample
+        if sample:getChannelCount() > 0 then
+            -- Mono analysis only -- channel 0 of any sample. Stereo will
+            -- be summed to mono in the C++ analyzer.
+            self.objects.op:setSample(sample.pSample)
+        end
     end
 
     if self.sampleEditor then

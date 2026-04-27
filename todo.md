@@ -45,6 +45,10 @@
 ### Colmatage
 - [ ] Xform control: add an xform ply (func + paramA/B/scope) mirroring the Excel/Ballot/Petrichor pattern so the cutting behavior can be algorithmically randomized/shuffled across presets. Candidate targets: block-size weights, repeat counts, texture, density, accel ratio. Decide whether scope is per-phrase or per-block.
 
+### Alembic
+- [ ] Bolt on the dual FM filter matrix from the existing Som unit. Som already implements a 2-filter morph/cross-route matrix that fits naturally as a post-PMM colorization stage on Alembic; lift the structure rather than re-deriving it. Cross-reference: Som.cpp/Som.h filter graph + matrix routing.
+- [ ] Direct sample swap (no detach first) doesn't retrain properly. Loading a new sample over an attached one leaves analyzer/preset state straddling the buffers; scan stops responding. Detach-then-attach via menu works fine. Phase 5a Lua already does op:setSample(nil) before op:setSample(new) sequence and Phase 5b C++ release/attach lifecycle mirrors od::Head, so the refcount path looks right -- needs deeper trace (likely Sample loading from card is async and analyzeSample runs on partially-loaded buffer; first attach happens to settle by playback time, second one races). Possible fixes: defer analyzeSample until Sample::isFullyLoaded() if such a check exists; or post analyzeSample to a deferred task that re-checks readiness. Reproduce: Card → sample A → load. Card → sample B without detaching → scan flat.
+
 ### Serialization & stale-label inventory (spreadsheet package)
 
 Progress this session:
