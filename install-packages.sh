@@ -15,6 +15,34 @@ EMU_SRC=/home/sure/repos/er-301-habitat/testing/linux
 
 SUFFIX="-stolmine"
 
+# Emit one path per package basename, picking the highest version. The
+# "basename" is the filename minus its -<version> chunk; if a non-numeric
+# suffix follows the version (e.g. "-stolmine.9.1.0.4"), it's folded
+# into the basename so vanilla and forked builds of the same upstream
+# package are tracked separately.
+pick_latest_pkgs() {
+  local dir="$1"
+  ls "$dir"/*.pkg 2>/dev/null | awk '
+    {
+      bn = $0; sub(/.*\//, "", bn); sub(/\.pkg$/, "", bn)
+      key = bn; ver = "0"
+      if (match(bn, /-[0-9]/)) {
+        name = substr(bn, 1, RSTART - 1)
+        rest = substr(bn, RSTART + 1)
+        if (match(rest, /^[0-9][0-9.]*/)) {
+          ver = substr(rest, 1, RLENGTH)
+          suf = substr(rest, RLENGTH + 1); sub(/^-/, "", suf)
+          key = (suf == "") ? name : name "-" suf
+        }
+      }
+      printf "%s\t%s\t%s\n", key, ver, $0
+    }
+  ' | sort -k1,1 -k2V | awk -F'\t' '
+    { latest[$1] = $3 }
+    END { for (k in latest) print latest[k] }
+  ' | sort
+}
+
 case "${1}" in
   --release)
     if [ ! -d "$HW_DEST" ]; then
@@ -62,7 +90,7 @@ case "${1}" in
     # --- Hardware (am335x) ---
     if [ -d "$HW_DEST" ]; then
       echo "Hardware (am335x):"
-      for pkg in "$HW_SRC"/*.pkg; do
+      pick_latest_pkgs "$HW_SRC" | while IFS= read -r pkg; do
         [ -f "$pkg" ] || continue
         name=$(basename "$pkg" .pkg)
         echo "  $name"
@@ -75,7 +103,7 @@ case "${1}" in
     # --- Emulator (linux) ---
     if [ -d "$EMU_DEST" ]; then
       echo "Emulator (linux):"
-      for pkg in "$EMU_SRC"/*.pkg; do
+      pick_latest_pkgs "$EMU_SRC" | while IFS= read -r pkg; do
         [ -f "$pkg" ] || continue
         name=$(basename "$pkg")
         echo "  $name"
