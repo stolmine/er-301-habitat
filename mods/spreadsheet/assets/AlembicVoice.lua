@@ -16,6 +16,7 @@ local Pitch = require "Unit.ViewControl.Pitch"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
 local AlembicScanControl = require "spreadsheet.AlembicScanControl"
+local AlembicReagentControl = require "spreadsheet.AlembicReagentControl"
 local Encoder = require "Encoder"
 local SamplePool = require "Sample.Pool"
 local SamplePoolInterface = require "Sample.Pool.Interface"
@@ -74,10 +75,12 @@ function AlembicVoice:onLoadGraph(channelCount)
     adapter("level", "Level", 0.5)
     adapter("scanPos", "ScanPos", 0.0)
     adapter("scanK", "ScanK", 4.0)
+    adapter("reagentScan", "ReagentScan", 0.0)
+    adapter("reagent", "Reagent", 0.0)
 end
 
 local views = {
-    expanded = {"tune", "freq", "sync", "scan", "level"},
+    expanded = {"tune", "freq", "sync", "scan", "reagent", "level"},
     scan = {"scan"},
     collapsed = {}
 }
@@ -127,6 +130,19 @@ function AlembicVoice:onLoadViews(objects, branches)
         op = objects.op
     }
 
+    controls.reagent = AlembicReagentControl {
+        button = "reagent",
+        description = "Reagent Scan",
+        branch = branches.reagentScan,
+        gainbias = objects.reagentScan,
+        range = objects.reagentScan,
+        biasMap = Encoder.getMap("[0,1]"),
+        biasUnits = app.unitNone,
+        biasPrecision = 3,
+        initialBias = 0.0,
+        amountParam = objects.reagent:getParameter("Bias")
+    }
+
     controls.level = GainBias {
         button = "level",
         description = "Level",
@@ -140,10 +156,11 @@ function AlembicVoice:onLoadViews(objects, branches)
     return controls, views
 end
 
--- Serialize: 4 adapter biases + tune Offset + sync Threshold per
--- feedback_serialize_deserialize_pattern. The 29 hidden Phase 2
--- Parameters are inert in Phase 3 and not persisted.
-local adapterBiases = { "f0", "level", "scanPos", "scanK" }
+-- Serialize: top-level adapter biases + tune Offset + sync Threshold
+-- per feedback_serialize_deserialize_pattern. The hidden Phase 2/5d
+-- Parameters (ratios/levels/detunes/matrix/filter base/lane attens)
+-- are inert in pre-Phase-7 and not persisted.
+local adapterBiases = { "f0", "level", "scanPos", "scanK", "reagentScan", "reagent" }
 
 function AlembicVoice:serialize()
     local t = Unit.serialize(self)

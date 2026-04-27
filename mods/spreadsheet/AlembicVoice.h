@@ -91,9 +91,15 @@ namespace stolmine
     od::Parameter mMatrixDC{"MatrixDC", 0.0f};
     od::Parameter mMatrixDD{"MatrixDD", 0.0f};
 
-    // Phase 5d-1 reagent (wavetable transfer-function blend). The per-
-    // node row[28] is sample-derived; this Parameter is the user-bias
-    // hook for Phase 7's Reagent global to scale it.
+    // Phase 5d-1.5 reagent controls. Reagent scan is a SECOND scan
+    // position, independent of mScanPos. The wavetable LUT shape and
+    // its trained row[28] blend amount come from K=4 nodes around
+    // mReagentScan, while the PM voice (ratios/levels/detunes/matrix)
+    // continues to use mScanPos's neighborhood. This lets the user
+    // pick a tonal node region as source and a chaotic node region as
+    // shaper (or any combination). mReagent is the global amount
+    // multiplier on the trained blend; default 0 = clean PM at boot.
+    od::Parameter mReagentScan{"ReagentScan", 0.0f};
     od::Parameter mReagent{"Reagent", 0.0f};
 
     // Phase 4 viz hooks. Inline so the sphere's draw loop has no dispatch

@@ -207,6 +207,7 @@ namespace stolmine
     addParameter(mMatrixDB);
     addParameter(mMatrixDC);
     addParameter(mMatrixDD);
+    addParameter(mReagentScan);
     addParameter(mReagent);
 
     memset(mPhaseBank, 0, sizeof(mPhaseBank));
@@ -921,7 +922,6 @@ namespace stolmine
     for (int f = 0; f < 4; f++) mLevelFlat[f] = 0.0f;
     for (int f = 0; f < 4; f++) mDetuneFlat[f] = 0.0f;
     for (int f = 0; f < 16; f++) mMatrixFlat[f] = 0.0f;
-    mWavetableBlend = 0.0f;
     for (int j = 0; j < K; j++)
     {
       const float wj = w[j] * wInv;
@@ -930,8 +930,39 @@ namespace stolmine
       for (int f = 0; f < 4; f++) mLevelFlat[f] += wj * p[4 + f];
       for (int f = 0; f < 4; f++) mDetuneFlat[f] += wj * p[8 + f];
       for (int f = 0; f < 16; f++) mMatrixFlat[f] += wj * p[12 + f];
-      mWavetableBlend += wj * p[28];
     }
+
+    // Phase 5d-1.5: independent reagent scan window. mReagentScan
+    // selects a separate K-node neighborhood for the wavetable LUT
+    // shape AND its trained row[28] blend. mReagent (amount) multiplies
+    // the K-blended blend so default mReagent = 0 -> clean PM. K is
+    // shared with the main scan to keep the ply count tight (one extra
+    // top-level control, not two).
+    const float scanPosR = CLAMP(0.0f, 1.0f, mReagentScan.value());
+    const float sR = scanPosR * 63.0f;
+    int n0r = (int)(sR + 0.5f) - K / 2;
+    if (n0r < 0) n0r = 0;
+    if (n0r + K > 64) n0r = 64 - K;
+    float wR[6];
+    float wSumR = 0.0f;
+    for (int j = 0; j < K; j++)
+    {
+      const float dist = fabsf((float)(n0r + j) - sR);
+      const float wRaw = halfWidth - dist;
+      wR[j] = wRaw > 0.0f ? wRaw : 0.0f;
+      wSumR += wR[j];
+    }
+    if (wSumR < 1e-9f)
+    {
+      wR[0] = 1.0f;
+      wSumR = 1.0f;
+    }
+    const float wInvR = 1.0f / wSumR;
+    float reagentBlend = 0.0f;
+    for (int j = 0; j < K; j++)
+      reagentBlend += (wR[j] * wInvR) * mPresetTable[n0r + j][28];
+    const float reagentAmt = CLAMP(0.0f, 1.0f, mReagent.value());
+    mWavetableBlend = reagentBlend * reagentAmt;
     // Apply the diagonal kFbScale after the blend, matching Phase 2b's
     // per-sample matrix-sum convention. Off-diagonal cross-mod stays 1x.
     mMatrixFlat[0 * 4 + 0] *= kFbScale;
@@ -941,9 +972,11 @@ namespace stolmine
 
     // Phase 5d-1: precompute K-blend weights for the per-sample wavetable
     // shaper (K=2..6 frames). Stays on the stack but is small enough
-    // not to NEON-vectorize -- gcc keeps these in scalar regs.
-    float wNormalized[6];
-    for (int j = 0; j < K; j++) wNormalized[j] = w[j] * wInv;
+    // not to NEON-vectorize -- gcc keeps these in scalar regs. Phase
+    // 5d-1.5 splits this into reagent-scan-specific weights so the
+    // wavetable LUT lookup uses the independent reagent scan window.
+    float wNormalizedR[6];
+    for (int j = 0; j < K; j++) wNormalizedR[j] = wR[j] * wInvR;
 
     // Block-rate NEON loads. Only vLevel hoists across the per-sample
     // loop -- it's used in the output-sum step *after* simd_sin so it
@@ -1043,10 +1076,10 @@ namespace stolmine
       float shaped = 0.0f;
       for (int j = 0; j < K; j++)
       {
-        const float *frame = mWavetableLUT[n0 + j];
+        const float *frame = mWavetableLUT[n0r + j];
         const float a = frame[idxL];
         const float b = frame[idxR];
-        shaped += wNormalized[j] * (a + frac * (b - a));
+        shaped += wNormalizedR[j] * (a + frac * (b - a));
       }
       const float shapedOut = sat * (1.0f - wblend) + shaped * wblend;
       out[i] = shapedOut * lvl;
