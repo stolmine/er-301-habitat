@@ -15,6 +15,7 @@
 #pragma once
 
 #include <od/objects/Object.h>
+#include <od/audio/Sample.h>
 #include <od/config.h>
 
 namespace stolmine
@@ -25,6 +26,13 @@ namespace stolmine
   public:
     AlembicVoice();
     virtual ~AlembicVoice();
+
+    // Sample-pool slot. Lua passes sample.pSample (a od::Sample*); the
+    // unit attaches/releases per the standard SDK lifecycle (see
+    // od::Head::setSample for the canonical pattern). Phase 5a stores
+    // the pointer; Phase 5b will trigger analyzeSample() here.
+    void setSample(od::Sample *sample);
+    od::Sample *getSample();
 
 #ifndef SWIGLUA
     virtual void process();
@@ -132,6 +140,17 @@ namespace stolmine
     float mRatioFlat[4];
     float mDetuneFlat[4];
     float mLevelFlat[4];
+
+    // Per-instance preset table. Phase 3 placeholder gradient fills this
+    // at construction; Phase 5 analyzeSample() overwrites with sample-
+    // derived content. Per-instance (was file-scope static in Phases 3-4)
+    // because each unit trains on its own sample. ~7424 bytes.
+    float mPresetTable[64][29];
+
+    // Sample-pool slot. Lifetime managed via attach/release pairs in
+    // setSample. Phase 5a holds it; Phase 5b will read it once for
+    // offline feature extraction.
+    od::Sample *mpSample;
 
     bool mSyncWasHigh;
   };

@@ -23,12 +23,11 @@ namespace stolmine
   // sum so the two units produce identical self-feedback math.
   static const float kFbScale = 0.18f;
 
-  // Phase 3 hand-authored preset gradient, stored at FILE scope (shared
-  // across all AlembicVoice instances; init-on-first-construction). Slot
-  // 0 is a clean sine on op A; slot 63 is 4-op chaos with all matrix
-  // entries ~0.45 and op detunes for beating. Linear interpolation
-  // across slots 1..62. Phase 5 replaces this with offline training
-  // output. ~7.4 KB total (not per-instance).
+  // Phase 3 hand-authored preset gradient. Slot 0 is a clean sine on op
+  // A; slot 63 is 4-op chaos with all matrix entries ~0.45 and op detunes
+  // for beating. Linear interpolation across slots 1..62. Phase 5b's
+  // analyzeSample() overwrites the table with sample-derived content;
+  // detach reverts to this placeholder.
   //
   // Per-slot layout (29 floats):
   //   [0..3]   ratios
@@ -36,21 +35,14 @@ namespace stolmine
   //   [8..11]  detunes (Hz)
   //   [12..27] matrix[src*4 + dst], source-major
   //   [28]     reagent flag (Phase 7+; ignored in Phase 3)
-  static float sPresetTable[64][29];
-  static bool sPresetTableInit = false;
-
-  // Disable auto-vectorization on this initializer. GCC otherwise emits
-  // NEON quad ops with `:64` alignment hints on the .rodata endA/endB
-  // and .bss sPresetTable accesses, plus a stack-spill quad write to
-  // `[sp :64]`. The runtime alignment doesn't match the hints on
-  // Cortex-A8 and the unit traps at construction time -- exactly the
-  // class of crash from feedback_neon_intrinsics_drumvoice but in the
-  // constructor instead of the per-sample loop. Scalar code path is
-  // perfectly fast for a one-shot 64*29 init.
+  //
+  // noinline + no-tree-vectorize: GCC otherwise auto-vectorizes the
+  // 64x29 init loop and emits `:64`-aligned NEON ops on the .rodata
+  // endA/endB plus the destination table, which trap on Cortex-A8 at
+  // construction time (feedback_neon_hint_surfaces).
   __attribute__((noinline, optimize("no-tree-vectorize")))
-  static void fillPhase3Presets()
+  static void fillPhase3Presets(float (&t)[64][29])
   {
-    if (sPresetTableInit) return;
     static const float endA[29] = {
         1.0f, 2.0f, 3.0f, 5.0f,
         1.0f, 0.0f, 0.0f, 0.0f,
@@ -74,10 +66,9 @@ namespace stolmine
       const float u = (float)slot / 63.0f;
       for (int f = 0; f < 29; f++)
       {
-        sPresetTable[slot][f] = endA[f] + u * (endB[f] - endA[f]);
+        t[slot][f] = endA[f] + u * (endB[f] - endA[f]);
       }
     }
-    sPresetTableInit = true;
   }
 
   AlembicVoice::AlembicVoice()
@@ -131,12 +122,41 @@ namespace stolmine
     memset(mRatioFlat, 0, sizeof(mRatioFlat));
     memset(mDetuneFlat, 0, sizeof(mDetuneFlat));
     memset(mLevelFlat, 0, sizeof(mLevelFlat));
-    fillPhase3Presets();
+    fillPhase3Presets(mPresetTable);
+    mpSample = nullptr;
     mSyncWasHigh = false;
   }
 
   AlembicVoice::~AlembicVoice()
   {
+    if (mpSample)
+      mpSample->release();
+  }
+
+  // setSample mirrors od::Head::setSample (er-301/od/objects/heads/Head.cpp).
+  // Null-out mpSample first so the audio thread can't observe a half-
+  // transitioned state; then release the old sample, attach the new, and
+  // commit the pointer. Phase 5b will hook analyzeSample() onto the
+  // non-null branch.
+  void AlembicVoice::setSample(od::Sample *sample)
+  {
+    od::Sample *old = mpSample;
+    mpSample = nullptr;
+    if (old) old->release();
+    if (sample) sample->attach();
+    mpSample = sample;
+    if (mpSample == nullptr)
+    {
+      // Detach -> revert to Phase 3 placeholder gradient.
+      fillPhase3Presets(mPresetTable);
+    }
+    // Phase 5b: when sample non-null, analyzeSample() will populate
+    // mPresetTable here. For 5a the placeholder gradient stays.
+  }
+
+  od::Sample *AlembicVoice::getSample()
+  {
+    return mpSample;
   }
 
   void AlembicVoice::process()
@@ -195,7 +215,7 @@ namespace stolmine
     for (int j = 0; j < K; j++)
     {
       const float wj = w[j] * wInv;
-      const float *p = sPresetTable[n0 + j];
+      const float *p = mPresetTable[n0 + j];
       for (int f = 0; f < 4; f++) mRatioFlat[f] += wj * p[f];
       for (int f = 0; f < 4; f++) mLevelFlat[f] += wj * p[4 + f];
       for (int f = 0; f < 4; f++) mDetuneFlat[f] += wj * p[8 + f];

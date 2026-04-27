@@ -17,6 +17,11 @@ local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
 local AlembicScanControl = require "spreadsheet.AlembicScanControl"
 local Encoder = require "Encoder"
+local SamplePool = require "Sample.Pool"
+local SamplePoolInterface = require "Sample.Pool.Interface"
+local SampleEditor = require "Sample.Editor"
+local Task = require "Unit.MenuControl.Task"
+local MenuHeader = require "Unit.MenuControl.Header"
 
 local AlembicVoice = Class{}
 AlembicVoice:include(Unit)
@@ -148,6 +153,9 @@ function AlembicVoice:serialize()
     if self.objects.sync then
         t.syncThreshold = self.objects.sync:getParameter("Threshold"):target()
     end
+    if self.sample then
+        t.sample = SamplePool.serializeSample(self.sample)
+    end
     return t
 end
 
@@ -164,6 +172,161 @@ function AlembicVoice:deserialize(t)
     if t.syncThreshold ~= nil and self.objects.sync then
         self.objects.sync:hardSet("Threshold", t.syncThreshold)
     end
+    if t.sample then
+        local sample = SamplePool.deserializeSample(t.sample, self.chain)
+        if sample then
+            self:setSample(sample)
+        else
+            local Utils = require "Utils"
+            app.logError("%s:deserialize: failed to load sample.", self)
+            Utils.pp(t.sample)
+        end
+    end
+end
+
+-- Sample-pool slot. Mirrors SampleScanner.lua:93-127. Phase 5a holds
+-- the pointer; Phase 5b will trigger offline analysis on the C++ side.
+function AlembicVoice:setSample(sample)
+    if self.sample then
+        self.sample:release(self)
+        self.sample = nil
+    end
+    self.sample = sample
+    if self.sample then
+        self.sample:claim(self)
+    end
+
+    if sample == nil or sample:getChannelCount() == 0 then
+        self.objects.op:setSample(nil)
+    else
+        -- Mono analysis only -- channel 0 of any sample. Stereo will
+        -- be summed to mono in Phase 5b's analyzer.
+        self.objects.op:setSample(sample.pSample)
+    end
+
+    if self.sampleEditor then
+        self.sampleEditor:setSample(sample)
+    end
+    self:notifyControls("setSample", sample)
+end
+
+function AlembicVoice:doAttachSampleFromCard()
+    local task = function(sample)
+        if sample then
+            local Overlay = require "Overlay"
+            Overlay.flashMainMessage("Attached sample: %s", sample.name)
+            self:setSample(sample)
+        end
+    end
+    SamplePool.chooseFileFromCard(self.loadInfo.id, task)
+end
+
+function AlembicVoice:doAttachSampleFromPool()
+    local chooser = SamplePoolInterface(self.loadInfo.id, "choose")
+    chooser:setDefaultChannelCount(self.channelCount)
+    chooser:highlight(self.sample)
+    local task = function(sample)
+        if sample then
+            local Overlay = require "Overlay"
+            Overlay.flashMainMessage("Attached sample: %s", sample.name)
+            self:setSample(sample)
+        end
+    end
+    chooser:subscribe("done", task)
+    chooser:show()
+end
+
+function AlembicVoice:doDetachSample()
+    local Overlay = require "Overlay"
+    Overlay.flashMainMessage("Sample detached.")
+    self:setSample()
+end
+
+function AlembicVoice:showSampleEditor()
+    if self.sample then
+        if self.sampleEditor == nil then
+            self.sampleEditor = SampleEditor(self, self.objects.op)
+            self.sampleEditor:setSample(self.sample)
+        end
+        self.sampleEditor:show()
+    else
+        local Overlay = require "Overlay"
+        Overlay.flashMainMessage("You must first select a sample.")
+    end
+end
+
+local menu = {
+    "sampleHeader",
+    "selectFromCard",
+    "selectFromPool",
+    "detachBuffer",
+    "editSample"
+}
+
+function AlembicVoice:onShowMenu(objects, branches)
+    local controls = {}
+
+    controls.sampleHeader = MenuHeader { description = "Sample Menu" }
+
+    controls.selectFromCard = Task {
+        description = "Select from Card",
+        task = function() self:doAttachSampleFromCard() end
+    }
+
+    controls.selectFromPool = Task {
+        description = "Select from Pool",
+        task = function() self:doAttachSampleFromPool() end
+    }
+
+    controls.detachBuffer = Task {
+        description = "Detach Buffer",
+        task = function() self:doDetachSample() end
+    }
+
+    controls.editSample = Task {
+        description = "Edit Buffer",
+        task = function() self:showSampleEditor() end
+    }
+
+    local sub = {}
+    if self.sample then
+        sub[1] = {
+            position = app.GRID5_LINE1,
+            justify = app.justifyLeft,
+            text = "Attached Sample:"
+        }
+        sub[2] = {
+            position = app.GRID5_LINE2,
+            justify = app.justifyLeft,
+            text = "+ " .. self.sample:getFilenameForDisplay(24)
+        }
+        sub[3] = {
+            position = app.GRID5_LINE3,
+            justify = app.justifyLeft,
+            text = "+ " .. self.sample:getDurationText()
+        }
+        sub[4] = {
+            position = app.GRID5_LINE4,
+            justify = app.justifyLeft,
+            text = string.format("+ %s %s %s",
+                self.sample:getChannelText(),
+                self.sample:getSampleRateText(),
+                self.sample:getMemorySizeText())
+        }
+    else
+        sub[1] = {
+            position = app.GRID5_LINE3,
+            justify = app.justifyCenter,
+            text = "No sample attached."
+        }
+    end
+
+    return controls, menu, sub
+end
+
+function AlembicVoice:onRemove()
+    self:setSample(nil)
+    Unit.onRemove(self)
 end
 
 return AlembicVoice
