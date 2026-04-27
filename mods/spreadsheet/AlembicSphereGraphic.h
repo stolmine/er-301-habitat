@@ -1,25 +1,34 @@
 // AlembicSphereGraphic -- 3D Voronoi sphere viz for the Alembic scan ply.
-// LITERAL line-for-line port of mods/catchall/SomSphereGraphic.h, with
-// the architectural fix from planning/alchemy-voice.md "Path A":
+// LITERAL line-for-line port of mods/catchall/SomSphereGraphic.h with two
+// architectural changes per planning/alchemy-voice.md "Path A":
 //
-//   - The full per-pixel rendered grayscale is stored in mGrayCache[]
-//     and reused across frames as long as (rotBucketX, rotBucketY,
-//     scanNode) is unchanged. Steady-state per-frame work is just a
-//     cheap blit.
-//   - When the cache key changes, refresh is time-sliced over
-//     kRefreshFrames consecutive frames so no single frame does the
-//     expensive full recompute (~524K dot products at per-pixel scale).
+//   - Per-pixel partition decision (kind + cell index) is cached and
+//     keyed on rotation buckets only. The expensive nearestSeed /
+//     twoNearestSeeds work runs once per bucket transition, time-sliced
+//     across kRefreshFrames frames.
 //
-// All shell logic, gray formulas, edge thresholds, lift formulas,
-// and constants come bit-for-bit from SomSphereGraphic. The only
-// substitutions are:
+//   - Per-frame the rendering loop reads kind+cell from the cache and
+//     computes gray fresh using current scanBright[cell] and per-pixel
+//     hz. This keeps the visual responsive to scan motion without
+//     invalidating the cache (scanBright changes every frame as the
+//     focused node and chain distance shift, but the partition stays
+//     valid while rotation is in the same bucket).
+//
+// Aesthetic decisions are bit-identical to SomSphereGraphic:
+//   - Two-shell logic (outer = lifted shards top face, inner = base
+//     surface or side wall)
+//   - liftVal[n] = richness/(richness+2) (Phase 4 placeholder uses
+//     getNodeBrightness * 4 as faux-richness)
+//   - scanBright[n] from 3D distance-from-scan in canonical frame
+//   - twoNearestSeeds for inner-shell edge detection
+//   - Top face / side wall / base surface / base edge gray formulas
+//     (5+sb*8, 3+sb*3, 4+sb*6, 1+sb*7), all scaled by hz depth
+//   - 64-step sphere outline ring at the equator
+//
+// Substitutions:
 //   - sinf/cosf -> lutCos/lutSin (per feedback_package_trig_lut)
-//   - asinf/atan2f -> precomputed per-node target table at construction
-//   - mpSom->getNodeX/Y/Z(n) -> mNodeX0/Y0/Z0[n] (Fibonacci computed
-//     in the graphic; AlembicVoice doesn't carry node positions yet)
-//   - mpSom->getNodeRichness(n) -> mpAlembic->getNodeBrightness(n) * 4.0f
-//     as a Phase 4 placeholder; Phase 5 will swap getNodeBrightness
-//     for real training-derived richness and the *4.0 falls away.
+//   - asinf/atan2f precomputed at construction
+//   - mpSom getter calls -> AlembicVoice equivalents
 
 #pragma once
 
@@ -42,31 +51,32 @@ namespace stolmine
 #ifndef SWIGLUA
     virtual void draw(od::FrameBuffer &fb);
 
-    // Worst-case dimensions; smaller graphics use a subset.
     static const int kMaxPixels = 128 * 64;
 
-    // Rotation buckets. 64/axis = 0.098 rad granularity. Integrator slew
-    // (~0.02 rad/frame at small dist) takes ~5 frames to cross a bucket;
-    // large jumps cross immediately and the time-sliced refresh hides
-    // the spike.
-    static const int kRotBuckets = 64;
+    // Pixel kinds (stored in mPixelKind). Match SomSphereGraphic's branch
+    // structure exactly; render path uses the corresponding gray formula.
+    static const uint8_t kKindEmpty       = 0;
+    static const uint8_t kKindTopFace     = 1;
+    static const uint8_t kKindSideWall    = 2;
+    static const uint8_t kKindBaseSurface = 3;
+    static const uint8_t kKindBaseEdge    = 4;
+    static const uint8_t kKindVoid        = 5;
 
-    // Refresh slice rate. h pixel rows refreshed over kRefreshFrames
-    // consecutive frames after a cache invalidation.
+    static const int kRotBuckets = 64;
     static const int kRefreshFrames = 8;
 #endif
 
   private:
     AlembicVoice *mpAlembic;
 
-    // Fibonacci sphere positions in canonical (un-rotated) frame; computed
-    // once in the constructor.
+    // Fibonacci sphere positions (canonical frame), computed once at
+    // construction.
     float mNodeX0[64];
     float mNodeY0[64];
     float mNodeZ0[64];
 
-    // Per-node camera target angles (asin Y / atan2 X,Z), computed once
-    // at construction so the draw path doesn't need asinf/atan2f.
+    // Per-node camera target angles, computed once at construction so
+    // the draw path has no asinf/atan2f.
     float mNodeTargetRotX[64];
     float mNodeTargetRotY[64];
 
@@ -75,29 +85,36 @@ namespace stolmine
     float mNodeY[64];
     float mNodeZ[64];
 
-    // Per-node lift + scan-proximity. Class members (not stack locals)
-    // per feedback_neon_intrinsics_drumvoice.
+    // Per-node lift + scan-proximity. Class members per
+    // feedback_neon_intrinsics_drumvoice.
     float mLiftVal[64];
     float mScanBright[64];
 
-    // Camera integrator (scan-following tumble).
+    // Camera integrator state.
     float mRotX;
     float mRotY;
     float mTargetRotX;
     float mTargetRotY;
 
-    // Full per-pixel rendered grayscale cache. Survives across frames
-    // until the cache key changes. Class member (not stack-local) per
-    // feedback_neon_intrinsics_drumvoice.
-    uint8_t mGrayCache[kMaxPixels];
+    // Cached outer-shell radius squared (used during render for top-face
+    // hz computation; kept consistent with whatever value was active when
+    // the cache was last refreshed). In Phase 4 placeholder this is
+    // stable; Phase 5 will need cache invalidation if maxLift changes.
+    float mCachedOuterR;
+    float mCachedOuterR2;
+
+    // Per-pixel partition cache. mPixelKind[idx] is the render decision;
+    // mPixelCell[idx] is which node won the Voronoi at that pixel. Cache
+    // is invalidated only when rotation bucket crosses; per-frame render
+    // uses these + current scanBright to paint.
+    uint8_t mPixelKind[kMaxPixels];
+    uint8_t mPixelCell[kMaxPixels];
 
     // Cache key. Sentinels (-1) force refresh on first draw.
     int mRotBucketX;
     int mRotBucketY;
-    int mScanNodeCached;
 
-    // Time-slice progress: number of rows refreshed since the last cache
-    // invalidation. == mHeight means the cache is fresh.
+    // Time-slice progress: rows refreshed since the last cache invalidation.
     int mRefreshProgress;
 
 #ifndef SWIGLUA

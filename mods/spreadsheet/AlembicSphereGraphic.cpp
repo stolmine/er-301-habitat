@@ -1,12 +1,10 @@
-// AlembicSphereGraphic implementation -- literal line-for-line port of
-// SomSphereGraphic::draw(), wrapped in a rotation-bucket-keyed
-// grayscale cache with time-sliced refresh.
+// AlembicSphereGraphic implementation -- partition-cache port of
+// SomSphereGraphic. See header for design notes.
 //
-// Per feedback_identical_means_identical: the per-pixel rendering logic
-// inside refreshCacheSlice() is structurally identical to SomSphere's
-// draw loop (lines 146-249). The only substitutions are sinf/cosf ->
-// lutCos/lutSin, asinf/atan2f -> precomputed table, and the Som getter
-// references -> AlembicVoice equivalents.
+// refreshCacheSlice() is a literal port of SomSphere::draw() lines
+// 165-249, computing the kind+cell per pixel. The per-frame render
+// loop applies SomSphere's gray formulas (lines 188-196 / 218-220 /
+// 232-237) with cached kind+cell + current scanBright + per-pixel hz.
 
 #include "AlembicSphereGraphic.h"
 #include "AlembicVoice.h"
@@ -20,7 +18,6 @@
 namespace stolmine
 {
   // ---- 72-entry sin/cos LUT ---------------------------------------------
-  // Local copy of FilterResponseGraphic.h's pattern; static at file scope.
   static const float kLutCos[72] = {
       +0.00000000f, +0.08715574f, +0.17364818f, +0.25881905f, +0.34202014f,
       +0.42261826f, +0.50000000f, +0.57357644f, +0.64278761f, +0.70710678f,
@@ -78,11 +75,7 @@ namespace stolmine
     return kLutSin[i] + (kLutSin[next] - kLutSin[i]) * frac;
   }
 
-  // ---- Fibonacci + per-node target precomputation -----------------------
-  // noinline + no-tree-vectorize per feedback_neon_hint_surfaces -- the
-  // 64-element loops would otherwise auto-vec into NEON ops with `:64`
-  // alignment hints on the .bss/stack arrays, which trap on Cortex-A8 at
-  // construction time.
+  // ---- Constructor + helpers --------------------------------------------
   __attribute__((noinline, optimize("no-tree-vectorize")))
   static void fillFibonacciTables(
       float (&x0)[64], float (&y0)[64], float (&z0)[64],
@@ -101,7 +94,6 @@ namespace stolmine
       y0[n] = y;
       z0[n] = z;
 
-      // Construction-time only -- safe to use math.h asin/atan2 here.
       float yc = y;
       if (yc > 1.0f) yc = 1.0f;
       else if (yc < -1.0f) yc = -1.0f;
@@ -115,7 +107,8 @@ namespace stolmine
         mpAlembic(nullptr),
         mRotX(0.0f), mRotY(0.0f),
         mTargetRotX(0.0f), mTargetRotY(0.0f),
-        mRotBucketX(-1), mRotBucketY(-1), mScanNodeCached(-1),
+        mCachedOuterR(1.0f), mCachedOuterR2(1.0f),
+        mRotBucketX(-1), mRotBucketY(-1),
         mRefreshProgress(0)
   {
     fillFibonacciTables(mNodeX0, mNodeY0, mNodeZ0,
@@ -125,7 +118,8 @@ namespace stolmine
     memset(mNodeZ, 0, sizeof(mNodeZ));
     memset(mLiftVal, 0, sizeof(mLiftVal));
     memset(mScanBright, 0, sizeof(mScanBright));
-    memset(mGrayCache, 0, sizeof(mGrayCache));
+    memset(mPixelKind, 0, sizeof(mPixelKind));
+    memset(mPixelCell, 0, sizeof(mPixelCell));
   }
 
   AlembicSphereGraphic::~AlembicSphereGraphic()
@@ -140,10 +134,10 @@ namespace stolmine
     if (mpAlembic) mpAlembic->attach();
   }
 
-  // ---- refreshCacheSlice: line-for-line Som per-pixel logic --------------
-  // SomSphereGraphic::draw lines 165-249 ported directly. Walks rows
-  // [rowStart, rowEnd), evaluates each pixel's outer/inner shell decision,
-  // computes the Som gray formula, and stores into mGrayCache[idx].
+  // ---- refreshCacheSlice -----------------------------------------------
+  // Literal port of SomSphere::draw lines 165-249, but stores (kind, cell)
+  // into the cache instead of gray. Per-pixel decisions follow the same
+  // shell tests, edge thresholds, and lift comparisons.
   __attribute__((optimize("no-tree-vectorize")))
   void AlembicSphereGraphic::refreshCacheSlice(int rowStart, int rowEnd,
                                                float outerR2, float invOuterR)
@@ -161,55 +155,52 @@ namespace stolmine
     {
       for (int px = 0; px < w; px++)
       {
+        const int idx = py * w + px;
         const float nx = ((float)px - cx) * invScreenR;
         const float ny = ((float)py - cy) * invScreenR;
         const float d2 = nx * nx + ny * ny;
 
-        int gray = 0;
+        uint8_t kind = kKindEmpty;
+        uint8_t cell = 0;
         bool drawn = false;
 
-        // OUTER SHELL: lifted shards (SomSphere lines 177-198 verbatim).
+        // OUTER SHELL: lifted shards top face (SomSphere lines 177-198).
         if (d2 < outerR2)
         {
           const float zOuter = sqrtf(outerR2 - d2);
           const float hx = nx * invOuterR;
           const float hy = ny * invOuterR;
           const float hz = zOuter * invOuterR;
+          (void)hz;
 
-          // nearestSeed inlined.
-          int cell = 0;
+          int bestIdx = 0;
           float bestDot = -2.0f;
           for (int n = 0; n < 64; n++)
           {
             if (mNodeZ[n] < -0.1f) continue;
             const float d = hx * mNodeX[n] + hy * mNodeY[n] + hz * mNodeZ[n];
-            if (d > bestDot) { bestDot = d; cell = n; }
+            if (d > bestDot) { bestDot = d; bestIdx = n; }
           }
-          const float cellR = 1.0f + mLiftVal[cell] * liftAmount;
-
-          if (cellR > 0.95f * outerR && mLiftVal[cell] > 0.1f && d2 < cellR * cellR)
+          const float cellR = 1.0f + mLiftVal[bestIdx] * liftAmount;
+          if (cellR > 0.95f * outerR && mLiftVal[bestIdx] > 0.1f &&
+              d2 < cellR * cellR)
           {
-            // TOP FACE of lifted shard.
-            const float sb = mScanBright[cell];
-            const float depthZ = hz;
-            gray = 5 + (int)(sb * 8.0f);
-            gray = (int)((float)gray * (0.3f + 0.7f * depthZ));
-            if (gray > 13) gray = 13;
-            if (gray < 3) gray = 3;
+            kind = kKindTopFace;
+            cell = (uint8_t)bestIdx;
             drawn = true;
           }
         }
 
-        // INNER SHELL: base surface (SomSphere lines 201-241 verbatim).
+        // INNER SHELL: base surface, edge, side wall, void
+        // (SomSphere lines 201-241).
         if (!drawn && d2 < 1.0f)
         {
-          const float zInner = sqrtf(1.0f - d2);
+          const float hz = sqrtf(1.0f - d2);
           const float hx = nx;
           const float hy = ny;
-          const float hz = zInner;
+          (void)hz;
 
-          // twoNearestSeeds inlined.
-          int cell = 0;
+          int bestIdx = 0;
           int second = 0;
           float bestDot = -2.0f;
           float secondDot = -2.0f;
@@ -220,9 +211,9 @@ namespace stolmine
             if (d > bestDot)
             {
               secondDot = bestDot;
-              second = cell;
+              second = bestIdx;
               bestDot = d;
-              cell = n;
+              bestIdx = n;
             }
             else if (d > secondDot)
             {
@@ -232,40 +223,36 @@ namespace stolmine
           }
           (void)second;
 
-          if (mLiftVal[cell] > 0.1f)
+          if (mLiftVal[bestIdx] > 0.1f)
           {
             const float edgeRatio = secondDot / (bestDot + 0.001f);
             if (edgeRatio > 0.92f)
             {
-              // SIDE WALL.
-              const float sb = mScanBright[cell];
-              gray = 3 + (int)(sb * 3.0f);
-              gray = (int)((float)gray * (0.2f + 0.5f * hz));
-              if (gray < 2) gray = 2;
+              kind = kKindSideWall;
+              cell = (uint8_t)bestIdx;
             }
-            // else: VOID -- gray stays 0.
+            else
+            {
+              kind = kKindVoid; // lifted cell, away from boundary
+              cell = (uint8_t)bestIdx;
+            }
           }
           else
           {
-            // BASE SURFACE.
             const float edgeRatio = secondDot / (bestDot + 0.001f);
             const bool isEdge = edgeRatio > 0.98f;
-            const float sb = mScanBright[cell];
-            if (isEdge)
-              gray = 4 + (int)(sb * 6.0f);
-            else
-              gray = 1 + (int)(sb * 7.0f);
-            gray = (int)((float)gray * (0.3f + 0.7f * hz));
+            cell = (uint8_t)bestIdx;
+            kind = isEdge ? kKindBaseEdge : kKindBaseSurface;
           }
-          if (gray > 13) gray = 13;
         }
 
-        mGrayCache[py * w + px] = (uint8_t)gray;
+        mPixelKind[idx] = kind;
+        mPixelCell[idx] = cell;
       }
     }
   }
 
-  // ---- Per-frame draw -----------------------------------------------------
+  // ---- Per-frame draw ---------------------------------------------------
   __attribute__((optimize("no-tree-vectorize")))
   void AlembicSphereGraphic::draw(od::FrameBuffer &fb)
   {
@@ -275,7 +262,7 @@ namespace stolmine
     const int left = mWorldLeft, bot = mWorldBottom;
     const int scanNode = mpAlembic->getScanNode();
 
-    // Camera target from precomputed per-node table.
+    // Camera target from precomputed table.
     mTargetRotX = mNodeTargetRotX[scanNode];
     mTargetRotY = mNodeTargetRotY[scanNode];
 
@@ -290,19 +277,19 @@ namespace stolmine
       mRotY += dy * (0.02f + dist * 0.12f);
     }
 
-    // Rotation matrix via LUT.
     const float cosRx = lutCos(mRotX);
     const float sinRx = lutSin(mRotX);
     const float cosRy = lutCos(mRotY);
     const float sinRy = lutSin(mRotY);
 
-    // Fixed visual constants (SomSphere lines 104-109).
+    // Visual constants (SomSphere lines 104-109).
     const int minDim = w < h ? w : h;
     const float screenR = (float)minDim * 0.34f;
     const float liftAmount = 0.35f;
     const float cx = (float)w * 0.5f;
     const float cy = (float)h * 0.5f;
     const float nbrRadius = 0.5f;
+    const float invScreenR = 1.0f / screenR;
 
     // Per-node liftVal + scanBright (SomSphere lines 116-130 verbatim,
     // with class-member arrays instead of stack-locals).
@@ -312,8 +299,6 @@ namespace stolmine
     float maxLift = 0.0f;
     for (int n = 0; n < 64; n++)
     {
-      // Phase 4 placeholder for richness: getNodeBrightness * 4. Phase 5
-      // swaps for true training-derived richness.
       const float r = mpAlembic->getNodeBrightness(n) * 4.0f;
       mLiftVal[n] = r / (r + 2.0f);
       if (mLiftVal[n] > maxLift) maxLift = mLiftVal[n];
@@ -343,48 +328,108 @@ namespace stolmine
     const float outerR2 = outerR * outerR;
     const float invOuterR = 1.0f / outerR;
 
-    // Cache key check: rotation bucket or scan node changed -> invalidate.
+    // Cache key: rotation buckets only. scanNode does NOT invalidate
+    // the cache because per-pixel brightness is recomputed each frame
+    // from current scanBright[cell].
     const float bucketScale = (float)kRotBuckets / (2.0f * (float)M_PI);
     const float bias = (float)kRotBuckets * 1000.0f;
     int newBucketX = (int)(mRotX * bucketScale + bias) % kRotBuckets;
     int newBucketY = (int)(mRotY * bucketScale + bias) % kRotBuckets;
-    if (newBucketX != mRotBucketX || newBucketY != mRotBucketY ||
-        scanNode != mScanNodeCached)
+    if (newBucketX != mRotBucketX || newBucketY != mRotBucketY)
     {
       mRotBucketX = newBucketX;
       mRotBucketY = newBucketY;
-      mScanNodeCached = scanNode;
       mRefreshProgress = 0;
+      // Stash outerR/outerR2 used for this refresh so the per-frame
+      // render's top-face hz computation matches the cache's decisions.
+      mCachedOuterR = outerR;
+      mCachedOuterR2 = outerR2;
     }
 
-    // Time-sliced refresh: kRefreshFrames frames to re-render the full
-    // grayscale cache after invalidation. 1/8 of rows per frame at h=64
-    // is 8 rows / frame; w * 8 * ~80 ops = ~40K ops worst case during
-    // refresh. Stable frames pay only the blit below.
+    // Time-sliced refresh on cache miss.
     if (mRefreshProgress < h)
     {
       int rowsPerFrame = h / kRefreshFrames;
       if (rowsPerFrame < 1) rowsPerFrame = 1;
       int rowEnd = mRefreshProgress + rowsPerFrame;
       if (rowEnd > h) rowEnd = h;
-      refreshCacheSlice(mRefreshProgress, rowEnd, outerR2, invOuterR);
+      refreshCacheSlice(mRefreshProgress, rowEnd, mCachedOuterR2,
+                        1.0f / mCachedOuterR);
       mRefreshProgress = rowEnd;
     }
 
-    // Blit cache: paint every non-zero pixel from mGrayCache.
+    // ---- Per-pixel render ----
+    // Read kind+cell from cache; compute current gray using SomSphere's
+    // exact formulas (lines 188-196 / 218-220 / 232-237) with current
+    // scanBright[cell] + per-pixel hz from sample-point geometry.
+    const float invCachedOuterR = 1.0f / mCachedOuterR;
     for (int py = 0; py < h; py++)
     {
-      const int rowBase = py * w;
       for (int px = 0; px < w; px++)
       {
-        const uint8_t gray = mGrayCache[rowBase + px];
+        const int idx = py * w + px;
+        const uint8_t kind = mPixelKind[idx];
+        if (kind == kKindEmpty || kind == kKindVoid) continue;
+
+        const int cell = (int)mPixelCell[idx];
+        const float sb = mScanBright[cell];
+
+        // Recompute per-pixel d2 + hz. Cheap (~6 ops/pixel) and avoids
+        // a 32KB precomputed table.
+        const float nx = ((float)px - cx) * invScreenR;
+        const float ny = ((float)py - cy) * invScreenR;
+        const float d2 = nx * nx + ny * ny;
+
+        int gray = 0;
+        if (kind == kKindTopFace)
+        {
+          // SomSphere lines 188-196.
+          float zo2 = mCachedOuterR2 - d2;
+          if (zo2 < 0.0f) zo2 = 0.0f;
+          const float hz = sqrtf(zo2) * invCachedOuterR;
+          gray = 5 + (int)(sb * 8.0f);
+          gray = (int)((float)gray * (0.3f + 0.7f * hz));
+          if (gray > 13) gray = 13;
+          if (gray < 3) gray = 3;
+        }
+        else if (kind == kKindSideWall)
+        {
+          // SomSphere lines 218-221.
+          float zi2 = 1.0f - d2;
+          if (zi2 < 0.0f) zi2 = 0.0f;
+          const float hz = sqrtf(zi2);
+          gray = 3 + (int)(sb * 3.0f);
+          gray = (int)((float)gray * (0.2f + 0.5f * hz));
+          if (gray < 2) gray = 2;
+          if (gray > 13) gray = 13;
+        }
+        else if (kind == kKindBaseEdge)
+        {
+          // SomSphere lines 233 + 237.
+          float zi2 = 1.0f - d2;
+          if (zi2 < 0.0f) zi2 = 0.0f;
+          const float hz = sqrtf(zi2);
+          gray = 4 + (int)(sb * 6.0f);
+          gray = (int)((float)gray * (0.3f + 0.7f * hz));
+          if (gray > 13) gray = 13;
+        }
+        else if (kind == kKindBaseSurface)
+        {
+          // SomSphere lines 235 + 237.
+          float zi2 = 1.0f - d2;
+          if (zi2 < 0.0f) zi2 = 0.0f;
+          const float hz = sqrtf(zi2);
+          gray = 1 + (int)(sb * 7.0f);
+          gray = (int)((float)gray * (0.3f + 0.7f * hz));
+          if (gray > 13) gray = 13;
+        }
+
         if (gray > 0)
-          fb.pixel((int)gray, left + px, bot + py);
+          fb.pixel(gray, left + px, bot + py);
       }
     }
 
-    // Sphere outline ring at the equator (SomSphere lines 252-266 with
-    // LUT cos/sin instead of runtime sinf/cosf).
+    // Sphere outline ring at the equator (SomSphere lines 252-266).
     {
       const int steps = 64;
       int prevOx = -1, prevOy = -1;
@@ -404,7 +449,7 @@ namespace stolmine
       }
     }
 
-    (void)nbrRadius; // kept as a named constant for parity with SomSphere
+    (void)nbrRadius;
   }
 
 } // namespace stolmine
