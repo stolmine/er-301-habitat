@@ -43,8 +43,14 @@ namespace stolmine
   // endA/endB plus the destination table, which trap on Cortex-A8 at
   // construction time (feedback_neon_hint_surfaces).
   __attribute__((noinline, optimize("no-tree-vectorize")))
-  static void fillPhase3Presets(float (&t)[64][29])
+  static void fillPhase3Presets(float (&t)[64][43])
   {
+    // Phase 3 placeholder gradient covers the original 29 trained slots
+    // (ratios, levels, detunes, matrix, scalar reagent which is now the
+    // wavetable blend slot). Slots [29..42] (filter base + lane attens)
+    // are zeroed -- when no sample is loaded the filter is bypassed
+    // (cutoffs at 0 -> filter pass-through after 5d-2 lands; in 5d-1
+    // there is no filter yet so these slots are inert).
     static const float endA[29] = {
         1.0f, 2.0f, 3.0f, 5.0f,
         1.0f, 0.0f, 0.0f, 0.0f,
@@ -70,6 +76,92 @@ namespace stolmine
       {
         t[slot][f] = endA[f] + u * (endB[f] - endA[f]);
       }
+      for (int f = 29; f < 43; f++) t[slot][f] = 0.0f;
+    }
+  }
+
+  // Phase 5d-1: identity-curve wavetable LUT. Used when no sample is
+  // loaded, or as a pathological fallback when a sample is too short
+  // to extract 32-sample windows. row[28] = 0 makes process() crossfade
+  // toward sat(pmm), bypassing the LUT entirely; the identity LUT is a
+  // safety net for the LUT-blend path.
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void fillIdentityWavetableLUT(float (&lut)[64][32])
+  {
+    for (int n = 0; n < 64; n++)
+      for (int k = 0; k < 32; k++)
+        lut[n][k] = ((float)k / 31.0f) * 2.0f - 1.0f;
+  }
+
+  // Phase 5d-1: build per-node transfer-function LUTs from 32-sample
+  // windows at the trained picks. DC-removed, peak-normalized, cosine-
+  // edge-faded so the curve anchors near zero at LUT boundaries
+  // (prevents discontinuities when the index walks off the edge).
+  // Heap-only scratch (the 32-float buf is on the stack but small enough
+  // and not NEON-targeted; the destination LUT is a class member).
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void buildWavetableFrames(od::Sample *s, const int picks[64],
+                                   int channels, float (&lut)[64][32])
+  {
+    if (!s) { fillIdentityWavetableLUT(lut); return; }
+    const int hop = (int)s->mSampleRate / 20;
+    const int Ns = (int)s->mSampleCount;
+    const bool stereo = (channels > 1);
+
+    for (int n = 0; n < 64; n++)
+    {
+      int frameStart = picks[n] * hop;
+      if (frameStart + 32 > Ns) frameStart = Ns - 32;
+      if (frameStart < 0)
+      {
+        for (int k = 0; k < 32; k++)
+          lut[n][k] = ((float)k / 31.0f) * 2.0f - 1.0f;
+        continue;
+      }
+
+      float buf[32];
+      for (int k = 0; k < 32; k++)
+      {
+        float x = s->get(frameStart + k, 0);
+        if (stereo) x = (x + s->get(frameStart + k, 1)) * 0.5f;
+        buf[k] = x;
+      }
+
+      // DC-remove.
+      float dc = 0.0f;
+      for (int k = 0; k < 32; k++) dc += buf[k];
+      dc *= (1.0f / 32.0f);
+      for (int k = 0; k < 32; k++) buf[k] -= dc;
+
+      // Peak-normalize to +/-1.
+      float peak = 0.0f;
+      for (int k = 0; k < 32; k++)
+      {
+        const float a = buf[k] < 0.0f ? -buf[k] : buf[k];
+        if (a > peak) peak = a;
+      }
+      if (peak > 1e-6f)
+      {
+        const float inv = 1.0f / peak;
+        for (int k = 0; k < 32; k++) buf[k] *= inv;
+      }
+
+      // Cosine edge fade: first 4 + last 4 entries multiplied by half-
+      // cosine window. Half-cosine values at k=0..3 are precomputed
+      // here for clarity; trivial cost.
+      const float fadeW[4] = {
+          0.0f,
+          0.146446609f,    // 0.5 - 0.5*cos(pi*1/4)
+          0.5f,
+          0.853553391f,    // 0.5 - 0.5*cos(pi*3/4)
+      };
+      for (int k = 0; k < 4; k++)
+      {
+        buf[k] *= fadeW[k];
+        buf[31 - k] *= fadeW[k];
+      }
+
+      for (int k = 0; k < 32; k++) lut[n][k] = buf[k];
     }
   }
 
@@ -115,6 +207,7 @@ namespace stolmine
     addParameter(mMatrixDB);
     addParameter(mMatrixDC);
     addParameter(mMatrixDD);
+    addParameter(mReagent);
 
     memset(mPhaseBank, 0, sizeof(mPhaseBank));
     memset(mPrevOutBank, 0, sizeof(mPrevOutBank));
@@ -125,6 +218,8 @@ namespace stolmine
     memset(mDetuneFlat, 0, sizeof(mDetuneFlat));
     memset(mLevelFlat, 0, sizeof(mLevelFlat));
     fillPhase3Presets(mPresetTable);
+    fillIdentityWavetableLUT(mWavetableLUT);
+    mWavetableBlend = 0.0f;
     mpSample = nullptr;
 
     // pffft state: lazy-allocated on first analyzeSample. Hann window
@@ -169,8 +264,9 @@ namespace stolmine
     mpSample = sample;
     if (mpSample == nullptr)
     {
-      // Detach -> revert to Phase 3 placeholder gradient.
+      // Detach -> revert to Phase 3 placeholder gradient + identity LUT.
       fillPhase3Presets(mPresetTable);
+      fillIdentityWavetableLUT(mWavetableLUT);
     }
     else
     {
@@ -604,8 +700,20 @@ namespace stolmine
     if (mask & (1u << 12)) row[12 + 12] = chainDA;
     if (mask & (1u << 15)) row[12 + 15] = fbScale * 0.7f;                   // D self-fb (tamer)
 
-    // Reagent flag (Phase 8 O3 will fill).
-    row[28] = 0.0f;
+    // Phase 5d-1: row[28] is now the wavetable transfer-function blend.
+    // Tonal samples (high runLen, low entropy + flatness) keep blend
+    // low -> output stays close to soft-saturated PMM. Noisy / chaotic
+    // samples push blend high -> output is heavily shaped by the per-
+    // node sample-window LUT. intPull is the same scalar used by
+    // ratios + detunes earlier in this function.
+    const float wblendIntensity =
+        (1.0f - intPull) * (entropy * 0.5f + flatness * 0.5f);
+    row[28] = wblendIntensity;
+
+    // Phase 5d-1: filter base + lane atten slots zeroed (5d-2/5d-3 will
+    // populate them). Filter is bypassed in 5d-1 by the process() chain;
+    // these slots are inert until 5d-2 lands.
+    for (int i = 29; i < 43; i++) row[i] = 0.0f;
   }
 
   // Mean-center ratios across nodes per planning doc line 125: even when
@@ -743,6 +851,12 @@ namespace stolmine
       derivePresetRow(&coarse[picks[n] * kFeatDim], mPresetTable[n], n);
     }
 
+    // Phase 5d-1: build per-node 32-entry transfer-function LUTs from
+    // 32-sample windows at the picks. Time-sorted picks already cluster
+    // temporally-adjacent windows into adjacent slots so the K=4 frame
+    // crossfade interpolates smoothly between LUT shapes.
+    buildWavetableFrames(mpSample, picks, channels, mWavetableLUT);
+
     // Mean-centering deferred: planning doc line 125 prescribes it for
     // tonally-uniform sources, but with feature-driven ratios it tends
     // to push some ratios negative. Phase 5 ships without.
@@ -798,13 +912,16 @@ namespace stolmine
     }
     const float wInv = 1.0f / wSum;
 
-    // Blend the 29 per-slot floats into the working voice state buffers.
-    // Loop body is uniform across K (no differential dispatch per
-    // feedback_runtime_branched_dsp_dispatch).
+    // Blend the per-slot trained floats into the working voice state
+    // buffers. Loop body is uniform across K (no differential dispatch
+    // per feedback_runtime_branched_dsp_dispatch). Phase 5d-1 added
+    // mWavetableBlend (row[28]); 5d-2/5d-3 will add filter base +
+    // lane attens to this loop without restructuring it.
     for (int f = 0; f < 4; f++) mRatioFlat[f] = 0.0f;
     for (int f = 0; f < 4; f++) mLevelFlat[f] = 0.0f;
     for (int f = 0; f < 4; f++) mDetuneFlat[f] = 0.0f;
     for (int f = 0; f < 16; f++) mMatrixFlat[f] = 0.0f;
+    mWavetableBlend = 0.0f;
     for (int j = 0; j < K; j++)
     {
       const float wj = w[j] * wInv;
@@ -813,6 +930,7 @@ namespace stolmine
       for (int f = 0; f < 4; f++) mLevelFlat[f] += wj * p[4 + f];
       for (int f = 0; f < 4; f++) mDetuneFlat[f] += wj * p[8 + f];
       for (int f = 0; f < 16; f++) mMatrixFlat[f] += wj * p[12 + f];
+      mWavetableBlend += wj * p[28];
     }
     // Apply the diagonal kFbScale after the blend, matching Phase 2b's
     // per-sample matrix-sum convention. Off-diagonal cross-mod stays 1x.
@@ -820,6 +938,12 @@ namespace stolmine
     mMatrixFlat[1 * 4 + 1] *= kFbScale;
     mMatrixFlat[2 * 4 + 2] *= kFbScale;
     mMatrixFlat[3 * 4 + 3] *= kFbScale;
+
+    // Phase 5d-1: precompute K-blend weights for the per-sample wavetable
+    // shaper (K=2..6 frames). Stays on the stack but is small enough
+    // not to NEON-vectorize -- gcc keeps these in scalar regs.
+    float wNormalized[6];
+    for (int j = 0; j < K; j++) wNormalized[j] = w[j] * wInv;
 
     // Block-rate NEON loads. Only vLevel hoists across the per-sample
     // loop -- it's used in the output-sum step *after* simd_sin so it
@@ -833,6 +957,7 @@ namespace stolmine
     // ~6 quad ops, marginal vs the simd_sin and matrix-FMA cost.
     const float32x4_t vLevel = vld1q_f32(mLevelFlat);
     const float f0Sp = f0 * sp;
+    const float wblend = mWavetableBlend;
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -892,13 +1017,39 @@ namespace stolmine
       float32x4_t vSine = simd_sin(vmulq_n_f32(vArg, kTwoPi));
       vst1q_f32(mSineBank, vSine);
 
-      // Output sum: NEON mul then horizontal reduce to scalar, scaled by
-      // the global level. vadd(low, high) + vpadd is the 4->1 reduction
-      // pattern on ARMv7 NEON (no vaddvq_f32 on Cortex-A8).
+      // Output sum: NEON mul then horizontal reduce to scalar. vadd(low,
+      // high) + vpadd is the 4->1 reduction pattern on ARMv7 NEON (no
+      // vaddvq_f32 on Cortex-A8).
       float32x4_t vProd = vmulq_f32(vSine, vLevel);
       float32x2_t vPair = vadd_f32(vget_low_f32(vProd), vget_high_f32(vProd));
       vPair = vpadd_f32(vPair, vPair);
-      out[i] = vget_lane_f32(vPair, 0) * lvl;
+      const float pmmSum = vget_lane_f32(vPair, 0);
+
+      // Phase 5d-1 wavetable shaper:
+      //   1. Soft-sat PMM sum to (-1, 1) cheaply.
+      //   2. Map sat to LUT index [0, 31] with linear interp.
+      //   3. K=4 frame blend across the active scan window.
+      //   4. Crossfade identity (sat) ↔ LUT-shaped by mWavetableBlend.
+      // Scalar throughout -- 4-frame LUT lookup not worth NEONing
+      // and `:64` hint risk avoided.
+      const float absSum = pmmSum < 0.0f ? -pmmSum : pmmSum;
+      const float sat = pmmSum / (1.0f + absSum);
+      float pos = (sat + 1.0f) * 15.5f;
+      if (pos < 0.0f) pos = 0.0f;
+      if (pos > 31.0f) pos = 31.0f;
+      const int idxL = (int)pos;
+      const int idxR = idxL + 1 > 31 ? 31 : idxL + 1;
+      const float frac = pos - (float)idxL;
+      float shaped = 0.0f;
+      for (int j = 0; j < K; j++)
+      {
+        const float *frame = mWavetableLUT[n0 + j];
+        const float a = frame[idxL];
+        const float b = frame[idxR];
+        shaped += wNormalized[j] * (a + frac * (b - a));
+      }
+      const float shapedOut = sat * (1.0f - wblend) + shaped * wblend;
+      out[i] = shapedOut * lvl;
 
       // Prev update for next sample's matrix/feedback.
       vst1q_f32(mPrevOutBank, vSine);

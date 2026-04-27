@@ -91,6 +91,11 @@ namespace stolmine
     od::Parameter mMatrixDC{"MatrixDC", 0.0f};
     od::Parameter mMatrixDD{"MatrixDD", 0.0f};
 
+    // Phase 5d-1 reagent (wavetable transfer-function blend). The per-
+    // node row[28] is sample-derived; this Parameter is the user-bias
+    // hook for Phase 7's Reagent global to scale it.
+    od::Parameter mReagent{"Reagent", 0.0f};
+
     // Phase 4 viz hooks. Inline so the sphere's draw loop has no dispatch
     // overhead. getNodeBrightness is a Phase 3 placeholder (linear gradient
     // per slot index); Phase 5 will replace it with sample-trained richness.
@@ -148,8 +153,33 @@ namespace stolmine
     // Per-instance preset table. Phase 3 placeholder gradient fills this
     // at construction; Phase 5 analyzeSample() overwrites with sample-
     // derived content. Per-instance (was file-scope static in Phases 3-4)
-    // because each unit trains on its own sample. ~7424 bytes.
-    float mPresetTable[64][29];
+    // because each unit trains on its own sample.
+    //
+    // Slot layout (43 floats per row, finalized in Phase 5d):
+    //   [0..3]   ratios          (5b)
+    //   [4..7]   levels          (5b)
+    //   [8..11]  detunes         (5b/5c, op-A drift at row[8])
+    //   [12..27] matrix 4x4      (5b + 5c topology mask)
+    //   [28]     wavetable blend (5d-1; was scalar reagent)
+    //   [29..34] filter base     (5d-2: cutoff1, cutoff2, Q, topoMix,
+    //                            bpLpBlend, drive)
+    //   [35..42] lane attens     (5d-3: 8 routing slots)
+    //
+    // Phase 5d-1 pre-grows the row to 43 floats so 5d-2/5d-3 land
+    // without further SWIG regen. ~11008 bytes.
+    float mPresetTable[64][43];
+
+    // Phase 5d-1: per-node 32-entry transfer-function LUT. Built from
+    // 32-sample windows at the trained picks (DC-removed, peak-
+    // normalized, cosine-edge-faded). Audio-rate softSat → LUT lookup
+    // → K=4 frame crossfade replaces the planned scalar nonlinearity.
+    // ~8192 bytes.
+    float mWavetableLUT[64][32];
+
+    // Block-rate K-blended wavetable blend amount (the row[28] sum).
+    // process()'s per-sample shaper crossfades identity ↔ full LUT
+    // by this scalar.
+    float mWavetableBlend;
 
     // Sample-pool slot. Lifetime managed via attach/release pairs in
     // setSample. Phase 5b reads it once during analyzeSample().
