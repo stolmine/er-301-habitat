@@ -133,35 +133,32 @@ namespace stolmine
       dc *= (1.0f / 32.0f);
       for (int k = 0; k < 32; k++) buf[k] -= dc;
 
-      // Peak-normalize to +/-1.
-      float peak = 0.0f;
+      // RMS-normalize to a target energy. Audio sample windows are
+      // PEAK-y -- one or two entries near max, most close to zero --
+      // so peak-normalizing produces low-RMS LUTs that read mostly
+      // silent. RMS-normalization equalizes perceived shaping
+      // loudness across all 64 LUTs regardless of which 32-sample
+      // window was picked. Gain is capped at 8x to avoid amplifying
+      // noise floor on near-silent windows. Soft-clip after gain
+      // bounds the curve to (-1, 1) without hard clipping artifacts.
+      float sumSq = 0.0f;
+      for (int k = 0; k < 32; k++) sumSq += buf[k] * buf[k];
+      const float rms = sqrtf(sumSq * (1.0f / 32.0f));
+      const float kTargetRms = 0.4f;
+      const float kMaxGain = 8.0f;
+      float gain = 0.0f;
+      if (rms > 1e-4f)
+      {
+        gain = kTargetRms / rms;
+        if (gain > kMaxGain) gain = kMaxGain;
+      }
       for (int k = 0; k < 32; k++)
       {
-        const float a = buf[k] < 0.0f ? -buf[k] : buf[k];
-        if (a > peak) peak = a;
+        const float v = buf[k] * gain;
+        const float av = v < 0.0f ? -v : v;
+        // Soft-clip: x / (1 + |x|) maps R into (-1, 1) smoothly.
+        lut[n][k] = v / (1.0f + av);
       }
-      if (peak > 1e-6f)
-      {
-        const float inv = 1.0f / peak;
-        for (int k = 0; k < 32; k++) buf[k] *= inv;
-      }
-
-      // Cosine edge fade: first 4 + last 4 entries multiplied by half-
-      // cosine window. Half-cosine values at k=0..3 are precomputed
-      // here for clarity; trivial cost.
-      const float fadeW[4] = {
-          0.0f,
-          0.146446609f,    // 0.5 - 0.5*cos(pi*1/4)
-          0.5f,
-          0.853553391f,    // 0.5 - 0.5*cos(pi*3/4)
-      };
-      for (int k = 0; k < 4; k++)
-      {
-        buf[k] *= fadeW[k];
-        buf[31 - k] *= fadeW[k];
-      }
-
-      for (int k = 0; k < 32; k++) lut[n][k] = buf[k];
     }
   }
 
