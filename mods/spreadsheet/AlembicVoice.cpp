@@ -9,6 +9,7 @@
 #include <hal/ops.h>
 #include <hal/simd.h>
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 
 namespace stolmine
@@ -228,7 +229,7 @@ namespace stolmine
     const int n = frameEnd - frameStart;
     if (n <= 0)
     {
-      out[0] = out[1] = out[2] = out[3] = out[4] = out[5] = 0.0f;
+      for (int i = 0; i < 7; i++) out[i] = 0.0f;
       return;
     }
 
@@ -312,6 +313,7 @@ namespace stolmine
       // Sample shorter than 256 samples? Skip FFT features.
       out[2] = 0.0f;
       out[3] = 0.0f;
+      out[6] = 0.0f;
       return;
     }
 
@@ -360,13 +362,42 @@ namespace stolmine
     }
     out[3] = sqrtf(flux);
 
+    // Spectral flatness = geometric mean / arithmetic mean over a sub-band
+    // that excludes DC and near-Nyquist (bins 4..109). Sine -> ~0; white
+    // noise -> ~1. Distinguishes tonal from broadband material more
+    // cleanly than ZCR for many sources, drives the Phase 5c topology
+    // picker.
+    {
+      float logSum = 0.0f;
+      float arithSum = 0.0f;
+      int validBins = 0;
+      for (int k = 4; k < 110; k++)
+      {
+        if (scratchMag[k] > 1e-9f)
+        {
+          logSum += logf(scratchMag[k]);
+          arithSum += scratchMag[k];
+          validBins++;
+        }
+      }
+      float flatness = 0.0f;
+      if (validBins > 0 && arithSum > 1e-9f)
+      {
+        const float geoMean = expf(logSum / (float)validBins);
+        const float arithMean = arithSum / (float)validBins;
+        flatness = geoMean / (arithMean + 1e-9f);
+      }
+      out[6] = flatness;
+    }
+
     // Stash for next frame's flux computation.
     for (int k = 0; k < 128; k++) prevMag[k] = scratchMag[k];
   }
 
-  // Squared L2 distance between two 6-dim feature vectors (4 audio +
-  // 2 binary-domain).
-  static inline float l2Distance6sq(const float *a, const float *b)
+  // Squared L2 distance between two 7-dim feature vectors (5 audio +
+  // 2 binary-domain). Audio: rms, zcr, centroid, flux, flatness.
+  // Binary: 16-bucket Shannon entropy, mean run length.
+  static inline float l2Distance7sq(const float *a, const float *b)
   {
     const float d0 = a[0] - b[0];
     const float d1 = a[1] - b[1];
@@ -374,13 +405,15 @@ namespace stolmine
     const float d3 = a[3] - b[3];
     const float d4 = a[4] - b[4];
     const float d5 = a[5] - b[5];
-    return d0 * d0 + d1 * d1 + d2 * d2 + d3 * d3 + d4 * d4 + d5 * d5;
+    const float d6 = a[6] - b[6];
+    return d0*d0 + d1*d1 + d2*d2 + d3*d3 + d4*d4 + d5*d5 + d6*d6;
   }
 
   // Greedy farthest-point sampling: pick `count` indices from `candidates`
   // such that each pick maximizes the minimum distance to any prior pick.
   // O(count * candidates.size() * count) -- ~77K dist ops at 64 picks /
-  // 1200 candidates / 60s sample. Negligible.
+  // 1200 candidates / 60s sample. Negligible. Distance is l2Distance7sq
+  // over 7-dim feature space (5 audio + 2 binary).
   __attribute__((noinline, optimize("no-tree-vectorize")))
   static void farthestPointPick(const float *coarse, const int *candidates,
                                 int nCandidates, int count, int *picks)
@@ -401,11 +434,10 @@ namespace stolmine
           if (picks[q] == c) { taken = true; break; }
         }
         if (taken) continue;
-        // Distance to nearest existing pick (6-dim feature space).
         float minD = 1e20f;
         for (int q = 0; q < p; q++)
         {
-          const float d = l2Distance6sq(&coarse[c * 6], &coarse[picks[q] * 6]);
+          const float d = l2Distance7sq(&coarse[c * 7], &coarse[picks[q] * 7]);
           if (d < minD) minD = d;
         }
         if (minD > bestMinDist) { bestMinDist = minD; best = c; }
@@ -414,13 +446,44 @@ namespace stolmine
     }
   }
 
-  // Layer 1 derivation: 3-dim feature vector + slot index -> 29-float row.
-  // Features (rms, zcr, brightness) drive the per-feature mappings.
-  // The slot index drives a DIAGNOSTIC ratio sweep so it's obvious from
-  // scan whether the analysis pipeline is running at all (without it,
-  // identical features at every pick produce 64 identical rows). The
-  // sweep is small enough not to dominate the feature-driven character
-  // but unmistakable on the ear.
+  // Phase 5c topology table. Bit i set => matrix path src*4+dst at
+  // row[12+i] is active for this template. Active subset is ordered
+  // along a "chaos" axis so adjacent buckets differ by 1-2 paths only;
+  // K=4 crossfade across topology boundaries fades a small path-mask
+  // delta rather than a full reset.
+  //
+  // Path index legend (src*4 + dst, ops A=0, B=1, C=2, D=3):
+  //   0=AA  1=AB  2=AC  3=AD
+  //   4=BA  5=BB  6=BC  7=BD
+  //   8=CA  9=CB 10=CC 11=CD
+  //  12=DA 13=DB 14=DC 15=DD
+  struct AlembicTopology { uint16_t mask; };
+  static const AlembicTopology kTopologies[6] = {
+    // T0 SINE: no FM, pure additive sines.
+    { 0x0000 },
+    // T1 PARALLEL: A->B, C->D.
+    { (uint16_t)((1u << 1) | (1u << 11)) },
+    // T2 CHAIN: A->B, B->C, C->D.
+    { (uint16_t)((1u << 1) | (1u << 6) | (1u << 11)) },
+    // T3 FEEDBACK_LOOP: A->B, B->C, C->D, D->A.
+    { (uint16_t)((1u << 1) | (1u << 6) | (1u << 11) | (1u << 12)) },
+    // T4 SELF_FB: A->B, B->C, AA, DD (chain + endpoint feedback).
+    { (uint16_t)((1u << 1) | (1u << 6) | (1u << 0) | (1u << 15)) },
+    // T5 DENSE: full 9-path 5b mapping.
+    { (uint16_t)((1u << 1) | (1u << 6) | (1u << 11) | (1u << 4)
+               | (1u << 9) | (1u << 12) | (1u << 0) | (1u << 5)
+               | (1u << 10)) },
+  };
+
+  // Phase 5c Layer 1 derivation: 7-dim feature vector + slot index ->
+  // 29-float preset row. Audio features (rms, zcr, centroid, flux,
+  // flatness) drive ratios / levels / detunes / matrix path strengths;
+  // binary features (entropy, runLen) drive ratio integer-pull, detune
+  // boost, and the topology picker. Topology selection -- a discrete
+  // choice of which matrix paths are active -- gives categorical
+  // discontinuity across nodes layered over the continuous strength
+  // mapping (the 5b behavior was strength-only; 5c adds path-set
+  // diversity so the 7 unused matrix slots become reachable).
   __attribute__((noinline, optimize("no-tree-vectorize")))
   static void derivePresetRow(const float *feat, float *row, int slot)
   {
@@ -430,6 +493,7 @@ namespace stolmine
     const float flux = feat[3];          // Spectral flux (onset/transient energy)
     const float entropy = feat[4];       // Binary: 16-bucket Shannon entropy
     const float runLen  = feat[5];       // Binary: mean run length normalized
+    const float flatness = feat[6];      // Spectral flatness (geo/arith mean)
     // pitched in [0,1]: 1 = clean tone, 0 = noisy / broadband.
     float pitched = 1.0f - 2.0f * zcr;
     if (pitched < 0.0f) pitched = 0.0f;
@@ -487,36 +551,58 @@ namespace stolmine
     // Detunes: audio (noisy + flux) drive baseline; entropy adds extra
     // perturbation per pick. High-entropy picks (broadband / spread
     // distribution material) get bigger detunes for additional audible
-    // movement. runLen also reduces detune for stationary nodes
-    // (intPull again -- consistent with ratio pull).
+    // movement. runLen reduces detune for stationary nodes (intPull
+    // again -- consistent with ratio pull). Phase 5c adds row[8] (op A
+    // carrier drift) driven by flatness * fluxClamp; tonal samples
+    // keep op A clean, noisy/transient samples let it drift up to ~6
+    // cents -- adds movement without breaking tonality.
     const float detuneScale = 1.0f - intPull * 0.6f;
-    row[8]  = 0.0f;
+    row[8]  = (1.0f - intPull) * (flatness * 4.0f + fluxClamp * 2.0f);
     row[9]  = (noisy * 8.0f  + fluxClamp * 4.0f  + entropy * 3.0f) * detuneScale;
     row[10] = (noisy * 14.0f + brightness * 6.0f + entropy * 4.0f) * detuneScale;
     row[11] = (noisy * 20.0f + fluxClamp * 10.0f + entropy * 5.0f) * detuneScale;
 
-    // Matrix: pure feature-driven, no slot baseline. Per-path scales
-    // up to ~0.5 so extreme features can reach the Phase 3 chaos
-    // endpoint naturally. Tonally-flat samples will have low matrix
-    // values and produce mostly additive sines; varied/transient
-    // samples produce dense feature-shaped FM topology.
+    // Matrix: Phase 5c topology selection. chaosScore drives a discrete
+    // template choice; path strengths are still feature-driven (same
+    // formulas as 5b) but only paths in the active mask are non-zero.
+    // K=4 crossfade across slots straddling a topology boundary fades
+    // the small mask delta -- categorical discontinuity emerges at
+    // pure-slot positions, smooth blend between.
+    const float chaosScore =
+        (1.0f - runLen) * 0.45f
+      + entropy         * 0.30f
+      + flatness        * 0.25f;
+    int topo;
+    if      (chaosScore < 0.15f) topo = 0;  // SINE
+    else if (chaosScore < 0.30f) topo = 1;  // PARALLEL
+    else if (chaosScore < 0.45f) topo = 2;  // CHAIN
+    else if (chaosScore < 0.60f) topo = 3;  // FEEDBACK_LOOP
+    else if (chaosScore < 0.75f) topo = 4;  // SELF_FB
+    else                         topo = 5;  // DENSE
+
     for (int i = 0; i < 16; i++) row[12 + i] = 0.0f;
 
-    // Matrix paths: audio features only. Binary features land in
-    // ratios (runLen integer-pull above) and detunes (entropy detune
-    // boost above). Adding them additively to matrix entries floods
-    // the FM density baseline and saturates per-node variation into
-    // uniform chaos -- learned from 147->148 regression where matrix
-    // baseline went from ~0.3 to ~0.45 mean and scan flattened.
-    row[12 + 0 * 4 + 1] = brightness * pitched * 0.50f + fluxClamp * 0.20f;  // A->B
-    row[12 + 1 * 4 + 2] = brightness * 0.45f + pitched * 0.10f;              // B->C
-    row[12 + 2 * 4 + 3] = pitched * 0.40f + fluxClamp * 0.15f;               // C->D
-    row[12 + 1 * 4 + 0] = noisy * brightness * 0.40f;                        // B->A chaos
-    row[12 + 2 * 4 + 1] = noisy * fluxClamp * 0.35f;                         // C->B
-    row[12 + 3 * 4 + 0] = noisy * 0.30f + fluxClamp * 0.15f;                 // D->A
-    row[12 + 0 * 4 + 0] = noisy * 0.40f;                                     // A self-fb
-    row[12 + 1 * 4 + 1] = brightness * fluxClamp * 0.30f;                    // B self-fb
-    row[12 + 2 * 4 + 2] = pitched * 0.25f;                                   // C self-fb
+    const uint16_t mask = kTopologies[topo].mask;
+    const float fbScale = noisy * 0.40f;                                    // self-fb
+    const float chainAB = brightness * pitched * 0.50f + fluxClamp * 0.20f; // A->B
+    const float chainBC = brightness * 0.45f + pitched * 0.10f;             // B->C
+    const float chainCD = pitched * 0.40f + fluxClamp * 0.15f;              // C->D
+    const float chainBA = noisy * brightness * 0.40f;                       // B->A
+    const float chainCB = noisy * fluxClamp * 0.35f;                        // C->B
+    const float chainDA = noisy * 0.30f + fluxClamp * 0.15f;                // D->A
+    const float chainBB = brightness * fluxClamp * 0.30f;                   // B self-fb
+    const float chainCC = pitched * 0.25f;                                  // C self-fb
+
+    if (mask & (1u << 0))  row[12 + 0]  = fbScale;
+    if (mask & (1u << 1))  row[12 + 1]  = chainAB;
+    if (mask & (1u << 4))  row[12 + 4]  = chainBA;
+    if (mask & (1u << 5))  row[12 + 5]  = chainBB;
+    if (mask & (1u << 6))  row[12 + 6]  = chainBC;
+    if (mask & (1u << 9))  row[12 + 9]  = chainCB;
+    if (mask & (1u << 10)) row[12 + 10] = chainCC;
+    if (mask & (1u << 11)) row[12 + 11] = chainCD;
+    if (mask & (1u << 12)) row[12 + 12] = chainDA;
+    if (mask & (1u << 15)) row[12 + 15] = fbScale * 0.7f;                   // D self-fb (tamer)
 
     // Reagent flag (Phase 8 O3 will fill).
     row[28] = 0.0f;
@@ -570,9 +656,10 @@ namespace stolmine
     // accidentally include the previous sample's spectral state).
     memset(mPrevMag, 0, sizeof(mPrevMag));
 
-    // 6 features per frame: 4 audio (RMS, ZCR, centroid, flux) + 2 binary
-    // (bucket entropy, mean run length).
-    const int kFeatDim = 6;
+    // 7 features per frame: 5 audio (RMS, ZCR, centroid, flux, flatness)
+    // + 2 binary (bucket entropy, mean run length). Phase 5c added
+    // flatness (out[6]) for the topology picker.
+    const int kFeatDim = 7;
     float *coarse = new float[nCoarse * kFeatDim];
     int *candidates = new int[nCoarse];
     int picks[64];
@@ -614,7 +701,7 @@ namespace stolmine
     int nCandidates = 0;
     for (int c = 1; c < nCoarse; c++)
     {
-      if (l2Distance6sq(&coarse[c * kFeatDim], &coarse[(c - 1) * kFeatDim]) > kChangeThresh2)
+      if (l2Distance7sq(&coarse[c * kFeatDim], &coarse[(c - 1) * kFeatDim]) > kChangeThresh2)
       {
         candidates[nCandidates++] = c;
       }
