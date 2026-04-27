@@ -20,8 +20,14 @@ local Encoder = require "Encoder"
 local SamplePool = require "Sample.Pool"
 local SamplePoolInterface = require "Sample.Pool.Interface"
 local SampleEditor = require "Sample.Editor"
+local Signal = require "Signal"
 local Task = require "Unit.MenuControl.Task"
 local MenuHeader = require "Unit.MenuControl.Header"
+
+-- Sample state constants (local to xroot/Sample/init.lua):
+--   NotSet=0, Enqueued=1, Working=2, Good=3, Error=4
+local SAMPLE_GOOD = 3
+local SAMPLE_ERROR = 4
 
 local AlembicVoice = Class{}
 AlembicVoice:include(Unit)
@@ -184,29 +190,77 @@ function AlembicVoice:deserialize(t)
     end
 end
 
--- Sample-pool slot. Mirrors SampleScanner.lua:93-127 with an explicit
--- detach-before-attach sequence: C++ setSample(nullptr) is fired first
--- (resets analyzer state, restores placeholder presets) before the
--- new pointer is set. Without this two-step transition, swapping
--- directly between two non-null samples can leave analyzer state
--- straddling the old and new buffer (observed: scan stops responding
--- on second sample load if the buffer wasn't detached first).
+-- Sample-pool slot. Gates the C++ op:setSample(pSample) call (which
+-- triggers analyzeSample on the C++ side) on the sample reaching the
+-- Good state. Without gating, picking a sample from Card returns a
+-- handle whose buffer is still streaming in -- analyzeSample then
+-- runs over a partially-loaded buffer and the resulting preset table
+-- doesn't reflect the sample's actual content. Same hazard applies
+-- on direct old->new swap: if the new sample was already in the pool
+-- it may be Good immediately, but if it was just enqueued the swap
+-- races the load.
+--
+-- Three transition cases:
+--   1. nil -> nil:        no-op.
+--   2. anything -> nil:   detach the old sample synchronously (C++
+--                         resets to placeholder gradient); cancel any
+--                         pending watcher.
+--   3. anything -> X:     detach the old sample; claim X; if X is
+--                         already Good, attach + analyze immediately;
+--                         otherwise register a sampleStatusChanged
+--                         watcher and defer attach until X reaches
+--                         Good (or abort on Error).
+--
+-- A new setSample call always cancels the previous watcher first, so
+-- back-to-back picks (A pending -> B picked) cleanly drop A's load
+-- and start tracking B.
+function AlembicVoice:_cancelPendingAttach()
+    if self._pendingHandle then
+        Signal.remove("sampleStatusChanged", self._pendingHandle)
+        self._pendingHandle = nil
+        self._pendingSample = nil
+    end
+end
+
+function AlembicVoice:_attachLoadedSample(sample)
+    if sample:getChannelCount() > 0 then
+        -- Mono analysis only -- channel 0 of any sample. Stereo gets
+        -- summed to mono in the C++ analyzer. op:setSample triggers
+        -- analyzeSample synchronously on the calling thread.
+        self.objects.op:setSample(sample.pSample)
+    end
+end
+
 function AlembicVoice:setSample(sample)
-    -- Step 1: detach existing sample (if any).
+    self:_cancelPendingAttach()
+
     if self.sample then
         self.objects.op:setSample(nil)
         self.sample:release(self)
         self.sample = nil
     end
 
-    -- Step 2: attach new sample (if non-nil).
     if sample then
         sample:claim(self)
         self.sample = sample
-        if sample:getChannelCount() > 0 then
-            -- Mono analysis only -- channel 0 of any sample. Stereo will
-            -- be summed to mono in the C++ analyzer.
-            self.objects.op:setSample(sample.pSample)
+
+        if sample.state == SAMPLE_GOOD then
+            self:_attachLoadedSample(sample)
+        elseif sample.state ~= SAMPLE_ERROR then
+            self._pendingSample = sample
+            local watcher = function(changed)
+                if changed ~= self._pendingSample then return end
+                if changed.state == SAMPLE_GOOD then
+                    self:_cancelPendingAttach()
+                    self:_attachLoadedSample(changed)
+                elseif changed.state == SAMPLE_ERROR then
+                    self:_cancelPendingAttach()
+                    local Overlay = require "Overlay"
+                    Overlay.flashMainMessage("Sample load failed.")
+                end
+            end
+            self._pendingHandle = Signal.register(
+                "sampleStatusChanged", watcher)
         end
     end
 
@@ -331,6 +385,7 @@ function AlembicVoice:onShowMenu(objects, branches)
 end
 
 function AlembicVoice:onRemove()
+    self:_cancelPendingAttach()
     self:setSample(nil)
     Unit.onRemove(self)
 end
