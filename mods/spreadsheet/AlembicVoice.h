@@ -175,12 +175,16 @@ namespace stolmine
     // without further SWIG regen. ~11008 bytes.
     float mPresetTable[64][43];
 
-    // Phase 5d-1: per-node 32-entry transfer-function LUT. Built from
-    // 32-sample windows at the trained picks (DC-removed, peak-
-    // normalized, cosine-edge-faded). Audio-rate softSat → LUT lookup
-    // → K=4 frame crossfade replaces the planned scalar nonlinearity.
-    // ~8192 bytes.
-    float mWavetableLUT[64][32];
+    // Phase 5d-1: per-node transfer-function LUT. Built from sample
+    // windows at the trained picks (DC-removed, RMS-normalized, soft-
+    // clipped, folded around the absolute peak with per-node even/odd
+    // symmetry chosen from features). 256-entry resolution sourced
+    // from a 256-sample multi-cycle window so the curve has multiple
+    // bends (wavefolder-style character) rather than the gentle sub-
+    // cycle slice of the earlier 32-entry version. Audio-rate softSat
+    // -> LUT lookup -> K=4 frame crossfade. 64 frames * 256 entries *
+    // 4 bytes = 64 KB.
+    float mWavetableLUT[64][256];
 
     // Block-rate K-blended wavetable blend amount (the row[28] sum).
     // process()'s per-sample shaper crossfades identity ↔ full LUT

@@ -81,46 +81,64 @@ namespace stolmine
   }
 
   // Phase 5d-1: identity-curve wavetable LUT. Used when no sample is
-  // loaded, or as a pathological fallback when a sample is too short
-  // to extract 32-sample windows. row[28] = 0 makes process() crossfade
-  // toward sat(pmm), bypassing the LUT entirely; the identity LUT is a
-  // safety net for the LUT-blend path.
+  // loaded, or as a pathological fallback when a sample is too short.
+  // row[28] = 0 makes process() crossfade toward sat(pmm), bypassing
+  // the LUT entirely; the identity LUT is a safety net for the
+  // LUT-blend path.
   __attribute__((noinline, optimize("no-tree-vectorize")))
-  static void fillIdentityWavetableLUT(float (&lut)[64][32])
+  static void fillIdentityWavetableLUT(float (&lut)[64][256])
   {
     for (int n = 0; n < 64; n++)
-      for (int k = 0; k < 32; k++)
-        lut[n][k] = ((float)k / 31.0f) * 2.0f - 1.0f;
+      for (int k = 0; k < 256; k++)
+        lut[n][k] = ((float)k / 255.0f) * 2.0f - 1.0f;
   }
 
-  // Phase 5d-1: build per-node transfer-function LUTs from 32-sample
-  // windows at the trained picks. DC-removed, peak-normalized, cosine-
-  // edge-faded so the curve anchors near zero at LUT boundaries
-  // (prevents discontinuities when the index walks off the edge).
-  // Heap-only scratch (the 32-float buf is on the stack but small enough
-  // and not NEON-targeted; the destination LUT is a class member).
+  // Phase 5d-1.6: per-node transfer-function LUTs built from 256-sample
+  // multi-cycle source windows at the trained picks. 256-entry LUT
+  // resolution matches source size 1:1 (no downsampling).
+  //
+  // Construction:
+  //   1. Read 256 source samples (sum-to-mono if stereo).
+  //   2. DC-remove.
+  //   3. Find absolute peak position k_peak.
+  //   4. Pick per-node symmetry from features: tonal/structured
+  //      (low entropy + flatness) -> ODD (classical S-curve, polarity-
+  //      preserving, odd harmonics); chaotic/noisy -> EVEN (hill/valley,
+  //      DC + even harmonics, more aggressive). Threshold sum > 1.0.
+  //   5. Fold the longer half of the window around k_peak into the
+  //      LUT's positive side (128 entries); fill the negative side
+  //      mirrored (EVEN: same value) or mirrored+inverted (ODD).
+  //   6. RMS-normalize (target 0.4, gain cap 8x) and soft-clip per
+  //      entry to (-1, 1).
+  //
+  // Heap-only scratch: the 256-float window buffer is on the stack
+  // (~1 KB, fine for am335x stack budget) and not NEON-targeted.
+  // Destination LUT is a class member.
   __attribute__((noinline, optimize("no-tree-vectorize")))
   static void buildWavetableFrames(od::Sample *s, const int picks[64],
-                                   int channels, float (&lut)[64][32])
+                                   int channels, const float *coarse,
+                                   int kFeatDim, float (&lut)[64][256])
   {
     if (!s) { fillIdentityWavetableLUT(lut); return; }
-    const int hop = (int)s->mSampleRate / 20;
     const int Ns = (int)s->mSampleCount;
+    const int hop = (int)s->mSampleRate / 20;
     const bool stereo = (channels > 1);
+    const int kSrcLen = 256;
+    const int kHalfLut = 128;
 
     for (int n = 0; n < 64; n++)
     {
       int frameStart = picks[n] * hop;
-      if (frameStart + 32 > Ns) frameStart = Ns - 32;
+      if (frameStart + kSrcLen > Ns) frameStart = Ns - kSrcLen;
       if (frameStart < 0)
       {
-        for (int k = 0; k < 32; k++)
-          lut[n][k] = ((float)k / 31.0f) * 2.0f - 1.0f;
+        for (int k = 0; k < 256; k++)
+          lut[n][k] = ((float)k / 255.0f) * 2.0f - 1.0f;
         continue;
       }
 
-      float buf[32];
-      for (int k = 0; k < 32; k++)
+      float buf[256];
+      for (int k = 0; k < kSrcLen; k++)
       {
         float x = s->get(frameStart + k, 0);
         if (stereo) x = (x + s->get(frameStart + k, 1)) * 0.5f;
@@ -129,21 +147,66 @@ namespace stolmine
 
       // DC-remove.
       float dc = 0.0f;
-      for (int k = 0; k < 32; k++) dc += buf[k];
-      dc *= (1.0f / 32.0f);
-      for (int k = 0; k < 32; k++) buf[k] -= dc;
+      for (int k = 0; k < kSrcLen; k++) dc += buf[k];
+      dc *= (1.0f / (float)kSrcLen);
+      for (int k = 0; k < kSrcLen; k++) buf[k] -= dc;
 
-      // RMS-normalize to a target energy. Audio sample windows are
-      // PEAK-y -- one or two entries near max, most close to zero --
-      // so peak-normalizing produces low-RMS LUTs that read mostly
-      // silent. RMS-normalization equalizes perceived shaping
-      // loudness across all 64 LUTs regardless of which 32-sample
-      // window was picked. Gain is capped at 8x to avoid amplifying
-      // noise floor on near-silent windows. Soft-clip after gain
-      // bounds the curve to (-1, 1) without hard clipping artifacts.
+      // Find absolute peak position.
+      int kPeak = 0;
+      float peakAbs = 0.0f;
+      for (int k = 0; k < kSrcLen; k++)
+      {
+        const float a = buf[k] < 0.0f ? -buf[k] : buf[k];
+        if (a > peakAbs) { peakAbs = a; kPeak = k; }
+      }
+
+      // Per-node symmetry choice: feat[4]=entropy, feat[6]=flatness.
+      const float entropy = coarse[picks[n] * kFeatDim + 4];
+      const float flatness = coarse[picks[n] * kFeatDim + 6];
+      const bool useEven = (entropy + flatness) > 1.0f;
+
+      // Pick the longer side of the window (more usable samples).
+      const int rightLen = kSrcLen - 1 - kPeak;
+      const int leftLen  = kPeak;
+      const bool useRight = rightLen >= leftLen;
+
+      // Build LUT positive side (LUT[128..255]) by walking outward from
+      // the peak along the longer side. If that side runs out before
+      // we fill kHalfLut entries, repeat the last value.
+      float pos[128];
+      for (int d = 0; d < kHalfLut; d++)
+      {
+        int srcIdx;
+        if (useRight)
+        {
+          srcIdx = kPeak + d;
+          if (srcIdx > kSrcLen - 1) srcIdx = kSrcLen - 1;
+        }
+        else
+        {
+          srcIdx = kPeak - d;
+          if (srcIdx < 0) srcIdx = 0;
+        }
+        pos[d] = buf[srcIdx];
+      }
+
+      // Fold into full LUT. Layout: indices 128..255 = positive side
+      // (d = 0..127); indices 127..0 = negative side (d = 0..127).
+      // EVEN: f(-x) = f(x) -> mirror.
+      // ODD:  f(-x) = -f(x) -> mirror + invert.
+      for (int d = 0; d < kHalfLut; d++)
+      {
+        const float p = pos[d];
+        lut[n][128 + d]      = p;
+        lut[n][127 - d]      = useEven ? p : -p;
+      }
+
+      // RMS-normalize the assembled LUT. Target 0.4, gain cap 8x. Soft-
+      // clip after gain bounds the curve to (-1, 1) without hard
+      // clipping artifacts. Same machinery as the 32-entry version.
       float sumSq = 0.0f;
-      for (int k = 0; k < 32; k++) sumSq += buf[k] * buf[k];
-      const float rms = sqrtf(sumSq * (1.0f / 32.0f));
+      for (int k = 0; k < 256; k++) sumSq += lut[n][k] * lut[n][k];
+      const float rms = sqrtf(sumSq * (1.0f / 256.0f));
       const float kTargetRms = 0.4f;
       const float kMaxGain = 8.0f;
       float gain = 0.0f;
@@ -152,11 +215,10 @@ namespace stolmine
         gain = kTargetRms / rms;
         if (gain > kMaxGain) gain = kMaxGain;
       }
-      for (int k = 0; k < 32; k++)
+      for (int k = 0; k < 256; k++)
       {
-        const float v = buf[k] * gain;
+        const float v = lut[n][k] * gain;
         const float av = v < 0.0f ? -v : v;
-        // Soft-clip: x / (1 + |x|) maps R into (-1, 1) smoothly.
         lut[n][k] = v / (1.0f + av);
       }
     }
@@ -849,11 +911,15 @@ namespace stolmine
       derivePresetRow(&coarse[picks[n] * kFeatDim], mPresetTable[n], n);
     }
 
-    // Phase 5d-1: build per-node 32-entry transfer-function LUTs from
-    // 32-sample windows at the picks. Time-sorted picks already cluster
-    // temporally-adjacent windows into adjacent slots so the K=4 frame
-    // crossfade interpolates smoothly between LUT shapes.
-    buildWavetableFrames(mpSample, picks, channels, mWavetableLUT);
+    // Phase 5d-1.6: build per-node 256-entry LUTs from 256-sample multi-
+    // cycle source windows at the picks, folded around each window's
+    // absolute peak with per-node even/odd symmetry chosen from the
+    // coarse features (high entropy + flatness -> even, else odd).
+    // Time-sorted picks already cluster temporally-adjacent windows
+    // into adjacent slots so K=4 crossfade interpolates smoothly
+    // between LUT shapes.
+    buildWavetableFrames(mpSample, picks, channels, coarse, kFeatDim,
+                         mWavetableLUT);
 
     // Mean-centering deferred: planning doc line 125 prescribes it for
     // tonally-uniform sources, but with feature-driven ratios it tends
@@ -1064,11 +1130,13 @@ namespace stolmine
       // and `:64` hint risk avoided.
       const float absSum = pmmSum < 0.0f ? -pmmSum : pmmSum;
       const float sat = pmmSum / (1.0f + absSum);
-      float pos = (sat + 1.0f) * 15.5f;
+      // 256-entry LUT: pos in [0, 255], linear interp between idxL and
+      // idxR. (sat + 1) * 127.5 maps sat=-1 -> 0, sat=+1 -> 255.
+      float pos = (sat + 1.0f) * 127.5f;
       if (pos < 0.0f) pos = 0.0f;
-      if (pos > 31.0f) pos = 31.0f;
+      if (pos > 255.0f) pos = 255.0f;
       const int idxL = (int)pos;
-      const int idxR = idxL + 1 > 31 ? 31 : idxL + 1;
+      const int idxR = idxL + 1 > 255 ? 255 : idxL + 1;
       const float frac = pos - (float)idxL;
       float shaped = 0.0f;
       for (int j = 0; j < K; j++)
