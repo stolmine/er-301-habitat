@@ -48,6 +48,26 @@ namespace stolmine
     u.i = ix << 23;
     return poly * u.f;
   }
+
+  // Wide soft-clip from Som.cpp:40-47. Linear pass-through in (-8, +8),
+  // tanh asymptote beyond. Preserves high-Q filter swing internally
+  // while bounding integrator state so feedback can't run away.
+  static inline float wideSoftClip(float x)
+  {
+    if (!isfinite(x)) return 0.0f;
+    const float ax = x < 0.0f ? -x : x;
+    if (ax < 8.0f) return x;
+    const float sign = x > 0.0f ? 1.0f : -1.0f;
+    return sign * (8.0f + tanhf((ax - 8.0f) * 0.5f) * 2.0f);
+  }
+
+  // Cheap soft-sat (-1, +1). Used on filter routing sources so the
+  // routing matrix can't compound feedback into runaway FM.
+  static inline float softSat1(float x)
+  {
+    const float ax = x < 0.0f ? -x : x;
+    return x / (1.0f + ax);
+  }
   // Matches libcore SineOscillator.cpp: feedback inlet value is clamped
   // to [-1,1] then multiplied by 0.18 before combining with the phase
   // argument. AlembicRef routes diagonal matrix entries via each op's
@@ -1400,16 +1420,20 @@ namespace stolmine
       // mRoutingSources / mRoutingDst are CLASS MEMBERS per
       // feedback_neon_intrinsics_drumvoice -- stack-local arrays here
       // produced gcc auto-vec :64 hints under -O3 -ffast-math.
+      // PMM sources already bounded by sin to [-1, +1]. Filter sources
+      // pass through softSat1 (x/(1+|x|)) so the routing matrix sees
+      // them bounded -- prevents feedback runaway via filter->cutoff
+      // FM compounding on itself across samples.
       mRoutingSources[0] = mSineBank[0];
       mRoutingSources[1] = mSineBank[1];
       mRoutingSources[2] = mSineBank[2];
       mRoutingSources[3] = mSineBank[3];
-      mRoutingSources[4] = mSvfIc2[0];                                          // F1 LP
-      mRoutingSources[5] = mSvfIc1[0];                                          // F1 BP
-      mRoutingSources[6] = wave_out - kFilterK * mSvfIc1[0] - mSvfIc2[0];       // F1 HP
-      mRoutingSources[7] = mSvfIc2[1];                                          // F2 LP
-      mRoutingSources[8] = mSvfIc1[1];                                          // F2 BP
-      mRoutingSources[9] = wave_out - kFilterK * mSvfIc1[1] - mSvfIc2[1];       // F2 HP
+      mRoutingSources[4] = softSat1(mSvfIc2[0]);                                // F1 LP
+      mRoutingSources[5] = softSat1(mSvfIc1[0]);                                // F1 BP
+      mRoutingSources[6] = softSat1(wave_out - kFilterK * mSvfIc1[0] - mSvfIc2[0]);  // F1 HP
+      mRoutingSources[7] = softSat1(mSvfIc2[1]);                                // F2 LP
+      mRoutingSources[8] = softSat1(mSvfIc1[1]);                                // F2 BP
+      mRoutingSources[9] = softSat1(wave_out - kFilterK * mSvfIc1[1] - mSvfIc2[1]);  // F2 HP
 
       mRoutingDst[0] = 0.0f; mRoutingDst[1] = 0.0f; mRoutingDst[2] = 0.0f;
       mRoutingDst[3] = 0.0f; mRoutingDst[4] = 0.0f; mRoutingDst[5] = 0.0f;
@@ -1425,8 +1449,16 @@ namespace stolmine
       const float addF1    = mRoutingDst[4];
       const float addF2    = mRoutingDst[5];
 
-      const float mg0 = baseG0 * fastExp(freqMod0 * 0.8f);
-      const float mg1 = baseG1 * fastExp(freqMod1 * 0.8f);
+      // Clamp mg to keep the SVF coefficient stable. fastTan(pi*fc/sr)
+      // = 8 corresponds to fc just below Nyquist; beyond that the
+      // SVF math diverges. Floor at 0.001 keeps mg positive when
+      // freqMod drives cutoff toward DC.
+      const float kMaxMg = 8.0f;
+      const float kMinMg = 0.001f;
+      float mg0 = baseG0 * fastExp(freqMod0 * 0.8f);
+      float mg1 = baseG1 * fastExp(freqMod1 * 0.8f);
+      if (mg0 > kMaxMg) mg0 = kMaxMg; else if (mg0 < kMinMg) mg0 = kMinMg;
+      if (mg1 > kMaxMg) mg1 = kMaxMg; else if (mg1 < kMinMg) mg1 = kMinMg;
       const float a01 = 1.0f / (1.0f + mg0 * (mg0 + kFilterK));
       const float a02 = mg0 * a01;
       const float a03 = mg0 * a02;
@@ -1439,8 +1471,11 @@ namespace stolmine
       float v3 = f1_in - mSvfIc2[0];
       const float v1_0 = a01 * mSvfIc1[0] + a02 * v3;
       const float v2_0 = mSvfIc2[0] + a02 * mSvfIc1[0] + a03 * v3;
-      mSvfIc1[0] = 2.0f * v1_0 - mSvfIc1[0];
-      mSvfIc2[0] = 2.0f * v2_0 - mSvfIc2[0];
+      // wideSoftClip on integrator state bounds it to ~+/-8 with tanh
+      // asymptote beyond -- prevents lockup from feedback amplification
+      // while preserving high-Q resonance up to that range.
+      mSvfIc1[0] = wideSoftClip(2.0f * v1_0 - mSvfIc1[0]);
+      mSvfIc2[0] = wideSoftClip(2.0f * v2_0 - mSvfIc2[0]);
       const float bpOut0 = v1_0;
       const float lpOut0 = v2_0;
 
@@ -1452,8 +1487,8 @@ namespace stolmine
       v3 = f2_in - mSvfIc2[1];
       const float v1_1 = a11 * mSvfIc1[1] + a12 * v3;
       const float v2_1 = mSvfIc2[1] + a12 * mSvfIc1[1] + a13 * v3;
-      mSvfIc1[1] = 2.0f * v1_1 - mSvfIc1[1];
-      mSvfIc2[1] = 2.0f * v2_1 - mSvfIc2[1];
+      mSvfIc1[1] = wideSoftClip(2.0f * v1_1 - mSvfIc1[1]);
+      mSvfIc2[1] = wideSoftClip(2.0f * v2_1 - mSvfIc2[1]);
       const float lpOut1 = v2_1;
 
       // Drive + hard clip (5d-2.1 -- preserves transient pop from
