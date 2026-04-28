@@ -160,10 +160,15 @@ namespace stolmine
         if (a > peakAbs) { peakAbs = a; kPeak = k; }
       }
 
-      // Per-node symmetry choice: feat[4]=entropy, feat[6]=flatness.
+      // Per-node symmetry choice + per-node fold drive. feat[4]=entropy,
+      // feat[6]=flatness. EVEN for chaos-y, ODD for tonal/structured.
+      // foldDrive scales how much the LUT entries get pushed past +/-1
+      // before the triangular wavefolder wraps them back -- chaos nodes
+      // get heavy fold (multiple bends), tonal nodes get gentle fold.
       const float entropy = coarse[picks[n] * kFeatDim + 4];
       const float flatness = coarse[picks[n] * kFeatDim + 6];
       const bool useEven = (entropy + flatness) > 1.0f;
+      const float foldDrive = 1.0f + (entropy + flatness) * 2.0f;  // 1..5
 
       // Pick the longer side of the window (more usable samples).
       const int rightLen = kSrcLen - 1 - kPeak;
@@ -201,9 +206,15 @@ namespace stolmine
         lut[n][127 - d]      = useEven ? p : -p;
       }
 
-      // RMS-normalize the assembled LUT. Target 0.4, gain cap 8x. Soft-
-      // clip after gain bounds the curve to (-1, 1) without hard
-      // clipping artifacts. Same machinery as the 32-entry version.
+      // RMS-normalize the assembled LUT, then wavefold. Target RMS 0.4,
+      // gain cap 8x. The wavefolder replaces the previous soft-clip:
+      // soft-clip mushed the LUT extremes asymptotically toward +/-1
+      // (so detail lived only in the middle and the edges were flat).
+      // Triangular folding instead WRAPS large values back into range,
+      // introducing discontinuous slope changes -- sharp corners that
+      // generate dramatic harmonic content. Per-node foldDrive scales
+      // the fold count: chaos nodes (high entropy + flatness) get
+      // multiple folds across the LUT; tonal nodes get one or none.
       float sumSq = 0.0f;
       for (int k = 0; k < 256; k++) sumSq += lut[n][k] * lut[n][k];
       const float rms = sqrtf(sumSq * (1.0f / 256.0f));
@@ -215,11 +226,17 @@ namespace stolmine
         gain = kTargetRms / rms;
         if (gain > kMaxGain) gain = kMaxGain;
       }
+      gain *= foldDrive;
       for (int k = 0; k < 256; k++)
       {
-        const float v = lut[n][k] * gain;
-        const float av = v < 0.0f ? -v : v;
-        lut[n][k] = v / (1.0f + av);
+        float x = lut[n][k] * gain;
+        // Triangle wavefold: while |x| > 1, reflect back. Each iteration
+        // strictly reduces |x| by at least 2, so the loop terminates in
+        // O(|x|) steps -- bounded by gain * peak_lut_value, typically
+        // < 8 iterations even at max gain * max foldDrive.
+        while (x > 1.0f) x = 2.0f - x;
+        while (x < -1.0f) x = -2.0f - x;
+        lut[n][k] = x;
       }
     }
   }
