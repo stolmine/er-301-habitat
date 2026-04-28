@@ -2,3 +2,9 @@ testing/
 release/
 debug/
 er-301
+
+# Local-only operational notes that contain rig-specific identifiers
+# (IP addresses, usernames, host paths). Kept on disk for personal
+# reference; never tracked. The architectural context this draws on
+# lives in stolmine repo's docs/planning/redesign/ series instead.
+docs/dev-rig-procedures.md
