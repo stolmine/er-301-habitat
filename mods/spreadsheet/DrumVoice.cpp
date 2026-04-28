@@ -2,7 +2,6 @@
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
-#include <string.h>
 
 #ifdef __ARM_NEON
 #include <arm_neon.h>
@@ -10,16 +9,6 @@
 
 namespace stolmine
 {
-
-  // Init helper for the 0.999f decay-coeffs init. memset can't write
-  // 0.999f (only byte patterns), so this loop has to be separate.
-  // noinline + no-tree-vectorize per feedback_neon_intrinsics_drumvoice.
-  __attribute__((noinline, optimize("no-tree-vectorize")))
-  static void initPartialDecayCoeffs(float *partialDecay)
-  {
-    for (int i = 0; i < 4; i++)
-      partialDecay[i] = 0.999f;
-  }
 
   static inline float fast_tanh(float x)
   {
@@ -188,35 +177,20 @@ namespace stolmine
   float DrumVoice::Internal::sLUT[257] = {};
   bool DrumVoice::Internal::sLUTInit = false;
 
-  // Constructor: no special attribute needed AFTER the in-class
-  // = nullptr initializers were removed from DrumVoice.h. Those were
-  // the source of the trap-prone quad-D vst1.64 :64 hints (gcc auto-
-  // vec'd the batched nullptr-init across 14 contiguous pointer fields
-  // in synthesized member-init code). Constructor body memsets the
-  // bias-pointer block instead, which gcc lowers to a libc call.
   DrumVoice::DrumVoice()
   {
-    // Zero-init seven NEON-touched float[4] arrays via memset (libc
-    // call, not subject to auto-vec). 0.999f init for partial decay
-    // goes through a noinline helper.
-    memset(mPhaseBank, 0, sizeof(mPhaseBank));
-    memset(mIncBank, 0, sizeof(mIncBank));
-    memset(mSineBank, 0, sizeof(mSineBank));
-    memset(mPartialPhases, 0, sizeof(mPartialPhases));
-    memset(mPartialInc, 0, sizeof(mPartialInc));
-    memset(mPartialSines, 0, sizeof(mPartialSines));
-    memset(mPartialEnvs, 0, sizeof(mPartialEnvs));
-    initPartialDecayCoeffs(mPartialDecayCoeffs);
-
-    // Zero the bias-pointer block via memset rather than 14 in-class
-    // = nullptr initializers (which gcc batched into quad-D :64 NEON
-    // hints in synthesized member-init -- the construction-time crash
-    // pattern from feedback_neon_intrinsics_drumvoice). Address-of the
-    // first pointer + sizeof span covers all 14 pointers contiguously.
-    memset(&mBiasCharacter, 0,
-           (char *)&mBiasOctave + sizeof(mBiasOctave) - (char *)&mBiasCharacter);
-    mXformGateWasHigh = false;
-    mManualFire = false;
+    // Zero-init NEON working buffers (no in-class init in header to keep
+    // the class layout simple).
+    for (int i = 0; i < 4; i++) {
+      mPhaseBank[i]          = 0.0f;
+      mIncBank[i]            = 0.0f;
+      mSineBank[i]           = 0.0f;
+      mPartialPhases[i]      = 0.0f;
+      mPartialInc[i]         = 0.0f;
+      mPartialSines[i]       = 0.0f;
+      mPartialEnvs[i]        = 0.0f;
+      mPartialDecayCoeffs[i] = 0.999f;
+    }
     addInput(mTrigger);
     addInput(mVOct);
     addInput(mXformGate);
@@ -314,49 +288,35 @@ namespace stolmine
     // Ternaries compile to CMP+MOVCC on Cortex-A8 (conditional-move,
     // not control-flow branch).
     //
-    // Tiers are orthogonal lock presets, NOT a strictly monotonic chain
-    // (after 2.5.5.118 added -env between -swp and -pch):
-    //   0 "all"  : nothing locked, full chaos
-    //   1 "-swp" : pitch sweep locked (env + oct + timbre vary)
-    //   2 "-env" : sweep + envelope locked (oct + timbre vary)
-    //   3 "-pch" : sweep + oct locked (env + timbre vary)
-    //   4 "tmbr" : sweep + env + oct locked (only timbre varies)
-    //
-    // -env preserves the *shape/length of the hit*; -pch preserves the
-    // *pitch identity*. Different musical results.
+    // Tiers (target value increases as we opt out of more):
+    //   0 "all"  : all four groups active
+    //   1 "-swp" : drop Sweep + SweepTime (pitch envelope locked)
+    //   2 "-pch" : also drop Octave (full pitch identity locked)
+    //   3 "tmbr" : timbre only (Char/Shape/Grit/Punch)
     //
     // Function-pointer-table dispatch (2.5.5.96) and switch-with-
     // differential-bodies (2.5.5.92, .93, .95) both crashed Cortex-A8
     // hardware under -O3 -ffast-math. This single-method shape matches
     // 2.5.5.94's known-loading topology while still providing per-tier
     // behavior at runtime.
-    int target = CLAMP(0, 4, (int)(mXformTarget.value() + 0.5f));
+    int target = CLAMP(0, 3, (int)(mXformTarget.value() + 0.5f));
     float depth  = CLAMP(0.0f, 1.0f, mXformDepth.value());
     float spread = CLAMP(0.0f, 1.0f, mXformSpread.value());
 
-    // Branchless mask lookup. The 117-119 -env tier (target=2)
-    // introduced an ORTHOGONAL pair of locks (env vs oct) that can't
-    // be expressed as monotonic single-comparison conditions like
-    // .98's working pattern (target <= N). Boolean expressions like
-    // `(target != 2) && (target != 4)` compile to actual branches on
-    // Cortex-A8 -- and per project_ngoma_codex (2.5.5.92-.97 bisect)
-    // / feedback_runtime_branched_dsp_dispatch, runtime branches in
-    // randomization dispatch CRASH am335x. Replace with table-indexed
-    // mask loads -- guaranteed branchless. target is CLAMP'd to [0,4]
-    // above so the index is always in-bounds.
-    static const float kEnvOnMask[5]   = {1.0f, 1.0f, 0.0f, 1.0f, 0.0f};
-    static const float kOctOnMask[5]   = {1.0f, 1.0f, 1.0f, 0.0f, 0.0f};
-    static const float kSweepOnMask[5] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    const float em = kEnvOnMask[target];
-    const float om = kOctOnMask[target];
-    const float sm = kSweepOnMask[target];
+    // When a tier is masked out we need BOTH depth=0 AND spread=0 so
+    // randomizeValue collapses to (center=cur, dev=0) → returns cur
+    // unchanged. depth=0 alone leaves the spread-pulled center pulling
+    // the value toward range midpoint.
+    bool envOn   = (target <= 2);
+    bool octOn   = (target <= 1);
+    bool sweepOn = (target == 0);
 
-    float depthEnv   = depth  * em;
-    float spreadEnv  = spread * em;
-    float depthOct   = depth  * om;
-    float spreadOct  = spread * om;
-    float depthSweep = depth  * sm;
-    float spreadSweep= spread * sm;
+    float depthEnv   = envOn   ? depth  : 0.0f;
+    float spreadEnv  = envOn   ? spread : 0.0f;
+    float depthOct   = octOn   ? depth  : 0.0f;
+    float spreadOct  = octOn   ? spread : 0.0f;
+    float depthSweep = sweepOn ? depth  : 0.0f;
+    float spreadSweep= sweepOn ? spread : 0.0f;
 
     doRnd(mBiasCharacter, 0.0f,   1.0f,  depth,      spread);
     doRnd(mBiasShape,     0.0f,   1.0f,  depth,      spread);
@@ -503,16 +463,9 @@ namespace stolmine
         mManualFire = false;
       }
 
-      // Trigger detection: rising edge. Threshold 0.5f per
-      // feedback_comparator_gate_threshold -- 0.1 was tripping on
-      // uninitialized fuzz / DC residue when the trigger inlet was
-      // undriven, firing the heavy rising-edge handler (expf/powf +
-      // envelope reset) at unit-insertion time before any actual
-      // trigger signal had been routed in. That spurious handler
-      // execution against unset Internal state was the suspected
-      // am335x crash signature.
+      // Trigger detection: rising edge
       float trigVal = trig[i];
-      if (trigVal > 0.5f && s.prevTrigger <= 0.5f)
+      if (trigVal > 0.1f && s.prevTrigger <= 0.1f)
       {
         // Grit envelope coupling: high grit shortens decay
         float effectiveDecay = decay;
@@ -652,17 +605,6 @@ namespace stolmine
       if (s.punchEnv > 0.01f)
         droopFreq *= (1.0f + s.punchEnv * 0.05f);
 
-      // Partial droop tracker: uses currentSubFreq (gentler 0.3x sweep)
-      // as base, keeps the same droop/wobble character as the carrier.
-      // Without this, mode partials at 2-7x ratios get Doppler'd above
-      // Nyquist during high-sweep transients and the 2-tap decimator
-      // cancels them -- partials would silence themselves whenever sweep
-      // is engaged. Reusing the existing sub-sweep means partials stay
-      // audible across the full sweep range without a new pitch tracker.
-      float partialDroopFreq = s.currentSubFreq * (1.0f + s.ampEnv * 0.015f + wobble);
-      if (s.punchEnv > 0.01f)
-        partialDroopFreq *= (1.0f + s.punchEnv * 0.05f);
-
       // === Oscillator section at 2x rate (anti-alias for fold + FM) ===
       //
       // Osc1 (carrier) + osc2 (Shape FM modulator) + phaseFm (metallic
@@ -674,26 +616,18 @@ namespace stolmine
       float sr2 = sr * 2.0f;
       float foldGain = 1.0f + (character > 0.5f ? (character - 0.5f) * 2.0f * 6.0f : 0.0f);
       float tMorph   = character < 0.5f ? character * 2.0f : 0.0f;
-      // Shape FM ceiling reduced 6.0 -> 4.5 to dial back transient intensity
-      // at high sweep + high shape (was masking body decay). Grit boost on
-      // shape FM moved to upper grit range only (was triggering at 0.5,
-      // which compounded with other grit-driven stuff to blow up the
-      // bottom 2/3 of the grit fader).
-      float shapeFmDepth = shape * shape * s.shapeEnv * 4.5f;
-      if (grit > 0.7f)
-        shapeFmDepth += (grit - 0.7f) * 2.0f * shape * 0.4f;
+      // Shape FM ceiling raised 2.0 -> 6.0 so the fader reaches modulation
+      // index ~6 at max -- 3x deeper than the prior tuning, hits hard FM
+      // territory without needing extra range on the knob.
+      float shapeFmDepth   = shape * shape * s.shapeEnv * 6.0f;
+      if (grit > 0.5f)
+        shapeFmDepth += (grit - 0.5f) * 2.0f * shape * 0.5f;
 
-      // Grit FM thresholds nudged down slightly for a more forgiving
-      // ramp up: the "blowing up" zone was the sharp transition where
-      // FM contributions kicked in. Smoother thresholds keep the early
-      // grit range usable while preserving the high-grit endpoint.
-      float gritMetNorm   = (grit - 0.25f);                   // 0 below 0.25
-      if (gritMetNorm < 0.0f) gritMetNorm = 0.0f;
-      float metFmDepth = gritMetNorm * 2.667f * s.ampEnv;     // 0 -> ~2.0 at grit=1.0
-
-      float gritNoiseNorm = (grit - 0.35f);                   // 0 below 0.35
-      if (gritNoiseNorm < 0.0f) gritNoiseNorm = 0.0f;
-      float gritNoiseFmDev = gritNoiseNorm * gritNoiseNorm * 2367.0f * s.ampEnv;
+      // Grit taming: lower FM and noise-FM ceilings (3 -> 2 and 2000 -> 1000)
+      // so high grit no longer blows the output up. The tail of the chain
+      // also applies a gritGainComp to walk loudness back further.
+      float metFmDepth     = grit * 2.0f * s.ampEnv;
+      float gritNoiseFmDev = grit * grit * 1000.0f * s.ampEnv;
       if (character > 0.7f)
         gritNoiseFmDev += (character - 0.7f) * 3.3f * grit * 500.0f;
 
@@ -751,7 +685,7 @@ namespace stolmine
         mIncBank[0] = droopFreq * 2.71f / sr2;          // metallic FM
         mIncBank[1] = droopFreq * 2.0f / sr2;           // spacious FM mod
         mIncBank[2] = s.currentSubFreq / sr2;           // sub-sine fundamental
-        mIncBank[3] = partialDroopFreq * 3.0f / sr2;    // 3rd-harmonic partial (gentler sweep)
+        mIncBank[3] = droopFreq * 3.0f / sr2;           // 3rd-harmonic partial
         neonAdvanceSines(mPhaseBank, mIncBank, mSineBank);
         float fmMod        = mSineBank[0];
         float mod4         = mSineBank[1];
@@ -764,9 +698,9 @@ namespace stolmine
         //   Lane 2: membrane mode 2
         //   Lane 3: membrane mode 3
         mPartialInc[0] = 0.5f * s.currentSubFreq / sr2;
-        mPartialInc[1] = mode1Ratio * partialDroopFreq / sr2;
-        mPartialInc[2] = mode2Ratio * partialDroopFreq / sr2;
-        mPartialInc[3] = mode3Ratio * partialDroopFreq / sr2;
+        mPartialInc[1] = mode1Ratio * droopFreq / sr2;
+        mPartialInc[2] = mode2Ratio * droopFreq / sr2;
+        mPartialInc[3] = mode3Ratio * droopFreq / sr2;
         neonAdvanceSines(mPartialPhases, mPartialInc, mPartialSines);
         float subOctaveAt2x = mPartialSines[0];
         float mode1At2x     = mPartialSines[1];
