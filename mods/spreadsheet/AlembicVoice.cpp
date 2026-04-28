@@ -843,22 +843,24 @@ namespace stolmine
         (1.0f - intPull) * (entropy * 0.5f + flatness * 0.5f);
     row[28] = wblendIntensity;
 
-    // Phase 5d-2 filter base [29..34]. All values normalized [0,1];
+    // Phase 5d-2.1 filter base [29..34]. All values normalized [0,1];
     // process() maps to Hz / Q / etc per Som's convention. Mapping
-    // taste:
-    //   - Brightness drives both cutoffs; cutoff2 also picks up flux
-    //     and entropy so it diverges from cutoff1 on transient material
-    //   - Pitched material gets sharp Q (resonant); noisy stays low Q
-    //   - Stationary samples (high runLen) cascade their filter pair;
-    //     transient samples stay parallel
-    //   - Tonal samples blend toward LP; noisy toward BP
-    //   - Drive picks up noisy + flux so transient material gets
-    //     pushed harder
-    const float bScore  = brightness * 0.7f + flatness   * 0.3f;
-    const float bScore2 = brightness * 0.4f + fluxClamp  * 0.4f + entropy * 0.2f;
-    row[29] = bScore;                              // cutoff1 [0,1]
-    row[30] = bScore2;                             // cutoff2 [0,1]
-    row[31] = pitched;                             // Q [0,1]
+    // taste -- cutoffs driven by ORTHOGONAL features so they move
+    // independently across nodes (5d-2's both-cutoffs-from-brightness
+    // mapping made them track too closely):
+    //   - cutoff1 = brightness (high-freq spectral energy)
+    //   - cutoff2 = (entropy + fluxClamp) * 0.5 (chaos / transient
+    //     energy axis, anticorrelated with brightness for tonal sources)
+    //   - Q = 1 - flatness (tonal -> resonant, noisy -> wide; flatness
+    //     is post-min-max-normalized so the full [0,1] range is used,
+    //     unlike the clamped-pitched mapping in 5d-2 which squashed
+    //     the upper half of zcr to Q=0.5)
+    //   - topoMix = runLen (stationary -> cascade, transient -> parallel)
+    //   - bpLpBlend = pitched (tonal -> LP, noisy -> BP)
+    //   - drive = noisy * 0.6 + fluxClamp * 0.4
+    row[29] = brightness;                          // cutoff1 [0,1]
+    row[30] = (entropy + fluxClamp) * 0.5f;        // cutoff2 [0,1]
+    row[31] = 1.0f - flatness;                     // Q [0,1]
     row[32] = runLen;                              // topoMix [0,1]
     row[33] = pitched;                             // bpLpBlend [0,1] (tonal -> LP)
     row[34] = noisy * 0.6f + fluxClamp * 0.4f;     // drive [0,1]
@@ -1302,10 +1304,14 @@ namespace stolmine
         mSvfIc2[1] = 2.0f * v2_1 - mSvfIc2[1];
         const float lpOut1 = v2_1;
 
-        // Drive saturation: gain stage + soft clip via x/(1+|x|)
+        // Drive: gain stage + hard clip. Soft-sat x/(1+|x|) was
+        // asymptotically mushy and killed transient pop. Hard clip
+        // produces real clipping harmonics + sharp transitions when
+        // the signal exceeds +/-1, giving the click/pop character on
+        // transients that shaping-only material couldn't produce.
         float filt = lpOut1 * driveGain;
-        const float af = filt < 0.0f ? -filt : filt;
-        filt = filt / (1.0f + af);
+        if (filt > 1.0f) filt = 1.0f;
+        else if (filt < -1.0f) filt = -1.0f;
         out[i] = filt * lvl;
       }
 
