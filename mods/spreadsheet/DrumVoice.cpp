@@ -500,9 +500,16 @@ namespace stolmine
         mManualFire = false;
       }
 
-      // Trigger detection: rising edge
+      // Trigger detection: rising edge. Threshold 0.5f per
+      // feedback_comparator_gate_threshold -- 0.1 was tripping on
+      // uninitialized fuzz / DC residue when the trigger inlet was
+      // undriven, firing the heavy rising-edge handler (expf/powf +
+      // envelope reset) at unit-insertion time before any actual
+      // trigger signal had been routed in. That spurious handler
+      // execution against unset Internal state was the suspected
+      // am335x crash signature.
       float trigVal = trig[i];
-      if (trigVal > 0.1f && s.prevTrigger <= 0.1f)
+      if (trigVal > 0.5f && s.prevTrigger <= 0.5f)
       {
         // Grit envelope coupling: high grit shortens decay
         float effectiveDecay = decay;
