@@ -334,26 +334,29 @@ namespace stolmine
     float depth  = CLAMP(0.0f, 1.0f, mXformDepth.value());
     float spread = CLAMP(0.0f, 1.0f, mXformSpread.value());
 
-    // When a tier is masked out we need BOTH depth=0 AND spread=0 so
-    // randomizeValue collapses to (center=cur, dev=0) → returns cur
-    // unchanged. depth=0 alone leaves the spread-pulled center pulling
-    // the value toward range midpoint.
-    //
-    // Group ON conditions per tier (branchless via comparisons that
-    // compile to CMP+MOVCC on Cortex-A8):
-    //   sweepOn: only tier 0
-    //   octOn:   tiers 0, 1, 2 (target <= 2)
-    //   envOn:   tiers 0, 1, 3 (NOT tier 2 or 4)
-    bool envOn   = (target != 2) && (target != 4);
-    bool octOn   = (target <= 2);
-    bool sweepOn = (target == 0);
+    // Branchless mask lookup. The 117-119 -env tier (target=2)
+    // introduced an ORTHOGONAL pair of locks (env vs oct) that can't
+    // be expressed as monotonic single-comparison conditions like
+    // .98's working pattern (target <= N). Boolean expressions like
+    // `(target != 2) && (target != 4)` compile to actual branches on
+    // Cortex-A8 -- and per project_ngoma_codex (2.5.5.92-.97 bisect)
+    // / feedback_runtime_branched_dsp_dispatch, runtime branches in
+    // randomization dispatch CRASH am335x. Replace with table-indexed
+    // mask loads -- guaranteed branchless. target is CLAMP'd to [0,4]
+    // above so the index is always in-bounds.
+    static const float kEnvOnMask[5]   = {1.0f, 1.0f, 0.0f, 1.0f, 0.0f};
+    static const float kOctOnMask[5]   = {1.0f, 1.0f, 1.0f, 0.0f, 0.0f};
+    static const float kSweepOnMask[5] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    const float em = kEnvOnMask[target];
+    const float om = kOctOnMask[target];
+    const float sm = kSweepOnMask[target];
 
-    float depthEnv   = envOn   ? depth  : 0.0f;
-    float spreadEnv  = envOn   ? spread : 0.0f;
-    float depthOct   = octOn   ? depth  : 0.0f;
-    float spreadOct  = octOn   ? spread : 0.0f;
-    float depthSweep = sweepOn ? depth  : 0.0f;
-    float spreadSweep= sweepOn ? spread : 0.0f;
+    float depthEnv   = depth  * em;
+    float spreadEnv  = spread * em;
+    float depthOct   = depth  * om;
+    float spreadOct  = spread * om;
+    float depthSweep = depth  * sm;
+    float spreadSweep= spread * sm;
 
     doRnd(mBiasCharacter, 0.0f,   1.0f,  depth,      spread);
     doRnd(mBiasShape,     0.0f,   1.0f,  depth,      spread);
