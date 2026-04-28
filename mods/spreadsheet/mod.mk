@@ -48,7 +48,15 @@ LFLAGS = -nostdlib -nodefaultlibs -r
 endif
 
 ifeq ($(ARCH),linux)
+HOST_ARCH := $(shell uname -m)
+ifeq ($(HOST_ARCH),aarch64)
+# RPi 4 dev rig: NEON is in the base ISA so no special flag; intrinsics
+# from arm_neon.h work directly. -fno-tree-loop-vectorize matches x86
+# default to keep behavior comparable across host arches.
+CFLAGS.linux = -Wno-deprecated-declarations -fPIC -fno-tree-loop-vectorize
+else
 CFLAGS.linux = -Wno-deprecated-declarations -msse4 -fPIC -fno-tree-loop-vectorize
+endif
 LFLAGS = -shared
 endif
 
