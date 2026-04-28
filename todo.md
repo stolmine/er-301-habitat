@@ -760,6 +760,17 @@ C++ rewrite of Joe's Shards Lua preset. Feedback looper with self-modulating del
 
 - [x] BPF (RBJ biquad) + one-pole envelope follower. Center freq, bandwidth, attack, decay.
 
+## Spectral Mask
+
+Simple-on-the-outside unit: main signal in via inlet, monobranch sidechain input drives a per-bin spectral mask applied to the main. Where sidechain has spectral energy, the corresponding main band passes through (or attenuates -- inverted variant); where the sidechain is quiet, that band gets gated. Vocoder-adjacent but not full vocoder -- closer to a spectral noise gate keyed by another signal, useful for ducking, breath/voice keying, sidechain-shaped reverb tails, etc.
+
+- [ ] FFT both inputs at matched window/hop (256 or 512 pt, 50% overlap, Hann window). Reuse pffft (`mods/spreadsheet/pffft.h`) and the analysis pattern from MultibandCompressor.
+- [ ] Build mask from sidechain magnitude per bin: smoothed via attack/release one-pole on each bin, mapped through threshold + ratio (compressor-style transfer curve) so quiet bins go to 0 and loud bins go to 1.
+- [ ] Multiply main spectrum by mask, IFFT + overlap-add for output.
+- [ ] Plies (keep small): threshold, attack, release, mix (dry/wet), invert (mask -> 1-mask for ducking flavor). Maybe a "spectral tilt" bias so high vs low bands respond differently to the same sidechain level.
+- [ ] Sidechain via monobranch input (same pattern as Impasto's sidechain ply / branch wiring).
+- [ ] CPU: 2x FFT + 2x IFFT per hop = 4 transforms / 50% overlap. Should fit in the same envelope as Tomograph + Parfait.
+
 ## Tone Cluster / Drone Machine
 
 N oscillators (8-16) in spreadsheet. Reuses FFB's scale-aware distribution for placing oscillators on scale degrees.
