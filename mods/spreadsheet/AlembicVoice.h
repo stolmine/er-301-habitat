@@ -114,6 +114,21 @@ namespace stolmine
     od::Parameter mBpLpBlend{"BpLpBlend", 1.0f};
     od::Parameter mDrive{"Drive", 0.2f};
 
+    // Phase 5d-4 comb scan: third independent scan position (after
+    // mScanPos and mReagentScan). Single fader collapses dry/wet AND
+    // comb-scan node selection: at 0 = comb bypass, at 1 = full wet
+    // at trained slot 63. Trained per-node comb config (5 slots) lives
+    // in row[43..47].
+    od::Parameter mCombScan{"CombScan", 0.0f};
+
+    // Phase 5d-4 Ferment: single-axis chaos scalar. Multiplies trained
+    // matrix off-diagonal (cross-mod) AND routing lane attenuations
+    // (filter-FM + addAdd injection). Default 1.0 = trained chaos
+    // fully expressed; 0 = clean tonal voice; 1.5 = boost beyond
+    // training. Tonal regions (cutoffs, ratios, base levels, drive,
+    // wavetable) are NOT scaled by Ferment.
+    od::Parameter mFerment{"Ferment", 1.0f};
+
     // Phase 4 viz hooks. Inline so the sphere's draw loop has no dispatch
     // overhead. getNodeBrightness is a Phase 3 placeholder (linear gradient
     // per slot index); Phase 5 will replace it with sample-trained richness.
@@ -182,10 +197,11 @@ namespace stolmine
     //   [29..34] filter base     (5d-2: cutoff1, cutoff2, Q, topoMix,
     //                            bpLpBlend, drive)
     //   [35..42] lane attens     (5d-3: 8 routing slots)
+    //   [43..48] comb            (5d-4: density, pitch, pattern,
+    //                            resType, feedback, slope)
     //
-    // Phase 5d-1 pre-grows the row to 43 floats so 5d-2/5d-3 land
-    // without further SWIG regen. ~11008 bytes.
-    float mPresetTable[64][43];
+    // Phase 5d-4 grows row to 49 floats. ~12544 bytes.
+    float mPresetTable[64][49];
 
     // Phase 5d-1: per-node transfer-function LUT. Built from sample
     // windows at the trained picks (DC-removed, RMS-normalized, soft-
@@ -250,6 +266,45 @@ namespace stolmine
     // is unlikely to auto-vec anyway).
     float mRoutingSources[10];
     float mRoutingDst[6];
+
+    // Phase 5d-4 comb state. Fixed-size buffer (no Pecto-style runtime
+    // allocate) because the unit is fixed-purpose. 4096 samples = ~85ms
+    // at 48 kHz, covers down to ~12 Hz fundamental delay. Tap max
+    // matches Pecto's 24 for exact engine clone.
+    static const int kCombBufSize = 4096;
+    static const int kCombMaxTaps = 24;
+    int16_t mCombBuf[kCombBufSize];                 // 8 KB delay line
+    int mCombWriteIdx;
+    float mCombFbFilterState;                       // resType=1 LP state
+    float mCombSitarEnv;                            // resType=3 envelope
+    float mCombDcX1, mCombDcY1;                     // DC-blocker on output
+    // Block-rate K-blended continuous comb slots (density, pitch,
+    // feedback). Pattern + resType + slope are categorical -- hard-cut
+    // from the single nearest comb-scan slot.
+    float mCombFlat[3];                             // [density, pitch, feedback]
+    int mCombActiveTaps;                            // 1..24
+    float mCombTapPos[kCombMaxTaps];                // fractional positions [0..1]
+    float mCombTapWeight[kCombMaxTaps];             // slope envelope
+    int mCombCachedSlot;                            // last picked slot, -1 = dirty
+    int mCombCachedDensity;                         // last computed density (dirty check)
+    int mCombCachedPattern;                         // last picked pattern index
+    int mCombCachedSlope;                           // last picked slope index
+
+    // Phase 5d-4 NEON 3-pass scratch arrays as CLASS MEMBERS per
+    // feedback_neon_intrinsics_drumvoice. Pecto uses stack-locals here,
+    // but AlembicVoice's process() has heavy register pressure
+    // (PMM matrix + simd_sin) and gcc's stack-local NEON `:64` hints
+    // trap on Cortex-A8 in this scenario. Heap-allocated via the
+    // class instance avoids that.
+    int32_t mCombIdx0[kCombMaxTaps];
+    int32_t mCombIdx1[kCombMaxTaps];
+    float mCombFrac[kCombMaxTaps];
+    int16_t mCombSA[kCombMaxTaps];
+    int16_t mCombSB[kCombMaxTaps];
+    // Per-tap delay/weight cached at block setup, used by 3-pass
+    // (Pecto pattern: avoid recomputing per sample).
+    float mCombCachedDelaySamples[kCombMaxTaps];
+    float mCombCachedTapWeight[kCombMaxTaps];
 
     // Sample-pool slot. Lifetime managed via attach/release pairs in
     // setSample. Phase 5b reads it once during analyzeSample().

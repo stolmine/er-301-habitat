@@ -77,10 +77,12 @@ function AlembicVoice:onLoadGraph(channelCount)
     adapter("scanK", "ScanK", 4.0)
     adapter("reagentScan", "ReagentScan", 0.0)
     adapter("reagent", "Reagent", 0.0)
+    adapter("combScan", "CombScan", 0.0)
+    adapter("ferment", "Ferment", 1.0)
 end
 
 local views = {
-    expanded = {"tune", "freq", "sync", "scan", "reagent", "level"},
+    expanded = {"tune", "freq", "sync", "scan", "reagent", "comb", "ferment", "level"},
     scan = {"scan"},
     collapsed = {}
 }
@@ -143,6 +145,35 @@ function AlembicVoice:onLoadViews(objects, branches)
         amountParam = objects.reagent:getParameter("Bias")
     }
 
+    -- Phase 5d-4 comb ply. Single fader, no shift toggle. Collapses
+    -- dry/wet AND comb-scan position onto one axis: 0 = bypass,
+    -- 1 = full wet at comb-scan slot 63.
+    controls.comb = GainBias {
+        button = "comb",
+        description = "Comb",
+        branch = branches.combScan,
+        gainbias = objects.combScan,
+        range = objects.combScan,
+        biasMap = Encoder.getMap("[0,1]"),
+        biasUnits = app.unitNone,
+        biasPrecision = 3,
+        initialBias = 0.0
+    }
+
+    -- Phase 5d-4 ferment ply. Single-axis chaos scalar. Default 1.0
+    -- = full trained chaos; 0 = clean tonal voice; 1.5 = boost.
+    controls.ferment = GainBias {
+        button = "ferment",
+        description = "Ferment",
+        branch = branches.ferment,
+        gainbias = objects.ferment,
+        range = objects.ferment,
+        biasMap = Encoder.getMap("[0,1]"),
+        biasUnits = app.unitNone,
+        biasPrecision = 3,
+        initialBias = 1.0
+    }
+
     controls.level = GainBias {
         button = "level",
         description = "Level",
@@ -160,7 +191,7 @@ end
 -- per feedback_serialize_deserialize_pattern. The hidden Phase 2/5d
 -- Parameters (ratios/levels/detunes/matrix/filter base/lane attens)
 -- are inert in pre-Phase-7 and not persisted.
-local adapterBiases = { "f0", "level", "scanPos", "scanK", "reagentScan", "reagent" }
+local adapterBiases = { "f0", "level", "scanPos", "scanK", "reagentScan", "reagent", "combScan", "ferment" }
 
 function AlembicVoice:serialize()
     local t = Unit.serialize(self)

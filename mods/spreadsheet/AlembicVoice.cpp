@@ -82,6 +82,215 @@ namespace stolmine
     const float over = ax - 0.9f;
     return sign * (0.9f + 0.1f * over / (1.0f + over));
   }
+
+  // Phase 5d-4: noinline + no-tree-vectorize helper for the constructor
+  // tap-init loop. Without this attribute gcc auto-vectorizes the loop
+  // and emits quad-D vst1.64 :64 hints into class member arrays, which
+  // trap on Cortex-A8 per feedback_neon_intrinsics_drumvoice.
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void initCombTapDefaults(float *pos, float *weight, int n)
+  {
+    for (int i = 0; i < n; i++)
+    {
+      pos[i] = (float)(i + 1) / (float)n;
+      weight[i] = 1.0f;
+    }
+  }
+
+  // Same defensive wrapper for the per-block cache loop -- gcc would
+  // otherwise auto-vec quad-D operations on class member float arrays,
+  // emitting :64 hints. Pass A/C of the per-sample 3-pass uses
+  // explicit NEON intrinsics intentionally (mirrors Pecto's shipped
+  // code) and those :64 hints are accepted; this scalar loop's hints
+  // would be NEW.
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void cacheCombTapDelays(const float *tapPos, const float *tapWeight,
+                                  float *cachedDelay, float *cachedWeight,
+                                  float baseDelay, int density)
+  {
+    for (int t = 0; t < density; t++)
+    {
+      cachedDelay[t] = baseDelay * tapPos[t];
+      cachedWeight[t] = tapWeight[t];
+    }
+  }
+
+  // Phase 5d-4 comb helpers, lifted verbatim from Pecto.cpp:18-51.
+  // int16_t circular buffer (saves heap vs float for the 4096-sample
+  // delay line, half the cache footprint), linear interp for fractional
+  // delay, fast tanh approximation for feedback saturation.
+  static inline float combFastTanh(float x)
+  {
+    if (x < -4.0f) return -1.0f;
+    if (x >  4.0f) return  1.0f;
+    const float x2 = x * x;
+    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+  }
+
+  static inline void combBufWrite(int16_t *buf, int idx, float v)
+  {
+    int s = (int)(v * 32767.0f);
+    if (s > 32767) s = 32767;
+    if (s < -32767) s = -32767;
+    buf[idx] = (int16_t)s;
+  }
+
+  static inline float combBufRead(const int16_t *buf, int idx)
+  {
+    return (float)buf[idx] * (1.0f / 32767.0f);
+  }
+
+  static inline float combBufReadInterp(const int16_t *buf, float pos, int maxDelay)
+  {
+    int idx0 = (int)floorf(pos);
+    const float frac = pos - (float)idx0;
+    if (idx0 < 0) idx0 += maxDelay;
+    if (idx0 >= maxDelay) idx0 -= maxDelay;
+    int idx1 = idx0 + 1;
+    if (idx1 >= maxDelay) idx1 = 0;
+    const float a = combBufRead(buf, idx0);
+    const float b = combBufRead(buf, idx1);
+    return a + (b - a) * frac;
+  }
+
+  // Pattern + slope tap distribution -- IDENTICAL CLONE of Pecto's
+  // engine (Pecto.cpp:165-321). 16 base patterns (8 deterministic +
+  // 8 seeded perturbations) + 4 slope envelopes + sort by ascending
+  // tap position so the last tap is the longest delay (feedback
+  // source). Lift verbatim so the comb's character matches Pecto's
+  // exactly when the trained controls hit the same values.
+  __attribute__((optimize("O1")))
+  static void combComputePattern(float *pos, int density, int basePattern)
+  {
+    const int N = density;
+    switch (basePattern)
+    {
+    default:
+    case 0: // Uniform
+      for (int i = 0; i < N; i++)
+        pos[i] = (float)(i + 1) / (float)N;
+      break;
+    case 1: // Fibonacci
+    {
+      const float phi = 1.6180339887f;
+      for (int i = 0; i < N; i++)
+        pos[i] = fmodf((float)(i + 1) * (1.0f / phi), 1.0f);
+      for (int i = 0; i < N - 1; i++)
+        for (int j = i + 1; j < N; j++)
+          if (pos[j] < pos[i]) { float tmp = pos[i]; pos[i] = pos[j]; pos[j] = tmp; }
+      for (int i = 0; i < N; i++)
+        if (pos[i] < 0.001f) pos[i] = 0.001f;
+      break;
+    }
+    case 2: // Early -- power < 1
+      for (int i = 0; i < N; i++)
+      {
+        const float t = (float)(i + 1) / (float)N;
+        pos[i] = powf(t, 0.5f);
+      }
+      break;
+    case 3: // Late -- power > 1
+      for (int i = 0; i < N; i++)
+      {
+        const float t = (float)(i + 1) / (float)N;
+        pos[i] = powf(t, 2.0f);
+      }
+      break;
+    case 4: // Middle -- sine warp
+      for (int i = 0; i < N; i++)
+      {
+        const float t = (float)(i + 1) / (float)(N + 1);
+        pos[i] = 0.5f + 0.5f * sinf((t - 0.5f) * 3.14159f);
+      }
+      break;
+    case 5: // Ess -- smoothstep
+      for (int i = 0; i < N; i++)
+      {
+        const float t = (float)(i + 1) / (float)(N + 1);
+        const float s = t * t * (3.0f - 2.0f * t);
+        pos[i] = s;
+      }
+      break;
+    case 6: // Flat -- unison/chorus
+      for (int i = 0; i < N; i++)
+        pos[i] = 1.0f;
+      break;
+    case 7: // Rev-Fibonacci
+    {
+      const float phi = 1.6180339887f;
+      for (int i = 0; i < N; i++)
+        pos[i] = fmodf((float)(i + 1) * (1.0f / phi), 1.0f);
+      for (int i = 0; i < N - 1; i++)
+        for (int j = i + 1; j < N; j++)
+          if (pos[j] < pos[i]) { float tmp = pos[i]; pos[i] = pos[j]; pos[j] = tmp; }
+      for (int i = 0; i < N; i++)
+        pos[i] = 1.0f - pos[i];
+      for (int i = 0; i < N - 1; i++)
+        for (int j = i + 1; j < N; j++)
+          if (pos[j] < pos[i]) { float tmp = pos[i]; pos[i] = pos[j]; pos[j] = tmp; }
+      for (int i = 0; i < N; i++)
+        if (pos[i] < 0.001f) pos[i] = 0.001f;
+      break;
+    }
+    }
+  }
+
+  __attribute__((optimize("O1")))
+  static void combPerturbPattern(float *pos, int density, unsigned int seed)
+  {
+    unsigned int s = seed;
+    for (int i = 0; i < density; i++)
+    {
+      s = s * 1103515245u + 12345u;
+      const float r = ((float)((s >> 8) & 0x7FFF) / 16383.0f) * 2.0f - 1.0f;
+      const float spacing = (i < density - 1) ? (pos[i + 1] - pos[i]) : (1.0f - pos[i]);
+      pos[i] += r * spacing * 0.1f;
+      if (pos[i] < 0.001f) pos[i] = 0.001f;
+      if (pos[i] > 1.0f) pos[i] = 1.0f;
+    }
+  }
+
+  __attribute__((optimize("O1")))
+  static void combRecomputeTaps(float *pos, float *weight,
+                                int density, int pattern, int slope)
+  {
+    const int basePattern = pattern & 7;
+    combComputePattern(pos, density, basePattern);
+    if (pattern >= 8)
+      combPerturbPattern(pos, density,
+                         (unsigned int)(pattern * 7919 + density * 131));
+    // Slope envelope (4 modes, identical to Pecto).
+    for (int i = 0; i < density; i++)
+    {
+      const float t = (density > 1) ? (float)i / (float)(density - 1) : 0.5f;
+      switch (slope)
+      {
+      case 0: weight[i] = 1.0f; break;
+      case 1: weight[i] = 0.1f + 0.9f * t; break;
+      case 2: weight[i] = 1.0f - 0.9f * t; break;
+      case 3:
+        weight[i] = sinf(t * 3.14159f);
+        if (weight[i] < 0.05f) weight[i] = 0.05f;
+        break;
+      }
+    }
+    // Sort ascending so the last tap is the longest delay (feedback
+    // source). Carry weights alongside positions.
+    for (int i = 1; i < density; i++)
+    {
+      const float pKey = pos[i];
+      const float wKey = weight[i];
+      int j = i - 1;
+      while (j >= 0 && pos[j] > pKey)
+      {
+        pos[j + 1] = pos[j];
+        weight[j + 1] = weight[j];
+        j--;
+      }
+      pos[j + 1] = pKey;
+      weight[j + 1] = wKey;
+    }
+  }
   // Matches libcore SineOscillator.cpp: feedback inlet value is clamped
   // to [-1,1] then multiplied by 0.18 before combining with the phase
   // argument. AlembicRef routes diagonal matrix entries via each op's
@@ -108,7 +317,7 @@ namespace stolmine
   // endA/endB plus the destination table, which trap on Cortex-A8 at
   // construction time (feedback_neon_hint_surfaces).
   __attribute__((noinline, optimize("no-tree-vectorize")))
-  static void fillPhase3Presets(float (&t)[64][43])
+  static void fillPhase3Presets(float (&t)[64][49])
   {
     // Phase 3 placeholder gradient covers the original 29 trained slots
     // (ratios, levels, detunes, matrix, scalar reagent which is now the
@@ -153,6 +362,16 @@ namespace stolmine
       t[slot][34] = 0.2f;   // drive in [0,1] -> driveGain ~1.0 (unity)
       // Lane attens (5d-3) stay zero in placeholder.
       for (int f = 35; f < 43; f++) t[slot][f] = 0.0f;
+      // Comb (5d-4) placeholder: density=4 taps, mid pitch, uniform
+      // pattern, raw resonator, no feedback, flat slope. Comb fader at
+      // 0 = bypass anyway, so these only matter if user pushes the
+      // fader without a sample loaded.
+      t[slot][43] = 0.16f;  // density 0.16 * 24 ~= 4 taps
+      t[slot][44] = 0.5f;   // pitch mid
+      t[slot][45] = 0.0f;   // pattern uniform (categorical bucket 0..15)
+      t[slot][46] = 0.0f;   // resType raw (categorical bucket 0..3)
+      t[slot][47] = 0.0f;   // feedback off
+      t[slot][48] = 0.0f;   // slope flat (categorical bucket 0..3)
     }
   }
 
@@ -369,6 +588,9 @@ namespace stolmine
     addParameter(mBpLpBlend);
     addParameter(mDrive);
 
+    addParameter(mCombScan);
+    addParameter(mFerment);
+
     memset(mPhaseBank, 0, sizeof(mPhaseBank));
     memset(mPrevOutBank, 0, sizeof(mPrevOutBank));
     memset(mPhaseArgBank, 0, sizeof(mPhaseArgBank));
@@ -388,6 +610,28 @@ namespace stolmine
     mActiveEdgeCount = 0;
     memset(mRoutingSources, 0, sizeof(mRoutingSources));
     memset(mRoutingDst, 0, sizeof(mRoutingDst));
+
+    // Phase 5d-4 comb init.
+    memset(mCombBuf, 0, sizeof(mCombBuf));
+    mCombWriteIdx = 0;
+    mCombFbFilterState = 0.0f;
+    mCombSitarEnv = 0.0f;
+    mCombDcX1 = mCombDcY1 = 0.0f;
+    memset(mCombFlat, 0, sizeof(mCombFlat));
+    mCombActiveTaps = 1;
+    initCombTapDefaults(mCombTapPos, mCombTapWeight, kCombMaxTaps);
+    memset(mCombIdx0, 0, sizeof(mCombIdx0));
+    memset(mCombIdx1, 0, sizeof(mCombIdx1));
+    memset(mCombFrac, 0, sizeof(mCombFrac));
+    memset(mCombSA, 0, sizeof(mCombSA));
+    memset(mCombSB, 0, sizeof(mCombSB));
+    memset(mCombCachedDelaySamples, 0, sizeof(mCombCachedDelaySamples));
+    memset(mCombCachedTapWeight, 0, sizeof(mCombCachedTapWeight));
+    mCombCachedSlope = -1;
+    mCombCachedSlot = -1;
+    mCombCachedDensity = -1;
+    mCombCachedPattern = -1;
+
     mpSample = nullptr;
 
     // pffft state: lazy-allocated on first analyzeSample. Hann window
@@ -436,13 +680,19 @@ namespace stolmine
       // Reset SVF state so filter ringing doesn't persist into the
       // gentle near-bypass settings, and zero the routing lane indices
       // so the matrix is inert (atten=0 in placeholder rows already
-      // makes mActiveEdges empty, but explicit zero is safer).
+      // makes mActiveEdges empty, but explicit zero is safer). Comb
+      // buffer + filter state cleared to silence comb tail.
       fillPhase3Presets(mPresetTable);
       fillIdentityWavetableLUT(mWavetableLUT);
       memset(mSvfIc1, 0, sizeof(mSvfIc1));
       memset(mSvfIc2, 0, sizeof(mSvfIc2));
       memset(mLaneSrc, 0, sizeof(mLaneSrc));
       memset(mLaneDst, 0, sizeof(mLaneDst));
+      memset(mCombBuf, 0, sizeof(mCombBuf));
+      mCombFbFilterState = 0.0f;
+      mCombSitarEnv = 0.0f;
+      mCombDcX1 = mCombDcY1 = 0.0f;
+      mCombCachedSlot = -1;
     }
     else
     {
@@ -981,6 +1231,30 @@ namespace stolmine
 
     // Lane attens [35..42] stay zero (5d-3 populates).
     for (int i = 35; i < 43; i++) row[i] = 0.0f;
+
+    // Phase 5d-4 comb [43..47]. All values normalized [0,1]; process()
+    // maps to actual tap counts / delay lengths / categorical buckets.
+    // Mapping taste:
+    //   - density: chaotic + transient material gets more taps (more
+    //     comb teeth); tonal stationary gets fewer (cleaner Karplus)
+    //   - pitch: pitched feature drives delay length (tonal nodes ring
+    //     at recognizable pitches; noisy nodes get short noise-y delay)
+    //   - pattern: chaosScore-like signature picks 1-of-4. Tonal
+    //     -> uniform; gradient -> Fibonacci/S-curve; chaotic -> jitter.
+    //   - resType: combined feature signature picks 1-of-4 resonator.
+    //     Pitched + tonal -> Guitar (LP feedback); noisy -> Clarinet
+    //     (clip distortion); pure -> Raw; bright + transient -> Sitar.
+    //   - feedback: stationary tonal material rings longer; transient
+    //     decays quickly.
+    row[43] = entropy * 0.6f + fluxClamp * 0.4f;                           // density
+    row[44] = pitched * 0.7f + (1.0f - flatness) * 0.3f;                    // pitch
+    row[45] = (1.0f - runLen) * 0.5f + entropy * 0.5f;                      // pattern signature (16 buckets)
+    row[46] = pitched * 0.4f + (1.0f - flatness) * 0.3f + fluxClamp * 0.3f; // resType signature (4 buckets)
+    row[47] = runLen * 0.6f + pitched * 0.4f;                               // feedback
+    // Slope: tonal stationary -> flat (0); rising material (low entropy +
+    // bright) -> rise (1); falling material (transient pop) -> fall (2);
+    // chaotic -> hump (3). Categorical, hard-cut at process time.
+    row[48] = entropy * 0.5f + brightness * 0.3f + fluxClamp * 0.2f;       // slope signature (4 buckets)
   }
 
   // Mean-center ratios across nodes per planning doc line 125: even when
@@ -1203,6 +1477,14 @@ namespace stolmine
     // per feedback_runtime_branched_dsp_dispatch). Phase 5d-1 added
     // mWavetableBlend (row[28]); 5d-2/5d-3 will add filter base +
     // lane attens to this loop without restructuring it.
+    // Phase 5d-4 Ferment chaos scalar. Pre-scaled into the matrix
+    // K-blend so we don't need a standalone post-blend multiply loop
+    // (gcc auto-vec'd the standalone version into quad-D :64 hints
+    // even though mMatrixFlat is a heap class member -- per memory
+    // these can trap on Cortex-A8). Fusing into the K-blend gives us
+    // the same math (sum over j of wj*p[12+f] then *ferment ==
+    // sum over j of wj*ferment*p[12+f]) without the standalone loop.
+    const float ferment = CLAMP(0.0f, 1.5f, mFerment.value());
     for (int f = 0; f < 4; f++) mRatioFlat[f] = 0.0f;
     for (int f = 0; f < 4; f++) mLevelFlat[f] = 0.0f;
     for (int f = 0; f < 4; f++) mDetuneFlat[f] = 0.0f;
@@ -1211,11 +1493,12 @@ namespace stolmine
     for (int j = 0; j < K; j++)
     {
       const float wj = w[j] * wInv;
+      const float wjFerment = wj * ferment;
       const float *p = mPresetTable[n0 + j];
       for (int f = 0; f < 4; f++) mRatioFlat[f] += wj * p[f];
       for (int f = 0; f < 4; f++) mLevelFlat[f] += wj * p[4 + f];
       for (int f = 0; f < 4; f++) mDetuneFlat[f] += wj * p[8 + f];
-      for (int f = 0; f < 16; f++) mMatrixFlat[f] += wj * p[12 + f];
+      for (int f = 0; f < 16; f++) mMatrixFlat[f] += wjFerment * p[12 + f];
       for (int f = 0; f < 6; f++) mFilterFlat[f] += wj * p[29 + f];
     }
 
@@ -1321,7 +1604,10 @@ namespace stolmine
     mActiveEdgeCount = 0;
     for (int e = 0; e < 8; e++)
     {
-      const float a = mPresetTable[routingSlot][35 + e];
+      // Ferment also scales lane attens. At Ferment=0 the routing
+      // collapses entirely (no filter-FM, no addAdd injection -- filter
+      // pair runs on trained block-rate cutoffs only).
+      const float a = mPresetTable[routingSlot][35 + e] * ferment;
       const float aa = a < 0.0f ? -a : a;
       if (aa > 1e-6f)
       {
@@ -1330,6 +1616,94 @@ namespace stolmine
         mActiveEdges[mActiveEdgeCount].atten = a;
         mActiveEdgeCount++;
       }
+    }
+
+    // Phase 5d-4 comb block-rate setup. Single-fader collapses dry/wet
+    // AND scan position: combFader=0 -> bypass; combFader>0 -> scan
+    // position = combFader * 63, wet = combFader. Engine identical to
+    // Pecto -- 16 patterns, 4 slopes, 4 resonator types, NEON 3-pass
+    // tap gather.
+    const float combFader = CLAMP(0.0f, 1.0f, mCombScan.value());
+    const float combWet = combFader;
+    const float combDry = 1.0f - combFader;
+    const bool combActive = (combFader > 1e-3f);
+    int combSlot = 0;
+    int combDensity = 0;
+    int combPattern = 0;
+    int combResType = 0;
+    int combSlope = 0;
+    float combFeedback = 0.0f;
+    float combDelaySamples = 0.0f;
+    const float dcR = 1.0f - 6.28318530718f * 20.0f / sr;  // DC-blocker coeff
+    if (combActive)
+    {
+      const float sC = combFader * 63.0f;
+      int n0c = (int)(sC + 0.5f) - K / 2;
+      if (n0c < 0) n0c = 0;
+      if (n0c + K > 64) n0c = 64 - K;
+      mCombFlat[0] = mCombFlat[1] = mCombFlat[2] = 0.0f;
+      float wSumC = 0.0f;
+      float wC[6];
+      for (int j = 0; j < K; j++)
+      {
+        const float dist = fabsf((float)(n0c + j) - sC);
+        const float wRaw = halfWidth - dist;
+        wC[j] = wRaw > 0.0f ? wRaw : 0.0f;
+        wSumC += wC[j];
+      }
+      if (wSumC < 1e-9f) { wC[0] = 1.0f; wSumC = 1.0f; }
+      const float wInvC = 1.0f / wSumC;
+      for (int j = 0; j < K; j++)
+      {
+        const float wj = wC[j] * wInvC;
+        const float *p = mPresetTable[n0c + j];
+        mCombFlat[0] += wj * p[43];
+        mCombFlat[1] += wj * p[44];
+        mCombFlat[2] += wj * p[47];
+      }
+      // Hard-cut single-slot pick for categorical pattern, resType,
+      // slope. Pattern bucketed across 16 (Pecto-full); resType + slope
+      // across 4 each.
+      combSlot = (int)(sC + 0.5f);
+      if (combSlot < 0) combSlot = 0;
+      if (combSlot > 63) combSlot = 63;
+      combDensity = (int)(mCombFlat[0] * (float)kCombMaxTaps + 0.5f);
+      if (combDensity < 1) combDensity = 1;
+      if (combDensity > kCombMaxTaps) combDensity = kCombMaxTaps;
+      combPattern = (int)(mPresetTable[combSlot][45] * 16.0f);
+      if (combPattern < 0) combPattern = 0;
+      if (combPattern > 15) combPattern = 15;
+      combResType = (int)(mPresetTable[combSlot][46] * 4.0f);
+      if (combResType < 0) combResType = 0;
+      if (combResType > 3) combResType = 3;
+      combSlope = (int)(mPresetTable[combSlot][48] * 4.0f);
+      if (combSlope < 0) combSlope = 0;
+      if (combSlope > 3) combSlope = 3;
+      combFeedback = mCombFlat[2] * 0.95f;
+      const float pitchN = CLAMP(0.0f, 1.0f, mCombFlat[1]);
+      const float delayMin = 4.0f;
+      const float delayMax = (float)kCombBufSize - 1.0f;
+      combDelaySamples = delayMin * powf(delayMax / delayMin, pitchN);
+      if (combDensity != mCombCachedDensity ||
+          combPattern != mCombCachedPattern ||
+          combSlope != mCombCachedSlope ||
+          combSlot != mCombCachedSlot)
+      {
+        combRecomputeTaps(mCombTapPos, mCombTapWeight,
+                          combDensity, combPattern, combSlope);
+        mCombActiveTaps = combDensity;
+        mCombCachedDensity = combDensity;
+        mCombCachedPattern = combPattern;
+        mCombCachedSlope = combSlope;
+        mCombCachedSlot = combSlot;
+      }
+      // Cache per-tap delay samples + weights for the per-sample
+      // 3-pass loop (Pecto pattern). Avoids per-sample multiply.
+      // noinline helper prevents gcc auto-vec from emitting :64 hints
+      // on class member arrays.
+      cacheCombTapDelays(mCombTapPos, mCombTapWeight,
+                         mCombCachedDelaySamples, mCombCachedTapWeight,
+                         combDelaySamples, combDensity);
     }
 
     for (int i = 0; i < FRAMELENGTH; i++)
@@ -1520,11 +1894,159 @@ namespace stolmine
       if (!isfinite(mSvfIc2[1])) mSvfIc2[1] = 0.0f;
       const float lpOut1 = v2_1;
 
+      // Phase 5d-4 comb DSP -- IDENTICAL CLONE of Pecto's engine
+      // (Pecto.cpp:506-705). NEON 3-pass: Pass A computes read indices,
+      // Pass B gathers samples (scalar with prefetch), Pass C
+      // interpolates + weights + accumulates. Then resonator type on
+      // feedback, sitar jawari modulation on write, DC-blocker, mix.
+      float postFilt = lpOut1;
+      if (combActive)
+      {
+        if (mCombWriteIdx >= kCombBufSize) mCombWriteIdx = 0;
+        const float writeIdxF = (float)mCombWriteIdx;
+        const float maxDelayF = (float)kCombBufSize;
+        const int density = mCombActiveTaps;
+        const float scale = 1.0f / 32767.0f;
+
+        // --- Pass A (NEON): compute read indices and fractional offsets.
+        {
+          const float32x4_t writeIdxVec = vdupq_n_f32(writeIdxF);
+          const float32x4_t zeroVec = vdupq_n_f32(0.0f);
+          const float32x4_t maxDelayFVec = vdupq_n_f32(maxDelayF);
+          const int32x4_t maxDelayVec = vdupq_n_s32(kCombBufSize);
+          const int32x4_t oneVec = vdupq_n_s32(1);
+          const int32x4_t zeroIVec = vdupq_n_s32(0);
+          int t = 0;
+          for (; t + 4 <= density; t += 4)
+          {
+            float32x4_t delayV = vld1q_f32(&mCombCachedDelaySamples[t]);
+            float32x4_t p = vsubq_f32(writeIdxVec, delayV);
+            uint32x4_t negMask = vcltq_f32(p, zeroVec);
+            float32x4_t pWrap = vaddq_f32(p, maxDelayFVec);
+            p = vbslq_f32(negMask, pWrap, p);
+            int32x4_t i0v = vcvtq_s32_f32(p);
+            int32x4_t i1v = vaddq_s32(i0v, oneVec);
+            uint32x4_t wrapMask = vcgeq_s32(i1v, maxDelayVec);
+            i1v = vbslq_s32(wrapMask, zeroIVec, i1v);
+            float32x4_t fracV = vsubq_f32(p, vcvtq_f32_s32(i0v));
+            vst1q_s32(&mCombIdx0[t], i0v);
+            vst1q_s32(&mCombIdx1[t], i1v);
+            vst1q_f32(&mCombFrac[t], fracV);
+          }
+          for (; t < density; t++)
+          {
+            float p = writeIdxF - mCombCachedDelaySamples[t];
+            if (p < 0.0f) p += maxDelayF;
+            int i0 = (int)p;
+            int i1 = i0 + 1;
+            if (i1 >= kCombBufSize) i1 = 0;
+            mCombIdx0[t] = i0;
+            mCombIdx1[t] = i1;
+            mCombFrac[t] = p - (float)i0;
+          }
+        }
+
+        // Pass B: scalar gather with prefetch. Buffer is 8 KB so it
+        // fits L1, but the prefetch is cheap insurance.
+        for (int t = 0; t < density; t++)
+        {
+          const int pfIdx = t + 8;
+          if (pfIdx < density)
+            __builtin_prefetch(&mCombBuf[mCombIdx0[pfIdx]], 0, 1);
+          mCombSA[t] = mCombBuf[mCombIdx0[t]];
+          mCombSB[t] = mCombBuf[mCombIdx1[t]];
+        }
+
+        float wet = 0.0f;
+        float lastTapOut = 0.0f;
+
+        // --- Pass C (NEON): interpolate + weight + accumulate.
+        {
+          const float32x4_t scaleVec = vdupq_n_f32(scale);
+          float32x4_t wetVec = vdupq_n_f32(0.0f);
+          int t = 0;
+          for (; t + 4 <= density; t += 4)
+          {
+            int16x4_t sAi = vld1_s16(&mCombSA[t]);
+            int16x4_t sBi = vld1_s16(&mCombSB[t]);
+            float32x4_t aV = vmulq_f32(vcvtq_f32_s32(vmovl_s16(sAi)), scaleVec);
+            float32x4_t bV = vmulq_f32(vcvtq_f32_s32(vmovl_s16(sBi)), scaleVec);
+            float32x4_t fV = vld1q_f32(&mCombFrac[t]);
+            float32x4_t wV = vld1q_f32(&mCombCachedTapWeight[t]);
+            float32x4_t tapV = vmlaq_f32(aV, vsubq_f32(bV, aV), fV);
+            tapV = vmulq_f32(tapV, wV);
+            wetVec = vaddq_f32(wetVec, tapV);
+            lastTapOut = vgetq_lane_f32(tapV, 3);
+          }
+          float32x2_t loHi = vadd_f32(vget_low_f32(wetVec), vget_high_f32(wetVec));
+          wet = vget_lane_f32(vpadd_f32(loHi, loHi), 0);
+          for (; t < density; t++)
+          {
+            const float a = (float)mCombSA[t] * scale;
+            const float b = (float)mCombSB[t] * scale;
+            const float tapOut = (a + (b - a) * mCombFrac[t]) * mCombCachedTapWeight[t];
+            wet += tapOut;
+            lastTapOut = tapOut;
+          }
+        }
+
+        // Feedback resonator (Pecto.cpp:631-666 verbatim).
+        float fb = lastTapOut * combFeedback;
+        switch (combResType)
+        {
+        case 0: break;
+        case 1:
+        {
+          const float coeff = 0.15f;
+          mCombFbFilterState += (fb - mCombFbFilterState) * coeff;
+          fb = mCombFbFilterState;
+          break;
+        }
+        case 2:
+        {
+          const float driven = fb * 3.0f;
+          fb = driven - (driven * driven * driven) / 3.0f;
+          fb *= 0.33f;
+          break;
+        }
+        case 3:
+        {
+          const float absVal = fabsf(fb);
+          const float ac = (absVal > mCombSitarEnv) ? 0.01f : 0.001f;
+          mCombSitarEnv += (absVal - mCombSitarEnv) * ac;
+          break;
+        }
+        }
+        const float fbInjection = (fabsf(fb) > 1.5f) ? combFastTanh(fb) : fb;
+        const int writePos = mCombWriteIdx;
+        if (combResType == 3 && mCombSitarEnv > 0.00025f)
+        {
+          int modPos = writePos + (int)(mCombSitarEnv * 4.0f);
+          if (modPos >= kCombBufSize) modPos -= kCombBufSize;
+          if (modPos < 0) modPos += kCombBufSize;
+          combBufWrite(mCombBuf, modPos, postFilt + fbInjection);
+        }
+        else
+        {
+          combBufWrite(mCombBuf, writePos, postFilt + fbInjection);
+        }
+        mCombWriteIdx++;
+        if (mCombWriteIdx >= kCombBufSize) mCombWriteIdx = 0;
+
+        // Mix dry/wet. DC-blocker on the result -- comb feedback can
+        // accumulate DC, especially with sitar amplitude tracking.
+        const float mixed = postFilt * combDry + wet * combWet;
+        const float dcOut = mixed - mCombDcX1 + dcR * mCombDcY1;
+        mCombDcX1 = mixed;
+        mCombDcY1 = dcOut;
+        postFilt = dcOut;
+      }
+
       // Drive + hard clip (5d-2.1 -- preserves transient pop from
       // routing-driven filter resonance). End-of-chain soft-knee
       // limiter catches anything past +/-1 from level boost or
       // upcoming comb/macro stages.
-      float filt = lpOut1 * driveGain;
+      float filt = postFilt * driveGain;
       if (filt > 1.0f) filt = 1.0f;
       else if (filt < -1.0f) filt = -1.0f;
       out[i] = outputLimit(filt * lvl);
