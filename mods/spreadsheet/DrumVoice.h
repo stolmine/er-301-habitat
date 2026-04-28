@@ -82,20 +82,26 @@ namespace stolmine
     bool mManualFire = false;
 
     // Registered via setTopLevelBias; the randomize function mutates these.
-    od::Parameter *mBiasCharacter = nullptr;
-    od::Parameter *mBiasShape = nullptr;
-    od::Parameter *mBiasGrit = nullptr;
-    od::Parameter *mBiasPunch = nullptr;
-    od::Parameter *mBiasAttack = nullptr;
-    od::Parameter *mBiasHold = nullptr;
-    od::Parameter *mBiasDecay = nullptr;
-    od::Parameter *mBiasSweep = nullptr;
-    od::Parameter *mBiasSweepTime = nullptr;
-    od::Parameter *mBiasClipper = nullptr;
-    od::Parameter *mBiasEQ = nullptr;
-    od::Parameter *mBiasLevel = nullptr;
-    od::Parameter *mBiasComp = nullptr;
-    od::Parameter *mBiasOctave = nullptr;
+    // No in-class default initializers -- gcc auto-vectorizes the
+    // batched nullptr-init across these contiguous pointer fields into
+    // quad-D vst1.64 :64 stores in the constructor's synthesized
+    // member-init code, which trap on Cortex-A8 (per
+    // feedback_neon_intrinsics_drumvoice). Constructor body memsets
+    // the whole block instead, which gcc lowers to a libc call.
+    od::Parameter *mBiasCharacter;
+    od::Parameter *mBiasShape;
+    od::Parameter *mBiasGrit;
+    od::Parameter *mBiasPunch;
+    od::Parameter *mBiasAttack;
+    od::Parameter *mBiasHold;
+    od::Parameter *mBiasDecay;
+    od::Parameter *mBiasSweep;
+    od::Parameter *mBiasSweepTime;
+    od::Parameter *mBiasClipper;
+    od::Parameter *mBiasEQ;
+    od::Parameter *mBiasLevel;
+    od::Parameter *mBiasComp;
+    od::Parameter *mBiasOctave;
 
     struct Internal;
     Internal *mpInternal;

@@ -2,6 +2,7 @@
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
+#include <string.h>
 
 #ifdef __ARM_NEON
 #include <arm_neon.h>
@@ -9,6 +10,16 @@
 
 namespace stolmine
 {
+
+  // Init helper for the 0.999f decay-coeffs init. memset can't write
+  // 0.999f (only byte patterns), so this loop has to be separate.
+  // noinline + no-tree-vectorize per feedback_neon_intrinsics_drumvoice.
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void initPartialDecayCoeffs(float *partialDecay)
+  {
+    for (int i = 0; i < 4; i++)
+      partialDecay[i] = 0.999f;
+  }
 
   static inline float fast_tanh(float x)
   {
@@ -177,20 +188,35 @@ namespace stolmine
   float DrumVoice::Internal::sLUT[257] = {};
   bool DrumVoice::Internal::sLUTInit = false;
 
+  // Constructor: no special attribute needed AFTER the in-class
+  // = nullptr initializers were removed from DrumVoice.h. Those were
+  // the source of the trap-prone quad-D vst1.64 :64 hints (gcc auto-
+  // vec'd the batched nullptr-init across 14 contiguous pointer fields
+  // in synthesized member-init code). Constructor body memsets the
+  // bias-pointer block instead, which gcc lowers to a libc call.
   DrumVoice::DrumVoice()
   {
-    // Zero-init NEON working buffers (no in-class init in header to keep
-    // the class layout simple).
-    for (int i = 0; i < 4; i++) {
-      mPhaseBank[i]          = 0.0f;
-      mIncBank[i]            = 0.0f;
-      mSineBank[i]           = 0.0f;
-      mPartialPhases[i]      = 0.0f;
-      mPartialInc[i]         = 0.0f;
-      mPartialSines[i]       = 0.0f;
-      mPartialEnvs[i]        = 0.0f;
-      mPartialDecayCoeffs[i] = 0.999f;
-    }
+    // Zero-init seven NEON-touched float[4] arrays via memset (libc
+    // call, not subject to auto-vec). 0.999f init for partial decay
+    // goes through a noinline helper.
+    memset(mPhaseBank, 0, sizeof(mPhaseBank));
+    memset(mIncBank, 0, sizeof(mIncBank));
+    memset(mSineBank, 0, sizeof(mSineBank));
+    memset(mPartialPhases, 0, sizeof(mPartialPhases));
+    memset(mPartialInc, 0, sizeof(mPartialInc));
+    memset(mPartialSines, 0, sizeof(mPartialSines));
+    memset(mPartialEnvs, 0, sizeof(mPartialEnvs));
+    initPartialDecayCoeffs(mPartialDecayCoeffs);
+
+    // Zero the bias-pointer block via memset rather than 14 in-class
+    // = nullptr initializers (which gcc batched into quad-D :64 NEON
+    // hints in synthesized member-init -- the construction-time crash
+    // pattern from feedback_neon_intrinsics_drumvoice). Address-of the
+    // first pointer + sizeof span covers all 14 pointers contiguously.
+    memset(&mBiasCharacter, 0,
+           (char *)&mBiasOctave + sizeof(mBiasOctave) - (char *)&mBiasCharacter);
+    mXformGateWasHigh = false;
+    mManualFire = false;
     addInput(mTrigger);
     addInput(mVOct);
     addInput(mXformGate);
