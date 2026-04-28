@@ -349,6 +349,11 @@ namespace stolmine
     memset(mSvfIc1, 0, sizeof(mSvfIc1));
     memset(mSvfIc2, 0, sizeof(mSvfIc2));
     memset(mFilterFlat, 0, sizeof(mFilterFlat));
+    memset(mLaneSrc, 0, sizeof(mLaneSrc));
+    memset(mLaneDst, 0, sizeof(mLaneDst));
+    mActiveEdgeCount = 0;
+    memset(mRoutingSources, 0, sizeof(mRoutingSources));
+    memset(mRoutingDst, 0, sizeof(mRoutingDst));
     mpSample = nullptr;
 
     // pffft state: lazy-allocated on first analyzeSample. Hann window
@@ -395,11 +400,15 @@ namespace stolmine
     {
       // Detach -> revert to Phase 3 placeholder gradient + identity LUT.
       // Reset SVF state so filter ringing doesn't persist into the
-      // gentle near-bypass settings.
+      // gentle near-bypass settings, and zero the routing lane indices
+      // so the matrix is inert (atten=0 in placeholder rows already
+      // makes mActiveEdges empty, but explicit zero is safer).
       fillPhase3Presets(mPresetTable);
       fillIdentityWavetableLUT(mWavetableLUT);
       memset(mSvfIc1, 0, sizeof(mSvfIc1));
       memset(mSvfIc2, 0, sizeof(mSvfIc2));
+      memset(mLaneSrc, 0, sizeof(mLaneSrc));
+      memset(mLaneDst, 0, sizeof(mLaneDst));
     }
     else
     {
@@ -672,6 +681,77 @@ namespace stolmine
         if (minD > bestMinDist) { bestMinDist = minD; best = c; }
       }
       picks[p] = best;
+    }
+  }
+
+  // Phase 5d-3 routing-lane training. laneAffinity scores each (src,
+  // dst) pair against the pick's features -- different feature
+  // signatures favor different routing topologies. selectLanesForPick
+  // ranks all 60 candidates by affinity-plus-hash-noise and picks the
+  // top 8. Per-pick hash provides variation across nodes with similar
+  // features (avoids 64 identical lane assignments on uniform samples).
+  //
+  // Source / destination conventions (matched to AlembicVoice.h):
+  //   src 0..3 = PMM ops A..D, src 4..6 = F1 LP/BP/HP, src 7..9 = F2
+  //   dst 0..1 = F1 cutoff verso/inverso, dst 2..3 = F2 cutoff
+  //   dst 4 = F1 input addAdd, dst 5 = F2 input addAdd
+  static float laneAffinity(int src, int dst, const float *feat)
+  {
+    const float zcr        = feat[1];
+    const float brightness = feat[2];
+    const float fluxClamp  = feat[3] > 1.0f ? 1.0f : feat[3];
+    const float entropy    = feat[4];
+    const float pitched    = (zcr < 0.5f) ? (1.0f - 2.0f * zcr) : 0.0f;
+    const bool srcIsPMM   = (src < 4);
+    const bool srcIsFilt  = (src >= 4);
+    const bool dstIsCutoff = (dst < 4);
+    const bool dstIsAdd    = (dst >= 4);
+
+    if (srcIsPMM && dstIsCutoff) return fluxClamp * 0.6f + entropy * 0.2f + brightness * 0.2f;
+    if (srcIsFilt && dstIsCutoff) return entropy * 0.7f + fluxClamp * 0.2f;
+    if (srcIsPMM && dstIsAdd) return pitched * 0.5f + brightness * 0.3f;
+    if (srcIsFilt && dstIsAdd) return entropy * 0.4f + pitched * 0.3f;
+    return 0.0f;
+  }
+
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void selectLanesForPick(const float *feat, uint32_t pickHash,
+                                 uint8_t *outSrc, uint8_t *outDst,
+                                 float *outAtten)
+  {
+    struct Cand { uint8_t s, d; float score; };
+    Cand cands[60];
+    int n = 0;
+    for (int s = 0; s < 10; s++)
+    {
+      for (int d = 0; d < 6; d++)
+      {
+        float score = laneAffinity(s, d, feat);
+        // Per-pick hash for variety. ~30% weight so mostly feature-driven.
+        const uint32_t h = pickHash ^ (s * 374761393u) ^ (d * 668265263u);
+        const float hashNoise = (float)((h >> 8) & 0xFFFF) / 65535.0f;
+        score = score * 0.7f + hashNoise * 0.3f;
+        cands[n].s = (uint8_t)s;
+        cands[n].d = (uint8_t)d;
+        cands[n].score = score;
+        n++;
+      }
+    }
+    // Partial selection sort: top 8 by score.
+    for (int i = 0; i < 8; i++)
+    {
+      int best = i;
+      for (int j = i + 1; j < n; j++)
+        if (cands[j].score > cands[best].score) best = j;
+      Cand tmp = cands[i]; cands[i] = cands[best]; cands[best] = tmp;
+      outSrc[i] = cands[i].s;
+      outDst[i] = cands[i].d;
+      // Atten: score-based with floor + cap. Cap at 0.6 keeps filter-FM
+      // from going wildly unstable; floor at 0.2 ensures every active
+      // lane has audible contribution.
+      float a = 0.2f + cands[i].score * 0.4f;
+      if (a > 0.6f) a = 0.6f;
+      outAtten[i] = a;
     }
   }
 
@@ -1002,6 +1082,21 @@ namespace stolmine
     for (int n = 0; n < 64; n++)
     {
       derivePresetRow(&coarse[picks[n] * kFeatDim], mPresetTable[n], n);
+      // Phase 5d-3 routing lane training. Per-pick hash mixes node
+      // index + a constant so identical features still get distinct
+      // topologies across nodes.
+      const uint32_t pickHash =
+          ((uint32_t)picks[n] * 374761393u) ^ ((uint32_t)n * 2246822519u);
+      uint8_t src8[8], dst8[8];
+      float atten8[8];
+      selectLanesForPick(&coarse[picks[n] * kFeatDim], pickHash,
+                         src8, dst8, atten8);
+      for (int e = 0; e < 8; e++)
+      {
+        mLaneSrc[n][e] = src8[e];
+        mLaneDst[n][e] = dst8[e];
+        mPresetTable[n][35 + e] = atten8[e];
+      }
     }
 
     // Phase 5d-1.6: build per-node 256-entry LUTs from 256-sample multi-
@@ -1170,18 +1265,38 @@ namespace stolmine
     const float kFilterK = 1.0f / Q;
     const float driveGain = 0.5f + driveNrm * 2.5f;
 
-    // Coefficient compute: clamp cutoff to [5, 0.499*sr] per Som.
+    // Block-rate base coefficient. With the 5d-3 routing matrix in,
+    // freqMod becomes per-sample (sources include PMM ops + filter
+    // states), so mg = baseG * fastExp(freqMod * 0.8) is computed
+    // per-sample inside the loop. baseG is block-rate constant.
     const float maxFc = sr * 0.499f;
     float fc1Clamp = fc1Hz; if (fc1Clamp < 5.0f) fc1Clamp = 5.0f; if (fc1Clamp > maxFc) fc1Clamp = maxFc;
     float fc2Clamp = fc2Hz; if (fc2Clamp < 5.0f) fc2Clamp = 5.0f; if (fc2Clamp > maxFc) fc2Clamp = maxFc;
-    const float mg0 = fastTan(3.14159f * fc1Clamp / sr);
-    const float mg1 = fastTan(3.14159f * fc2Clamp / sr);
-    const float a01 = 1.0f / (1.0f + mg0 * (mg0 + kFilterK));
-    const float a02 = mg0 * a01;
-    const float a03 = mg0 * a02;
-    const float a11 = 1.0f / (1.0f + mg1 * (mg1 + kFilterK));
-    const float a12 = mg1 * a11;
-    const float a13 = mg1 * a12;
+    const float baseG0 = fastTan(3.14159f * fc1Clamp / sr);
+    const float baseG1 = fastTan(3.14159f * fc2Clamp / sr);
+
+    // Phase 5d-3 routing matrix: hard-cut single-slot pick. The single
+    // nearest preset slot to mScanPos provides the 8 (src, dst, atten)
+    // lanes -- no K-blend across slot boundaries. Routing topology
+    // snaps when scan crosses slot edges (deliberate per user taste:
+    // produces audible discontinuities + click character at boundaries
+    // rather than smooth interpolation between routings).
+    int routingSlot = (int)(s + 0.5f);
+    if (routingSlot < 0) routingSlot = 0;
+    if (routingSlot > 63) routingSlot = 63;
+    mActiveEdgeCount = 0;
+    for (int e = 0; e < 8; e++)
+    {
+      const float a = mPresetTable[routingSlot][35 + e];
+      const float aa = a < 0.0f ? -a : a;
+      if (aa > 1e-6f)
+      {
+        mActiveEdges[mActiveEdgeCount].src = mLaneSrc[routingSlot][e];
+        mActiveEdges[mActiveEdgeCount].dst = mLaneDst[routingSlot][e];
+        mActiveEdges[mActiveEdgeCount].atten = a;
+        mActiveEdgeCount++;
+      }
+    }
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -1276,44 +1391,77 @@ namespace stolmine
       }
       const float wave_out = sat * (1.0f - wblend) + shaped * wblend;
 
-      // Phase 5d-2 filter pair (lifted from Som.cpp:623-654, dropped
-      // staircase / stair mix / oversample subloop -- Alembic's PMM
-      // doesn't have those signal sources). Filter1 always reads
-      // wave_out; Filter2 reads either wave_out (parallel, topoMix=0)
-      // or F1's BP/LP bridge (cascade, topoMix=1). Output is F2 LP
-      // through drive saturation.
-      {
-        // Filter1
-        float v3 = wave_out - mSvfIc2[0];
-        const float v1_0 = a01 * mSvfIc1[0] + a02 * v3;
-        const float v2_0 = mSvfIc2[0] + a02 * mSvfIc1[0] + a03 * v3;
-        mSvfIc1[0] = 2.0f * v1_0 - mSvfIc1[0];
-        mSvfIc2[0] = 2.0f * v2_0 - mSvfIc2[0];
-        const float bpOut0 = v1_0;
-        const float lpOut0 = v2_0;
+      // Phase 5d-3 routing + filter pair. Sources are the 4 PMM op
+      // outputs (mSineBank, just computed this sample) + filter LP/BP/HP
+      // outputs (LP/BP from end-of-previous-sample integrator state;
+      // HP reconstructed from input - k*BP - LP). 1-sample feedback
+      // delay on filter sources is fine -- standard pattern for
+      // self-modulating filters.
+      // mRoutingSources / mRoutingDst are CLASS MEMBERS per
+      // feedback_neon_intrinsics_drumvoice -- stack-local arrays here
+      // produced gcc auto-vec :64 hints under -O3 -ffast-math.
+      mRoutingSources[0] = mSineBank[0];
+      mRoutingSources[1] = mSineBank[1];
+      mRoutingSources[2] = mSineBank[2];
+      mRoutingSources[3] = mSineBank[3];
+      mRoutingSources[4] = mSvfIc2[0];                                          // F1 LP
+      mRoutingSources[5] = mSvfIc1[0];                                          // F1 BP
+      mRoutingSources[6] = wave_out - kFilterK * mSvfIc1[0] - mSvfIc2[0];       // F1 HP
+      mRoutingSources[7] = mSvfIc2[1];                                          // F2 LP
+      mRoutingSources[8] = mSvfIc1[1];                                          // F2 BP
+      mRoutingSources[9] = wave_out - kFilterK * mSvfIc1[1] - mSvfIc2[1];       // F2 HP
 
-        // Filter2 input: parallel ↔ cascade morph
-        const float f1_bridge = bpOut0 * (1.0f - bpLpBlend) + lpOut0 * bpLpBlend;
-        const float f2_in = wave_out * (1.0f - topoMix) + f1_bridge * topoMix;
+      mRoutingDst[0] = 0.0f; mRoutingDst[1] = 0.0f; mRoutingDst[2] = 0.0f;
+      mRoutingDst[3] = 0.0f; mRoutingDst[4] = 0.0f; mRoutingDst[5] = 0.0f;
+      for (int e = 0; e < mActiveEdgeCount; e++)
+        mRoutingDst[mActiveEdges[e].dst] += mRoutingSources[mActiveEdges[e].src] * mActiveEdges[e].atten;
 
-        // Filter2
-        v3 = f2_in - mSvfIc2[1];
-        const float v1_1 = a11 * mSvfIc1[1] + a12 * v3;
-        const float v2_1 = mSvfIc2[1] + a12 * mSvfIc1[1] + a13 * v3;
-        mSvfIc1[1] = 2.0f * v1_1 - mSvfIc1[1];
-        mSvfIc2[1] = 2.0f * v2_1 - mSvfIc2[1];
-        const float lpOut1 = v2_1;
+      // freqMod = verso - inverso pair per filter; addAdd directly into
+      // filter input. fastExp(freqMod * 0.8) follows Som's convention
+      // -- multiplicative cutoff modulation, bounded by fastExp's
+      // internal clamping so the filter can't go totally unstable.
+      const float freqMod0 = mRoutingDst[0] - mRoutingDst[1];
+      const float freqMod1 = mRoutingDst[2] - mRoutingDst[3];
+      const float addF1    = mRoutingDst[4];
+      const float addF2    = mRoutingDst[5];
 
-        // Drive: gain stage + hard clip. Soft-sat x/(1+|x|) was
-        // asymptotically mushy and killed transient pop. Hard clip
-        // produces real clipping harmonics + sharp transitions when
-        // the signal exceeds +/-1, giving the click/pop character on
-        // transients that shaping-only material couldn't produce.
-        float filt = lpOut1 * driveGain;
-        if (filt > 1.0f) filt = 1.0f;
-        else if (filt < -1.0f) filt = -1.0f;
-        out[i] = filt * lvl;
-      }
+      const float mg0 = baseG0 * fastExp(freqMod0 * 0.8f);
+      const float mg1 = baseG1 * fastExp(freqMod1 * 0.8f);
+      const float a01 = 1.0f / (1.0f + mg0 * (mg0 + kFilterK));
+      const float a02 = mg0 * a01;
+      const float a03 = mg0 * a02;
+      const float a11 = 1.0f / (1.0f + mg1 * (mg1 + kFilterK));
+      const float a12 = mg1 * a11;
+      const float a13 = mg1 * a12;
+
+      // Filter1: input = wave_out + addF1 (additive injection from routing)
+      const float f1_in = wave_out + addF1;
+      float v3 = f1_in - mSvfIc2[0];
+      const float v1_0 = a01 * mSvfIc1[0] + a02 * v3;
+      const float v2_0 = mSvfIc2[0] + a02 * mSvfIc1[0] + a03 * v3;
+      mSvfIc1[0] = 2.0f * v1_0 - mSvfIc1[0];
+      mSvfIc2[0] = 2.0f * v2_0 - mSvfIc2[0];
+      const float bpOut0 = v1_0;
+      const float lpOut0 = v2_0;
+
+      // Filter2 input: parallel <-> cascade morph + addF2
+      const float f1_bridge = bpOut0 * (1.0f - bpLpBlend) + lpOut0 * bpLpBlend;
+      const float f2_in = wave_out * (1.0f - topoMix) + f1_bridge * topoMix + addF2;
+
+      // Filter2
+      v3 = f2_in - mSvfIc2[1];
+      const float v1_1 = a11 * mSvfIc1[1] + a12 * v3;
+      const float v2_1 = mSvfIc2[1] + a12 * mSvfIc1[1] + a13 * v3;
+      mSvfIc1[1] = 2.0f * v1_1 - mSvfIc1[1];
+      mSvfIc2[1] = 2.0f * v2_1 - mSvfIc2[1];
+      const float lpOut1 = v2_1;
+
+      // Drive + hard clip (5d-2.1 -- preserves transient pop from
+      // routing-driven filter resonance).
+      float filt = lpOut1 * driveGain;
+      if (filt > 1.0f) filt = 1.0f;
+      else if (filt < -1.0f) filt = -1.0f;
+      out[i] = filt * lvl;
 
       // Prev update for next sample's matrix/feedback.
       vst1q_f32(mPrevOutBank, vSine);

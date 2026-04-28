@@ -17,6 +17,7 @@
 #include <od/objects/Object.h>
 #include <od/audio/Sample.h>
 #include <od/config.h>
+#include <stdint.h>
 
 // Forward-declare pffft setup so AlembicVoice.h doesn't have to pull in
 // pffft.h. The .cpp includes pffft.h for the actual API.
@@ -211,9 +212,44 @@ namespace stolmine
 
     // Block-rate K-blended filter base scratch (cutoff1, cutoff2, Q,
     // topoMix, bpLpBlend, drive in [0,1]). Mapped to Hz / Q / etc at
-    // process time. 5d-3 will add lane-attens working buffers next to
-    // these; for now just the base 6.
+    // process time.
     float mFilterFlat[6];
+
+    // Phase 5d-3 routing matrix. Per-pick training picks 8 (src, dst)
+    // lanes; lane attens live in row[35..42] of the preset table.
+    // src indices in [0..9], dst indices in [0..5]:
+    //   src 0..3 = PMM op outputs A, B, C, D (mSineBank)
+    //   src 4..6 = Filter1 LP, BP, HP (from svf state + filter input)
+    //   src 7..9 = Filter2 LP, BP, HP
+    //   dst 0..1 = Filter1 cutoff verso, inverso (subtract -> freqMod)
+    //   dst 2..3 = Filter2 cutoff verso, inverso
+    //   dst 4    = Filter1 input addAdd
+    //   dst 5    = Filter2 input addAdd
+    //
+    // Hard-cut routing: process() picks the SINGLE nearest preset slot
+    // to mScanPos and uses its 8 lanes directly -- no K-blend across
+    // slot boundaries. Routing topology snaps at boundaries (per user
+    // taste -- matches the click/pop character the unit is going for).
+    uint8_t mLaneSrc[64][8];
+    uint8_t mLaneDst[64][8];
+
+    // Block-rate active-edge scratch. Up to 8 lanes (1 slot, hard cut)
+    // -- zero-atten lanes filtered out at block setup so the per-sample
+    // edge loop only processes useful contributions.
+    struct AlembicEdge { uint8_t src; uint8_t dst; float atten; };
+    AlembicEdge mActiveEdges[8];
+    int mActiveEdgeCount;
+
+    // Per-sample routing sources / destination scratch as CLASS MEMBERS
+    // (not stack-local) per feedback_neon_intrinsics_drumvoice. Stack-
+    // local NEON-touched arrays under -O3 -ffast-math get gcc auto-vec
+    // with `:64` alignment hints which trap on Cortex-A8. Holding these
+    // on the heap (via the AlembicVoice instance) keeps gcc from
+    // promoting hints on access patterns. Loops over them are scalar
+    // (no vectorize attribute on process() but the small 8-edge loop
+    // is unlikely to auto-vec anyway).
+    float mRoutingSources[10];
+    float mRoutingDst[6];
 
     // Sample-pool slot. Lifetime managed via attach/release pairs in
     // setSample. Phase 5b reads it once during analyzeSample().
