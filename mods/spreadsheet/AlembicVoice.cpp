@@ -1455,8 +1455,12 @@ namespace stolmine
       // freqMod drives cutoff toward DC.
       const float kMaxMg = 8.0f;
       const float kMinMg = 0.001f;
-      float mg0 = baseG0 * fastExp(freqMod0 * 0.8f);
-      float mg1 = baseG1 * fastExp(freqMod1 * 0.8f);
+      // Routing FM scale 0.6 (was 0.8 from Som). Cutoff modulation at
+      // audio rate smears the resonance peak across a wider band; a
+      // gentler scale keeps the peak audible while still letting routing
+      // contribute character.
+      float mg0 = baseG0 * fastExp(freqMod0 * 0.6f);
+      float mg1 = baseG1 * fastExp(freqMod1 * 0.6f);
       if (mg0 > kMaxMg) mg0 = kMaxMg; else if (mg0 < kMinMg) mg0 = kMinMg;
       if (mg1 > kMaxMg) mg1 = kMaxMg; else if (mg1 < kMinMg) mg1 = kMinMg;
       const float a01 = 1.0f / (1.0f + mg0 * (mg0 + kFilterK));
@@ -1466,29 +1470,40 @@ namespace stolmine
       const float a12 = mg1 * a11;
       const float a13 = mg1 * a12;
 
-      // Filter1: input = wave_out + addF1 (additive injection from routing)
-      const float f1_in = wave_out + addF1;
+      // Filter1: input = wave_out + addF1, hard-clamped to +/-4. Bounding
+      // the input (Tomograph / stmlib::Svf approach) lets the integrator
+      // state evolve freely without softening the resonance peak. This
+      // is the wooliness fix: wideSoftClip on the integrator was tanh-
+      // asymptoting the resonance peak, producing the muffled character.
+      float f1_in = wave_out + addF1;
+      if (f1_in > 4.0f) f1_in = 4.0f;
+      else if (f1_in < -4.0f) f1_in = -4.0f;
       float v3 = f1_in - mSvfIc2[0];
       const float v1_0 = a01 * mSvfIc1[0] + a02 * v3;
       const float v2_0 = mSvfIc2[0] + a02 * mSvfIc1[0] + a03 * v3;
-      // wideSoftClip on integrator state bounds it to ~+/-8 with tanh
-      // asymptote beyond -- prevents lockup from feedback amplification
-      // while preserving high-Q resonance up to that range.
-      mSvfIc1[0] = wideSoftClip(2.0f * v1_0 - mSvfIc1[0]);
-      mSvfIc2[0] = wideSoftClip(2.0f * v2_0 - mSvfIc2[0]);
+      mSvfIc1[0] = 2.0f * v1_0 - mSvfIc1[0];
+      mSvfIc2[0] = 2.0f * v2_0 - mSvfIc2[0];
+      // Finite-check safety net (rare-trigger). isfinite is one fcmp +
+      // branch; on the happy path the branch is never taken.
+      if (!isfinite(mSvfIc1[0])) mSvfIc1[0] = 0.0f;
+      if (!isfinite(mSvfIc2[0])) mSvfIc2[0] = 0.0f;
       const float bpOut0 = v1_0;
       const float lpOut0 = v2_0;
 
-      // Filter2 input: parallel <-> cascade morph + addF2
+      // Filter2 input: parallel <-> cascade morph + addF2, also bounded
       const float f1_bridge = bpOut0 * (1.0f - bpLpBlend) + lpOut0 * bpLpBlend;
-      const float f2_in = wave_out * (1.0f - topoMix) + f1_bridge * topoMix + addF2;
+      float f2_in = wave_out * (1.0f - topoMix) + f1_bridge * topoMix + addF2;
+      if (f2_in > 4.0f) f2_in = 4.0f;
+      else if (f2_in < -4.0f) f2_in = -4.0f;
 
-      // Filter2
+      // Filter2 -- same input-bounded, free-integrator approach
       v3 = f2_in - mSvfIc2[1];
       const float v1_1 = a11 * mSvfIc1[1] + a12 * v3;
       const float v2_1 = mSvfIc2[1] + a12 * mSvfIc1[1] + a13 * v3;
-      mSvfIc1[1] = wideSoftClip(2.0f * v1_1 - mSvfIc1[1]);
-      mSvfIc2[1] = wideSoftClip(2.0f * v2_1 - mSvfIc2[1]);
+      mSvfIc1[1] = 2.0f * v1_1 - mSvfIc1[1];
+      mSvfIc2[1] = 2.0f * v2_1 - mSvfIc2[1];
+      if (!isfinite(mSvfIc1[1])) mSvfIc1[1] = 0.0f;
+      if (!isfinite(mSvfIc2[1])) mSvfIc2[1] = 0.0f;
       const float lpOut1 = v2_1;
 
       // Drive + hard clip (5d-2.1 -- preserves transient pop from
