@@ -17,6 +17,37 @@ namespace stolmine
 
   static const float kTwoPi = 6.28318530718f;
   static const float kLn2 = 0.69314718056f;
+  // ln(200) for cutoff exp-mapping: cutoff_Hz = 40 * exp(fc * 5.298)
+  // gives a [0,1] -> 40..8000 Hz curve identical to Som's vp[0]
+  // expressed in a single fastExp call.
+  static const float kCutoffExpScale = 5.298317366f;
+
+  // Phase 5d-2 filter helpers, lifted verbatim from
+  // mods/catchall/Som.cpp:31-67. Pade 3/3 tan approximation for SVF
+  // coefficient + integer/fractional split exp approximation.
+  static inline float fastTan(float x)
+  {
+    const float x2 = x * x;
+    return x * (1.0f + x2 * (1.0f / 3.0f + x2 * (2.0f / 15.0f))) /
+               (1.0f + x2 * (-1.0f / 3.0f));
+  }
+
+  static inline float fastExp(float x)
+  {
+    x *= 1.4426950f; // log2(e)
+    if (x >  16.0f) x =  16.0f;
+    if (x < -16.0f) x = -16.0f;
+    const float xf = floorf(x);
+    const float fx = x - xf;
+    // 2^fx polynomial on [0, 1]
+    const float poly = 1.0f + fx * (0.6931472f + fx * (0.2402265f + fx * 0.0555041f));
+    union { float f; int32_t i; } u;
+    int ix = (int)xf + 127;
+    if (ix < 1) ix = 1;
+    if (ix > 254) ix = 254;
+    u.i = ix << 23;
+    return poly * u.f;
+  }
   // Matches libcore SineOscillator.cpp: feedback inlet value is clamped
   // to [-1,1] then multiplied by 0.18 before combining with the phase
   // argument. AlembicRef routes diagonal matrix entries via each op's
@@ -76,7 +107,18 @@ namespace stolmine
       {
         t[slot][f] = endA[f] + u * (endB[f] - endA[f]);
       }
-      for (int f = 29; f < 43; f++) t[slot][f] = 0.0f;
+      // Phase 5d-2 placeholder filter base (gentle near-bypass with no
+      // sample loaded): cutoff ~6.5 kHz, Q low, parallel topology, LP
+      // out only, unity drive. Trained content overwrites in
+      // derivePresetRow.
+      t[slot][29] = 0.85f;  // cutoff1 in [0,1] -> ~6500 Hz via exp map
+      t[slot][30] = 0.85f;  // cutoff2
+      t[slot][31] = 0.0f;   // Q in [0,1] -> 0.5 (gentle)
+      t[slot][32] = 0.0f;   // topoMix: parallel
+      t[slot][33] = 1.0f;   // bpLpBlend: LP only
+      t[slot][34] = 0.2f;   // drive in [0,1] -> driveGain ~1.0 (unity)
+      // Lane attens (5d-3) stay zero in placeholder.
+      for (int f = 35; f < 43; f++) t[slot][f] = 0.0f;
     }
   }
 
@@ -286,6 +328,13 @@ namespace stolmine
     addParameter(mReagentScan);
     addParameter(mReagent);
 
+    addParameter(mFilterCutoff1);
+    addParameter(mFilterCutoff2);
+    addParameter(mFilterQ);
+    addParameter(mTopoMix);
+    addParameter(mBpLpBlend);
+    addParameter(mDrive);
+
     memset(mPhaseBank, 0, sizeof(mPhaseBank));
     memset(mPrevOutBank, 0, sizeof(mPrevOutBank));
     memset(mPhaseArgBank, 0, sizeof(mPhaseArgBank));
@@ -297,6 +346,9 @@ namespace stolmine
     fillPhase3Presets(mPresetTable);
     fillIdentityWavetableLUT(mWavetableLUT);
     mWavetableBlend = 0.0f;
+    memset(mSvfIc1, 0, sizeof(mSvfIc1));
+    memset(mSvfIc2, 0, sizeof(mSvfIc2));
+    memset(mFilterFlat, 0, sizeof(mFilterFlat));
     mpSample = nullptr;
 
     // pffft state: lazy-allocated on first analyzeSample. Hann window
@@ -342,8 +394,12 @@ namespace stolmine
     if (mpSample == nullptr)
     {
       // Detach -> revert to Phase 3 placeholder gradient + identity LUT.
+      // Reset SVF state so filter ringing doesn't persist into the
+      // gentle near-bypass settings.
       fillPhase3Presets(mPresetTable);
       fillIdentityWavetableLUT(mWavetableLUT);
+      memset(mSvfIc1, 0, sizeof(mSvfIc1));
+      memset(mSvfIc2, 0, sizeof(mSvfIc2));
     }
     else
     {
@@ -787,10 +843,28 @@ namespace stolmine
         (1.0f - intPull) * (entropy * 0.5f + flatness * 0.5f);
     row[28] = wblendIntensity;
 
-    // Phase 5d-1: filter base + lane atten slots zeroed (5d-2/5d-3 will
-    // populate them). Filter is bypassed in 5d-1 by the process() chain;
-    // these slots are inert until 5d-2 lands.
-    for (int i = 29; i < 43; i++) row[i] = 0.0f;
+    // Phase 5d-2 filter base [29..34]. All values normalized [0,1];
+    // process() maps to Hz / Q / etc per Som's convention. Mapping
+    // taste:
+    //   - Brightness drives both cutoffs; cutoff2 also picks up flux
+    //     and entropy so it diverges from cutoff1 on transient material
+    //   - Pitched material gets sharp Q (resonant); noisy stays low Q
+    //   - Stationary samples (high runLen) cascade their filter pair;
+    //     transient samples stay parallel
+    //   - Tonal samples blend toward LP; noisy toward BP
+    //   - Drive picks up noisy + flux so transient material gets
+    //     pushed harder
+    const float bScore  = brightness * 0.7f + flatness   * 0.3f;
+    const float bScore2 = brightness * 0.4f + fluxClamp  * 0.4f + entropy * 0.2f;
+    row[29] = bScore;                              // cutoff1 [0,1]
+    row[30] = bScore2;                             // cutoff2 [0,1]
+    row[31] = pitched;                             // Q [0,1]
+    row[32] = runLen;                              // topoMix [0,1]
+    row[33] = pitched;                             // bpLpBlend [0,1] (tonal -> LP)
+    row[34] = noisy * 0.6f + fluxClamp * 0.4f;     // drive [0,1]
+
+    // Lane attens [35..42] stay zero (5d-3 populates).
+    for (int i = 35; i < 43; i++) row[i] = 0.0f;
   }
 
   // Mean-center ratios across nodes per planning doc line 125: even when
@@ -1002,6 +1076,7 @@ namespace stolmine
     for (int f = 0; f < 4; f++) mLevelFlat[f] = 0.0f;
     for (int f = 0; f < 4; f++) mDetuneFlat[f] = 0.0f;
     for (int f = 0; f < 16; f++) mMatrixFlat[f] = 0.0f;
+    for (int f = 0; f < 6; f++) mFilterFlat[f] = 0.0f;
     for (int j = 0; j < K; j++)
     {
       const float wj = w[j] * wInv;
@@ -1010,6 +1085,7 @@ namespace stolmine
       for (int f = 0; f < 4; f++) mLevelFlat[f] += wj * p[4 + f];
       for (int f = 0; f < 4; f++) mDetuneFlat[f] += wj * p[8 + f];
       for (int f = 0; f < 16; f++) mMatrixFlat[f] += wj * p[12 + f];
+      for (int f = 0; f < 6; f++) mFilterFlat[f] += wj * p[29 + f];
     }
 
     // Phase 5d-1.5: independent reagent scan window. mReagentScan
@@ -1071,6 +1147,39 @@ namespace stolmine
     const float32x4_t vLevel = vld1q_f32(mLevelFlat);
     const float f0Sp = f0 * sp;
     const float wblend = mWavetableBlend;
+
+    // Phase 5d-2 filter base resolution (block-rate). Map K-blended
+    // [0,1] values to Hz / Q / etc per Som's convention. In 5d-2 there
+    // is no routing FM, so freqMod = 0 -> mg is block-constant. We
+    // can pre-compute mg, k, a1/a2/a3 once per block per filter; the
+    // per-sample loop just runs the SVF state update. 5d-3 will move
+    // mg back inside the per-sample loop where freqMod from the
+    // routing matrix becomes signal-rate.
+    const float fc1Norm = CLAMP(0.0f, 1.0f, mFilterFlat[0]);
+    const float fc2Norm = CLAMP(0.0f, 1.0f, mFilterFlat[1]);
+    const float qNorm   = CLAMP(0.0f, 1.0f, mFilterFlat[2]);
+    const float topoMix = CLAMP(0.0f, 1.0f, mFilterFlat[3]);
+    const float bpLpBlend = CLAMP(0.0f, 1.0f, mFilterFlat[4]);
+    const float driveNrm = CLAMP(0.0f, 1.0f, mFilterFlat[5]);
+
+    const float fc1Hz = 40.0f * fastExp(fc1Norm * kCutoffExpScale);
+    const float fc2Hz = 40.0f * fastExp(fc2Norm * kCutoffExpScale);
+    const float Q = 0.5f + qNorm * 49.5f;
+    const float kFilterK = 1.0f / Q;
+    const float driveGain = 0.5f + driveNrm * 2.5f;
+
+    // Coefficient compute: clamp cutoff to [5, 0.499*sr] per Som.
+    const float maxFc = sr * 0.499f;
+    float fc1Clamp = fc1Hz; if (fc1Clamp < 5.0f) fc1Clamp = 5.0f; if (fc1Clamp > maxFc) fc1Clamp = maxFc;
+    float fc2Clamp = fc2Hz; if (fc2Clamp < 5.0f) fc2Clamp = 5.0f; if (fc2Clamp > maxFc) fc2Clamp = maxFc;
+    const float mg0 = fastTan(3.14159f * fc1Clamp / sr);
+    const float mg1 = fastTan(3.14159f * fc2Clamp / sr);
+    const float a01 = 1.0f / (1.0f + mg0 * (mg0 + kFilterK));
+    const float a02 = mg0 * a01;
+    const float a03 = mg0 * a02;
+    const float a11 = 1.0f / (1.0f + mg1 * (mg1 + kFilterK));
+    const float a12 = mg1 * a11;
+    const float a13 = mg1 * a12;
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -1163,8 +1272,42 @@ namespace stolmine
         const float b = frame[idxR];
         shaped += wNormalizedR[j] * (a + frac * (b - a));
       }
-      const float shapedOut = sat * (1.0f - wblend) + shaped * wblend;
-      out[i] = shapedOut * lvl;
+      const float wave_out = sat * (1.0f - wblend) + shaped * wblend;
+
+      // Phase 5d-2 filter pair (lifted from Som.cpp:623-654, dropped
+      // staircase / stair mix / oversample subloop -- Alembic's PMM
+      // doesn't have those signal sources). Filter1 always reads
+      // wave_out; Filter2 reads either wave_out (parallel, topoMix=0)
+      // or F1's BP/LP bridge (cascade, topoMix=1). Output is F2 LP
+      // through drive saturation.
+      {
+        // Filter1
+        float v3 = wave_out - mSvfIc2[0];
+        const float v1_0 = a01 * mSvfIc1[0] + a02 * v3;
+        const float v2_0 = mSvfIc2[0] + a02 * mSvfIc1[0] + a03 * v3;
+        mSvfIc1[0] = 2.0f * v1_0 - mSvfIc1[0];
+        mSvfIc2[0] = 2.0f * v2_0 - mSvfIc2[0];
+        const float bpOut0 = v1_0;
+        const float lpOut0 = v2_0;
+
+        // Filter2 input: parallel ↔ cascade morph
+        const float f1_bridge = bpOut0 * (1.0f - bpLpBlend) + lpOut0 * bpLpBlend;
+        const float f2_in = wave_out * (1.0f - topoMix) + f1_bridge * topoMix;
+
+        // Filter2
+        v3 = f2_in - mSvfIc2[1];
+        const float v1_1 = a11 * mSvfIc1[1] + a12 * v3;
+        const float v2_1 = mSvfIc2[1] + a12 * mSvfIc1[1] + a13 * v3;
+        mSvfIc1[1] = 2.0f * v1_1 - mSvfIc1[1];
+        mSvfIc2[1] = 2.0f * v2_1 - mSvfIc2[1];
+        const float lpOut1 = v2_1;
+
+        // Drive saturation: gain stage + soft clip via x/(1+|x|)
+        float filt = lpOut1 * driveGain;
+        const float af = filt < 0.0f ? -filt : filt;
+        filt = filt / (1.0f + af);
+        out[i] = filt * lvl;
+      }
 
       // Prev update for next sample's matrix/feedback.
       vst1q_f32(mPrevOutBank, vSine);

@@ -102,6 +102,17 @@ namespace stolmine
     od::Parameter mReagentScan{"ReagentScan", 0.0f};
     od::Parameter mReagent{"Reagent", 0.0f};
 
+    // Phase 5d-2 filter pair user-bias hooks. Trained values live in
+    // row[29..34]; these Parameters are the Phase 7 fade hooks.
+    // Cutoffs / Q / topoMix / bpLpBlend / drive normalized [0,1] per
+    // Som's convention (mapped to Hz / Q / etc at process time).
+    od::Parameter mFilterCutoff1{"FilterCutoff1", 0.6f};
+    od::Parameter mFilterCutoff2{"FilterCutoff2", 0.6f};
+    od::Parameter mFilterQ{"FilterQ", 0.0f};
+    od::Parameter mTopoMix{"TopoMix", 0.0f};
+    od::Parameter mBpLpBlend{"BpLpBlend", 1.0f};
+    od::Parameter mDrive{"Drive", 0.2f};
+
     // Phase 4 viz hooks. Inline so the sphere's draw loop has no dispatch
     // overhead. getNodeBrightness is a Phase 3 placeholder (linear gradient
     // per slot index); Phase 5 will replace it with sample-trained richness.
@@ -190,6 +201,19 @@ namespace stolmine
     // process()'s per-sample shaper crossfades identity ↔ full LUT
     // by this scalar.
     float mWavetableBlend;
+
+    // Phase 5d-2 TPT SVF state (lifted from Som's filter pair). Two
+    // filters per voice; integrators ic1 (BP) and ic2 (LP) per filter.
+    // Class members per feedback_neon_intrinsics_drumvoice (heap, not
+    // stack-local). Initialized to 0 in constructor + setSample(null).
+    float mSvfIc1[2];
+    float mSvfIc2[2];
+
+    // Block-rate K-blended filter base scratch (cutoff1, cutoff2, Q,
+    // topoMix, bpLpBlend, drive in [0,1]). Mapped to Hz / Q / etc at
+    // process time. 5d-3 will add lane-attens working buffers next to
+    // these; for now just the base 6.
+    float mFilterFlat[6];
 
     // Sample-pool slot. Lifetime managed via attach/release pairs in
     // setSample. Phase 5b reads it once during analyzeSample().
