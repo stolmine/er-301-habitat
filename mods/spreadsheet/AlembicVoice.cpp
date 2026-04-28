@@ -68,6 +68,20 @@ namespace stolmine
     const float ax = x < 0.0f ? -x : x;
     return x / (1.0f + ax);
   }
+
+  // Soft-knee output limiter. Linear pass-through for |x| < 0.9,
+  // smooth asymptote toward +/-1.0 above. Catches peaks from internal
+  // stages (drive hard-clip at +/-1 + level can already approach 1;
+  // upcoming comb + Ferment/Crucible boosts can push higher) without
+  // killing dynamics in the normal range.
+  static inline float outputLimit(float x)
+  {
+    const float ax = x < 0.0f ? -x : x;
+    if (ax < 0.9f) return x;
+    const float sign = x < 0.0f ? -1.0f : 1.0f;
+    const float over = ax - 0.9f;
+    return sign * (0.9f + 0.1f * over / (1.0f + over));
+  }
   // Matches libcore SineOscillator.cpp: feedback inlet value is clamped
   // to [-1,1] then multiplied by 0.18 before combining with the phase
   // argument. AlembicRef routes diagonal matrix entries via each op's
@@ -1507,11 +1521,13 @@ namespace stolmine
       const float lpOut1 = v2_1;
 
       // Drive + hard clip (5d-2.1 -- preserves transient pop from
-      // routing-driven filter resonance).
+      // routing-driven filter resonance). End-of-chain soft-knee
+      // limiter catches anything past +/-1 from level boost or
+      // upcoming comb/macro stages.
       float filt = lpOut1 * driveGain;
       if (filt > 1.0f) filt = 1.0f;
       else if (filt < -1.0f) filt = -1.0f;
-      out[i] = filt * lvl;
+      out[i] = outputLimit(filt * lvl);
 
       // Prev update for next sample's matrix/feedback.
       vst1q_f32(mPrevOutBank, vSine);
