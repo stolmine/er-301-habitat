@@ -1,39 +1,32 @@
--- AlembicScanControl: paramMode shift-toggle scan control for Alembic.
--- Headline knob = scan position; shift-toggle reveals two readouts on the
--- sub-display: K (path window, sub1) and sample-pointer depth (Phase 8e,
--- sub3). Structurally close to ColmatageBlockControl per
--- feedback_identical_means_identical.
+-- AlembicReagentControl: paramMode shift-toggle reagent control for
+-- Alembic. Headline knob = reagent scan position (independent of the
+-- main scan -- moves through the wavetable transfer-function frames);
+-- shift-toggle reveals the Amount fader on the sub-display. Defaults
+-- to amount=0 so a freshly-loaded unit is clean PM until the user
+-- dials the wavetable in.
 --
--- setFocusedReadout always called via the method, never direct assignment,
--- per feedback_gainbias_dual_mode_focus.
+-- Structurally identical to AlembicScanControl per
+-- feedback_identical_means_identical, with two deviations: no sphere
+-- viz attached to the main cursor (the sphere belongs to the main
+-- scan ply), and the shift-toggle parameter is the Amount fader
+-- instead of K.
 
 local app = app
-local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
-local ShiftHelpers = require "spreadsheet.ShiftHelpers"
+local ShiftHelpers = require "catchall.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
 local center4 = app.GRID5_CENTER4
-local col1 = app.BUTTON1_CENTER
-local col3 = app.BUTTON3_CENTER
+local col2 = app.BUTTON2_CENTER
 
-local AlembicScanControl = Class {}
-AlembicScanControl:include(GainBias)
+local AlembicReagentControl = Class {}
+AlembicReagentControl:include(GainBias)
 
-function AlembicScanControl:init(args)
+function AlembicReagentControl:init(args)
   GainBias.init(self, args)
-
-  -- Sphere viz attaches as the main cursor controller (mirrors
-  -- SomScanControl + ColmatageBlockControl pattern).
-  local sphere = libspreadsheet.AlembicSphereGraphic(0, 0, ply, 64)
-  if args.op then sphere:follow(args.op) end
-  local container = app.Graphic(0, 0, ply, 64)
-  container:addChild(sphere)
-  self:setMainCursorController(sphere)
-  self:setControlGraphic(container)
 
   self.paramMode = false
   self.shiftHeld = false
@@ -42,56 +35,36 @@ function AlembicScanControl:init(args)
 
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  local kMap = (function()
-    local m = app.LinearDialMap(2, 6)
-    m:setSteps(1, 1, 1, 1)
-    m:setRounding(1)
+  local amountMap = (function()
+    local m = app.LinearDialMap(0, 1)
+    m:setSteps(0.1, 0.05, 0.01, 0.001)
+    m:setRounding(0.001)
     return m
   end)()
 
-  -- Two readouts in the canonical paramMode layout: sub1 (left) = K
-  -- (path window), sub3 (right) = sample-pointer excitation depth.
-  self.kReadout = (function()
+  -- Single centered readout (matches AlembicScanControl's K layout).
+  self.amountReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
-    g:setParameter(args.kParam)
-    g:setAttributes(app.unitNone, kMap)
-    g:setPrecision(0)
-    g:setCenter(col1, center4)
+    g:setParameter(args.amountParam)
+    g:setAttributes(app.unitNone, amountMap)
+    g:setPrecision(3)
+    g:setCenter(col2, center4)
     return g
   end)()
 
-  self.depthReadout = (function()
-    local g = app.Readout(0, 0, ply, 10)
-    g:setParameter(args.depthParam)
-    g:setAttributes(app.unitNone, Encoder.getMap("[0,1]"))
-    g:setPrecision(2)
-    g:setCenter(col3, center4)
-    return g
-  end)()
+  local desc = app.Label("Amount", 10)
+  desc:fitToText(3)
+  desc:setSize(ply * 3, desc.mHeight)
+  desc:setBorder(1)
+  desc:setCornerRadius(3, 0, 0, 3)
+  desc:setCenter(col2, center1 + 1)
 
-  local descK = app.Label("Path window K", 10)
-  descK:fitToText(3)
-  descK:setSize(ply * 3, descK.mHeight)
-  descK:setBorder(1)
-  descK:setCornerRadius(3, 0, 0, 3)
-  descK:setCenter(col1, center1 + 1)
-
-  local descD = app.Label("Sample pointer depth", 10)
-  descD:fitToText(3)
-  descD:setSize(ply * 3, descD.mHeight)
-  descD:setBorder(1)
-  descD:setCornerRadius(3, 0, 0, 3)
-  descD:setCenter(col3, center1 + 1)
-
-  self.paramSubGraphic:addChild(self.kReadout)
-  self.paramSubGraphic:addChild(self.depthReadout)
-  self.paramSubGraphic:addChild(descK)
-  self.paramSubGraphic:addChild(descD)
-  self.paramSubGraphic:addChild(app.SubButton("K", 1))
-  self.paramSubGraphic:addChild(app.SubButton("dpth", 3))
+  self.paramSubGraphic:addChild(self.amountReadout)
+  self.paramSubGraphic:addChild(desc)
+  self.paramSubGraphic:addChild(app.SubButton("amt", 2))
 end
 
-function AlembicScanControl:setParamMode(enabled)
+function AlembicReagentControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
   self.paramFocusedReadout = nil
@@ -105,7 +78,7 @@ function AlembicScanControl:setParamMode(enabled)
   self:addSubGraphic(self.subGraphic)
 end
 
-function AlembicScanControl:onCursorEnter(spot)
+function AlembicReagentControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
   if self.paramMode then
@@ -113,7 +86,7 @@ function AlembicScanControl:onCursorEnter(spot)
   end
 end
 
-function AlembicScanControl:onCursorLeave(spot)
+function AlembicReagentControl:onCursorLeave(spot)
   if self.paramMode then
     self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
@@ -122,7 +95,7 @@ function AlembicScanControl:onCursorLeave(spot)
   GainBias.onCursorLeave(self, spot)
 end
 
-function AlembicScanControl:shiftPressed()
+function AlembicReagentControl:shiftPressed()
   self.shiftHeld = true
   self.shiftUsed = false
   if self.paramFocusedReadout then
@@ -133,7 +106,7 @@ function AlembicScanControl:shiftPressed()
   return true
 end
 
-function AlembicScanControl:shiftReleased()
+function AlembicReagentControl:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
     if self.paramFocusedReadout and self.shiftSnapshot then
       local cur = self.paramFocusedReadout:getValueInUnits()
@@ -150,7 +123,7 @@ function AlembicScanControl:shiftReleased()
   return true
 end
 
-function AlembicScanControl:spotReleased(spot, shifted)
+function AlembicReagentControl:spotReleased(spot, shifted)
   if self.paramMode then
     self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
@@ -159,11 +132,10 @@ function AlembicScanControl:spotReleased(spot, shifted)
   return GainBias.spotReleased(self, spot, shifted)
 end
 
-function AlembicScanControl:subReleased(i, shifted)
+function AlembicReagentControl:subReleased(i, shifted)
   if self.paramMode then
     local readout, label
-    if i == 1 then readout, label = self.kReadout, "K"
-    elseif i == 3 then readout, label = self.depthReadout, "Depth" end
+    if i == 2 then readout, label = self.amountReadout, "Amount" end
     if readout then
       if shifted then
         ShiftHelpers.openKeyboardFor(readout, label)
@@ -179,7 +151,7 @@ function AlembicScanControl:subReleased(i, shifted)
   return GainBias.subReleased(self, i, shifted)
 end
 
-function AlembicScanControl:encoder(change, shifted)
+function AlembicReagentControl:encoder(change, shifted)
   if shifted and self.shiftHeld then self.shiftUsed = true end
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
@@ -188,7 +160,7 @@ function AlembicScanControl:encoder(change, shifted)
   return GainBias.encoder(self, change, shifted)
 end
 
-function AlembicScanControl:zeroPressed()
+function AlembicReagentControl:zeroPressed()
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:zero()
     return true
@@ -196,7 +168,7 @@ function AlembicScanControl:zeroPressed()
   return GainBias.zeroPressed(self)
 end
 
-function AlembicScanControl:cancelReleased(shifted)
+function AlembicReagentControl:cancelReleased(shifted)
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:restore()
     return true
@@ -204,4 +176,4 @@ function AlembicScanControl:cancelReleased(shifted)
   return GainBias.cancelReleased(self, shifted)
 end
 
-return AlembicScanControl
+return AlembicReagentControl

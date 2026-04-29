@@ -1,5 +1,5 @@
 local app = app
-local libcatchall = require "spreadsheet.libcatchall"
+local libcatchall = require "catchall.libcatchall"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local Pitch = require "Unit.ViewControl.Pitch"

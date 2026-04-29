@@ -8,6 +8,8 @@
 #include "Flakes.h"
 #include "Som.h"
 #include "SomSphereGraphic.h"
+#include "AlembicVoice.h"
+#include "AlembicSphereGraphic.h"
 #define SWIGLUA
 %}
 
@@ -16,3 +18,5 @@
 %include "Flakes.h"
 %include "Som.h"
 %include "SomSphereGraphic.h"
+%include "AlembicVoice.h"
+%include "AlembicSphereGraphic.h"

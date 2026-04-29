@@ -1,5 +1,5 @@
 PKGNAME ?= catchall
-PKGVERSION ?= 0.2.0
+PKGVERSION ?= 0.3.0
 
 include scripts/env.mk
 
@@ -12,8 +12,13 @@ MOD_DIR = mods/$(PKGNAME)
 ASSET_DIR = $(MOD_DIR)/assets
 
 MOD_CPP = $(wildcard $(MOD_DIR)/*.cpp)
+# Phase 8 / .188+: AlembicVoice uses pffft for its FFT analysis kernel
+# (also lives in spreadsheet for the Multiband units; copies kept in
+# both packages, both small).
+MOD_C = $(wildcard $(MOD_DIR)/*.c)
 
 OBJECTS = $(addprefix $(OUT_DIR)/,$(MOD_CPP:%.cpp=%.o))
+OBJECTS += $(addprefix $(OUT_DIR)/,$(MOD_C:%.c=%.o))
 
 SWIG_SOURCE = $(MOD_DIR)/$(PKGNAME).cpp.swig
 SWIG_WRAPPER = $(OUT_DIR)/$(MOD_DIR)/$(PKGNAME)_swig.cpp
@@ -83,6 +88,11 @@ $(OUT_DIR)/%.o: %.cpp
 	@echo [C++ $<]
 	@mkdir -p $(@D)
 	@$(CPP) $(CFLAGS) -std=gnu++11 -c $< -o $@
+
+$(OUT_DIR)/%.o: %.c
+	@echo [CC $<]
+	@mkdir -p $(@D)
+	@$(CC) $(CFLAGS) -std=gnu11 -c $< -o $@
 
 $(SWIG_WRAPPER): $(SWIG_SOURCE)
 	@echo [SWIG $<]

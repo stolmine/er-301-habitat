@@ -5,18 +5,19 @@
 -- on the C++ class but are dropped from the Lua UI; Phase 7 will
 -- re-expose them as user-bias adapters wired into the group fades.
 --
--- AlembicRef remains alongside as the Lua-graph reference voice (still
--- has its 16 user-direct matrix knobs).
+-- Lives in catchall (experimental tier) until Phase 6 serialization
+-- + Phase 8 audio-path features land. AlembicRef (Phase 1 listening
+-- reference) was retired during the spreadsheet -> catchall move.
 
 local app = app
-local libspreadsheet = require "spreadsheet.libspreadsheet"
+local libcatchall = require "catchall.libcatchall"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local Pitch = require "Unit.ViewControl.Pitch"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
-local AlembicScanControl = require "spreadsheet.AlembicScanControl"
-local AlembicReagentControl = require "spreadsheet.AlembicReagentControl"
+local AlembicScanControl = require "catchall.AlembicScanControl"
+local AlembicReagentControl = require "catchall.AlembicReagentControl"
 local Encoder = require "Encoder"
 local SamplePool = require "Sample.Pool"
 local SamplePoolInterface = require "Sample.Pool.Interface"
@@ -40,7 +41,7 @@ function AlembicVoice:init(args)
 end
 
 function AlembicVoice:onLoadGraph(channelCount)
-    local op = self:addObject("op", libspreadsheet.AlembicVoice())
+    local op = self:addObject("op", libcatchall.AlembicVoice())
 
     -- V/Oct: ConstantOffset directly to op.V/Oct. AlembicVoice applies
     -- the FULLSCALE_IN_VOLTS*ln2 scaling internally, matching libcore
