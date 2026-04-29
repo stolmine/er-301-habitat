@@ -1,5 +1,6 @@
 #include "Pecto.h"
 #include <od/config.h>
+#include <od/AudioThread.h>
 #include <hal/ops.h>
 #include <math.h>
 #include <string.h>
@@ -99,8 +100,15 @@ namespace stolmine
     mpInternal = new Internal();
     mpInternal->Init();
     memset(mCachedDelaySamples, 0, sizeof(mCachedDelaySamples));
+    memset(mCachedDelaySamples0, 0, sizeof(mCachedDelaySamples0));
     for (int i = 0; i < kMaxCombTaps; i++)
       mCachedTapWeight[i] = 1.0f;
+    // Snap-and-fade zipper-noise smoother. 25ms ramp at frame rate
+    // (matches od::Delay::Delay's `frameRate * 0.025f` setting). The
+    // ramp counts down per process() call; getInterpolatedFrame() fills
+    // FRAMELENGTH per-sample weights interpolating from current value
+    // toward goal.
+    mFade.setLength((int)(globalConfig.frameRate * 0.025f));
   }
 
   Pecto::~Pecto()
@@ -451,14 +459,35 @@ namespace stolmine
     if (baseDelay < 1.0f) baseDelay = 1.0f;
     if (baseDelay > (float)(maxDelay - 1)) baseDelay = (float)(maxDelay - 1);
 
-    // Cache per-tap delay positions. tapPosition[] and tapWeight[] are
-    // already sorted ascending inside recomputeTaps(), and multiplying
-    // by baseDelay preserves order, so no per-block sort is needed.
+    // Snap-and-fade target update (matches od::Delay::process pattern).
+    // Tap positions snap to the new baseDelay only when the previous
+    // 25ms crossfade has completed -- that's when mFade.done() is true.
+    // While the fade is in progress, mCachedDelaySamples0 (old) and
+    // mCachedDelaySamples (new) hold the two endpoints; per-sample
+    // crossfade interpolates between them.
+    //
+    // tapWeight[] tracks the slope envelope which only changes when
+    // density / pattern / slope ratchet (handled by recomputeTaps's
+    // dirty check). It can update every block without zipper -- only
+    // continuous baseDelay motion needs the fade.
     for (int t = 0; t < density; t++)
-    {
-      mCachedDelaySamples[t] = baseDelay * s.tapPosition[t];
       mCachedTapWeight[t] = s.tapWeight[t];
+
+    if (mFade.done())
+    {
+      mFade.reset(1, 0);
+      // snap: old <- current "new" target
+      for (int t = 0; t < density; t++)
+        mCachedDelaySamples0[t] = mCachedDelaySamples[t];
+      // recompute new target
+      for (int t = 0; t < density; t++)
+        mCachedDelaySamples[t] = baseDelay * s.tapPosition[t];
     }
+
+    // Per-sample fade weight buffer (1.0 -> 0.0 across the ramp;
+    // matches od::Delay's mFade.getInterpolatedFrame() usage).
+    float *fade = od::AudioThread::getFrame();
+    mFade.getInterpolatedFrame(fade);
 
     // Comb feedback: direct, no tap-count normalization
     // (unlike Petrichor, feedback is from a single tap, not a sum)
@@ -495,11 +524,16 @@ namespace stolmine
     // gather (B) stays scalar but is now isolated and prefetched
     // further ahead. idx0/idx1 are int32_t so NEON intrinsic
     // vst1q_s32 compiles (it wants int32_t*, not int*, on ARM GCC).
-    int32_t idx0[kMaxCombTaps];
-    int32_t idx1[kMaxCombTaps];
-    float frac[kMaxCombTaps];
-    int16_t sA[kMaxCombTaps];
-    int16_t sB[kMaxCombTaps];
+    //
+    // Two scratch sets per pipeline stage: ...0 = OLD positions
+    // (snap-fade source), unsuffixed = NEW positions (snap-fade
+    // target). Per-sample loop runs the existing pipeline twice
+    // (once per set) and crossfades in the final accumulator stage.
+    int32_t idx0_0[kMaxCombTaps], idx0[kMaxCombTaps];
+    int32_t idx1_0[kMaxCombTaps], idx1[kMaxCombTaps];
+    float frac_0[kMaxCombTaps], frac[kMaxCombTaps];
+    int16_t sA_0[kMaxCombTaps], sA[kMaxCombTaps];
+    int16_t sB_0[kMaxCombTaps], sB[kMaxCombTaps];
     const float scale = 1.0f / 32767.0f;
 
     // Process audio
@@ -513,8 +547,57 @@ namespace stolmine
       float writeIdxF = (float)s.writeIndex;
       float maxDelayF = (float)maxDelay;
 
+      // ============================================================
+      // Snap-and-fade dual pipeline (matches od::Delay's two-read
+      // crossfade). Per output sample we run pass A + B + C twice:
+      // once with mCachedDelaySamples0 (OLD positions) and once with
+      // mCachedDelaySamples (NEW positions), then crossfade the
+      // two `wet` (and lastTapOut for feedback) by the per-sample
+      // fade weight. fade goes 1.0 -> 0.0 over the ramp, so:
+      //   wet = w * wet_old + (1 - w) * wet_new
+      // matches od::Delay::pushSamples line 202.
+      // ============================================================
+
 #ifdef PECTO_HAS_NEON
-      // --- Pass A (NEON): compute read indices and fractional offsets.
+      // --- Pass A (NEON) for OLD positions ---
+      {
+        const float32x4_t writeIdxVec = vdupq_n_f32(writeIdxF);
+        const float32x4_t zeroVec = vdupq_n_f32(0.0f);
+        const float32x4_t maxDelayFVec = vdupq_n_f32(maxDelayF);
+        const int32x4_t maxDelayVec = vdupq_n_s32(maxDelay);
+        const int32x4_t oneVec = vdupq_n_s32(1);
+        const int32x4_t zeroIVec = vdupq_n_s32(0);
+
+        int t = 0;
+        for (; t + 4 <= density; t += 4)
+        {
+          float32x4_t delayV = vld1q_f32(&mCachedDelaySamples0[t]);
+          float32x4_t p = vsubq_f32(writeIdxVec, delayV);
+          uint32x4_t negMask = vcltq_f32(p, zeroVec);
+          float32x4_t pWrap = vaddq_f32(p, maxDelayFVec);
+          p = vbslq_f32(negMask, pWrap, p);
+          int32x4_t i0v = vcvtq_s32_f32(p);
+          int32x4_t i1v = vaddq_s32(i0v, oneVec);
+          uint32x4_t wrapMask = vcgeq_s32(i1v, maxDelayVec);
+          i1v = vbslq_s32(wrapMask, zeroIVec, i1v);
+          float32x4_t fracV = vsubq_f32(p, vcvtq_f32_s32(i0v));
+          vst1q_s32(&idx0_0[t], i0v);
+          vst1q_s32(&idx1_0[t], i1v);
+          vst1q_f32(&frac_0[t], fracV);
+        }
+        for (; t < density; t++)
+        {
+          float p = writeIdxF - mCachedDelaySamples0[t];
+          if (p < 0.0f) p += maxDelayF;
+          int i0 = (int)p;
+          int i1 = i0 + 1;
+          if (i1 >= maxDelay) i1 = 0;
+          idx0_0[t] = i0;
+          idx1_0[t] = i1;
+          frac_0[t] = p - (float)i0;
+        }
+      }
+      // --- Pass A (NEON) for NEW positions ---
       {
         const float32x4_t writeIdxVec = vdupq_n_f32(writeIdxF);
         const float32x4_t zeroVec = vdupq_n_f32(0.0f);
@@ -531,7 +614,7 @@ namespace stolmine
           uint32x4_t negMask = vcltq_f32(p, zeroVec);
           float32x4_t pWrap = vaddq_f32(p, maxDelayFVec);
           p = vbslq_f32(negMask, pWrap, p);
-          int32x4_t i0v = vcvtq_s32_f32(p);           // p >= 0, truncates = floor
+          int32x4_t i0v = vcvtq_s32_f32(p);
           int32x4_t i1v = vaddq_s32(i0v, oneVec);
           uint32x4_t wrapMask = vcgeq_s32(i1v, maxDelayVec);
           i1v = vbslq_s32(wrapMask, zeroIVec, i1v);
@@ -540,7 +623,6 @@ namespace stolmine
           vst1q_s32(&idx1[t], i1v);
           vst1q_f32(&frac[t], fracV);
         }
-        // Tail
         for (; t < density; t++)
         {
           float p = writeIdxF - mCachedDelaySamples[t];
@@ -554,7 +636,18 @@ namespace stolmine
         }
       }
 #else
-      // Pass A (scalar): compiler auto-vectorizes on -O3 -msse4 etc.
+      // Pass A (scalar): both position sets back-to-back.
+      for (int t = 0; t < density; t++)
+      {
+        float p = writeIdxF - mCachedDelaySamples0[t];
+        if (p < 0.0f) p += maxDelayF;
+        int i0 = (int)p;
+        int i1 = i0 + 1;
+        if (i1 >= maxDelay) i1 = 0;
+        idx0_0[t] = i0;
+        idx1_0[t] = i1;
+        frac_0[t] = p - (float)i0;
+      }
       for (int t = 0; t < density; t++)
       {
         float p = writeIdxF - mCachedDelaySamples[t];
@@ -568,23 +661,58 @@ namespace stolmine
       }
 #endif
 
-      // Pass B: scalar gather (no NEON gather on Cortex-A8). Prefetch
-      // 8 taps ahead -- 192 KB buffer regularly misses L1 so we need
-      // a longer pipeline to hide memory latency.
+      // Pass B: scalar gather, both sets. Prefetch 8 taps ahead per
+      // set. 192 KB buffer misses L1 frequently; the OLD and NEW
+      // index arrays may point to nearby buffer regions during the
+      // fade so cache hits should improve as the fade progresses.
       for (int t = 0; t < density; t++)
       {
         int pfIdx = t + 8;
         if (pfIdx < density)
+        {
+          __builtin_prefetch(&buf[idx0_0[pfIdx]], 0, 1);
           __builtin_prefetch(&buf[idx0[pfIdx]], 0, 1);
-        sA[t] = buf[idx0[t]];
-        sB[t] = buf[idx1[t]];
+        }
+        sA_0[t] = buf[idx0_0[t]];
+        sB_0[t] = buf[idx1_0[t]];
+        sA[t]   = buf[idx0[t]];
+        sB[t]   = buf[idx1[t]];
       }
 
-      float wet = 0.0f;
-      float lastTapOut = 0.0f;
+      float wet_old = 0.0f, wet_new = 0.0f;
+      float lastTapOut_old = 0.0f, lastTapOut_new = 0.0f;
 
 #ifdef PECTO_HAS_NEON
-      // --- Pass C (NEON): interpolate + weight + accumulate.
+      // --- Pass C (NEON) for OLD ---
+      {
+        const float32x4_t scaleVec = vdupq_n_f32(scale);
+        float32x4_t wetVec = vdupq_n_f32(0.0f);
+        int t = 0;
+        for (; t + 4 <= density; t += 4)
+        {
+          int16x4_t sAi = vld1_s16(&sA_0[t]);
+          int16x4_t sBi = vld1_s16(&sB_0[t]);
+          float32x4_t aV = vmulq_f32(vcvtq_f32_s32(vmovl_s16(sAi)), scaleVec);
+          float32x4_t bV = vmulq_f32(vcvtq_f32_s32(vmovl_s16(sBi)), scaleVec);
+          float32x4_t fV = vld1q_f32(&frac_0[t]);
+          float32x4_t wV = vld1q_f32(&mCachedTapWeight[t]);
+          float32x4_t tapV = vmlaq_f32(aV, vsubq_f32(bV, aV), fV);
+          tapV = vmulq_f32(tapV, wV);
+          wetVec = vaddq_f32(wetVec, tapV);
+          lastTapOut_old = vgetq_lane_f32(tapV, 3);
+        }
+        float32x2_t loHi = vadd_f32(vget_low_f32(wetVec), vget_high_f32(wetVec));
+        wet_old = vget_lane_f32(vpadd_f32(loHi, loHi), 0);
+        for (; t < density; t++)
+        {
+          float a = (float)sA_0[t] * scale;
+          float b = (float)sB_0[t] * scale;
+          float tapOut = (a + (b - a) * frac_0[t]) * mCachedTapWeight[t];
+          wet_old += tapOut;
+          lastTapOut_old = tapOut;
+        }
+      }
+      // --- Pass C (NEON) for NEW ---
       {
         const float32x4_t scaleVec = vdupq_n_f32(scale);
         float32x4_t wetVec = vdupq_n_f32(0.0f);
@@ -600,32 +728,44 @@ namespace stolmine
           float32x4_t tapV = vmlaq_f32(aV, vsubq_f32(bV, aV), fV);
           tapV = vmulq_f32(tapV, wV);
           wetVec = vaddq_f32(wetVec, tapV);
-          lastTapOut = vgetq_lane_f32(tapV, 3);
+          lastTapOut_new = vgetq_lane_f32(tapV, 3);
         }
-        // Horizontal sum (Cortex-A8: no vaddvq; use vadd + vpadd).
         float32x2_t loHi = vadd_f32(vget_low_f32(wetVec), vget_high_f32(wetVec));
-        wet = vget_lane_f32(vpadd_f32(loHi, loHi), 0);
-        // Scalar tail
+        wet_new = vget_lane_f32(vpadd_f32(loHi, loHi), 0);
         for (; t < density; t++)
         {
           float a = (float)sA[t] * scale;
           float b = (float)sB[t] * scale;
           float tapOut = (a + (b - a) * frac[t]) * mCachedTapWeight[t];
-          wet += tapOut;
-          lastTapOut = tapOut;
+          wet_new += tapOut;
+          lastTapOut_new = tapOut;
         }
       }
+
 #else
-      // Pass C (scalar): auto-vectorizes as a reduction on -O3.
+      // Pass C (scalar): both position sets back-to-back, then crossfade.
+      for (int t = 0; t < density; t++)
+      {
+        float a = (float)sA_0[t] * scale;
+        float b = (float)sB_0[t] * scale;
+        float tapOut = (a + (b - a) * frac_0[t]) * mCachedTapWeight[t];
+        wet_old += tapOut;
+        lastTapOut_old = tapOut;
+      }
       for (int t = 0; t < density; t++)
       {
         float a = (float)sA[t] * scale;
         float b = (float)sB[t] * scale;
         float tapOut = (a + (b - a) * frac[t]) * mCachedTapWeight[t];
-        wet += tapOut;
-        lastTapOut = tapOut;
+        wet_new += tapOut;
+        lastTapOut_new = tapOut;
       }
 #endif
+
+      // Crossfade old <-> new (matches od::Delay pushSamples line 202).
+      const float w = fade[i];
+      float wet = w * wet_old + (1.0f - w) * wet_new;
+      float lastTapOut = w * lastTapOut_old + (1.0f - w) * lastTapOut_new;
 
 
       // Feedback from longest tap (last position, highest delay)
@@ -706,6 +846,13 @@ namespace stolmine
       // Output
       out[i] = fast_tanh(dcOut * outputLevel);
     }
+
+    // Step the snap-and-fade ramp once per process() call -- matches
+    // od::Delay::process line 162. mFade.step() decrements mCount; when
+    // it reaches zero, mFade.done() returns true and the next process
+    // call will snap to the new target.
+    mFade.step();
+    od::AudioThread::releaseFrame(fade);
   }
 
 } // namespace stolmine
