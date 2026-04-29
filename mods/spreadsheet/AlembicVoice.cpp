@@ -317,7 +317,7 @@ namespace stolmine
   // endA/endB plus the destination table, which trap on Cortex-A8 at
   // construction time (feedback_neon_hint_surfaces).
   __attribute__((noinline, optimize("no-tree-vectorize")))
-  static void fillPhase3Presets(float (&t)[64][49])
+  static void fillPhase3Presets(float (&t)[64][50])
   {
     // Phase 3 placeholder gradient covers the original 29 trained slots
     // (ratios, levels, detunes, matrix, scalar reagent which is now the
@@ -372,6 +372,11 @@ namespace stolmine
       t[slot][46] = 0.0f;   // resType raw (categorical bucket 0..3)
       t[slot][47] = 0.0f;   // feedback off
       t[slot][48] = 0.0f;   // slope flat (categorical bucket 0..3)
+      // Phase 8e filter dry/wet placeholder (no sample loaded). Default
+      // 0.7 so the placeholder voice still passes through the filter
+      // pair character. Per-node trained value overwrites in
+      // derivePresetRow.
+      t[slot][49] = 0.7f;
     }
   }
 
@@ -1287,13 +1292,23 @@ namespace stolmine
     // bright) -> rise (1); falling material (transient pop) -> fall (2);
     // chaotic -> hump (3). Categorical, hard-cut at process time.
     row[48] = entropy * 0.5f + brightness * 0.3f + fluxClamp * 0.2f;       // slope signature (4 buckets)
+
+    // Phase 8e -- per-node trained filter dry/wet ratio. Bright + chaotic
+    // + non-flat samples engage the filter pair more; flat / clean tones
+    // pass through more dry. Range biased to [0.3, 1.0] so dry never
+    // fully bypasses the filter (some character preserved at every node).
+    float filterWet = brightness * 0.3f + entropy * 0.3f
+                    + (1.0f - flatness) * 0.4f;
+    if (filterWet < 0.0f) filterWet = 0.0f;
+    if (filterWet > 1.0f) filterWet = 1.0f;
+    row[49] = 0.3f + filterWet * 0.7f;
   }
 
   // Mean-center ratios across nodes per planning doc line 125: even when
   // input material is tonally uniform, mean-centering preserves whatever
   // relative variation the picks captured, recentered on 1.0.
   __attribute__((noinline, optimize("no-tree-vectorize")))
-  static void meanCenterRatios(float (&t)[64][29])
+  static void meanCenterRatios(float (&t)[64][50])
   {
     for (int op = 0; op < 4; op++)
     {
@@ -1783,6 +1798,8 @@ namespace stolmine
     for (int f = 0; f < 4; f++) mDetuneFlat[f] = 0.0f;
     for (int f = 0; f < 16; f++) mMatrixFlat[f] = 0.0f;
     for (int f = 0; f < 6; f++) mFilterFlat[f] = 0.0f;
+    // Phase 8e -- K-blended trained filter dry/wet (no user fader).
+    float filterWet = 0.0f;
     for (int j = 0; j < K; j++)
     {
       const float wj = w[j] * wInv;
@@ -1793,7 +1810,11 @@ namespace stolmine
       for (int f = 0; f < 4; f++) mDetuneFlat[f] += wj * p[8 + f];
       for (int f = 0; f < 16; f++) mMatrixFlat[f] += wjFerment * p[12 + f];
       for (int f = 0; f < 6; f++) mFilterFlat[f] += wj * p[29 + f];
+      filterWet += wj * p[49];
     }
+    if (filterWet < 0.0f) filterWet = 0.0f;
+    if (filterWet > 1.0f) filterWet = 1.0f;
+    const float filterDry = 1.0f - filterWet;
 
     // Phase 5d-1.5: independent reagent scan window. mReagentScan
     // selects a separate K-node neighborhood for the wavetable LUT
@@ -2119,6 +2140,8 @@ namespace stolmine
       // Phase 8d -- sample-pointer excitation. Pre-filled at block
       // setup; per-sample read is unconditional (branchless) for
       // codegen safety per feedback_runtime_branched_dsp_dispatch.
+      // Used both as matrix source 10 and as direct filter-input
+      // injection below; gcc CSEs the two reads.
       mRoutingSources[10] =
           (i < kSamplePtrBufSize) ? mSamplePtrBlockBuf[i] : 0.0f;
 
@@ -2157,12 +2180,20 @@ namespace stolmine
       const float a12 = mg1 * a11;
       const float a13 = mg1 * a12;
 
-      // Filter1: input = wave_out + addF1, hard-clamped to +/-4. Bounding
-      // the input (Tomograph / stmlib::Svf approach) lets the integrator
-      // state evolve freely without softening the resonance peak. This
-      // is the wooliness fix: wideSoftClip on the integrator was tanh-
-      // asymptoting the resonance peak, producing the muffled character.
-      float f1_in = wave_out + addF1;
+      // Filter1: input = wave_out + addF1 + sample-pointer direct, hard-
+      // clamped to +/-4. Bounding the input (Tomograph / stmlib::Svf
+      // approach) lets the integrator state evolve freely without
+      // softening the resonance peak.
+      //
+      // Phase 8e -- direct sample-pointer injection into filter input.
+      // mSamplePtrBlockBuf is already depth-scaled at block fill, so the
+      // depth fader controls the magnitude of the direct injection
+      // alongside any matrix routing of source 10. Guarantees the
+      // depth knob has audible effect even when the trained lane
+      // selection doesn't pick source 10 for any matrix lane.
+      const float spExcite =
+          (i < kSamplePtrBufSize) ? mSamplePtrBlockBuf[i] : 0.0f;
+      float f1_in = wave_out + addF1 + spExcite;
       if (f1_in > 4.0f) f1_in = 4.0f;
       else if (f1_in < -4.0f) f1_in = -4.0f;
       float v3 = f1_in - mSvfIc2[0];
@@ -2193,12 +2224,17 @@ namespace stolmine
       if (!isfinite(mSvfIc2[1])) mSvfIc2[1] = 0.0f;
       const float lpOut1 = v2_1;
 
+      // Phase 8e -- filter dry/wet (per-node trained, no user fader).
+      // dry = wave_out (pre-filter); wet = lpOut1 (post-filter pair).
+      // Crossfade by trained ratio so nodes that don't benefit from
+      // filter coloration stay closer to raw PMM, while bright /
+      // chaotic nodes engage the filter character fully.
       // Phase 5d-4 comb DSP -- IDENTICAL CLONE of Pecto's engine
       // (Pecto.cpp:506-705). NEON 3-pass: Pass A computes read indices,
       // Pass B gathers samples (scalar with prefetch), Pass C
       // interpolates + weights + accumulates. Then resonator type on
       // feedback, sitar jawari modulation on write, DC-blocker, mix.
-      float postFilt = lpOut1;
+      float postFilt = wave_out * filterDry + lpOut1 * filterWet;
       if (combActive)
       {
         if (mCombWriteIdx >= kCombBufSize) mCombWriteIdx = 0;

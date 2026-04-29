@@ -205,7 +205,9 @@ namespace stolmine
     //                            resType, feedback, slope)
     //
     // Phase 5d-4 grows row to 49 floats. ~12544 bytes.
-    float mPresetTable[64][49];
+    // Preset row layout: 0..48 = Phase 5b-5d-4 trained floats;
+    // 49 = Phase 8e filter dry/wet (trained per-node, no user knob).
+    float mPresetTable[64][50];
 
     // Phase 5d-1: per-node transfer-function LUT. Built from sample
     // windows at the trained picks (DC-removed, RMS-normalized, soft-
