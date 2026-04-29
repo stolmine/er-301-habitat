@@ -1,9 +1,8 @@
 -- AlembicScanControl: paramMode shift-toggle scan control for Alembic.
--- Headline knob = scan position; shift-toggle reveals K (path window) on
--- the sub-display. Structurally identical to ColmatageBlockControl per
--- feedback_identical_means_identical, with one deliberate simplification:
--- a single centered K readout + middle SubButton instead of the canonical
--- 3-column layout (only one parameter to multiplex).
+-- Headline knob = scan position; shift-toggle reveals two readouts on the
+-- sub-display: K (path window, sub1) and sample-pointer depth (Phase 8e,
+-- sub3). Structurally close to ColmatageBlockControl per
+-- feedback_identical_means_identical.
 --
 -- setFocusedReadout always called via the method, never direct assignment,
 -- per feedback_gainbias_dual_mode_focus.
@@ -18,7 +17,8 @@ local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
 local center4 = app.GRID5_CENTER4
-local col2 = app.BUTTON2_CENTER
+local col1 = app.BUTTON1_CENTER
+local col3 = app.BUTTON3_CENTER
 
 local AlembicScanControl = Class {}
 AlembicScanControl:include(GainBias)
@@ -49,28 +49,46 @@ function AlembicScanControl:init(args)
     return m
   end)()
 
-  -- Single centered readout (deviation from Colmatage's 3-column layout;
-  -- only one parameter to multiplex here).
+  -- Two readouts in the canonical paramMode layout: sub1 (left) = K
+  -- (path window), sub3 (right) = sample-pointer excitation depth.
   self.kReadout = (function()
     local g = app.Readout(0, 0, ply, 10)
     g:setParameter(args.kParam)
     g:setAttributes(app.unitNone, kMap)
     g:setPrecision(0)
-    g:setCenter(col2, center4)
+    g:setCenter(col1, center4)
     return g
   end)()
 
-  local desc = app.Label("Path window K", 10)
-  desc:fitToText(3)
-  desc:setSize(ply * 3, desc.mHeight)
-  desc:setBorder(1)
-  desc:setCornerRadius(3, 0, 0, 3)
-  desc:setCenter(col2, center1 + 1)
+  self.depthReadout = (function()
+    local g = app.Readout(0, 0, ply, 10)
+    g:setParameter(args.depthParam)
+    g:setAttributes(app.unitNone, Encoder.getMap("[0,1]"))
+    g:setPrecision(2)
+    g:setCenter(col3, center4)
+    return g
+  end)()
+
+  local descK = app.Label("Path window K", 10)
+  descK:fitToText(3)
+  descK:setSize(ply * 3, descK.mHeight)
+  descK:setBorder(1)
+  descK:setCornerRadius(3, 0, 0, 3)
+  descK:setCenter(col1, center1 + 1)
+
+  local descD = app.Label("Sample pointer depth", 10)
+  descD:fitToText(3)
+  descD:setSize(ply * 3, descD.mHeight)
+  descD:setBorder(1)
+  descD:setCornerRadius(3, 0, 0, 3)
+  descD:setCenter(col3, center1 + 1)
 
   self.paramSubGraphic:addChild(self.kReadout)
-  self.paramSubGraphic:addChild(desc)
-  -- Middle sub button (index 2) to align with the centered readout.
-  self.paramSubGraphic:addChild(app.SubButton("K", 2))
+  self.paramSubGraphic:addChild(self.depthReadout)
+  self.paramSubGraphic:addChild(descK)
+  self.paramSubGraphic:addChild(descD)
+  self.paramSubGraphic:addChild(app.SubButton("K", 1))
+  self.paramSubGraphic:addChild(app.SubButton("dpth", 3))
 end
 
 function AlembicScanControl:setParamMode(enabled)
@@ -144,7 +162,8 @@ end
 function AlembicScanControl:subReleased(i, shifted)
   if self.paramMode then
     local readout, label
-    if i == 2 then readout, label = self.kReadout, "K" end
+    if i == 1 then readout, label = self.kReadout, "K"
+    elseif i == 3 then readout, label = self.depthReadout, "Depth" end
     if readout then
       if shifted then
         ShiftHelpers.openKeyboardFor(readout, label)

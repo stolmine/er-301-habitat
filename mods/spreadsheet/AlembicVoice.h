@@ -53,6 +53,10 @@ namespace stolmine
     // preset table; ScanK is the path-window width (number of bracketing
     // nodes blended per block, clamped to [2,6]).
     od::Parameter mScanPos{"ScanPos", 0.0f};
+    // Phase 8e -- sample-pointer excitation depth (scales source 10 into
+    // the routing matrix). Default 0.5 = half-strength so the engine is
+    // audible without dominating the trained DSP voice on insertion.
+    od::Parameter mSamplePointerDepth{"SamplePointerDepth", 0.5f};
     od::Parameter mScanK{"ScanK", 4.0f};
 
     od::Parameter mRatioA{"RatioA", 1.0f};

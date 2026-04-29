@@ -79,6 +79,7 @@ function AlembicVoice:onLoadGraph(channelCount)
     adapter("reagent", "Reagent", 0.0)
     adapter("combScan", "CombScan", 0.0)
     adapter("ferment", "Ferment", 1.0)
+    adapter("samplePtrDepth", "SamplePointerDepth", 0.5)
 end
 
 local views = {
@@ -129,6 +130,7 @@ function AlembicVoice:onLoadViews(objects, branches)
         biasPrecision = 3,
         initialBias = 0.0,
         kParam = objects.scanK:getParameter("Bias"),
+        depthParam = objects.samplePtrDepth:getParameter("Bias"),
         op = objects.op
     }
 
@@ -191,7 +193,7 @@ end
 -- per feedback_serialize_deserialize_pattern. The hidden Phase 2/5d
 -- Parameters (ratios/levels/detunes/matrix/filter base/lane attens)
 -- are inert in pre-Phase-7 and not persisted.
-local adapterBiases = { "f0", "level", "scanPos", "scanK", "reagentScan", "reagent", "combScan", "ferment" }
+local adapterBiases = { "f0", "level", "scanPos", "scanK", "reagentScan", "reagent", "combScan", "ferment", "samplePtrDepth" }
 
 function AlembicVoice:serialize()
     local t = Unit.serialize(self)

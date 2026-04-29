@@ -546,6 +546,7 @@ namespace stolmine
     addParameter(mGlobalLevel);
     addParameter(mScanPos);
     addParameter(mScanK);
+    addParameter(mSamplePointerDepth);
 
     addParameter(mRatioA);
     addParameter(mRatioB);
@@ -1729,12 +1730,16 @@ namespace stolmine
     // basePos+i from mpSample (linear interp, mono'd if stereo). Active
     // gate evaluated once per block -- inner audio loop reads from the
     // pre-filled scratch unconditionally to keep that loop branchless
-    // (per feedback_runtime_branched_dsp_dispatch).
+    // (per feedback_runtime_branched_dsp_dispatch). Phase 8e folds in
+    // the depth fader scaler at fill time so the inner loop stays
+    // unchanged and the depth=0 case zero-fills the buffer.
     {
       const bool samplePtrActive =
           (mpSample != nullptr) && (mpSample->mSampleCount > 0);
       const int outN = FRAMELENGTH > kSamplePtrBufSize
                        ? kSamplePtrBufSize : FRAMELENGTH;
+      const float samplePtrDepth =
+          CLAMP(0.0f, 1.0f, mSamplePointerDepth.value());
       if (samplePtrActive)
       {
         float samplePtrBasePos = 0.0f;
@@ -1751,7 +1756,7 @@ namespace stolmine
           if (rp > maxFrame) rp = maxFrame;
           float sx = mpSample->get(rp, 0);
           if (stereo) sx = (sx + mpSample->get(rp, 1)) * 0.5f;
-          mSamplePtrBlockBuf[i] = sx;
+          mSamplePtrBlockBuf[i] = sx * samplePtrDepth;
         }
       }
       else
