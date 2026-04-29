@@ -2,7 +2,6 @@
 
 #include <od/objects/Object.h>
 #include <od/config.h>
-#include <od/extras/LinearRamp.h>
 
 namespace stolmine
 {
@@ -55,15 +54,6 @@ namespace stolmine
     int mLastPattern = -1;
     int mLastSlope = -1;
     float mLastCombSize = -1.0f;
-    // Snap-and-fade zipper-noise smoother (matches od::Delay pattern).
-    // Two cached delay-sample arrays: ...0 = OLD positions held during
-    // a 25ms crossfade ramp; ...1 = NEW target positions sampled each
-    // time mFade.done() (i.e., when the previous fade has completed).
-    // Per output sample the multitap pipeline runs twice (once per
-    // position set) and the two outputs crossfade by mFade's per-sample
-    // weight.
-    od::LinearRamp mFade;
-    float mCachedDelaySamples0[kMaxCombTaps];
     float mCachedDelaySamples[kMaxCombTaps];
     float mCachedTapWeight[kMaxCombTaps];
 
