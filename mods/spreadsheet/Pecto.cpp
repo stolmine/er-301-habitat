@@ -596,7 +596,19 @@ namespace stolmine
           uint32x4_t negMask = vcltq_f32(p, zeroVec);
           float32x4_t pWrap = vaddq_f32(p, maxDelayFVec);
           p = vbslq_f32(negMask, pWrap, p);
-          int32x4_t i0v = vcvtq_s32_f32(p);           // p >= 0, truncates = floor
+          int32x4_t i0v = vcvtq_s32_f32(p);
+          // Float-precision-edge wrap on i0v. When p is barely-negative
+          // below ulp(maxDelayF) (~0.0078 at maxDelay ~96k), the
+          // p + maxDelayF wrap rounds exactly to maxDelayF, then
+          // vcvtq_s32_f32 yields maxDelay -> buf[maxDelay] OOB.
+          // This is the slow-trickle crash that took 20-30s under
+          // continuous baseDelay smoothing in .184-.187 (read pointer
+          // continuously sliding across positions, occasionally
+          // landing in the precision danger zone). Extra mask + bsl
+          // forces idx0 = 0 in that case. Same pattern as the
+          // existing i1v wrap below.
+          uint32x4_t i0WrapMask = vcgeq_s32(i0v, maxDelayVec);
+          i0v = vbslq_s32(i0WrapMask, zeroIVec, i0v);
           int32x4_t i1v = vaddq_s32(i0v, oneVec);
           uint32x4_t wrapMask = vcgeq_s32(i1v, maxDelayVec);
           i1v = vbslq_s32(wrapMask, zeroIVec, i1v);
@@ -611,6 +623,7 @@ namespace stolmine
           float p = writeIdxF - currentBase * s.tapPosition[t];
           if (p < 0.0f) p += maxDelayF;
           int i0 = (int)p;
+          if (i0 >= maxDelay) i0 = 0;   // float-precision edge guard
           int i1 = i0 + 1;
           if (i1 >= maxDelay) i1 = 0;
           idx0[t] = i0;
@@ -625,6 +638,7 @@ namespace stolmine
         float p = writeIdxF - currentBase * s.tapPosition[t];
         if (p < 0.0f) p += maxDelayF;
         int i0 = (int)p;
+        if (i0 >= maxDelay) i0 = 0;   // float-precision edge guard
         int i1 = i0 + 1;
         if (i1 >= maxDelay) i1 = 0;
         idx0[t] = i0;
