@@ -2,6 +2,7 @@
 
 #include <od/objects/Object.h>
 #include <od/config.h>
+#include <od/extras/LinearRamp.h>
 
 namespace stolmine
 {
@@ -49,13 +50,30 @@ namespace stolmine
 
     int mMaxDelayInSamples = 0;
 
-    // Dirty-check cache
+    // Dirty-check cache (categorical: density / pattern / slope)
     int mLastDensity = -1;
     int mLastPattern = -1;
     int mLastSlope = -1;
     float mLastCombSize = -1.0f;
-    float mCachedDelaySamples[kMaxCombTaps];
     float mCachedTapWeight[kMaxCombTaps];
+
+    // Doppler-style smoother for baseDelay. Continuous knob motion
+    // (combSize, V/Oct) causes baseDelay to jump block-to-block,
+    // producing audible zipper noise on the 24-tap multitap. Smooth
+    // by linearly ramping baseDelay over a 25ms window: every time
+    // the previous ramp completes, snapshot prev <- cur, set cur to
+    // the latest target, reset the ramp. Per-sample inside process()
+    // currentBase = fade[i] * mPrevBaseDelay + (1 - fade[i]) * mCurBaseDelay
+    // and the read pointer slides smoothly to the new position.
+    //
+    // Doppler-style rather than crossfade (od::Delay's pattern at 24
+    // taps doubled the per-sample NEON pipeline and produced trap-
+    // shaped codegen on Cortex-A8 in .182/.183). For a multitap comb
+    // this is also more musical -- pitch glide during sweeps matches
+    // tape-delay character.
+    od::LinearRamp mFade;
+    float mPrevBaseDelay = 0.0f;
+    float mCurBaseDelay = 0.0f;
 
     // Xform gate state
     bool mXformGateWasHigh = false;

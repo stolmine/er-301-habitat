@@ -1,5 +1,6 @@
 #include "Pecto.h"
 #include <od/config.h>
+#include <od/AudioThread.h>
 #include <hal/ops.h>
 #include <math.h>
 #include <string.h>
@@ -13,6 +14,19 @@
 
 namespace stolmine
 {
+
+  // Block-rate copy helper for class-member float arrays. noinline +
+  // no-tree-vectorize prevents gcc from auto-vectorizing into quad-D
+  // vst1.64 :64 stores, which trap on Cortex-A8 when the destination
+  // class-member offset isn't 8-byte aligned from `this` (per
+  // feedback_neon_intrinsics_drumvoice .165 ctor fix). Path B's
+  // class layout grew/shrank vs .181, so we can't assume the same
+  // safe offsets that .181 happened to have.
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void copyFloatArray(float *dst, const float *src, int n)
+  {
+    for (int i = 0; i < n; i++) dst[i] = src[i];
+  }
 
   // Fast tanh approximation (Pade 3/3)
   static inline float fast_tanh(float x)
@@ -98,9 +112,13 @@ namespace stolmine
 
     mpInternal = new Internal();
     mpInternal->Init();
-    memset(mCachedDelaySamples, 0, sizeof(mCachedDelaySamples));
     for (int i = 0; i < kMaxCombTaps; i++)
       mCachedTapWeight[i] = 1.0f;
+    // 25ms smoothing ramp at frame rate (matches od::Delay's mFade
+    // setLength). frameRate = sampleRate / FRAMELENGTH. For 48k/128
+    // this is 9 frames = ~24ms. Used to interpolate baseDelay between
+    // mPrevBaseDelay and mCurBaseDelay over the ramp window.
+    mFade.setLength((int)(globalConfig.frameRate * 0.025f));
   }
 
   Pecto::~Pecto()
@@ -451,14 +469,31 @@ namespace stolmine
     if (baseDelay < 1.0f) baseDelay = 1.0f;
     if (baseDelay > (float)(maxDelay - 1)) baseDelay = (float)(maxDelay - 1);
 
-    // Cache per-tap delay positions. tapPosition[] and tapWeight[] are
-    // already sorted ascending inside recomputeTaps(), and multiplying
-    // by baseDelay preserves order, so no per-block sort is needed.
-    for (int t = 0; t < density; t++)
+    // Doppler-style baseDelay smoother (matches od::Delay's mFade.done()
+    // gating semantics, but interpolating a scalar instead of crossfading
+    // two read positions). Snap the previous-target down to mPrev when
+    // the ramp completes; reset the ramp toward 1.0 -> 0.0 over its
+    // 25ms length. Per-sample fade weights drive the linear interp
+    // between mPrev and mCur inside the inner loop. Block-rate target
+    // sampling (only when fade is done) means rapid knob motion
+    // produces a chain of overlapping ~25ms smooth transitions.
+    if (mFade.done())
     {
-      mCachedDelaySamples[t] = baseDelay * s.tapPosition[t];
-      mCachedTapWeight[t] = s.tapWeight[t];
+      mPrevBaseDelay = mCurBaseDelay;
+      mCurBaseDelay = baseDelay;
+      mFade.reset(1, 0);
     }
+
+    // Per-sample fade-weight buffer (1.0 -> 0.0 across the ramp).
+    float *fade = od::AudioThread::getFrame();
+    mFade.getInterpolatedFrame(fade);
+
+    // Tap weight (slope envelope) tracks categorical changes only --
+    // recomputeTaps's dirty check covers density / pattern / slope
+    // ratchets. Continuous knob motion never modifies tapWeight, so
+    // the block-rate update is zipper-free already. noinline-wrapped
+    // to prevent auto-vec :64 trap (see copyFloatArray comment).
+    copyFloatArray(mCachedTapWeight, s.tapWeight, density);
 
     // Comb feedback: direct, no tap-count normalization
     // (unlike Petrichor, feedback is from a single tap, not a sum)
@@ -513,12 +548,25 @@ namespace stolmine
       float writeIdxF = (float)s.writeIndex;
       float maxDelayF = (float)maxDelay;
 
+      // Per-sample smoothed baseDelay. fade[i] is mFade's per-sample
+      // weight (1.0 -> 0.0 across the 25ms ramp). mPrevBaseDelay holds
+      // the value at the start of the current ramp; mCurBaseDelay is
+      // the latest target. When the ramp completes mFade.done() will
+      // gate the next snap at the top of process().
+      const float w_i = fade[i];
+      const float currentBase =
+          w_i * mPrevBaseDelay + (1.0f - w_i) * mCurBaseDelay;
+
 #ifdef PECTO_HAS_NEON
       // --- Pass A (NEON): compute read indices and fractional offsets.
+      // Per-tap delay = currentBase * tapPosition[t]. Computed inline
+      // per output sample; no class-member tap-delay cache, so no
+      // block-rate auto-vec :64 trap surface to worry about.
       {
         const float32x4_t writeIdxVec = vdupq_n_f32(writeIdxF);
         const float32x4_t zeroVec = vdupq_n_f32(0.0f);
         const float32x4_t maxDelayFVec = vdupq_n_f32(maxDelayF);
+        const float32x4_t currentBaseVec = vdupq_n_f32(currentBase);
         const int32x4_t maxDelayVec = vdupq_n_s32(maxDelay);
         const int32x4_t oneVec = vdupq_n_s32(1);
         const int32x4_t zeroIVec = vdupq_n_s32(0);
@@ -526,7 +574,8 @@ namespace stolmine
         int t = 0;
         for (; t + 4 <= density; t += 4)
         {
-          float32x4_t delayV = vld1q_f32(&mCachedDelaySamples[t]);
+          float32x4_t tapPosV = vld1q_f32(&s.tapPosition[t]);
+          float32x4_t delayV = vmulq_f32(tapPosV, currentBaseVec);
           float32x4_t p = vsubq_f32(writeIdxVec, delayV);
           uint32x4_t negMask = vcltq_f32(p, zeroVec);
           float32x4_t pWrap = vaddq_f32(p, maxDelayFVec);
@@ -543,7 +592,7 @@ namespace stolmine
         // Tail
         for (; t < density; t++)
         {
-          float p = writeIdxF - mCachedDelaySamples[t];
+          float p = writeIdxF - currentBase * s.tapPosition[t];
           if (p < 0.0f) p += maxDelayF;
           int i0 = (int)p;
           int i1 = i0 + 1;
@@ -557,7 +606,7 @@ namespace stolmine
       // Pass A (scalar): compiler auto-vectorizes on -O3 -msse4 etc.
       for (int t = 0; t < density; t++)
       {
-        float p = writeIdxF - mCachedDelaySamples[t];
+        float p = writeIdxF - currentBase * s.tapPosition[t];
         if (p < 0.0f) p += maxDelayF;
         int i0 = (int)p;
         int i1 = i0 + 1;
@@ -706,6 +755,12 @@ namespace stolmine
       // Output
       out[i] = fast_tanh(dcOut * outputLevel);
     }
+
+    // Step the smoother once per process() call (matches od::Delay's
+    // mFade.step() at line 162). When mCount reaches 0, mFade.done()
+    // returns true and the next process() call snaps the new target.
+    mFade.step();
+    od::AudioThread::releaseFrame(fade);
   }
 
 } // namespace stolmine
