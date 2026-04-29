@@ -1078,7 +1078,9 @@ namespace stolmine
   // mapping (the 5b behavior was strength-only; 5c adds path-set
   // diversity so the 7 unused matrix slots become reachable).
   __attribute__((noinline, optimize("no-tree-vectorize")))
-  static void derivePresetRow(const float *feat, float *row, int slot)
+  static void derivePresetRow(const float *feat, float *row, int slot,
+                              float sampleFeatureVariance,
+                              float sampleMeanEntropy)
   {
     const float rms = feat[0];
     const float zcr = feat[1];
@@ -1161,10 +1163,29 @@ namespace stolmine
     // K=4 crossfade across slots straddling a topology boundary fades
     // the small mask delta -- categorical discontinuity emerges at
     // pure-slot positions, smooth blend between.
-    const float chaosScore =
+    float chaosScore =
         (1.0f - runLen) * 0.45f
       + entropy         * 0.30f
       + flatness        * 0.25f;
+
+    // Phase 8c -- meta-mapping biases.
+    // (1) sampleMeanEntropy shifts the chaosScore midpoint up/down so
+    //     noisy samples skew toward chaotic topologies (5/6) and quiet
+    //     samples stay in tonal (0..2). Bias capped at +/- 0.10 so the
+    //     trained per-pick character still dominates.
+    // (2) sampleFeatureVariance widens the chaosScore distribution
+    //     around 0.5 so high-variance samples reach more topologies
+    //     across the map; low-variance samples cluster tighter.
+    {
+      const float kEntropyBias = 0.10f;
+      chaosScore += (sampleMeanEntropy - 0.5f) * 2.0f * kEntropyBias;
+      const float kVarianceSpread = 0.20f;
+      const float spread = 1.0f + sampleFeatureVariance * kVarianceSpread;
+      chaosScore = 0.5f + (chaosScore - 0.5f) * spread;
+      if (chaosScore < 0.0f) chaosScore = 0.0f;
+      if (chaosScore > 1.0f) chaosScore = 1.0f;
+    }
+
     int topo;
     if      (chaosScore < 0.15f) topo = 0;  // SINE
     else if (chaosScore < 0.30f) topo = 1;  // PARALLEL
@@ -1283,11 +1304,23 @@ namespace stolmine
     const int channels = mpSample->mChannelCount;
     if (sr <= 0 || nFrames <= 0) return;
 
-    const int hop = sr / 20;                 // 20 Hz coarse rate
-    const int nCoarse = nFrames / hop;
+    // Phase 8c -- sample length adapts coarse hop. Default is 20 Hz; if
+    // that gives fewer than the farthest-point margin (192 candidates,
+    // 3x the 64 picks for selection breathing room), drop the hop so a
+    // 1-second sample still yields enough candidates. Long samples are
+    // unaffected.
+    const int kMinCandidates = 192;
+    int hop = sr / 20;                       // 20 Hz default coarse rate
+    int nCoarse = nFrames / hop;
+    if (nCoarse < kMinCandidates)
+    {
+      hop = nFrames / kMinCandidates;
+      if (hop < 1) hop = 1;
+      nCoarse = nFrames / hop;
+    }
     if (nCoarse < 64)
     {
-      // Sample too short for distinct picks. Leave placeholder gradient.
+      // Sample too short even for 64 picks. Leave placeholder gradient.
       return;
     }
 
@@ -1387,9 +1420,48 @@ namespace stolmine
       }
     }
 
+    // Phase 8c -- per-sample variance + mean entropy biases for the
+    // topology selector. Computed once over the 64 picks before the
+    // derivePresetRow loop so each call sees the same sample-level
+    // context. featureVariance is the mean of per-feature std-dev
+    // across the 7 dims (high = sample sweeps widely through feature
+    // space); meanEntropy is mean of feature[4] (Shannon entropy) over
+    // picks (high = noisy / grit content). Both passed into
+    // derivePresetRow which uses them to bias chaosScore so the
+    // topology distribution shifts based on sample-level character,
+    // not just per-pick features.
+    float sampleFeatureVariance = 0.0f;
+    float sampleMeanEntropy = 0.0f;
+    {
+      float fmean[kFeatDim] = {0};
+      for (int n = 0; n < 64; n++)
+        for (int k = 0; k < kFeatDim; k++)
+          fmean[k] += coarse[picks[n] * kFeatDim + k];
+      const float invN = 1.0f / 64.0f;
+      for (int k = 0; k < kFeatDim; k++) fmean[k] *= invN;
+
+      float fvar[kFeatDim] = {0};
+      for (int n = 0; n < 64; n++)
+        for (int k = 0; k < kFeatDim; k++)
+        {
+          float d = coarse[picks[n] * kFeatDim + k] - fmean[k];
+          fvar[k] += d * d;
+        }
+      float varSum = 0.0f;
+      for (int k = 0; k < kFeatDim; k++) varSum += sqrtf(fvar[k] * invN);
+      sampleFeatureVariance = varSum / (float)kFeatDim;
+      // std-dev of normalized [0,1] features tops out around 0.3-0.4
+      // for varied samples; scale to a [0,1] usability range.
+      sampleFeatureVariance *= (1.0f / 0.35f);
+      if (sampleFeatureVariance > 1.0f) sampleFeatureVariance = 1.0f;
+
+      sampleMeanEntropy = fmean[4]; // already in [0,1]
+    }
+
     for (int n = 0; n < 64; n++)
     {
-      derivePresetRow(&coarse[picks[n] * kFeatDim], mPresetTable[n], n);
+      derivePresetRow(&coarse[picks[n] * kFeatDim], mPresetTable[n], n,
+                      sampleFeatureVariance, sampleMeanEntropy);
       // Phase 5d-3 routing lane training. Per-pick hash mixes node
       // index + a constant so identical features still get distinct
       // topologies across nodes.
