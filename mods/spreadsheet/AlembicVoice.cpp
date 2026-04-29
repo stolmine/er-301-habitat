@@ -610,6 +610,8 @@ namespace stolmine
     mActiveEdgeCount = 0;
     memset(mRoutingSources, 0, sizeof(mRoutingSources));
     memset(mRoutingDst, 0, sizeof(mRoutingDst));
+    memset(mPresetTimestamp, 0, sizeof(mPresetTimestamp));
+    memset(mSamplePtrBlockBuf, 0, sizeof(mSamplePtrBlockBuf));
 
     // Phase 5d-4 comb init.
     memset(mCombBuf, 0, sizeof(mCombBuf));
@@ -977,6 +979,7 @@ namespace stolmine
   //
   // Source / destination conventions (matched to AlembicVoice.h):
   //   src 0..3 = PMM ops A..D, src 4..6 = F1 LP/BP/HP, src 7..9 = F2
+  //   src 10 = sample-pointer excitation (Phase 8d)
   //   dst 0..1 = F1 cutoff verso/inverso, dst 2..3 = F2 cutoff
   //   dst 4 = F1 input addAdd, dst 5 = F2 input addAdd
   static float laneAffinity(int src, int dst, const float *feat)
@@ -987,7 +990,8 @@ namespace stolmine
     const float entropy    = feat[4];
     const float pitched    = (zcr < 0.5f) ? (1.0f - 2.0f * zcr) : 0.0f;
     const bool srcIsPMM   = (src < 4);
-    const bool srcIsFilt  = (src >= 4);
+    const bool srcIsFilt  = (src >= 4 && src < 10);
+    const bool srcIsSamplePtr = (src == 10);
     const bool dstIsCutoff = (dst < 4);
     const bool dstIsAdd    = (dst >= 4);
 
@@ -995,6 +999,12 @@ namespace stolmine
     if (srcIsFilt && dstIsCutoff) return entropy * 0.7f + fluxClamp * 0.2f;
     if (srcIsPMM && dstIsAdd) return pitched * 0.5f + brightness * 0.3f;
     if (srcIsFilt && dstIsAdd) return entropy * 0.4f + pitched * 0.3f;
+    // Phase 8d: sample-pointer excitation. As an audio-rate signal it
+    // pairs naturally with ADD destinations (texture into the synth
+    // path); modest CUTOFF affinity for transient-heavy nodes (audio-
+    // rate sample data into filter cutoff = inharmonic texture).
+    if (srcIsSamplePtr && dstIsAdd) return entropy * 0.4f + pitched * 0.3f + brightness * 0.3f;
+    if (srcIsSamplePtr && dstIsCutoff) return fluxClamp * 0.4f + entropy * 0.3f;
     return 0.0f;
   }
 
@@ -1004,9 +1014,9 @@ namespace stolmine
                                  float *outAtten)
   {
     struct Cand { uint8_t s, d; float score; };
-    Cand cands[60];
+    Cand cands[66]; // Phase 8d: 11 sources x 6 dests = 66
     int n = 0;
-    for (int s = 0; s < 10; s++)
+    for (int s = 0; s < 11; s++)
     {
       for (int d = 0; d < 6; d++)
       {
@@ -1420,6 +1430,13 @@ namespace stolmine
       }
     }
 
+    // Phase 8d -- per-pick sample timestamp. picks[n] is the coarse-frame
+    // index; multiply by hop to get the sample-frame index where this
+    // pick sits in the source. mScanPos K-blend at runtime turns this
+    // into a read pointer into mpSample.
+    for (int n = 0; n < 64; n++)
+      mPresetTimestamp[n] = (float)(picks[n] * hop);
+
     // Phase 8c -- per-sample variance + mean entropy biases for the
     // topology selector. Computed once over the 64 picks before the
     // derivePresetRow loop so each call sees the same sample-level
@@ -1705,6 +1722,43 @@ namespace stolmine
       wSum = 1.0f;
     }
     const float wInv = 1.0f / wSum;
+
+    // Phase 8d -- block-rate sample-pointer excitation fill. K-blend the
+    // per-pick sample timestamps using the same weights as the preset
+    // row blend; that's the read-pointer base. Each output sample reads
+    // basePos+i from mpSample (linear interp, mono'd if stereo). Active
+    // gate evaluated once per block -- inner audio loop reads from the
+    // pre-filled scratch unconditionally to keep that loop branchless
+    // (per feedback_runtime_branched_dsp_dispatch).
+    {
+      const bool samplePtrActive =
+          (mpSample != nullptr) && (mpSample->mSampleCount > 0);
+      const int outN = FRAMELENGTH > kSamplePtrBufSize
+                       ? kSamplePtrBufSize : FRAMELENGTH;
+      if (samplePtrActive)
+      {
+        float samplePtrBasePos = 0.0f;
+        for (int j = 0; j < K; j++)
+          samplePtrBasePos += (w[j] * wInv) * mPresetTimestamp[n0 + j];
+        const int maxFrame = (int)mpSample->mSampleCount - 1;
+        const int channels = (int)mpSample->mChannelCount;
+        const bool stereo = channels > 1;
+        const int basePosI = (int)samplePtrBasePos;
+        for (int i = 0; i < outN; i++)
+        {
+          int rp = basePosI + i;
+          if (rp < 0) rp = 0;
+          if (rp > maxFrame) rp = maxFrame;
+          float sx = mpSample->get(rp, 0);
+          if (stereo) sx = (sx + mpSample->get(rp, 1)) * 0.5f;
+          mSamplePtrBlockBuf[i] = sx;
+        }
+      }
+      else
+      {
+        for (int i = 0; i < outN; i++) mSamplePtrBlockBuf[i] = 0.0f;
+      }
+    }
 
     // Blend the per-slot trained floats into the working voice state
     // buffers. Loop body is uniform across K (no differential dispatch
@@ -2056,6 +2110,12 @@ namespace stolmine
       mRoutingSources[7] = softSat1(mSvfIc2[1]);                                // F2 LP
       mRoutingSources[8] = softSat1(mSvfIc1[1]);                                // F2 BP
       mRoutingSources[9] = softSat1(wave_out - kFilterK * mSvfIc1[1] - mSvfIc2[1]);  // F2 HP
+
+      // Phase 8d -- sample-pointer excitation. Pre-filled at block
+      // setup; per-sample read is unconditional (branchless) for
+      // codegen safety per feedback_runtime_branched_dsp_dispatch.
+      mRoutingSources[10] =
+          (i < kSamplePtrBufSize) ? mSamplePtrBlockBuf[i] : 0.0f;
 
       mRoutingDst[0] = 0.0f; mRoutingDst[1] = 0.0f; mRoutingDst[2] = 0.0f;
       mRoutingDst[3] = 0.0f; mRoutingDst[4] = 0.0f; mRoutingDst[5] = 0.0f;

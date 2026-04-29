@@ -264,8 +264,25 @@ namespace stolmine
     // promoting hints on access patterns. Loops over them are scalar
     // (no vectorize attribute on process() but the small 8-edge loop
     // is unlikely to auto-vec anyway).
-    float mRoutingSources[10];
+    // Phase 8d adds source 10 (sample-pointer excitation).
+    float mRoutingSources[11];
     float mRoutingDst[6];
+
+    // Phase 8d -- per-pick sample timestamp (frame index in the source).
+    // Captured at training time; K-blended at block setup to give the
+    // current scan-position's read pointer into mpSample. 64 floats so
+    // the K-blend op matches the existing K-blend over preset row floats.
+    float mPresetTimestamp[64];
+    // Phase 8d -- block-rate scratch for sample-pointer excitation. Filled
+    // once per block from the K-blended read pointer (if a sample is
+    // attached); zeroed otherwise. Inner per-sample loop reads from this
+    // buffer unconditionally so the audio-rate path stays branchless
+    // (matters per feedback_runtime_branched_dsp_dispatch). Sized for
+    // FRAMELENGTH=128 default; if framelength > 128 the loop fills the
+    // first 128 entries and reads beyond will be 0 -- voice degrades
+    // gracefully rather than crashing.
+    static const int kSamplePtrBufSize = 256;
+    float mSamplePtrBlockBuf[kSamplePtrBufSize];
 
     // Phase 5d-4 comb state. Fixed-size buffer (no Pecto-style runtime
     // allocate) because the unit is fixed-purpose. 4096 samples = ~85ms
