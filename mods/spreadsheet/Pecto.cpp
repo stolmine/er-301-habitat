@@ -455,8 +455,12 @@ namespace stolmine
     int resonatorType = mBiasResonatorType ? CLAMP(0, 3, (int)(mBiasResonatorType->value() + 0.5f))
                                            : CLAMP(0, 3, (int)(mResonatorType.value() + 0.5f));
 
-    // V/Oct pitch
-    float voctPitch = mVOctPitch.value() * 10.0f;
+    // V/Oct pitch. CLAMP to a safe range BEFORE powf so the divisor
+    // stays bounded; otherwise an unbounded V/Oct CV (or any path that
+    // could produce NaN/inf upstream) propagates through powf and
+    // poisons baseDelay. ±12 octaves covers the entire useful musical
+    // range and bounds powf(2, .) to [1/4096, 4096].
+    float voctPitch = CLAMP(-12.0f, 12.0f, mVOctPitch.value() * 10.0f);
 
     // Dirty-check tap distribution
     if (density != mLastDensity || pattern != mLastPattern || slope != mLastSlope)
@@ -464,9 +468,17 @@ namespace stolmine
       recomputeTaps(density, pattern, slope);
     }
 
-    // Compute base delay in samples from comb size, V/Oct shrinks delay (raises pitch)
+    // Compute base delay in samples from comb size, V/Oct shrinks delay
+    // (raises pitch). NaN-safe clamp: `!(x >= 1)` catches NaN (NaN >= 1
+    // is false → !false = true → fall through to 1.0) which a plain
+    // `if (x < 1)` does not, since all comparisons with NaN return
+    // false. Without this, V/Oct + size double-modulation that ever
+    // produces NaN at any block writes NaN into mCurBaseDelay and
+    // currentBase, and NaN in vcvtq_s32_f32 returns implementation-
+    // defined integer values (0 with FZ flag, INT_MIN/INT_MAX without)
+    // that can index `buf` out of bounds → hardware data abort.
     float baseDelay = combSize * sr / powf(2.0f, voctPitch);
-    if (baseDelay < 1.0f) baseDelay = 1.0f;
+    if (!(baseDelay >= 1.0f)) baseDelay = 1.0f;
     if (baseDelay > (float)(maxDelay - 1)) baseDelay = (float)(maxDelay - 1);
 
     // Doppler-style baseDelay smoother (matches od::Delay's mFade.done()
