@@ -9,25 +9,7 @@ local DrumVoiceCharacterControl = require "spreadsheet.DrumVoiceCharacterControl
 local DrumVoiceSweepControl = require "spreadsheet.DrumVoiceSweepControl"
 local DrumVoiceDecayControl = require "spreadsheet.DrumVoiceDecayControl"
 local DrumVoiceLevelControl = require "spreadsheet.DrumVoiceLevelControl"
-local TransformGateControl = require "spreadsheet.TransformGateControl"
 local Encoder = require "Encoder"
-
-local xformTargetNames = {
-  [0] = "all", "-swp", "-env", "-pch", "tmbr"
-}
-
-local function intMap(min, max)
-  local map = app.LinearDialMap(min, max)
-  map:setSteps(1, 1, 1, 1)
-  map:setRounding(1)
-  return map
-end
-
-local function floatMap(min, max)
-  local map = app.LinearDialMap(min, max)
-  map:setSteps(0.1, 0.01, 0.001, 0.001)
-  return map
-end
 
 local DrumVoice = Class {}
 DrumVoice:include(Unit)
@@ -38,20 +20,12 @@ function DrumVoice:init(args)
   Unit.init(self, args)
 end
 
-function DrumVoice:fireTransform()
-  self.objects.op:fireRandomize()
-end
-
 function DrumVoice:onLoadGraph(channelCount)
   local op = self:addObject("op", libspreadsheet.DrumVoice())
 
   local trig = self:addObject("trig", app.Comparator())
   trig:setTriggerMode()
   connect(trig, "Out", op, "Trigger")
-
-  local xformTrig = self:addObject("xformTrig", app.Comparator())
-  xformTrig:setTriggerMode()
-  connect(xformTrig, "Out", op, "XformGate")
 
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
@@ -72,9 +46,6 @@ function DrumVoice:onLoadGraph(channelCount)
   local level      = self:addObject("level",      app.ParameterAdapter())
   local compAmt    = self:addObject("compAmt",    app.ParameterAdapter())
   local octave     = self:addObject("octave",     app.ParameterAdapter())
-  local depth       = self:addObject("depth",       app.ParameterAdapter())
-  local spread      = self:addObject("spread",      app.ParameterAdapter())
-  local xformTarget = self:addObject("xformTarget", app.ParameterAdapter())
 
   character:hardSet("Bias", 0.5)
   shape:hardSet("Bias", 0.0)
@@ -90,9 +61,6 @@ function DrumVoice:onLoadGraph(channelCount)
   level:hardSet("Bias", 0.8)
   compAmt:hardSet("Bias", 0.0)
   octave:hardSet("Bias", 0.0)
-  depth:hardSet("Bias", 0.3)
-  spread:hardSet("Bias", 0.5)
-  xformTarget:hardSet("Bias", 0)
 
   -- Gain defaults on wide-range adapters so 1 V CV sweeps the useful
   -- range. Identity (Gain = 1.0) is only meaningful for 0..1 params;
@@ -117,28 +85,6 @@ function DrumVoice:onLoadGraph(channelCount)
   tie(op, "Level",     level,     "Out")
   tie(op, "CompAmt",   compAmt,   "Out")
   tie(op, "Octave",    octave,    "Out")
-  tie(op, "XformDepth",  depth,       "Out")
-  tie(op, "XformSpread", spread,      "Out")
-  tie(op, "XformTarget", xformTarget, "Out")
-
-  -- Register every top-level Bias the C++ op should mutate on randomize.
-  -- Indices match the switch in applyRandomize. User asked to open
-  -- everything to xform; downstream chain (Clipper/EQ/Level/Comp) and
-  -- Sweep/SweepTime/Octave are now in the set.
-  op:setTopLevelBias(0,  character:getParameter("Bias"))
-  op:setTopLevelBias(1,  shape:getParameter("Bias"))
-  op:setTopLevelBias(2,  grit:getParameter("Bias"))
-  op:setTopLevelBias(3,  punch:getParameter("Bias"))
-  op:setTopLevelBias(4,  attack:getParameter("Bias"))
-  op:setTopLevelBias(5,  hold:getParameter("Bias"))
-  op:setTopLevelBias(6,  decay:getParameter("Bias"))
-  op:setTopLevelBias(7,  sweep:getParameter("Bias"))
-  op:setTopLevelBias(8,  sweepTime:getParameter("Bias"))
-  op:setTopLevelBias(9,  clipper:getParameter("Bias"))
-  op:setTopLevelBias(10, eq:getParameter("Bias"))
-  op:setTopLevelBias(11, level:getParameter("Bias"))
-  op:setTopLevelBias(12, compAmt:getParameter("Bias"))
-  op:setTopLevelBias(13, octave:getParameter("Bias"))
 
   local characterRange = self:addObject("characterRange", app.MinMax())
   local sweepRange     = self:addObject("sweepRange",     app.MinMax())
@@ -170,10 +116,6 @@ function DrumVoice:onLoadGraph(channelCount)
   self:addMonoBranch("level",     level,     "In", level,     "Out")
   self:addMonoBranch("compAmt",   compAmt,   "In", compAmt,   "Out")
   self:addMonoBranch("octave",    octave,    "In", octave,    "Out")
-  self:addMonoBranch("xformTrig",   xformTrig,   "In", xformTrig,   "Out")
-  self:addMonoBranch("depth",       depth,       "In", depth,       "Out")
-  self:addMonoBranch("spread",      spread,      "In", spread,      "Out")
-  self:addMonoBranch("xformTarget", xformTarget, "In", xformTarget, "Out")
 end
 
 function DrumVoice:onLoadViews(objects, branches)
@@ -275,28 +217,6 @@ function DrumVoice:onLoadViews(objects, branches)
       holdParam = objects.hold:getParameter("Bias"),
       attackParam = objects.attack:getParameter("Bias")
     },
-    -- STEP 1 (2.5.5.9): xform ply wires funcParam to xformTarget (new),
-    -- factorParam to depth. spread is still tied (vestigial; C++ still
-    -- reads it) but unexposed at the ply. applyRandomize in C++ still
-    -- does the flat 10-param randomize -- target is read but ignored.
-    xform = TransformGateControl {
-      seq = self,
-      button = "xform",
-      description = "Randomize",
-      branch = branches.xformTrig,
-      comparator = objects.xformTrig,
-      funcNames = xformTargetNames,
-      funcMap = intMap(0, 4),
-      funcParam = objects.xformTarget:getParameter("Bias"),
-      paramALabel = "depth",
-      factorParam = objects.depth:getParameter("Bias"),
-      factorMap = (function()
-        local m = app.LinearDialMap(0, 1)
-        m:setSteps(0.1, 0.01, 0.001, 0.001)
-        return m
-      end)(),
-      factorPrecision = 2
-    },
     level = DrumVoiceLevelControl {
       button = "level",
       description = "Level",
@@ -374,26 +294,13 @@ function DrumVoice:onLoadViews(objects, branches)
       branch = branches.octave, gainbias = objects.octave, range = objects.octave,
       biasMap = octaveMap, biasUnits = app.unitNone,
       biasPrecision = 0, initialBias = 0
-    },
-    xformDepth = GainBias {
-      button = "dpth", description = "Depth",
-      branch = branches.depth, gainbias = objects.depth, range = objects.depth,
-      biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
-      biasPrecision = 2, initialBias = 0.3
-    },
-    xformSpread = GainBias {
-      button = "sprd", description = "Spread",
-      branch = branches.spread, gainbias = objects.spread, range = objects.spread,
-      biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
-      biasPrecision = 2, initialBias = 0.5
     }
   }, {
-    expanded  = { "trig", "tune", "character", "sweep", "decay", "xform", "level" },
+    expanded  = { "trig", "tune", "character", "sweep", "decay", "level" },
     tune      = { "tune", "tuneOctave" },
     character = { "character", "charShape", "charGrit", "charPunch" },
     sweep     = { "sweep", "sweepTime" },
     decay     = { "decay", "decayHold", "decayAttack" },
-    xform     = { "xform", "xformDepth", "xformSpread" },
     level     = { "level", "levelClipper", "levelEQ", "levelComp" },
     collapsed = {}
   }
@@ -401,13 +308,12 @@ end
 
 local adapterBiases = {
   "character", "shape", "grit", "punch", "sweep", "sweepTime",
-  "attack", "hold", "decay", "clipper", "eq", "level", "compAmt", "octave",
-  "depth", "spread"
+  "attack", "hold", "decay", "clipper", "eq", "level", "compAmt", "octave"
 }
 
 function DrumVoice:serialize()
   local t = Unit.serialize(self)
-  t.schema = 3 -- schema 3 = Makeup replaced with one-knob CompAmt
+  t.schema = 4 -- schema 4 = xform / randomize removed (.175)
   for _, name in ipairs(adapterBiases) do
     local obj = self.objects[name]
     if obj then
@@ -431,9 +337,10 @@ function DrumVoice:deserialize(t)
     t.eq = (t.eq - 0.5) * 2.0
   end
   -- Migration from schema 1 / 2 (pre-comp): Makeup is gone; legacy t.makeup
-  -- is silently dropped, compAmt defaults to 0 via the hardSet at init.
-  -- Saved CV bindings against the makeup branch will fail to resolve and
-  -- produce a log warning; user can re-bind to the compAmt branch.
+  -- is silently dropped, compAmt defaults to 0.
+  -- Migration to schema 4 (.175): xform removed. Saved CV bindings against
+  -- xformTrig / depth / spread / xformTarget branches will fail to resolve
+  -- and produce a log warning; they're orphaned by design.
 
   Unit.deserialize(self, t)
   for _, name in ipairs(adapterBiases) do

@@ -2,6 +2,7 @@
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
+#include <string.h>
 
 #ifdef __ARM_NEON
 #include <arm_neon.h>
@@ -9,6 +10,16 @@
 
 namespace stolmine
 {
+
+  // 0.999f init can't go through memset (only byte patterns); needs a
+  // separate loop. noinline + no-tree-vectorize so gcc doesn't lift it
+  // back into a NEON quad-store with :64 hint.
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void initPartialDecayCoeffs(float *partialDecay)
+  {
+    for (int i = 0; i < 4; i++)
+      partialDecay[i] = 0.999f;
+  }
 
   static inline float fast_tanh(float x)
   {
@@ -179,21 +190,20 @@ namespace stolmine
 
   DrumVoice::DrumVoice()
   {
-    // Zero-init NEON working buffers (no in-class init in header to keep
-    // the class layout simple).
-    for (int i = 0; i < 4; i++) {
-      mPhaseBank[i]          = 0.0f;
-      mIncBank[i]            = 0.0f;
-      mSineBank[i]           = 0.0f;
-      mPartialPhases[i]      = 0.0f;
-      mPartialInc[i]         = 0.0f;
-      mPartialSines[i]       = 0.0f;
-      mPartialEnvs[i]        = 0.0f;
-      mPartialDecayCoeffs[i] = 0.999f;
-    }
+    // Zero-init seven NEON-touched float[4] arrays via memset (libc
+    // call, not subject to auto-vec). 0.999f init for partial decay
+    // goes through a noinline helper.
+    memset(mPhaseBank, 0, sizeof(mPhaseBank));
+    memset(mIncBank, 0, sizeof(mIncBank));
+    memset(mSineBank, 0, sizeof(mSineBank));
+    memset(mPartialPhases, 0, sizeof(mPartialPhases));
+    memset(mPartialInc, 0, sizeof(mPartialInc));
+    memset(mPartialSines, 0, sizeof(mPartialSines));
+    memset(mPartialEnvs, 0, sizeof(mPartialEnvs));
+    initPartialDecayCoeffs(mPartialDecayCoeffs);
+
     addInput(mTrigger);
     addInput(mVOct);
-    addInput(mXformGate);
     addOutput(mOut);
     addParameter(mCharacter);
     addParameter(mShape);
@@ -209,9 +219,6 @@ namespace stolmine
     addParameter(mLevel);
     addParameter(mCompAmt);
     addParameter(mOctave);
-    addParameter(mXformDepth);
-    addParameter(mXformSpread);
-    addParameter(mXformTarget);
     mpInternal = new Internal();
     mpInternal->initLUT();
   }
@@ -227,115 +234,11 @@ namespace stolmine
   float DrumVoice::getEnvLevel()  { return mpInternal->vizEnvLevel; }
   bool  DrumVoice::getGateState() { return mpInternal->vizGateState; }
 
-  void DrumVoice::fireRandomize() { mManualFire = true; }
-
-  void DrumVoice::setTopLevelBias(int which, od::Parameter *param)
-  {
-    switch (which)
-    {
-    case 0:  mBiasCharacter = param; break;
-    case 1:  mBiasShape     = param; break;
-    case 2:  mBiasGrit      = param; break;
-    case 3:  mBiasPunch     = param; break;
-    case 4:  mBiasAttack    = param; break;
-    case 5:  mBiasHold      = param; break;
-    case 6:  mBiasDecay     = param; break;
-    case 7:  mBiasSweep     = param; break;
-    case 8:  mBiasSweepTime = param; break;
-    case 9:  mBiasClipper   = param; break;
-    case 10: mBiasEQ        = param; break;
-    case 11: mBiasLevel     = param; break;
-    case 12: mBiasComp      = param; break;
-    case 13: mBiasOctave    = param; break;
-    }
-  }
-
-  static uint32_t sRandState = 48271u;
-
-  static float randomizeValue(float cur, float mn, float mx, float depth, float spread)
-  {
-    float range = mx - mn;
-    float center = spread * (mn + mx) * 0.5f + (1.0f - spread) * cur;
-    float dev = depth * range * 0.5f;
-    sRandState = sRandState * 1664525u + 1013904223u;
-    float r = (float)(int32_t)sRandState / 2147483648.0f;
-    float v = center + r * dev;
-    if (v < mn) v = mn;
-    if (v > mx) v = mx;
-    return v;
-  }
-
-  // Non-capturing helpers. Used by applyRandomize's switch cases -- non-
-  // capturing because [&]-captured lambdas inlined into differential case
-  // bodies caused hardware-only crashes (2.5.5.92, 2.5.5.93).
-  static void doRnd(od::Parameter *p, float mn, float mx, float depth, float spread)
-  {
-    if (p) p->hardSet(randomizeValue(p->value(), mn, mx, depth, spread));
-  }
-  static void doRndInt(od::Parameter *p, float mn, float mx, float depth, float spread)
-  {
-    if (p) p->hardSet(floorf(randomizeValue(p->value(), mn, mx, depth, spread) + 0.5f));
-  }
-
-  void DrumVoice::applyRandomize()
-  {
-    // Single-method, branchless tier masking. We always perform exactly
-    // 10 doRnd/doRndInt calls (matching the 2.5.5.91 / 2.5.5.94 working
-    // shape). Tier filtering is applied via per-group depth masks --
-    // when a group is excluded, its depth becomes 0.0f, which makes
-    // randomizeValue return cur unchanged (depth*range/2 = 0 → no
-    // deviation, center collapses to cur because spread is also 0.5).
-    // Ternaries compile to CMP+MOVCC on Cortex-A8 (conditional-move,
-    // not control-flow branch).
-    //
-    // Tiers (target value increases as we opt out of more):
-    //   0 "all"  : all four groups active
-    //   1 "-swp" : drop Sweep + SweepTime (pitch envelope locked)
-    //   2 "-pch" : also drop Octave (full pitch identity locked)
-    //   3 "tmbr" : timbre only (Char/Shape/Grit/Punch)
-    //
-    // Function-pointer-table dispatch (2.5.5.96) and switch-with-
-    // differential-bodies (2.5.5.92, .93, .95) both crashed Cortex-A8
-    // hardware under -O3 -ffast-math. This single-method shape matches
-    // 2.5.5.94's known-loading topology while still providing per-tier
-    // behavior at runtime.
-    int target = CLAMP(0, 3, (int)(mXformTarget.value() + 0.5f));
-    float depth  = CLAMP(0.0f, 1.0f, mXformDepth.value());
-    float spread = CLAMP(0.0f, 1.0f, mXformSpread.value());
-
-    // When a tier is masked out we need BOTH depth=0 AND spread=0 so
-    // randomizeValue collapses to (center=cur, dev=0) → returns cur
-    // unchanged. depth=0 alone leaves the spread-pulled center pulling
-    // the value toward range midpoint.
-    bool envOn   = (target <= 2);
-    bool octOn   = (target <= 1);
-    bool sweepOn = (target == 0);
-
-    float depthEnv   = envOn   ? depth  : 0.0f;
-    float spreadEnv  = envOn   ? spread : 0.0f;
-    float depthOct   = octOn   ? depth  : 0.0f;
-    float spreadOct  = octOn   ? spread : 0.0f;
-    float depthSweep = sweepOn ? depth  : 0.0f;
-    float spreadSweep= sweepOn ? spread : 0.0f;
-
-    doRnd(mBiasCharacter, 0.0f,   1.0f,  depth,      spread);
-    doRnd(mBiasShape,     0.0f,   1.0f,  depth,      spread);
-    doRnd(mBiasGrit,      0.0f,   1.0f,  depth,      spread);
-    doRnd(mBiasPunch,     0.0f,   1.0f,  depth,      spread);
-    doRnd(mBiasAttack,    0.0f,   0.05f, depthEnv,   spreadEnv);
-    doRnd(mBiasHold,      0.0f,   0.5f,  depthEnv,   spreadEnv);
-    doRnd(mBiasDecay,     0.01f,  2.0f,  depthEnv,   spreadEnv);
-    doRndInt(mBiasOctave, -4.0f,  4.0f,  depthOct,   spreadOct);
-    doRnd(mBiasSweep,     0.0f,   72.0f, depthSweep, spreadSweep);
-    doRnd(mBiasSweepTime, 0.001f, 0.5f,  depthSweep, spreadSweep);
-  }
-
   void DrumVoice::process()
   {
     Internal &s = *mpInternal;
     float *trig = mTrigger.buffer();
     float *voct = mVOct.buffer();
-    float *xgate = mXformGate.buffer();
     float *out  = mOut.buffer();
 
     float sr = globalConfig.sampleRate;
@@ -451,21 +354,9 @@ namespace stolmine
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
-      // Xform gate: rising edge on CV input OR manual fire flag -> apply
-      // randomize. Threshold matches Pecto (0.5) to ignore comparator
-      // residue between triggers.
-      bool xformHigh = xgate[i] > 0.5f;
-      bool xformRise = xformHigh && !mXformGateWasHigh;
-      mXformGateWasHigh = xformHigh;
-      if (xformRise || mManualFire)
-      {
-        applyRandomize();
-        mManualFire = false;
-      }
-
       // Trigger detection: rising edge
       float trigVal = trig[i];
-      if (trigVal > 0.1f && s.prevTrigger <= 0.1f)
+      if (trigVal > 0.5f && s.prevTrigger <= 0.5f)
       {
         // Grit envelope coupling: high grit shortens decay
         float effectiveDecay = decay;
