@@ -1407,6 +1407,114 @@ namespace stolmine
       }
     }
 
+    // Phase 8b -- Order 3: topology metrics into wavetable blend amount.
+    // For each node compute eccentricity (distance from cluster centroid
+    // in 7-dim feature space) and sparsity (mean distance to K=4 nearest
+    // neighbors). Both min/max-normalized across the 64 nodes. Both fold
+    // multiplicatively into row[28] (the wavetable shaper engagement
+    // amount). Effect: isolated / eccentric picks engage the wavetable
+    // shaper more strongly; central / dense picks stay cleaner.
+    //
+    // Training-time only. Reads features from `coarse` (untouched) so
+    // ordering vs Order 2 doesn't matter -- they write to disjoint
+    // preset rows (Order 2 -> rows 9..11, Order 3 -> row 28). Cost:
+    // O(N^2) for sparsity = 64*63 distance pairs ~= 30k flops, one-shot.
+    {
+      // Centroid: mean of features across all 64 picks
+      float centroid[kFeatDim] = {0};
+      for (int n = 0; n < 64; n++)
+      {
+        const float *fc = &coarse[picks[n] * kFeatDim];
+        for (int k = 0; k < kFeatDim; k++)
+          centroid[k] += fc[k];
+      }
+      const float invN = 1.0f / 64.0f;
+      for (int k = 0; k < kFeatDim; k++)
+        centroid[k] *= invN;
+
+      // Per-node eccentricity (distance from centroid)
+      float eccentricity[64];
+      for (int n = 0; n < 64; n++)
+      {
+        const float *fc = &coarse[picks[n] * kFeatDim];
+        float d = 0.0f;
+        for (int k = 0; k < kFeatDim; k++)
+        {
+          float dk = fc[k] - centroid[k];
+          d += dk * dk;
+        }
+        eccentricity[n] = sqrtf(d);
+      }
+
+      // Per-node sparsity: mean distance to K=4 nearest neighbors.
+      // Brute force pairwise (32k flops); fine at training time.
+      const int kSparsityK = 4;
+      float sparsity[64];
+      for (int n = 0; n < 64; n++)
+      {
+        const float *fc = &coarse[picks[n] * kFeatDim];
+        // Track 4 smallest distances via insertion into sorted small array.
+        float topK[kSparsityK];
+        for (int s = 0; s < kSparsityK; s++) topK[s] = 1e30f;
+        for (int m = 0; m < 64; m++)
+        {
+          if (m == n) continue;
+          const float *fm = &coarse[picks[m] * kFeatDim];
+          float d = 0.0f;
+          for (int k = 0; k < kFeatDim; k++)
+          {
+            float dk = fc[k] - fm[k];
+            d += dk * dk;
+          }
+          float dist = sqrtf(d);
+          // Insert into topK (keep ascending)
+          if (dist < topK[kSparsityK - 1])
+          {
+            int pos = kSparsityK - 1;
+            while (pos > 0 && topK[pos - 1] > dist)
+            {
+              topK[pos] = topK[pos - 1];
+              pos--;
+            }
+            topK[pos] = dist;
+          }
+        }
+        float sum = 0.0f;
+        for (int s = 0; s < kSparsityK; s++) sum += topK[s];
+        sparsity[n] = sum / (float)kSparsityK;
+      }
+
+      // Min/max normalize both arrays to [0,1] across the map
+      auto normalizeInPlace = [](float *arr, int count) {
+        float mn = 1e30f, mx = -1e30f;
+        for (int i = 0; i < count; i++)
+        {
+          if (arr[i] < mn) mn = arr[i];
+          if (arr[i] > mx) mx = arr[i];
+        }
+        float range = mx - mn;
+        if (range < 1e-6f) {
+          for (int i = 0; i < count; i++) arr[i] = 0.5f;
+          return;
+        }
+        float inv = 1.0f / range;
+        for (int i = 0; i < count; i++) arr[i] = (arr[i] - mn) * inv;
+      };
+      normalizeInPlace(eccentricity, 64);
+      normalizeInPlace(sparsity, 64);
+
+      // Fold into row[28]. Multiplicative; consumer already CLAMPs.
+      const float kEccentricityGain = 0.40f;
+      const float kSparsityGain     = 0.30f;
+      for (int n = 0; n < 64; n++)
+      {
+        float bias = 1.0f
+                     + eccentricity[n] * kEccentricityGain
+                     + sparsity[n]     * kSparsityGain;
+        mPresetTable[n][28] *= bias;
+      }
+    }
+
     // Phase 8a -- Order 2: scan-neighbor gradients into op B/C/D detunes.
     // For each node compute the feature-space distance to its two scan-
     // order neighbors (averaged); use as a multiplicative scalar on the
