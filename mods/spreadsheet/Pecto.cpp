@@ -7,6 +7,32 @@
 #include <new>
 #include <stdlib.h>
 
+namespace stolmine {
+  // Block-rate update helpers for Pecto's snap-and-fade smoother.
+  // noinline + no-tree-vectorize prevents gcc from auto-vectorizing
+  // the contiguous float[] copy / scale into quad-D vst1.64 :64
+  // stores, which trap on Cortex-A8 when the class-member offset
+  // doesn't land 8-byte aligned from `this` (per
+  // feedback_neon_intrinsics_drumvoice .165 ctor fix). Static so
+  // each call site sees a clean register window.
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void copyDelaySamples(float *dst, const float *src, int n)
+  {
+    for (int i = 0; i < n; i++) dst[i] = src[i];
+  }
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void recomputeDelaySamples(float *dst, const float *tapPos,
+                                    float baseDelay, int n)
+  {
+    for (int i = 0; i < n; i++) dst[i] = baseDelay * tapPos[i];
+  }
+  __attribute__((noinline, optimize("no-tree-vectorize")))
+  static void copyTapWeights(float *dst, const float *src, int n)
+  {
+    for (int i = 0; i < n; i++) dst[i] = src[i];
+  }
+}
+
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
 #define PECTO_HAS_NEON 1
@@ -470,18 +496,21 @@ namespace stolmine
     // density / pattern / slope ratchet (handled by recomputeTaps's
     // dirty check). It can update every block without zipper -- only
     // continuous baseDelay motion needs the fade.
-    for (int t = 0; t < density; t++)
-      mCachedTapWeight[t] = s.tapWeight[t];
+    //
+    // All three update loops go through noinline+no-tree-vectorize
+    // helpers (file scope) to prevent gcc from auto-vectorizing the
+    // contiguous float[] copy/scale into quad-D vst1.64 :64 stores
+    // -- those trap on Cortex-A8 when the class-member offset isn't
+    // 8-byte aligned from `this` (per feedback_neon_intrinsics_drumvoice).
+    copyTapWeights(mCachedTapWeight, s.tapWeight, density);
 
     if (mFade.done())
     {
       mFade.reset(1, 0);
       // snap: old <- current "new" target
-      for (int t = 0; t < density; t++)
-        mCachedDelaySamples0[t] = mCachedDelaySamples[t];
+      copyDelaySamples(mCachedDelaySamples0, mCachedDelaySamples, density);
       // recompute new target
-      for (int t = 0; t < density; t++)
-        mCachedDelaySamples[t] = baseDelay * s.tapPosition[t];
+      recomputeDelaySamples(mCachedDelaySamples, s.tapPosition, baseDelay, density);
     }
 
     // Per-sample fade weight buffer (1.0 -> 0.0 across the ramp;
