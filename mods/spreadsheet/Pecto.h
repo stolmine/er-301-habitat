@@ -2,7 +2,6 @@
 
 #include <od/objects/Object.h>
 #include <od/config.h>
-#include <od/extras/LinearRamp.h>
 
 namespace stolmine
 {
@@ -58,22 +57,20 @@ namespace stolmine
     float mCachedTapWeight[kMaxCombTaps];
 
     // Doppler-style smoother for baseDelay. Continuous knob motion
-    // (combSize, V/Oct) causes baseDelay to jump block-to-block,
-    // producing audible zipper noise on the 24-tap multitap. Smooth
-    // by linearly ramping baseDelay over a 25ms window: every time
-    // the previous ramp completes, snapshot prev <- cur, set cur to
-    // the latest target, reset the ramp. Per-sample inside process()
-    // currentBase = fade[i] * mPrevBaseDelay + (1 - fade[i]) * mCurBaseDelay
-    // and the read pointer slides smoothly to the new position.
+    // (combSize, V/Oct) jumps baseDelay block-to-block, producing
+    // audible zipper noise on the 24-tap multitap. Smoother is a
+    // simple per-sample one-pole LP (Path C in planning/pecto-zipper.md
+    // -- chosen over the LinearRamp+fade-buffer Path B which crashed
+    // under V/Oct + size double-modulation in .184/.185 with no
+    // identifiable trap surface; the asymptotic settling is musically
+    // adequate for a comb filter and removes both LinearRamp state
+    // and the AudioThread::getFrame allocation per block).
     //
-    // Doppler-style rather than crossfade (od::Delay's pattern at 24
-    // taps doubled the per-sample NEON pipeline and produced trap-
-    // shaped codegen on Cortex-A8 in .182/.183). For a multitap comb
-    // this is also more musical -- pitch glide during sweeps matches
-    // tape-delay character.
-    od::LinearRamp mFade;
-    float mPrevBaseDelay = 0.0f;
-    float mCurBaseDelay = 0.0f;
+    // mSmoothedBaseDelay tracks baseDelay via per-sample
+    // smoothedBaseDelay += (target - smoothedBaseDelay) * alpha,
+    // with alpha tuned for ~25ms settling at 48kHz. Pass A uses the
+    // smoothed value via vdupq_n_f32(currentBase).
+    float mSmoothedBaseDelay = 0.0f;
 
     // Xform gate state
     bool mXformGateWasHigh = false;

@@ -1,6 +1,5 @@
 #include "Pecto.h"
 #include <od/config.h>
-#include <od/AudioThread.h>
 #include <hal/ops.h>
 #include <math.h>
 #include <string.h>
@@ -114,11 +113,6 @@ namespace stolmine
     mpInternal->Init();
     for (int i = 0; i < kMaxCombTaps; i++)
       mCachedTapWeight[i] = 1.0f;
-    // 25ms smoothing ramp at frame rate (matches od::Delay's mFade
-    // setLength). frameRate = sampleRate / FRAMELENGTH. For 48k/128
-    // this is 9 frames = ~24ms. Used to interpolate baseDelay between
-    // mPrevBaseDelay and mCurBaseDelay over the ramp window.
-    mFade.setLength((int)(globalConfig.frameRate * 0.025f));
   }
 
   Pecto::~Pecto()
@@ -481,24 +475,31 @@ namespace stolmine
     if (!(baseDelay >= 1.0f)) baseDelay = 1.0f;
     if (baseDelay > (float)(maxDelay - 1)) baseDelay = (float)(maxDelay - 1);
 
-    // Doppler-style baseDelay smoother (matches od::Delay's mFade.done()
-    // gating semantics, but interpolating a scalar instead of crossfading
-    // two read positions). Snap the previous-target down to mPrev when
-    // the ramp completes; reset the ramp toward 1.0 -> 0.0 over its
-    // 25ms length. Per-sample fade weights drive the linear interp
-    // between mPrev and mCur inside the inner loop. Block-rate target
-    // sampling (only when fade is done) means rapid knob motion
-    // produces a chain of overlapping ~25ms smooth transitions.
-    if (mFade.done())
-    {
-      mPrevBaseDelay = mCurBaseDelay;
-      mCurBaseDelay = baseDelay;
-      mFade.reset(1, 0);
-    }
+    // Path C smoother target. Per-sample one-pole LP toward this
+    // target. alpha tuned for ~25ms settling at 48kHz: a single-pole
+    // step of `(target - state) * alpha` with alpha ≈ 1/(0.025*48000)
+    // hits 63% of the gap in 1 time-constant; over 25ms total the
+    // state settles asymptotically toward the target. Asymptotic
+    // (rather than linear-ramp) settling is musically natural for a
+    // delay-time slew and removes the LinearRamp state machine and
+    // AudioThread::getFrame allocation that .184/.185 had.
+    const float smoothAlpha = 1.0f / (0.025f * sr);
 
-    // Per-sample fade-weight buffer (1.0 -> 0.0 across the ramp).
-    float *fade = od::AudioThread::getFrame();
-    mFade.getInterpolatedFrame(fade);
+    // First-process safety: if the smoother has never been touched
+    // (initialized to 0.0f), seed it to the current baseDelay so we
+    // don't spend the first 25ms ramping up from zero.
+    if (mSmoothedBaseDelay < 1.0f) mSmoothedBaseDelay = baseDelay;
+
+    // DC blocker IIR state sanity-reset. dcX1/dcY1 carry across blocks
+    // and would latch NaN/inf forever if any sample produced one
+    // (rare under normal operation but possible under unusual input
+    // signals). isfinite is a single fcmp + branch on Cortex-A8 --
+    // negligible per block, vs scrubbing the entire output to NaN
+    // until the unit is removed.
+    if (!isfinite(s.dcX1)) s.dcX1 = 0.0f;
+    if (!isfinite(s.dcY1)) s.dcY1 = 0.0f;
+    if (!isfinite(s.fbFilterState)) s.fbFilterState = 0.0f;
+    if (!isfinite(s.sitarEnvFollower)) s.sitarEnvFollower = 0.0f;
 
     // Tap weight (slope envelope) tracks categorical changes only --
     // recomputeTaps's dirty check covers density / pattern / slope
@@ -560,14 +561,17 @@ namespace stolmine
       float writeIdxF = (float)s.writeIndex;
       float maxDelayF = (float)maxDelay;
 
-      // Per-sample smoothed baseDelay. fade[i] is mFade's per-sample
-      // weight (1.0 -> 0.0 across the 25ms ramp). mPrevBaseDelay holds
-      // the value at the start of the current ramp; mCurBaseDelay is
-      // the latest target. When the ramp completes mFade.done() will
-      // gate the next snap at the top of process().
-      const float w_i = fade[i];
-      const float currentBase =
-          w_i * mPrevBaseDelay + (1.0f - w_i) * mCurBaseDelay;
+      // Per-sample one-pole LP step toward target baseDelay. alpha
+      // computed at block top from sample rate. CLAMP after each step
+      // keeps state finite even if alpha + numerical drift over many
+      // hours could nudge it -- belt-and-suspenders against state-
+      // accumulation crashes (.184/.185 mode that LinearRamp+fade-
+      // buffer Path B exhibited under V/Oct + size double-modulation).
+      mSmoothedBaseDelay += (baseDelay - mSmoothedBaseDelay) * smoothAlpha;
+      if (!(mSmoothedBaseDelay >= 1.0f)) mSmoothedBaseDelay = 1.0f;
+      if (mSmoothedBaseDelay > (float)(maxDelay - 1))
+        mSmoothedBaseDelay = (float)(maxDelay - 1);
+      const float currentBase = mSmoothedBaseDelay;
 
 #ifdef PECTO_HAS_NEON
       // --- Pass A (NEON): compute read indices and fractional offsets.
@@ -767,12 +771,6 @@ namespace stolmine
       // Output
       out[i] = fast_tanh(dcOut * outputLevel);
     }
-
-    // Step the smoother once per process() call (matches od::Delay's
-    // mFade.step() at line 162). When mCount reaches 0, mFade.done()
-    // returns true and the next process() call snaps the new target.
-    mFade.step();
-    od::AudioThread::releaseFrame(fade);
   }
 
 } // namespace stolmine
