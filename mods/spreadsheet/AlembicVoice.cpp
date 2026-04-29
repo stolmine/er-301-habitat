@@ -1407,6 +1407,60 @@ namespace stolmine
       }
     }
 
+    // Phase 8a -- Order 2: scan-neighbor gradients into op B/C/D detunes.
+    // For each node compute the feature-space distance to its two scan-
+    // order neighbors (averaged); use as a multiplicative scalar on the
+    // already-trained detunes (rows 9..11). Isolated picks in feature
+    // space drift further; clustered picks stay coherent. Op A (row 8)
+    // intentionally untouched to anchor pitch.
+    //
+    // Cost: 64 nodes x 7-dim distance x 2 neighbors ~= 900 flops, one
+    // shot at training time. Multiplicative on top -- disabling Order
+    // 2 is gradient*=0 which preserves the trained row.
+    {
+      const float kOrder2DetuneGain = 0.30f; // cap: +30% on detune
+      for (int n = 0; n < 64; n++)
+      {
+        const float *fc = &coarse[picks[n] * kFeatDim];
+        float gradAccum = 0.0f;
+        int gradN = 0;
+        if (n > 0)
+        {
+          const float *fp = &coarse[picks[n - 1] * kFeatDim];
+          float d = 0.0f;
+          for (int k = 0; k < kFeatDim; k++)
+          {
+            float dk = fc[k] - fp[k];
+            d += dk * dk;
+          }
+          gradAccum += sqrtf(d);
+          gradN++;
+        }
+        if (n < 63)
+        {
+          const float *fn = &coarse[picks[n + 1] * kFeatDim];
+          float d = 0.0f;
+          for (int k = 0; k < kFeatDim; k++)
+          {
+            float dk = fc[k] - fn[k];
+            d += dk * dk;
+          }
+          gradAccum += sqrtf(d);
+          gradN++;
+        }
+        // Distances are over min/max-normalized features in [0,1]^7
+        // so a maxed gradient is sqrt(7) ~= 2.65; clamp the gain
+        // input so the multiplier stays in [1, 1+kOrder2DetuneGain].
+        float gradient = (gradN > 0) ? (gradAccum / (float)gradN) : 0.0f;
+        gradient *= (1.0f / 2.65f);
+        if (gradient > 1.0f) gradient = 1.0f;
+        const float scale = 1.0f + gradient * kOrder2DetuneGain;
+        mPresetTable[n][9]  *= scale;
+        mPresetTable[n][10] *= scale;
+        mPresetTable[n][11] *= scale;
+      }
+    }
+
     // Phase 5d-1.6: build per-node 256-entry LUTs from 256-sample multi-
     // cycle source windows at the picks, folded around each window's
     // absolute peak with per-node even/odd symmetry chosen from the
