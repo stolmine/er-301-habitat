@@ -63,24 +63,28 @@ namespace jf
     }
 
     // Convenience: build a 4-lane uint mask from 4 bools.
+    // NB: the obvious "stack-local float v[4]; vld1q_f32(v)" pattern
+    // generates `:64` alignment hints that trap on Cortex-A8 under -O3
+    // -ffast-math (per feedback_neon_intrinsics_drumvoice). We use
+    // vsetq_lane_* instead, which stays register-only on hardware.
     inline uint32x4_t make_mask(bool a, bool b, bool c, bool d)
     {
-      uint32_t v[4];
-      v[0] = a ? 0xFFFFFFFFu : 0u;
-      v[1] = b ? 0xFFFFFFFFu : 0u;
-      v[2] = c ? 0xFFFFFFFFu : 0u;
-      v[3] = d ? 0xFFFFFFFFu : 0u;
-      return vld1q_u32(v);
+      uint32x4_t r = vdupq_n_u32(0);
+      r = vsetq_lane_u32(a ? 0xFFFFFFFFu : 0u, r, 0);
+      r = vsetq_lane_u32(b ? 0xFFFFFFFFu : 0u, r, 1);
+      r = vsetq_lane_u32(c ? 0xFFFFFFFFu : 0u, r, 2);
+      r = vsetq_lane_u32(d ? 0xFFFFFFFFu : 0u, r, 3);
+      return r;
     }
 
     inline float32x4_t make_4(float a, float b, float c, float d)
     {
-      float v[4];
-      v[0] = a;
-      v[1] = b;
-      v[2] = c;
-      v[3] = d;
-      return vld1q_f32(v);
+      float32x4_t r = vdupq_n_f32(0.0f);
+      r = vsetq_lane_f32(a, r, 0);
+      r = vsetq_lane_f32(b, r, 1);
+      r = vsetq_lane_f32(c, r, 2);
+      r = vsetq_lane_f32(d, r, 3);
+      return r;
     }
 
     // ----- gate edge detection -----

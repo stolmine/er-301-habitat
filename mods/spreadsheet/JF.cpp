@@ -109,6 +109,13 @@ namespace stolmine
       return undertone + (noonDetune - undertone) * (1.0f + pos);
   }
 
+  // no-tree-vectorize keeps GCC from auto-vectorizing the per-sample
+  // output buffer writes into NEON quad-D stores with `:64` alignment
+  // hints, which trap on Cortex-A8 when the buffer pointer arithmetic
+  // (outs[N] + i) doesn't land on an 8-byte boundary. Same pattern as
+  // Pecto's copyFloatArray helper. Our own NEON intrinsics inside
+  // jf::four are unaffected — they're explicit, not auto-emitted.
+  __attribute__((optimize("no-tree-vectorize")))
   void JF::process()
   {
     const int frames = FRAMELENGTH;
@@ -196,24 +203,28 @@ namespace stolmine
       // Mask off g1 lanes 2,3 in output (zero them).
       shapedG1 = vbslq_f32(g1Mask, shapedG1, vdupq_n_f32(0.0f));
 
-      // Per-voice sub-out writes.
-      float voices[8];
-      vst1q_f32(voices,     shapedG0);
-      vst1q_f32(voices + 4, shapedG1);
+      // Per-voice sub-out writes via vgetq_lane_f32 — keeps the NEON
+      // values register-resident; storing to a stack-local voices[8]
+      // array would emit `:64` hints that trap on Cortex-A8 (per
+      // feedback_neon_intrinsics_drumvoice + feedback_neon_hint_surfaces).
+      const float v1N = vgetq_lane_f32(shapedG0, 0);
+      const float v2N = vgetq_lane_f32(shapedG0, 1);
+      const float v3N = vgetq_lane_f32(shapedG0, 2);
+      const float v4N = vgetq_lane_f32(shapedG0, 3);
+      const float v5N = vgetq_lane_f32(shapedG1, 0);
+      const float v6N = vgetq_lane_f32(shapedG1, 1);
 
-      outs[0][i] = voices[0];  // 1N
-      outs[1][i] = voices[1];  // 2N
-      outs[2][i] = voices[2];  // 3N
-      outs[3][i] = voices[3];  // 4N
-      outs[4][i] = voices[4];  // 5N
-      outs[5][i] = voices[5];  // 6N
+      outs[0][i] = v1N;
+      outs[1][i] = v2N;
+      outs[2][i] = v3N;
+      outs[3][i] = v4N;
+      outs[4][i] = v5N;
+      outs[5][i] = v6N;
 
       // MIX = sum of all 6 voices, scaled to avoid clipping.
       // Phase 4 swaps in the proper combiner (tanh in Sound, max-of-
       // index-scaled in Shape).
-      const float sum = jf::four::sum_lanes(shapedG0)
-                      + voices[4] + voices[5];
-      mixBuf[i] = sum * (1.0f / 6.0f);
+      mixBuf[i] = (v1N + v2N + v3N + v4N + v5N + v6N) * (1.0f / 6.0f);
     }
   }
 

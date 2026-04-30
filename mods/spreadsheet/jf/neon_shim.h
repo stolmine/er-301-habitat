@@ -161,6 +161,22 @@ static inline uint32x4_t vcltq_f32(float32x4_t a, float32x4_t b) {
   return r;
 }
 
+// ----- lane access -----
+
+static inline float32x4_t vsetq_lane_f32(float v, float32x4_t a, int idx) {
+  a.v[idx] = v;
+  return a;
+}
+
+static inline uint32x4_t vsetq_lane_u32(uint32_t v, uint32x4_t a, int idx) {
+  a.v[idx] = v;
+  return a;
+}
+
+static inline float vgetq_lane_f32(float32x4_t a, int idx) {
+  return a.v[idx];
+}
+
 // ----- pairwise add (for sum_lanes) -----
 
 static inline float32x2_t vget_low_f32(float32x4_t a) {
