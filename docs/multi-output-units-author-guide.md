@@ -81,6 +81,55 @@ end
 
 The `unitOutputNames` global in `xroot/boot/globals-setup.lua` already maps `"Out1"` through `"Out4"` to channel indices 0-3. If you need more than 4, that table needs extending in stolmine — file an issue.
 
+## Sub-chain presence detection (cascade pattern)
+
+For units with N parallel sub-chains where unpatched cells should fall through to a neighbor's source — Just-Friends-style right-to-left normalling, polyphonic units folding unused voices onto the next-active one, sequencer rows where empty rows inherit upstream — use a **mask-based dispatch**, not input-source rebinding.
+
+### The pattern
+
+1. Each frame, Lua walks the N sub-chains and computes a presence mask:
+
+   ```lua
+   local mask = {}
+   for i = 1, N do
+     mask[i] = (self:getControlBranch(i):getInputSource(1) ~= nil) and 1 or 0
+   end
+   ```
+
+2. Lua pushes the mask to C++ as a parameter (bool array, packed integer, or N parameter slots — whichever your DSP wants).
+
+3. C++ reads all N trigger inlets per block and uses the mask to select the effective source for each voice. Empty cells fall through to the nearest `mask=1` neighbor by your unit's normalling rule.
+
+### Why mask-not-rebind
+
+The naive alternative is to call `chain:setInputSource(j, ...)` on empty cells to alias them to the patched neighbor's source. Don't. Two reasons:
+
+- **Inlet-buffer aliasing on the audio thread.** Source rebinding mutates inlet ownership on every patch change, racing with the audio thread that's mid-block reading those inlets.
+- **Engine-visible source structure becomes a lie.** Other code reading sub-chain source state will see synthetic bindings and may persist or render them. The mask stays purely DSP-internal.
+
+Inlets stay bound to whatever the user actually patched. The audio thread reads them unconditionally and the DSP picks which one to use per-sample-or-per-block via the mask.
+
+### `getInputSource(1) ~= nil` vs `branch:length() > 0`
+
+These look interchangeable but mean different things, and the difference is a footgun:
+
+- **`branch:length() > 0`** — any unit has been added to the sub-chain. True even if the user added a unit but didn't patch a cable into its input.
+- **`branch:getInputSource(1) ~= nil`** — the user has bound a Source via the local picker — i.e. patched a cable. This is what cascade-presence detection actually wants.
+
+`getInputSource(1)` is what `Branch:isSerializationNeeded()` itself uses (`Chain/Branch.lua:84`). Use the same primitive.
+
+### Cadence
+
+Patch state changes only on user patch/unpatch, not at audio rate. Polling once per frame (Lua-side) is fine. If polling shows up in profiling, the framework's `Chain/Base.lua:518` `contentChanged` signal can be hooked instead; raise it as a firmware-side consideration if needed.
+
+## Control polarity (bipolar CV)
+
+When a sub-control's natural domain is bipolar (±polarity — FM index swinging around zero, phase offset running ±π, modulation depth oscillating around center), **produce a bipolar control directly**. Don't reach for a unipolar control + shift-toggle pattern just to support polarity.
+
+A polarity shift-toggle is the right tool only when the user needs to choose polarity at use-time — i.e. when the same control could serve different musical roles in different patches. Most multi-out sub-controls aren't this; their domain is fixed by the DSP, and the right declaration up front is cleaner than runtime polarity flipping.
+
+Default: pick the natural polarity for the parameter and stick with it. Bipolar where called for, unipolar otherwise. Reach for a uni/bi toggle only when the parameter genuinely admits both signs of operation in different musical contexts.
+
 ## C++ DSP — the trig bug
 
 **Critical for hardware:** package-side `sinf`/`cosf` miscompute on am335x at the package→firmware call boundary. Symptoms are silent and geometric — a sine wave looks malformed, a circle distends, indicators point to the wrong place.
@@ -192,4 +241,4 @@ If you need degree symbols or non-ASCII in labels, test on hardware first — th
 - **Stereo-paired sub-outs** (e.g. main L+R as one logical sub-out, aux L+R as another). Not supported in v1; treat each sub-out as a single mono channel.
 - **Per-sub-out controls.** Multi-out unit controls live only at the top level (macro-style, affecting all sub-outs). No per-sub-out control depth.
 - **Sub-views.** No drill-down navigation for selection (the M6 cycle replaces it). The unit's own focused view may surface sub-out topology in future, but it's not committed.
-- **Two-digit sub-out counts.** The `X/Y` indicator ply is 42px wide and assumes single-digit X and Y; a sub-out count of 10+ would visually clutter the indicator (and arguably the unit itself should be a sub-chain at that point). Practically there's no hard cap, but if your design calls for ≥10 sub-outs, reconsider.
+- **Sub-out count ceiling: 99 (graphical), single-digit (practical).** The `X/Y` indicator ply renders the count as `N/M` and accommodates two digits per side, so the hard graphical cap is `99/99`. Three digits won't fit the current readout — that's the only structural limit. UX-wise the M6 cycler advances sequentially through sub-outs, so anything past single digits gets tedious to navigate fast. Practical guidance: if your design calls for ≥10 sub-outs, look hard at whether the unit should instead be a sub-chain or a polyphonic-style splitter.
