@@ -79,7 +79,7 @@ function MyMultiOut:onLoadGraph(channelCount)
 end
 ```
 
-The `unitOutputNames` global in `xroot/boot/globals-setup.lua` already maps `"Out1"` through `"Out4"` to channel indices 0-3. If you need more than 4, that table needs extending in stolmine — file an issue.
+The `unitOutputNames` global in `xroot/boot/globals-setup.lua` is generated up to `"Out99"` so any sub-out count from 1 to 99 works without firmware changes. The 99 cap matches the picker's `X/Y` readout (two digits per side); see "Out of scope" below for the practical UX guidance.
 
 ## Sub-chain presence detection (cascade pattern)
 
