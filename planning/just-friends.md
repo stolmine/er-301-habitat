@@ -95,36 +95,74 @@ In SHIFT (Shape/Transient + RUN patched):
 
 **Habitat precedent:** Helicase's phase-receptivity sync between carrier and modulator is a direct reuse target. Same state-machine-per-voice shape.
 
-## Output topology
+## Output topology — LOCKED 2026-04-30
 
-- **6 per-voice outputs** on sub-outs 1–6 (IDENTITY / 1N as sub-out 1 — **primary** for framework).
-- **MIX output** — candidate for sub-out 7 (would push fan-out to 7, still under the framework's single-digit 9-cap).
-  - Open question: sub-out 7 or absorb MIX into IDENTITY (which on hardware is both the 1N output and the first cell of the cascade)?
-  - Decision likely: separate sub-out 7 to match hardware semantics. Mix is a musically distinct output.
+**7 sub-outs, MIX-first ordering:**
 
-**Framework hard choice — sub-out 1 primary = IDENTITY.** On vanilla ER-301 this is what auto-wires. Good default for the stand-alone drone/envelope use case.
+| Sub-out | Label | Signal |
+|---|---|---|
+| 1 (primary) | `mix` | tanh-limited sum of all 6 voices (in Sound range); analog-max of index-scaled voices in Shape range |
+| 2 | `1N` | IDENTITY voice |
+| 3 | `2N` | 2N voice |
+| 4 | `3N` | 3N voice |
+| 5 | `4N` | 4N voice |
+| 6 | `5N` | 5N voice |
+| 7 | `6N` | 6N voice |
+
+**Why MIX as primary (sub-out 1).** Author-guide convention: sub-out 1 auto-wires on vanilla and is what a chain inserts into. MIX prioritizes the audio-usage default — drop the unit on a chain and you get a hex-voiced signal out of the box without per-voice routing. The hardware module's MIX is also a separate jack, so this matches hardware semantics.
+
+**Why ordered MIX → 1N..6N (not 1N → 6N → MIX).** The ordering is what the M6 cycler walks. Putting MIX first means M6's first stop is the most likely consumer; per-voice taps are deeper in the cycle, matching their lower-frequency utility.
+
+**Vanilla compatibility.** On vanilla firmware, only sub-out 1 (and sub-out 2 on stereo chains) is reachable from the picker. With MIX as sub-out 1, vanilla users get a fully-functional unit even without multi-out picker support. The Page 1 OUT crossfader fader is the *vanilla path* to per-voice access: set OUT to 1..6 to swap MIX for a specific voice on the primary outlet. CV-able, so the OUT fader is also useful on stolmine for animation effects (sweeping through voices at audio/control rate, scanning-style).
+
+**OUT crossfader vs M6 cycler — both ship.** On stolmine, M6 in the local picker selects a sub-out for a specific consumer chain (per-consumer, static). The OUT fader sweeps the *primary outlet's* signal source dynamically (per-source, CV-able). They're not redundant — they serve different musical roles.
 
 **Derivability:** fails unambiguously via shared-engine state. Cascaded triggers alone don't break derivability (all voices see identical edges on single-trigger patch). What does: INTONE ratio morph, CURVE/RAMP/FM global shaping, per-voice phase-receptivity state (SHIFT), Geode round-robin allocation counter.
 
-## Proposed UI layout (v1)
+## UI layout (v1) — LOCKED 2026-04-30
 
-**Control inventory:** 5 globals + 6 trigger sub-chains + 1 RUN CV sub-chain + 2 mode switches = ~14 controls.
+ER-301's "page" convention is a single horizontal ply row that the user scrolls through (not paginated cards). Conceptually grouped here as Page 1 (globals + audio output access) and Page 2 (gate sub-chains). All plies sit in the same `expanded` view.
 
-**Habitat convention:** signal-level inputs (trigger, gate, clock, CV) live on main view, never hidden behind config menus. Config menu reserved for static configuration. Triggers are signal-carrying and mid-set repatchable → main view.
+**Habitat convention:** signal-level inputs (trigger, gate, clock, CV) live on main view, never hidden behind config menus.
 
-**Main view, 5 pages × 3 slots:**
+### Page 1 — global macros + output access
 
-| Page | Slot 1 | Slot 2 | Slot 3 |
-|---|---|---|---|
-| 1 | Range switch (Sound / Shape) | Mode switch (Transient / Sustain / Cycle) | TIME fader + V/oct CV sub-chain |
-| 2 | INTONE + CV | RAMP + CV | CURVE + CV |
-| 3 | FM + CV | RUN + CV | (spare or MIX-level) |
-| 4 | Trig **1N** (IDENTITY) | Trig **2N** | Trig **3N** |
-| 5 | Trig **4N** | Trig **5N** | Trig **6N** |
+Reuses the Plaits / Helicase synth-voice ply order convention (V/oct-style first, then global shapers), with a Canals-style output crossfader on the final ply.
 
-Scroll depth comparable to Helicase / Plaits. Muscle memory: triggers always on the last two pages.
+| Ply | Control | Notes |
+|---|---|---|
+| 1 | **Mode** (T/S/C) | 3-position fader (LinearDialMap 0..2, rounded). Modeled on Canals `ModeSelector`. Alt name: TSC. |
+| 2 | **Range** (Sound / Shape) | 2-position fader (LinearDialMap 0..1, rounded). Modeled on Canals `ModeSelector`. |
+| 3 | **TIME** (V/Oct + offset) | `Pitch` ply, like Plaits/Helicase tune. |
+| 4 | **INTONE** + CV | GainBias. Bipolar (±1) — overtone/unison/undertone morph. |
+| 5 | **RAMP** + CV | GainBias. Bipolar per technical map. |
+| 6 | **CURVE** + CV | GainBias. Bipolar (log↔lin↔exp↔sine↔rect morph). |
+| 7 | **FM** + CV | GainBias. Bipolar. |
+| 8 | **RUN** + CV | GainBias. Bipolar (±5V on hardware). Drives SHIFT phase-receptivity sweep. |
+| 9 | **OUT** (output crossfader) | Canals-pattern `ModeSelector` 0..6 (LinearDialMap, 7-position rounded). Selects which signal goes to the **primary outlet**: 0 = MIX, 1 = IDENTITY (1N), 2 = 2N, ..., 6 = 6N. CV-able so the primary out can sweep across outputs at audio/control rate. |
 
-**Config menu reserved for v2 static settings:** RUN-mode personality toggles (when PLUME/FLOOM/SPILL etc. ship), output-mode choices (whether MIX is a sub-out), Just-Type / Geode mode selection.
+Scroll depth: 9 plies. Comparable to Plaits' 6 + 3 menu items, no worse than Helicase.
+
+### Page 2 — gate inputs per function generator (6 plies)
+
+| Ply | Control |
+|---|---|
+| 10 | **gate 1N** (IDENTITY) |
+| 11 | **gate 2N** |
+| 12 | **gate 3N** |
+| 13 | **gate 4N** |
+| 14 | **gate 5N** |
+| 15 | **gate 6N** |
+
+Right-to-left cascade resolved Lua-side via the mask pattern from `docs/multi-output-units-author-guide.md` (sub-chain presence detection): for each cell N from 6 down to 1, if `branch:getInputSource(1) == nil`, that voice's effective trigger source is the nearest patched neighbor's. Mask is pushed to C++ as a parameter; C++ reads all 6 inlets and dispatches.
+
+### Total ply count: 15
+
+Single-row scroll. Matches existing precedent (Plaits 6, Helicase 7, Larets 8, Alembic 8). Long but legible — gate sub-chains are visually distinct (`Gate` ply graphic) from globals so muscle memory locates the gate bank quickly at the right edge.
+
+### Config menu (header hold) — v2 only
+
+RUN-mode personality toggles (when PLUME/FLOOM/SPILL/STRATA/VOLLEY ship), Just-Type / Geode static mode selection. v1 ships with no menu.
 
 ## MVP scope (v1)
 
@@ -157,12 +195,14 @@ Scroll depth comparable to Helicase / Plaits. Muscle memory: triggers always on 
 
 ## Open design questions
 
-1. **Sub-out 7 for MIX or absorb into IDENTITY?** On hardware, IDENTITY is its own output AND the leftmost cell of the cascade; MIX is a separate jack summing all 6. Mapping to habitat: likely keep them separate (MIX = sub-out 7). Confirm framework-side that `subOutLabels` of length 7 renders cleanly.
-2. **RAMP CV behavior.** Tech map says RAMP CV is bipolar. How does habitat's GainBias pattern handle bipolar modulation cleanly — is it bias-bound, or does it want a uni/bi shift-toggle (D8)?
-3. **Range-switch sample-rate implications.** Sound range runs voices at audio-rate; Shape at control-rate. Internally the habitat DSP must probably run at 48 kHz always, with Shape-range voices simply clamped to control-rate frequencies. Confirm CPU.
-4. **TZ-linear FM implementation.** Through-zero linear FM requires specific phase-accumulator handling (bipolar FM signal crosses zero → phase can run backward). Design the slope engine's phase accumulator with this in mind from the start, even for v1 clamp-to-Sound.
-5. **Trigger sub-chain cascade API ergonomics.** How does a Lua-side cascade interact with ER-301's inlet buffers? Probably: Lua polls presence per frame, writes a 6-bit cascadeMask to C++; C++ reads from the "active source" inlet for each cell. Verify inlet buffer aliasing semantics.
-6. **Geode scope (v2 or later).** Geode fundamentally changes the unit's use model (polyrhythmic allocator). Might belong in its own unit rather than a mode of the main JF unit. Decide when v2 scoping arrives.
+1. **Range-switch sample-rate implications.** Sound range runs voices at audio-rate; Shape at control-rate. Internally the habitat DSP must probably run at 48 kHz always, with Shape-range voices simply clamped to control-rate frequencies. Confirm CPU.
+2. **TZ-linear FM implementation.** Through-zero linear FM requires specific phase-accumulator handling (bipolar FM signal crosses zero → phase can run backward). Design the slope engine's phase accumulator with this in mind from the start, even for v1 clamp-to-Sound.
+3. **Geode scope (v2 or later).** Geode fundamentally changes the unit's use model (polyrhythmic allocator). Might belong in its own unit rather than a mode of the main JF unit. Decide when v2 scoping arrives.
+
+**Resolved 2026-04-30:**
+- ~~Sub-out 7 for MIX or absorb into IDENTITY?~~ → MIX = sub-out 1 primary; 1N..6N = sub-outs 2..7. See Output topology.
+- ~~RAMP CV bipolar handling.~~ → bipolar GainBias directly per author-guide control-polarity convention.
+- ~~Trigger sub-chain cascade API ergonomics.~~ → mask-based dispatch per author guide; primitive verified (`branch:getInputSource(1)`).
 
 ## Open UI questions
 
@@ -171,20 +211,17 @@ Scroll depth comparable to Helicase / Plaits. Muscle memory: triggers always on 
    - Harmonic ratio visualization showing INTONE's current voicing
    - Contour preview per voice based on RAMP/CURVE
    - Something aggregating — maybe the MIX output's waveform with voice-activity markers
-2. **RUN CV placement.** It's a single bipolar CV that affects different things in different cells (SHIFT threshold / STRATA sustain / VOLLEY burst / SPILL timing / PLUME vactrol / FLOOM ratio). Adaptive label per-cell like Stages' adaptive slider labels.
-3. **Per-voice output labels.** `subOutLabels` — use "1N" / "2N" / "3N" / "4N" / "5N" / "6N" to match panel labels, or use "1" / "2" / ... / "6"? "1N" reads cleanly at 6 chars on the 42px indicator. Prefer panel-match.
+2. **RUN CV placement.** It's a single bipolar CV that affects different things in different cells (SHIFT threshold / STRATA sustain / VOLLEY burst / SPILL timing / PLUME vactrol / FLOOM ratio). Adaptive label per-cell like Stages' adaptive slider labels — but v1 only ships SHIFT, so v1 label is just "RUN" or "shift" without adaptive variation.
 
-## Next steps (tomorrow's thinking aid)
+**Resolved 2026-04-30:**
+- ~~Per-voice output labels.~~ → `{"mix", "1N", "2N", "3N", "4N", "5N", "6N"}` (≤6 chars cleanly). MIX-first matches output topology decision.
 
-1. **Decide MVP scope commitments:**
-   - MIX as sub-out 7 or absorbed?
-   - SHIFT included in v1 or deferred with PLUME/FLOOM?
-   - Is the 5-page UI layout right, or does it want reshuffling?
-2. **Probe ER-301 SDK primitives:**
-   - Sub-chain empty-check (for trigger cascade)
-   - Whether `subOutLabels` tolerates length 7
-   - Inlet buffer behavior when cascade rewires source mid-frame
-3. **Review Helicase's phase-receptivity code** as the direct reuse basis for SHIFT.
-4. **Review Varishape Osc's polyBLEP** for CURVE morph reusability.
-5. **Draft the slope-engine struct** — the per-voice state object carrying phase, cycle flag, receptivity flag, plus shared-param pointers.
-6. **Profile plan:** 6 slope engines at 48 kHz on am335x — confirm budget before committing.
+## Next steps
+
+1. **Validate `subOutLabels` length 7** — extend QuadLFO reference to 7 outs as a half-day pre-flight; confirms picker overlay + M6 cycler render cleanly. Logged firmware-side in `er-301/docs/planning/just-friends-sdk-questions.md`.
+2. **Pick package home.** JF voice + DSP both ship in a single package — no cross-package dependencies (general repo policy; see todo). Open: which package? Likely `spreadsheet` (tier-1, alongside Helicase/Ngoma/Pecto), or new `mannequins` if other Mannequins ports follow (Three Sisters, Cold Mac, Mangrove). Decide before code.
+3. **Review Helicase's phase-receptivity code** as the direct reuse basis for SHIFT mode (per-voice state machine identical shape).
+4. **Review Varishape Osc's polyBLEP** for CURVE morph reusability across sine/tri/saw/square/pulse audio-rate edges.
+5. **Draft the slope-engine struct** — per-voice state object carrying phase, cycle flag, receptivity flag, plus shared-param pointers. 6 instances managed in DSP class.
+6. **Profile plan:** 6 slope engines at 48 kHz on am335x — confirm CPU budget before committing. NEON-vectorize across the 6 voices' phase-accumulator + polyBLEP if needed; reuse Ngoma's 4-lane phasor pattern as starting template.
+7. **Trig LUT sweep.** Audit any `sinf`/`cosf` in the slope-engine + CURVE morph + analog-max MIX combiner; route through `kLutSin`/`kLutCos` per author-guide trig-bug section.
