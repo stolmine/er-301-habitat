@@ -93,6 +93,16 @@ namespace stolmine
     return baseFreq * powf(2.0f, voctV);
   }
 
+  // Fast tanh — Padé 3/3 approximation. Same shape as Pecto/Helicase
+  // use. Clamps to ±1 outside [-3, +3] without branching pain.
+  static inline float fast_tanh(float x)
+  {
+    if (x >  3.0f) return  1.0f;
+    if (x < -3.0f) return -1.0f;
+    const float xx = x * x;
+    return x * (27.0f + xx) / (27.0f + 9.0f * xx);
+  }
+
   // INTONE morph: continuous CCW (-1) → noon (0) → CW (+1).
   // Returns per-voice frequency multiplier (1.0 = same as IDENTITY).
   //   CW (+1):  voice n → n   (overtone series 1:2:3:4:5:6)
@@ -148,6 +158,21 @@ namespace stolmine
     const float rampPos = mRamp.value();  // -1..+1 bipolar
     const float curvePos = mCurve.value(); // -1..+1 bipolar
     const float fmDepth = mFmDepth.value(); // -1..+1 bipolar (signed)
+    const int outMode = mOutMode.value();   // 1=smooth, 2=snap
+
+    // OUT crossfader [0..6]: 0 = MIX, 1..6 = per-voice 1N..6N.
+    // Snap-mode rounds to nearest integer; smooth blends adjacent.
+    float outVal = mOut.value();
+    if (outVal < 0.0f) outVal = 0.0f;
+    if (outVal > 6.0f) outVal = 6.0f;
+    if (outMode == 2)
+    {
+      // Snap to integer position.
+      int idx = (int)(outVal + 0.5f);
+      if (idx < 0) idx = 0;
+      if (idx > 6) idx = 6;
+      outVal = (float)idx;
+    }
 
     // RAMP threshold T in (eps, 1-eps). Clamp keeps invT / inv(1-T)
     // finite at extremes. T = 0.5 → symmetric triangle (matches Phase 3a
@@ -327,10 +352,51 @@ namespace stolmine
       outs[4][i] = v5N;
       outs[5][i] = v6N;
 
-      // MIX = sum of all 6 voices, scaled to avoid clipping.
-      // Phase 4 swaps in the proper combiner (tanh in Sound, max-of-
-      // index-scaled in Shape).
-      mixBuf[i] = (v1N + v2N + v3N + v4N + v5N + v6N) * (1.0f / 6.0f);
+      // True MIX combiner per tech map.
+      //   Sound: tanh(sum_of_voices) — equal mix, soft-clipped.
+      //   Shape: max(v[i]/i)        — analog-max of index-scaled.
+      float trueMix;
+      if (range == 2)
+      {
+        const float s = v1N + v2N + v3N + v4N + v5N + v6N;
+        trueMix = fast_tanh(s);
+      }
+      else
+      {
+        // Index-scaled: voice n divided by n. Voice 1 (IDENTITY)
+        // unaffected. Take the maximum.
+        const float c1 = v1N;
+        const float c2 = v2N * 0.5f;
+        const float c3 = v3N * (1.0f / 3.0f);
+        const float c4 = v4N * 0.25f;
+        const float c5 = v5N * 0.2f;
+        const float c6 = v6N * (1.0f / 6.0f);
+        float m = c1;
+        if (c2 > m) m = c2;
+        if (c3 > m) m = c3;
+        if (c4 > m) m = c4;
+        if (c5 > m) m = c5;
+        if (c6 > m) m = c6;
+        trueMix = m;
+      }
+
+      // OUT crossfader: tent-function blend across [MIX, 1N..6N].
+      // tent(k) = max(0, 1 - |k - outVal|). Branchless inline; no
+      // stack array (avoids :64 hint risk).
+      auto tent = [&](float k) -> float {
+        float d = k - outVal;
+        if (d < 0.0f) d = -d;
+        return (d < 1.0f) ? (1.0f - d) : 0.0f;
+      };
+      const float outSelected = tent(0.0f) * trueMix
+                              + tent(1.0f) * v1N
+                              + tent(2.0f) * v2N
+                              + tent(3.0f) * v3N
+                              + tent(4.0f) * v4N
+                              + tent(5.0f) * v5N
+                              + tent(6.0f) * v6N;
+
+      mixBuf[i] = outSelected;
     }
   }
 

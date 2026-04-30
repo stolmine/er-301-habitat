@@ -91,6 +91,14 @@ function JF:onLoadGraph(channelCount)
   tie(jf, "FmDepth", fmDepth, "Out")
   self:addMonoBranch("fmDepth", fmDepth, "In", fmDepth, "Out")
 
+  -- OUT crossfader — selects what goes to the primary outlet.
+  -- 0 = MIX, 1 = 1N (IDENTITY), 2 = 2N, ..., 6 = 6N. CV-able.
+  -- Smooth/snap behavior is set via the config menu (mOutMode option).
+  local outSel = self:addObject("outSel", app.ParameterAdapter())
+  outSel:hardSet("Bias", 0.0)
+  tie(jf, "Out", outSel, "Out")
+  self:addMonoBranch("outSel", outSel, "In", outSel, "Out")
+
   -- IDENTITY trigger (1N gate input). Comparator-driven per the
   -- comparator-gate-threshold convention; the C++ side reads >0.5 as
   -- gate-high.
@@ -112,7 +120,7 @@ function JF:onLoadGraph(channelCount)
 end
 
 local views = {
-  expanded = { "tune", "time", "intone", "ramp", "curve", "fmDepth", "fm", "trig1N" },
+  expanded = { "tune", "time", "intone", "ramp", "curve", "fmDepth", "fm", "outSel", "trig1N" },
   collapsed = {}
 }
 
@@ -137,6 +145,12 @@ end)()
 local curveMap = (function()
   local m = app.LinearDialMap(-1, 1)
   m:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return m
+end)()
+
+local outMap = (function()
+  local m = app.LinearDialMap(0, 6)
+  m:setSteps(1, 0.1, 0.01, 0.001)
   return m
 end)()
 
@@ -229,6 +243,18 @@ function JF:onLoadViews(objects, branches)
     initialBias = 0.0
   }
 
+  controls.outSel = GainBias {
+    button = "OUT",
+    description = "OUT (primary outlet selector)",
+    branch = branches.outSel,
+    gainbias = objects.outSel,
+    range = objects.outSel,
+    biasMap = outMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 2,
+    initialBias = 0.0
+  }
+
   return controls, views
 end
 
@@ -236,7 +262,9 @@ local menu = {
   "rangeHeader",
   "range",
   "modeHeader",
-  "mode"
+  "mode",
+  "outModeHeader",
+  "outMode"
 }
 
 function JF:onShowMenu(objects, branches)
@@ -260,6 +288,16 @@ function JF:onShowMenu(objects, branches)
     description = "Mode",
     option = objects.jf:getOption("Mode"),
     choices = { "trans", "sust", "cycle" }
+  }
+
+  controls.outModeHeader = MenuHeader {
+    description = "OUT mode:"
+  }
+
+  controls.outMode = OptionControl {
+    description = "OUT mode",
+    option = objects.jf:getOption("OutMode"),
+    choices = { "smooth", "snap" }
   }
 
   return controls, menu
