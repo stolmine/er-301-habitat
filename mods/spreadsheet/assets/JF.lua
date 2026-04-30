@@ -4,12 +4,15 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local Pitch = require "Unit.ViewControl.Pitch"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Gate = require "Unit.ViewControl.Gate"
+local OptionControl = require "Unit.MenuControl.OptionControl"
+local MenuHeader = require "Unit.MenuControl.Header"
 local Encoder = require "Encoder"
 
--- JF — hex-voiced harmonically-coupled slope-engine voice. v1 phase 1
--- skeleton: declares the 7 sub-out topology, MIX-first ordering. No
--- DSP wired yet — unit produces silence. Validates the multi-output
--- declaration end-to-end before voice DSP comes online.
+-- JF — hex-voiced harmonically-coupled slope-engine voice. v1.
+-- Phase 2: scalar single-voice slope engine on IDENTITY (1N).
+-- Range + Mode in config menu (header hold) for now; promoted to
+-- main view in Phase 4 (UI polish).
 --
 -- See planning/just-friends.md + planning/jf-initial-pass.md.
 
@@ -19,10 +22,6 @@ JF:include(Unit)
 function JF:init(args)
   args.title = "JF"
   args.mnemonic = "JF"
-  -- 8 framework sub-outs. The first two BOTH source from the C++ Mix
-  -- outlet (Out1 = chain L, Out2 = chain R) so vanilla stereo chains
-  -- receive MIX on both channels rather than MIX/1N. Sub-outs 3..8 are
-  -- the per-voice taps, reachable on stolmine via the M6 picker cycle.
   args.channelCount = 8
   args.subOutLabels = {"mix", "mix R", "1N", "2N", "3N", "4N", "5N", "6N"}
   Unit.init(self, args)
@@ -31,8 +30,7 @@ end
 function JF:onLoadGraph(channelCount)
   local jf = self:addObject("jf", libspreadsheet.JF())
 
-  -- V/Oct + tune offset (TIME ply). Phase 1 wires the param surface;
-  -- DSP consumption added in Phase 2.
+  -- V/Oct (TIME). 1V/8ve, exp scaled into the slope-engine's frequency.
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
   tune:hardSet("Offset", 0.0)
@@ -40,16 +38,30 @@ function JF:onLoadGraph(channelCount)
   connect(tune, "Out", tuneRange, "In")
   self:addMonoBranch("tune", tune, "In", tune, "Out")
 
-  -- FM input branch. Bipolar; Phase 4 adds AC-coupling switching.
+  -- TIME knob (the slope-rate bias, separate from V/Oct CV per tech map).
+  -- Uses a ParameterAdapter so the knob lives on the C++ TimeBias param.
+  local time = self:addObject("time", app.ParameterAdapter())
+  time:hardSet("Bias", 0.5)
+  tie(jf, "TimeBias", time, "Out")
+  self:addMonoBranch("time", time, "In", time, "Out")
+
+  -- FM input (bipolar). Plumbed; DSP consumption arrives in Phase 4.
   local fm = self:addObject("fm", app.GainBias())
   local fmRange = self:addObject("fmRange", app.MinMax())
   connect(fm, "Out", jf, "FM In")
   connect(fm, "Out", fmRange, "In")
   self:addMonoBranch("fm", fm, "In", fm, "Out")
 
+  -- IDENTITY trigger (1N gate input). Comparator-driven per the
+  -- comparator-gate-threshold convention; the C++ side reads >0.5 as
+  -- gate-high.
+  local trig1N = self:addObject("trig1N", app.Comparator())
+  trig1N:setGateMode()
+  connect(trig1N, "Out", jf, "Trig 1N")
+  self:addMonoBranch("trig1N", trig1N, "In", trig1N, "Out")
+
   -- Wire 8 framework outlets. Out1 + Out2 both source from C++ Mix so
-  -- vanilla stereo chains see MIX on both L and R. Phase 1 produces
-  -- silence on each; Phases 2-4 fill in.
+  -- vanilla stereo chains see MIX on both L and R.
   connect(jf, "Mix",   self, "Out1") -- chain L (and mono primary)
   connect(jf, "Mix",   self, "Out2") -- chain R duplicate of MIX
   connect(jf, "Out1N", self, "Out3")
@@ -61,9 +73,15 @@ function JF:onLoadGraph(channelCount)
 end
 
 local views = {
-  expanded = { "tune", "fm" },
+  expanded = { "tune", "time", "trig1N", "fm" },
   collapsed = {}
 }
+
+local timeMap = (function()
+  local m = app.LinearDialMap(0, 1)
+  m:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return m
+end)()
 
 function JF:onLoadViews(objects, branches)
   local controls = {}
@@ -74,6 +92,25 @@ function JF:onLoadViews(objects, branches)
     branch = branches.tune,
     offset = objects.tune,
     range = objects.tuneRange
+  }
+
+  controls.time = GainBias {
+    button = "time",
+    description = "TIME",
+    branch = branches.time,
+    gainbias = objects.time,
+    range = objects.time,
+    biasMap = timeMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.5
+  }
+
+  controls.trig1N = Gate {
+    button = "1N",
+    description = "Trigger 1N (IDENTITY)",
+    branch = branches.trig1N,
+    comparator = objects.trig1N
   }
 
   controls.fm = GainBias {
@@ -88,6 +125,39 @@ function JF:onLoadViews(objects, branches)
   }
 
   return controls, views
+end
+
+local menu = {
+  "rangeHeader",
+  "range",
+  "modeHeader",
+  "mode"
+}
+
+function JF:onShowMenu(objects, branches)
+  local controls = {}
+
+  controls.rangeHeader = MenuHeader {
+    description = "Range:"
+  }
+
+  controls.range = OptionControl {
+    description = "Range",
+    option = objects.jf:getOption("Range"),
+    choices = { "shape", "sound" }
+  }
+
+  controls.modeHeader = MenuHeader {
+    description = "Mode:"
+  }
+
+  controls.mode = OptionControl {
+    description = "Mode",
+    option = objects.jf:getOption("Mode"),
+    choices = { "trans", "sust", "cycle" }
+  }
+
+  return controls, menu
 end
 
 return JF

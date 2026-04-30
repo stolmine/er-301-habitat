@@ -26,9 +26,11 @@ namespace stolmine
     virtual void process();
 
     // Inlets — populated in later phases. Phase 1 declares only what the
-    // skeleton wires from Lua.
+    // skeleton wires from Lua. Phase 2 adds the IDENTITY (1N) trigger
+    // inlet to drive the single-voice scalar slope engine.
     od::Inlet mVOct{"V/Oct"};
     od::Inlet mFM{"FM In"};
+    od::Inlet mTrig1N{"Trig 1N"};
 
     // 7 named outlets. Lua-side wraps these into 8 framework sub-outs:
     // Out1+Out2 both source from "Mix" (so vanilla stereo chains get MIX
@@ -44,7 +46,7 @@ namespace stolmine
 
     // Phase 1 parameters — placeholder set so onLoadGraph can wire faders
     // in v1 layout pass without DSP wired up yet.
-    od::Parameter mTimeBias{"TimeBias", 0.0f};
+    od::Parameter mTimeBias{"TimeBias", 0.5f};
     od::Parameter mIntone{"Intone", 0.0f};
     od::Parameter mRamp{"Ramp", 0.0f};
     od::Parameter mCurve{"Curve", 0.0f};
@@ -54,6 +56,10 @@ namespace stolmine
     od::Option mMode{"Mode", 1};            // 1 = Transient, 2 = Sustain, 3 = Cycle
     od::Option mOutMode{"OutMode", 1};      // 1 = smooth, 2 = snap
 #endif
+
+  private:
+    struct Internal;
+    Internal *mpInternal;
   };
 
 } // namespace stolmine
