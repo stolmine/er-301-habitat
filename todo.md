@@ -102,6 +102,27 @@ Cross-cutting patterns established this session (saved to memory):
 - [x] Test procedures draft: `docs/test-procedures.md` -- per-unit checklists covering insert, every control, sub-displays, expansion views, menus, CV behavior, stereo routing, save/load round-trip, and edge cases for all units across spreadsheet/biome/catchall/scope/stolmine packages. Global sanity pass appended. Runs in a couple of hours pre-release.
 - [x] **v2.4.0 released 2026-04-30.** spreadsheet 2.6.0, catchall 0.3.0, biome 2.2.0, mi 1.0.1 (new). Two new full-stack units (Ngoma drum voice, Alembic sample-trained 4-op PMM matrix synth), Constant Random utility added to biome, 8 individual MI port packages collapsed into single `mi` package, Pecto zipper-noise fixed at .188 (Doppler smoother + idx wrap ulp guard), shift-handling audit D1-D7 shipped (D8 pinned). 135 commits since v2.3.0. Release at https://github.com/stolmine/er-301-habitat/releases/tag/v2.4.0. Notes: `planning/release-v2.4.0-{github.md,discord.md,bbcode.txt}`. Saved-patch break for old MI port references (clouds.X / plaits.X / etc. → mi.X) documented in release notes.
 
+### JF (hex-voiced slope-engine voice, spreadsheet)
+
+Clean-room from Mannequins technical map. Working title "JF" avoids third-party branding. v1 = 6 default base cells (Range × Mode); v2 = alt RUN-mode personalities; v3 = Just-Type (likely never). See `planning/just-friends.md` and `planning/jf-initial-pass.md`. Codex at `project_jf_codex.md`.
+
+- [x] Phase 1 — skeleton + 7 sub-out plumbing *(2.6.0.1)*
+- [x] Phase 2 — single-voice scalar slope engine *(2.6.0.3)*
+- [x] Phase 3a — NEON 6-voice + INTONE morph *(2.6.0.5; polygon pattern vendored to `jf/voice.h`)*
+- [x] Phase 3b — RAMP rise/fall asymmetry *(2.6.0.6)*
+- [x] Phase 3c — CURVE 5-anchor LUT morph *(2.6.0.7)*
+- [x] Phase 4a — FM (TZFM + INTONE-FM, AC-coupling in Sound) *(2.6.0.8)*
+- [x] Phase 4b/c — MIX combiners (tanh/index-max) + OUT crossfader *(2.6.0.9)*
+- [x] Phase 5 — per-voice trigger inlets, right-to-left cascade, 2-page UI *(2.6.0.13; mTrig1N..mTrig6N + mCascadeMask, Lua subscribes to branch contentChanged → mask update; gates page reachable via config-menu Task per Plaits/Xxxxxx pattern)*
+- [ ] **Phase 6 — polish + ship**:
+  - Trig LUT sweep audit: CURVE LUT init uses `cosf` at construction time only (not the package-trig-bug surface, but verify); MIX combiner uses `tanh` polynomial (no libm trig); slope engine has no sinf/cosf.
+  - Hardware CPU profile under worst-case (Sound/Cycle, all 6 voices firing, full INTONE+RAMP+CURVE+FM modulation). Confirm <20% one-core target.
+  - Test procedures entry in `docs/test-procedures-clean.md`.
+  - Vanilla compatibility test on stolmine vanilla fw: pkg loads, sub-out 1 (MIX) auto-wires, sub-outs 3+ silently inaccessible (no crash).
+  - Spreadsheet PKGVERSION 2.6.0.13 → 2.7.0 on first ship.
+  - Release notes entry.
+- [ ] **v1.x consolidation (cosmetic):** combine FM Depth + FM in into a single ply via custom ViewControl (knob → mFmDepth, CV → mFM inlet). Stock GainBias doesn't fit the multiply semantics.
+
 ### Pre-release scoping
 
 - [ ] **Cross-package dependency audit.** Every package must build and run with no `require` / SWIG `%import` / C++ header reference reaching into another package's source tree. The Stratos→clouds-reverb and Rings→plaits.EngineSelector cross-deps that triggered the `mi` consolidation are the precedent — same shape might exist elsewhere (catchall pffft duplication is *deliberate* shared dep documented at Move 1; that's allowed because the file lives inside both packages, but anything that resolves a `require "<otherpkg>.X"` or `#include "<otherpkg>/..."` is not). Sweep: grep all `require "<pkg>.` strings and all `%import`/`#include` paths under `mods/<pkg>/` for refs naming a different `<pkg>`; for each hit, decide between vendoring the dep into the requiring package (clean) or consolidating the two packages (heavier — only if there's a second hit warranting it). Aim: any package can be tarball-shipped solo without ghost dependencies.

@@ -125,6 +125,35 @@ Top-level namespace `namespace jf` for the unit, sub-namespace `namespace jf::fo
 - CURVE LUT generation script (one-off Python or Lua during build to populate the shapes).
 - Overview viz — defer until v1 audio is shipping; can ship v1.0 with no overview, add in v1.1.
 
-## Now starting: Phase 1
+## Phase progress (2026-04-30)
 
-Skeleton + plumbing. Goal is a silent 7-output unit that inserts cleanly. Will commit at end of phase.
+| Phase | Status | Pkg ver | Notes |
+|---|---|---|---|
+| 1 | ✓ done | 2.6.0.1 | Silent 7-output skeleton; insert + restore validated |
+| 2 | ✓ done | 2.6.0.3 | Scalar slope engine across 6 base cells |
+| 3a | ✓ done | 2.6.0.5 | NEON 6-voice via vendored polygon pattern + INTONE morph |
+| 3b | ✓ done | 2.6.0.6 | RAMP rise/fall asymmetry |
+| 3c | ✓ done | 2.6.0.7 | CURVE 5-anchor LUT morph |
+| 4a | ✓ done | 2.6.0.8 | FM (TZFM + INTONE-FM, Sound AC-couple) |
+| 4b/c | ✓ done | 2.6.0.9 | MIX combiners + OUT crossfader |
+| 5 | ✓ done | 2.6.0.13 | Per-voice trigger cascade + 2-page UI (Globals / Gates) |
+| 6 | pending | → 2.7.0 | Polish + ship |
+
+### Phase 5 — UI correction note
+
+The original plan (Page 1 globals + Page 2 gates as a single horizontal scroll) was revised mid-Phase-5 to match Plaits / Xxxxxx (Accents) convention: separate `views.expanded` (default = 8 globals plies) and `views.gates` (6 trigger plies), with switching via two config-menu Tasks ("Globals", "Gates"). Trade-off: deviates from the "all signal-level inputs on main view" convention but caps default-view scroll at 8 plies instead of 14.
+
+### Phase 6 — remaining work
+
+1. **Trig LUT sweep**: CURVE LUT init uses `cosf` at construction-time only (not the package-trig-bug surface — that's runtime libm in `.so`). Slope engine path has no sinf/cosf. MIX combiner uses Padé tanh polynomial. Likely no LUT swap needed; verify with a grep + objdump pass.
+2. **Hardware CPU profile**: insert JF in worst-case patch (Sound/Cycle, all 6 voices firing, audio-rate FM, full INTONE/RAMP/CURVE modulation). Confirm <20% one-core target.
+3. **Test procedures entry**: per-cell trigger semantics, INTONE morph extremes, OUT crossfader smooth/snap, vanilla-fw compat. Add to `docs/test-procedures-clean.md`.
+4. **Vanilla compatibility**: build vanilla fw, install pkg, insert JF, verify sub-out 1 (MIX) auto-wires, sub-outs 3+ silently inaccessible without crash.
+5. **Version bump**: spreadsheet PKGVERSION 2.6.0.13 → 2.7.0 on first ship.
+6. **Release notes**: add JF entry to next release-notes draft.
+
+### v1.x backlog (post-ship)
+
+- FM Depth + FM in consolidation into a single custom ViewControl (cosmetic; current 2-ply layout matches the hardware paradigm).
+- Overview graphic — currently no viz on JF. Options sketched in earlier "Open UI questions" section. Add in v1.1 once core sound is bedded in.
+- Pecto Doppler slew-time exposure (separate todo).
