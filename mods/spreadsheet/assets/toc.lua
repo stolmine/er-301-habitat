@@ -17,6 +17,7 @@ return {
     { title = "Blanda",   moduleName = "Blanda",             category = "Spreadsheet", keywords = "mixer, scan, morph, fade, three, input, blanda" },
     { title = "Colmatage", moduleName = "Colmatage",          category = "Spreadsheet", keywords = "effect, rhythm, breakbeat, slicer, stutter, warp, colmatage" },
     { title = "Pecto",     moduleName = "Pecto",              category = "Spreadsheet", keywords = "comb, resonator, filter, delay, karplus, pecto" },
-    { title = "Ngoma",        moduleName = "DrumVoice",           category = "Spreadsheet", keywords = "drum, percussion, voice, synth, kick, snare" }
+    { title = "Ngoma",        moduleName = "DrumVoice",           category = "Spreadsheet", keywords = "drum, percussion, voice, synth, kick, snare" },
+    { title = "JF",           moduleName = "JF",                  category = "Spreadsheet", keywords = "voice, slope, function, generator, multi, multiout, hex, polyphonic, jf" }
   }
 }

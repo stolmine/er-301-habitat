@@ -38,6 +38,7 @@
 #include "Pecto.h"
 #include "DrumVoice.h"
 #include "DrumCubeGraphic.h"
+#include "JF.h"
 #define SWIGLUA
 %}
 
@@ -76,3 +77,4 @@
 %include "Pecto.h"
 %include "DrumVoice.h"
 %include "DrumCubeGraphic.h"
+%include "JF.h"
