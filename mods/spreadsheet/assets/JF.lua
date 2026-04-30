@@ -30,11 +30,16 @@ end
 function JF:onLoadGraph(channelCount)
   local jf = self:addObject("jf", libspreadsheet.JF())
 
-  -- V/Oct (TIME). 1V/8ve, exp scaled into the slope-engine's frequency.
+  -- V/Oct CV. TIME knob (below) is the base rate/pitch per tech map;
+  -- V/Oct adds octaves on top exponentially. Helicase/Plaits convention:
+  -- buffer carries 0.1/octave so we apply 10x gain to get 1.0/octave
+  -- into the C++ where powf(2, voctV) does the exponentiation.
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
-  tune:hardSet("Offset", 0.0)
-  connect(tune, "Out", jf, "V/Oct")
+  local voctGain = self:addObject("voctGain", app.ConstantGain())
+  voctGain:hardSet("Gain", 10.0)
+  connect(tune, "Out", voctGain, "In")
+  connect(voctGain, "Out", jf, "V/Oct")
   connect(tune, "Out", tuneRange, "In")
   self:addMonoBranch("tune", tune, "In", tune, "Out")
 
