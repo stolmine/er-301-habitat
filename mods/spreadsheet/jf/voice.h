@@ -238,5 +238,133 @@ namespace jf
       return fclamp_n(shaped, 0.0f, 1.0f);
     }
 
+    // ----- CURVE LUT -----
+    //
+    // 5 anchor shapes × 256 entries each. Tech map:
+    //   CURVE full CCW  → rect  (instant rise, instant fall — zero-time
+    //                            slopes, RAMP becomes a PWM control)
+    //   CURVE CCW half  → log   (fast initial rate, slowing toward end)
+    //   CURVE noon      → lin   (linear ramp; matches Phase 3b behavior)
+    //   CURVE CW half   → exp   (slow initial rate, accelerating toward end)
+    //   CURVE full CW   → sine  (S-curve, slow start + slow end)
+    //
+    // Input to the LUT is the 0..1 "slope progress" coming out of
+    // ramp_triangle (already represents the current rise- or fall-stage
+    // position normalized to [0, 1] over its own stage). LUT bends that
+    // monotonic 0..1 into the chosen shape.
+    //
+    // Stored as five 256-entry tables. Lookup is per-lane scalar gather
+    // (vsetq_lane after vgetq_lane) — NEON has no native gather; we keep
+    // the gather scalar to stay register-only and avoid the stack-array
+    // alignment-hint trap (per feedback_neon_intrinsics_drumvoice).
+
+    static constexpr int kCurveLutSize = 256;
+    static constexpr int kCurveLutAnchors = 5;
+
+    struct CurveLut
+    {
+      float lut[kCurveLutAnchors][kCurveLutSize];
+
+      // Initialize once at construction. Cheap (5*256 = 1280 ops).
+      CurveLut()
+      {
+        for (int i = 0; i < kCurveLutSize; i++)
+        {
+          float u = (float)i / (float)(kCurveLutSize - 1); // 0..1
+
+          // 0: rect — step at u >= 0.5 (RAMP would shift this; here
+          //          we use the "stage-position" interpretation: full
+          //          height for the whole rise stage). Tech map: rect
+          //          slope rises instantly to peak and stays there.
+          //          Implement as step: 0 below midpoint, 1 above.
+          //          (For PWM-from-RAMP behavior, the slope phase
+          //          itself shifts the duty; rect just maps stage
+          //          progress to a step.)
+          lut[0][i] = (u < 0.5f) ? 0.0f : 1.0f;
+
+          // 1: log — fast initial rate, slowing. Use 1 - (1-u)^k for k>1.
+          {
+            float v = 1.0f - (1.0f - u) * (1.0f - u) * (1.0f - u);
+            lut[1][i] = v;
+          }
+
+          // 2: lin — passthrough.
+          lut[2][i] = u;
+
+          // 3: exp — slow initial rate, accelerating. u^k for k>1.
+          lut[3][i] = u * u * u;
+
+          // 4: sine — S-curve. (1 - cos(pi*u))/2 maps 0→0, 1→1 with
+          //          slow ends. Per tech map "sinusoidal".
+          lut[4][i] = 0.5f * (1.0f - cosf((float)M_PI * u));
+        }
+      }
+
+      // Per-lane lookup with linear interpolation across LUT index AND
+      // across anchor shapes. Returns the curved 0..1 stage value.
+      //
+      //   shape0/shape1 — anchor indices to blend (e.g. lin→exp at CURVE > 0)
+      //   morph         — [0,1] blend between shape0 and shape1 (broadcast)
+      //
+      // Per-lane scalar gather: NEON has no native gather, and a stack-
+      // array gather would re-introduce :64 hints. vget/vset lane stays
+      // register-only.
+      inline float32x4_t lookup(
+          float32x4_t progress,
+          int shape0,
+          int shape1,
+          float32x4_t morph
+      ) const
+      {
+        progress = fclamp_n(progress, 0.0f, 1.0f);
+        const float scale = (float)(kCurveLutSize - 1);
+        const auto idxF = vmulq_f32(progress, vdupq_n_f32(scale));
+
+        const float *t0 = lut[shape0];
+        const float *t1 = lut[shape1];
+
+        // Per-lane gather + intra-LUT linear interp + cross-anchor lerp.
+        float32x4_t r = vdupq_n_f32(0.0f);
+        for (int lane = 0; lane < 4; lane++)
+        {
+          float f;
+          switch (lane)
+          {
+            case 0: f = vgetq_lane_f32(idxF, 0); break;
+            case 1: f = vgetq_lane_f32(idxF, 1); break;
+            case 2: f = vgetq_lane_f32(idxF, 2); break;
+            default: f = vgetq_lane_f32(idxF, 3); break;
+          }
+          int i0 = (int)f;
+          if (i0 < 0) i0 = 0;
+          if (i0 > kCurveLutSize - 1) i0 = kCurveLutSize - 1;
+          int i1 = (i0 < kCurveLutSize - 1) ? (i0 + 1) : i0;
+          float frac = f - (float)i0;
+
+          float a0 = t0[i0] + (t0[i1] - t0[i0]) * frac;
+          float a1 = t1[i0] + (t1[i1] - t1[i0]) * frac;
+
+          float m;
+          switch (lane)
+          {
+            case 0: m = vgetq_lane_f32(morph, 0); break;
+            case 1: m = vgetq_lane_f32(morph, 1); break;
+            case 2: m = vgetq_lane_f32(morph, 2); break;
+            default: m = vgetq_lane_f32(morph, 3); break;
+          }
+          float v = a0 + (a1 - a0) * m;
+
+          switch (lane)
+          {
+            case 0: r = vsetq_lane_f32(v, r, 0); break;
+            case 1: r = vsetq_lane_f32(v, r, 1); break;
+            case 2: r = vsetq_lane_f32(v, r, 2); break;
+            default: r = vsetq_lane_f32(v, r, 3); break;
+          }
+        }
+        return r;
+      }
+    };
+
   } // namespace four
 } // namespace jf

@@ -31,6 +31,7 @@ namespace stolmine
     // [g0:0..3, g1:0..1]. g1 lanes 2,3 masked off via gate=0 always.
     jf::four::Voice mVoiceG0;  // 1N, 2N, 3N, 4N
     jf::four::Voice mVoiceG1;  // 5N, 6N, _, _
+    jf::four::CurveLut mCurveLut;  // 5 anchors × 256 entries, init in ctor
   };
 
   JF::JF()
@@ -138,6 +139,7 @@ namespace stolmine
     const float timeBias = mTimeBias.value();
     const float intonePos = mIntone.value();
     const float rampPos = mRamp.value();  // -1..+1 bipolar
+    const float curvePos = mCurve.value(); // -1..+1 bipolar
 
     // RAMP threshold T in (eps, 1-eps). Clamp keeps invT / inv(1-T)
     // finite at extremes. T = 0.5 → symmetric triangle (matches Phase 3a
@@ -148,6 +150,33 @@ namespace stolmine
     const float32x4_t rampTv = vdupq_n_f32(rampT);
     const float32x4_t invRampTv = vdupq_n_f32(1.0f / rampT);
     const float32x4_t invOneMinusRampTv = vdupq_n_f32(1.0f / (1.0f - rampT));
+
+    // CURVE morph: continuous blend across 5 anchors.
+    //   pos -1.0..-0.5: rect (0) → log (1)    morph = (pos + 1) / 0.5
+    //   pos -0.5..  0 : log  (1) → lin (2)    morph = (pos + 0.5) / 0.5
+    //   pos  0  ..+0.5: lin  (2) → exp (3)    morph = pos / 0.5
+    //   pos +0.5..+1.0: exp  (3) → sine (4)   morph = (pos - 0.5) / 0.5
+    int curveShape0, curveShape1;
+    float curveMorph;
+    if (curvePos < -0.5f)
+    {
+      curveShape0 = 0; curveShape1 = 1; curveMorph = (curvePos + 1.0f) / 0.5f;
+    }
+    else if (curvePos < 0.0f)
+    {
+      curveShape0 = 1; curveShape1 = 2; curveMorph = (curvePos + 0.5f) / 0.5f;
+    }
+    else if (curvePos < 0.5f)
+    {
+      curveShape0 = 2; curveShape1 = 3; curveMorph = curvePos / 0.5f;
+    }
+    else
+    {
+      curveShape0 = 3; curveShape1 = 4; curveMorph = (curvePos - 0.5f) / 0.5f;
+    }
+    if (curveMorph < 0.0f) curveMorph = 0.0f;
+    if (curveMorph > 1.0f) curveMorph = 1.0f;
+    const float32x4_t curveMorphV = vdupq_n_f32(curveMorph);
 
     // Block-rate base frequency. Per-sample V/Oct + FM in Phase 4.
     const float voctV = vOctBuf[0];
@@ -188,10 +217,10 @@ namespace stolmine
       auto pG0 = vG0.process(incG0, gate, mode);
       auto pG1 = vG1.process(incG1, vandq_u32(gate, g1Mask), mode);
 
-      // Waveshape: RAMP-asymmetric for Cycle/Transient, linear for
-      // Sustain. (Sustain phase is already a 0..1 trapezoid level; no
-      // fold. RAMP in Sustain mode would scale rise-rate vs fall-rate
-      // independently — deferred, see planning notes.)
+      // Waveshape: RAMP-asymmetric stage progress → CURVE LUT bend, for
+      // Cycle/Transient. Sustain feeds phase straight through (it's
+      // already a 0..1 trapezoid level; CURVE is bypassed in Sustain
+      // mode per tech map's interpretation).
       float32x4_t shapedG0, shapedG1;
       if (mode == jf::four::kSustain)
       {
@@ -200,8 +229,10 @@ namespace stolmine
       }
       else
       {
-        shapedG0 = jf::four::ramp_triangle(pG0, rampTv, invRampTv, invOneMinusRampTv);
-        shapedG1 = jf::four::ramp_triangle(pG1, rampTv, invRampTv, invOneMinusRampTv);
+        auto rg0 = jf::four::ramp_triangle(pG0, rampTv, invRampTv, invOneMinusRampTv);
+        auto rg1 = jf::four::ramp_triangle(pG1, rampTv, invRampTv, invOneMinusRampTv);
+        shapedG0 = mpInternal->mCurveLut.lookup(rg0, curveShape0, curveShape1, curveMorphV);
+        shapedG1 = mpInternal->mCurveLut.lookup(rg1, curveShape0, curveShape1, curveMorphV);
       }
 
       // Range polarity: Sound = bipolar (±1), Shape = unipolar (0..1).

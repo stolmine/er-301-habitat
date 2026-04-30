@@ -66,6 +66,14 @@ function JF:onLoadGraph(channelCount)
   tie(jf, "Ramp", ramp, "Out")
   self:addMonoBranch("ramp", ramp, "In", ramp, "Out")
 
+  -- CURVE knob — bipolar slope-shape morph per tech map.
+  -- Continuous blend: rect (full CCW) → log → lin (noon) → exp → sine
+  -- (full CW). Implemented via 5-anchor 256-entry LUT in jf/voice.h.
+  local curve = self:addObject("curve", app.ParameterAdapter())
+  curve:hardSet("Bias", 0.0)
+  tie(jf, "Curve", curve, "Out")
+  self:addMonoBranch("curve", curve, "In", curve, "Out")
+
   -- FM input (bipolar). Plumbed; DSP consumption arrives in Phase 4.
   local fm = self:addObject("fm", app.GainBias())
   local fmRange = self:addObject("fmRange", app.MinMax())
@@ -94,7 +102,7 @@ function JF:onLoadGraph(channelCount)
 end
 
 local views = {
-  expanded = { "tune", "time", "intone", "ramp", "trig1N", "fm" },
+  expanded = { "tune", "time", "intone", "ramp", "curve", "trig1N", "fm" },
   collapsed = {}
 }
 
@@ -111,6 +119,12 @@ local intoneMap = (function()
 end)()
 
 local rampMap = (function()
+  local m = app.LinearDialMap(-1, 1)
+  m:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return m
+end)()
+
+local curveMap = (function()
   local m = app.LinearDialMap(-1, 1)
   m:setSteps(0.1, 0.01, 0.001, 0.0001)
   return m
@@ -158,6 +172,18 @@ function JF:onLoadViews(objects, branches)
     gainbias = objects.ramp,
     range = objects.ramp,
     biasMap = rampMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.0
+  }
+
+  controls.curve = GainBias {
+    button = "curve",
+    description = "CURVE",
+    branch = branches.curve,
+    gainbias = objects.curve,
+    range = objects.curve,
+    biasMap = curveMap,
     biasUnits = app.unitNone,
     biasPrecision = 3,
     initialBias = 0.0
