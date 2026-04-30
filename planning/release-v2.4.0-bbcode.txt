@@ -1,0 +1,74 @@
+[b]er-301-habitat v2.4.0[/b] -- 2026-04-29
+Requires firmware: v0.7.0-stolmine.9.x
+Packages: spreadsheet 2.3.1 -> 2.5.5.189, catchall 0.1.0 -> 0.3.0, biome 2.1.0 -> 2.2.0, [b]mi 1.0.1 NEW[/b] (consolidates clouds + commotio + grids + marbles + plaits + rings + stratos + warps).
+
+[b]Highlights[/b]
+Two new full-stack units: [b]Ngoma[/b] (analog macro drum voice, spreadsheet) and [b]Alembic[/b] (sample-trained 4-op phase-mod matrix synth, catchall). Major package reshape: 8 individual MI port packages collapse into one [b]mi[/b] package. Pecto zipper-noise on V/Oct + size sweeps fixed. Shift-handling audit decisions D1-D7 shipped. New utility unit [b]Constant Random[/b] (biome).
+
+[b]New unit: Ngoma[/b]
+Analog-style macro drum voice (spreadsheet pkg). 4-source mix (carrier osc + detuned-unison + sub-sine + 3 inharmonic membrane modes) summed in a 2x oversampled inner loop. Pitch-morph membrane mode ratios -- wide-spread sub-bass enrichment at low pitch, tight cymbal-sheen clusters at high pitch. NEON-vectorized 4-lane phasor + polynomial sine + per-partial NEON decay quad with feature-tied scaling. Grit-knee saturation, optional EQ + clipper + level limiter. Rotating-cube viz on Character.
+[list]
+[*][b]trig[/b] -- comparator-driven trigger
+[*][b]V/Oct[/b] -- pitch with octave on shift-sub
+[*][b]char[/b] -- Character morph; rotating cube viz; shift sub: Shape / Grit / Punch
+[*][b]sweep[/b] -- pitch envelope amount; shift sub: Sweep Time
+[*][b]decay[/b] -- amplitude decay; shift sub: Hold / Attack
+[*][b]level[/b] -- output level; shift sub: Clipper / EQ / Compressor
+[*][b]expanded[/b] -- full sub-display surface across all 14 hidden parameters
+[/list]
+Note: xform / randomize feature deferred to a later release.
+
+[b]New unit: Alembic[/b]
+Sample-trained 4-operator phase-modulation matrix synth (catchall pkg, experimental tier). Loads any audio sample, analyzes once at commit time, populates a 64-slot per-instance preset table from per-pick spectral / temporal / statistical features. Three independent scan positions traverse the trained dataset.
+
+Signal chain: V/Oct + f0 -> 4-op PMM voice (4x4 matrix) -> 256-entry wavetable shaper -> 2x TPT SVF filter pair (topoMix / bpLpBlend / Q / drive) -> 10x6x8 routing matrix -> 24-tap multitap comb (Pecto-engine clone) -> drive -> output limiter.
+[list]
+[*][b]tune[/b] -- V/Oct + tune offset
+[*][b]freq[/b] -- fundamental frequency
+[*][b]sync[/b] -- sync gate input
+[*][b]scan[/b] -- main scan; shift sub: K (path window) and sample-pointer depth; rotating sphere viz
+[*][b]reagent[/b] -- independent reagent scan; shift sub: amount
+[*][b]comb[/b] -- single-fader collapsed dry/wet + comb-scan
+[*][b]ferment[/b] -- chaos scalar macro (0..1.5; multiplies trained matrix + routing)
+[*][b]level[/b] -- output level
+[/list]
+
+Order 2 scan-neighbor gradients into detune, Order 3 topology metrics into wavetable engagement, meta-mappings from sample-level features (variance, mean entropy, length), sample-pointer excitation (voice reads source at runtime), and per-node trained filter dry/wet ratio all shape the trained map. Phase 6 serialization is [i]not yet shipped[/i] -- trained state doesn't survive quicksave round-trip; sample re-analyzes on load.
+
+[b]New unit: Constant Random[/b]
+Single-fader probability utility (biome pkg). Output is either the held last value or a fresh random within the configured range, picked at clock edges. Probability fader sets the chance of swapping vs holding.
+
+[b]New package: mi[/b] (consolidates 8 MI ports)
+The 8 individual Mutable Instruments port packages collapse into one consolidated [b]mi[/b] package: clouds + commotio + grids + marbles + plaits + rings + stratos + warps. All 9 units' functionality preserved. Eliminates a cross-package source dep (Stratos's clouds-reverb reuse) and a Lua cross-package require (Rings's plaits.EngineSelector). Single shared stmlib build de-duplicates per-pkg copies. Stolmine modifications preserved as override files.
+
+[i]Saved-patch break[/i]: patches that referenced [b]clouds.Clouds[/b], [b]plaits.Plaits[/b], etc. won't auto-resolve. Re-load the patch and re-bind unit references to [b]mi.Clouds[/b], [b]mi.Plaits[/b], etc.
+
+[b]Pecto[/b] -- combSize / V/Oct knob sweeps now produce a smooth Doppler-style pitch glide instead of audible zipper noise. Per-sample one-pole LP smoother on baseDelay (~25 ms time constant) replaces the previous block-rate constant. Matches analog tape-delay character that pitch-tracking resonator types (Karplus, sitar, clarinet) call for. Final fix also closed a previously-latent float-precision-edge wrap bug in the multitap tap-index math. Behavior change: if you liked the abrupt step character on knob sweeps, future release will expose slew-time as a sub-param.
+
+[b]Shift-handling audit[/b] -- 7 UI decisions locked across spreadsheet + biome:
+[list]
+[*][b]D1[/b]: shift-hold + encoder touch suppresses the toggle on release
+[*][b]D2[/b]: Pattern C (TransformGate, Ratchet) secondary-toggle dropped; mirrors Pattern A
+[*][b]D3[/b]: subGraphic swap unified across Pattern A and C
+[*][b]D4[/b]: invert-flag normalization -> unified paramMode state
+[*][b]D5[/b]: shift+sub in paramMode opens keyboard for that readout
+[*][b]D6[/b]: Pecto migration biome -> spreadsheet (already shipped during v2.4.x dev)
+[*][b]D7[/b]: paramMode preserved across cursor leave/return; not serialized; focusedReadout resets on leave
+[/list]
+D8 (visible-highlight indicator on paramMode entry) has a partial fix; the encoder controls correctly but the highlight is missing on Helicase / Larets / MixInput sub-displays. Pinned for next release.
+
+[b]Migration notes[/b]
+[list]
+[*]Saved patches with old MI port references (clouds.X, plaits.X, etc.): re-load + re-bind to mi.X
+[*]Saved patches with biome.Pecto: Pecto migrated to spreadsheet during v2.4.x dev; use spreadsheet.Pecto
+[*]Pecto knob-sweep character: zipper noise replaced by Doppler glide
+[*]Alembic ships fresh in catchall, no migration concern
+[/list]
+
+[b]Known issues[/b]
+[list]
+[*]D8 visible-highlight bug on Helicase / Larets / MixInput sub-displays
+[*]Pecto Doppler slew-time exposure deferred (hard-coded 25 ms)
+[*]Alembic Phase 6 serialization not yet shipped (trained state ephemeral)
+[*]Alembic sample-swap-without-detach can fail to retrain reliably
+[/list]
