@@ -228,23 +228,94 @@ Reuses tomf custom-units' polygon pattern (proven on hardware in `er-301-custom-
 
 CURVE's piecewise morph is JF-specific — implement fresh as a 4-lane NEON shaper. polyBLEP for the rect endpoint.
 
-## Open design questions
+## Resolved design decisions (2026-04-30)
 
-### DSP / behavior
+All eight prior open questions resolved against the tech map and existing habitat code. Verbatim tech-map quotes follow each item.
 
-1. **TIME range and V/Oct mapping.** Hardware spec is roughly 8s slope (slowest LFO-rate Shape) up to ~80 kHz (fastest audio-rate Sound). Settle the V/Oct mapping: anchor pitch (e.g. A4 = 440 Hz at 0V) and how Range switch shifts the operating window. Likely two LinearVoltageMaps gated by Range.
-2. **CURVE morph topology.** Tech map describes log↔lin↔exp↔sine↔rect — confirm continuous (pixel-smooth) vs discrete-stepped morph. Reference recordings on YouTube show continuous; confirm against tech map verbatim before implementing.
-3. **MIX behavior across ranges.** Sound range = tanh-limited sum; Shape range = "analog max" of index-scaled voices (tech map's wording). Implement both and switch on Range. Open question: what does "index-scaled" mean exactly — 1N weighted full, 6N weighted by 1/6? Or all weighted unity then maxed?
-4. **TZ-linear FM phase-accumulator design.** Through-zero linear FM requires the phase accumulator to accept signed delta (bipolar FM signal crosses zero → phase runs backward briefly). Polygon's `osc::four::DualPhase` may already handle this; verify before extending.
-5. **OUT crossfader interpolation.** At intermediate values (e.g. OUT=2.5), should the primary outlet crossfade smoothly between voice 2N and 3N (musical, but slightly defocuses each), or hard-snap to the rounded position (cleaner but zipper-prone under CV)? Recommend: smooth crossfade with cosine taper for interpolation; the Range switch (which IS rounded) sets a different precedent and OUT is more usefully smooth.
-6. **Range-switch sample-rate implications.** DSP runs at 48 kHz always; Shape range simply clamps voice frequencies to LFO domain. Confirm CPU is fine for 6 lanes through full audio-rate pipeline even when only being used at LFO rates — likely yes given polygon's headroom, but verify.
+### 1. TIME range and V/Oct mapping — RESOLVED
 
-### Implementation
+> "*shape*: minutes to milliseconds, from CCW to CW
+> *sound*: milliseconds to microseconds (a.k.a. Hz to kHz), from CCW to CW
+>
+> The value of the *TIME* CV input is added to the *TIME* knob. The CV input is a highly accurate, exponential input: a 1V increase at the *TIME* input results in the speed (or frequency) of *IDENTITY* doubling. As such, the *TIME* CV input is labeled 'v/8,' short for '1V/8ve' or 'one-volt-per-octave.'
+>
+> The range of the *TIME* jack is roughly -2V to +5v. Voltages outside this range will be clamped at the limits."
 
-7. **`dsp::four::*` vendoring license.** Confirm tomf's custom-units repo license permits vendoring `common/dsp/` subset into habitat. Check `LICENSE` at repo root before extracting any files.
-8. **CURVE 4-lane shaper implementation.** Write fresh as a NEON `float32x4_t` piecewise function. Decision: lookup table (faster, ~256 entries × interpolate) vs analytic (smaller code but slower per-sample). Probably LUT — fits the trig-LUT lesson pattern.
+**Implementation:**
+- Two operating windows on TIME knob, gated by Range. Shape window: minutes (~60s = 0.0167 Hz) at full CCW to milliseconds (~1 ms = 1 kHz) at full CW. Sound window: ~20 Hz at full CCW to ~80 kHz at full CW.
+- V/Oct CV: standard 1V/8ve exponential, **added** to knob position — i.e. CV scales the knob's selected center frequency by 2^V. Match `Pitch` ply with Helicase-style Vpo handling.
+- Clamp CV to [-2V, +5V] per tech map. (At 1V/8ve this is 7 octaves of CV travel, plenty.)
 
-### Resolved 2026-04-30
+### 2. CURVE morph — RESOLVED (continuous)
+
+> "*CURVE* affects the shape of slopes as they rise and fall without affecting the durations of either stage. It takes the linear slopes determined by *TIME*, *INTONE* and *RAMP* and applies a lookup table to bend them into other shapes without affecting the timing. **Fine shapes are available with continuous blending between them.**"
+>
+> "When the *CURVE* knob is at noon, sweeping the *CURVE* CV input from -5V to +5V is equivalent to sweeping the knob from fully CCW to fully CW. *CURVE* CV is added to the *CURVE* knob."
+
+**Implementation:** continuous blend, full CCW = rect → log → lin (noon) → exp → sine = full CW. Five anchor shapes; pixel-smooth morph between adjacent pairs. CV maps -5V → -1.0 knob equivalent, +5V → +1.0; bipolar GainBias.
+
+### 3. MIX behavior across ranges — RESOLVED
+
+> "***shape*** — *MIX* jack behavior: Each slope's output value is divided by its index. The *MIX* jack then outputs the largest of the resulting values (analog max or 'OR'). *IDENTITY* is divided by 1 (unaffected), *2N* is divided by 2, *3N* divided by 3, and so on. This provides a unique modulation source otherwise requiring a large patch.
+>
+> ***sound*** — *MIX* jack behavior: The *MIX* jack creates an equal mix of all the current slopes, limiting the final amplitude to ~15V peak-to-peak w/ tanh shaping."
+
+**Implementation:**
+- **Shape MIX:** `mix = max(v[1], v[2]/2, v[3]/3, v[4]/4, v[5]/5, v[6]/6)`. NEON: pairwise reduction over the index-scaled lanes.
+- **Sound MIX:** `mix = tanhf(sum_of_voices)`, scaled so final amplitude caps near ±2.5 (15Vpp ≈ ±7.5V on hardware → habitat's normalized ±1 range with appropriate gain).
+
+### 4. FM control — RESOLVED (bipolar two-destination)
+
+> "Turning the FM knob clockwise increases the depth of the modulation linearly applied to all slopes equally.
+>
+> Turning the knob counterclockwise from noon increases the depth of the modulation applied to each slope generator in the *INTONE* style, i.e. in proportion to each channel's index (*IDENTITY* is unaffected, *2N* the least affected, *6N* the most affected).
+>
+> The FM knob thus controls whether the *FM INPUT* jack is linearly applied to the *INTONE* parameter (CCW) or linearly applied to the *TIME* parameter (CW), as well as the depth of the *FM INPUT* applied to either parameter."
+>
+> *sound* range: "The *FM INPUT* jack is AC-coupled (i.e. a DC-blocker is applied to the input) in order to achieve high-quality, linear, through-zero frequency modulation."
+
+**Implementation:** FM ply is a single bipolar GainBias. CW-positive → linear FM to TIME (all voices equally, classic TZFM). CCW-negative → linear FM to INTONE (per-voice index-weighted, IDENTITY unaffected, 6N maximally affected). At noon, FM jack ignored.
+
+**TZFM phase accumulator:** Helicase pattern, proven on hardware:
+```cpp
+phase += increment + fmAmount;  // fmAmount can be signed
+phase -= floorf(phase);          // floorf handles negative wrap correctly
+```
+NEON 4-lane: polygon's `osc::four::DualPhaseReverseSync` already accepts signed delta (`vbslq_f32(reverse, -deltaA, deltaA)`) and uses `util::four::wrap`. Reuse directly — don't reinvent.
+
+In Sound range, apply DC-blocker on the FM inlet buffer (one-pole HPF, ~5 Hz cutoff) per tech map. In Shape range, FM inlet is DC-coupled (no filter).
+
+### 5. OUT crossfader interpolation — RESOLVED (config option)
+
+Parametrize as a config menu option. Two modes:
+- **Smooth** (default): cosine-taper crossfade between adjacent voices at intermediate OUT values. Best for CV sweeps and audio-rate animation.
+- **Snap**: rounded-integer selection. Best for clean per-voice routing without bleed.
+
+Set on insert, persisted, served from a `Unit:onShowMenu` config item.
+
+### 6. Range-switch sample-rate implications — DEFERRED to profiling
+
+DSP runs at 48 kHz always; Shape range clamps voice frequencies to LFO domain via the TIME map. Will measure CPU on hardware; expected fine given polygon's headroom but unconfirmed.
+
+### 7. `dsp::four::*` vendoring — RESOLVED (port with attribution)
+
+`er-301-custom-units` has no LICENSE file, but tomf has given verbal blessing to learn from his implementations. **Port the needed subset with attribution.** Add tomf to package README author byline:
+
+```
+Just Friends voice port — Bram Myers (habitat). 4-lane NEON DSP
+infrastructure adapted from tomf's er-301-custom-units (polygon)
+with permission. Original code copyright tomf.
+```
+
+Vendor target: `mods/<jf-pkg>/voice/{osc.h, env.h, pitch.h, latch.h, util.h}` (subset of `er-301-custom-units/common/{dsp,util}/`). Adapt namespaces to `mannequins::voice::four::` or similar to keep collision-free if other packages later port custom-units code.
+
+### 8. CURVE 4-lane shaper — RESOLVED (LUT)
+
+256-entry LUT × 5 anchor shapes (rect, log, lin, exp, sine) = 1280 entries × float = 5KB ROM. Per-sample: 4-lane index lookup (`vld1q_*` with gather, or scalar gather + `vsetq_*`) + linear interpolation between adjacent shapes by CURVE morph value. Cheap and predictable; matches `feedback_package_trig_lut` lesson for `sinf`/`cosf`.
+
+(Alternative considered: analytic per-shape function — rejected on per-sample CPU vs the LUT memory cost being trivial.)
+
+### Resolved earlier
 - ~~Sub-out 7 for MIX or absorb into IDENTITY?~~ → MIX = sub-out 1 primary; 1N..6N = sub-outs 2..7. See Output topology.
 - ~~RAMP CV bipolar handling.~~ → bipolar GainBias directly per author-guide control-polarity convention.
 - ~~Trigger sub-chain cascade API ergonomics.~~ → mask-based dispatch per author guide; primitive verified (`branch:getInputSource(1)`).
