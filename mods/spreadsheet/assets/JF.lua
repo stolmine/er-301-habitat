@@ -7,6 +7,7 @@ local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
 local OptionControl = require "Unit.MenuControl.OptionControl"
 local MenuHeader = require "Unit.MenuControl.Header"
+local Task = require "Unit.MenuControl.Task"
 local Encoder = require "Encoder"
 
 -- JF — hex-voiced harmonically-coupled slope-engine voice. v1.
@@ -99,13 +100,23 @@ function JF:onLoadGraph(channelCount)
   tie(jf, "Out", outSel, "Out")
   self:addMonoBranch("outSel", outSel, "In", outSel, "Out")
 
-  -- IDENTITY trigger (1N gate input). Comparator-driven per the
-  -- comparator-gate-threshold convention; the C++ side reads >0.5 as
-  -- gate-high.
-  local trig1N = self:addObject("trig1N", app.Comparator())
-  trig1N:setGateMode()
-  connect(trig1N, "Out", jf, "Trig 1N")
-  self:addMonoBranch("trig1N", trig1N, "In", trig1N, "Out")
+  -- 6 per-voice trigger inlets — Phase 5. Each cell N has its own gate
+  -- branch. Right-to-left cascade per JF tech map: an unpatched cell
+  -- inherits trig from its rightmost patched neighbor. Mask computed
+  -- Lua-side (see updateCascadeMask) and pushed to C++ as a parameter.
+  for n = 1, 6 do
+    local key = "trig" .. n .. "N"
+    local trig = self:addObject(key, app.Comparator())
+    trig:setGateMode()
+    connect(trig, "Out", jf, "Trig " .. n .. "N")
+    self:addMonoBranch(key, trig, "In", trig, "Out")
+  end
+
+  -- Cascade-mask carrier — Lua updates this when any gate sub-chain's
+  -- input source changes (see updateCascadeMask).
+  local cascade = self:addObject("cascade", app.ParameterAdapter())
+  cascade:hardSet("Bias", 0.0)
+  tie(jf, "CascadeMask", cascade, "Out")
 
   -- Wire 8 framework outlets. Out1 + Out2 both source from C++ Mix so
   -- vanilla stereo chains see MIX on both L and R.
@@ -119,8 +130,13 @@ function JF:onLoadGraph(channelCount)
   connect(jf, "Out6N", self, "Out8")
 end
 
+-- Two-page UI per Plaits/Xxxxxx pattern. Default view = globals;
+-- "Gates" view (6 per-voice trigger plies) reachable via config menu
+-- Task. Switching makes the gates page full main-view real estate so
+-- they remain patchable via the local picker.
 local views = {
-  expanded = { "tune", "time", "intone", "ramp", "curve", "fmDepth", "fm", "outSel", "trig1N" },
+  expanded = { "tune", "time", "intone", "ramp", "curve", "fmDepth", "fm", "outSel" },
+  gates    = { "trig1N", "trig2N", "trig3N", "trig4N", "trig5N", "trig6N" },
   collapsed = {}
 }
 
@@ -213,12 +229,23 @@ function JF:onLoadViews(objects, branches)
     initialBias = 0.0
   }
 
-  controls.trig1N = Gate {
-    button = "1N",
-    description = "Trigger 1N (IDENTITY)",
-    branch = branches.trig1N,
-    comparator = objects.trig1N
-  }
+  -- 6 gate plies on the "gates" view. Buttons named per panel: 1N/2N/.../6N.
+  for n = 1, 6 do
+    local key = "trig" .. n .. "N"
+    controls[key] = Gate {
+      button = (n == 1) and "1N" or (n .. "N"),
+      description = (n == 1) and "Trigger 1N (IDENTITY)"
+                              or ("Trigger " .. n .. "N"),
+      branch = branches[key],
+      comparator = objects[key]
+    }
+    -- Subscribe to each branch's contentChanged so the mask refreshes
+    -- on every patch / unpatch event. Per author guide's mask-not-rebind
+    -- doctrine: presence detection lives Lua-side, dispatch lives C++.
+    branches[key]:subscribe("contentChanged", function()
+      self:updateCascadeMask()
+    end)
+  end
 
   controls.fmDepth = GainBias {
     button = "FM",
@@ -255,10 +282,35 @@ function JF:onLoadViews(objects, branches)
     initialBias = 0.0
   }
 
+  -- Compute initial mask (in case any gate sub-chains were already
+  -- patched at deserialize time).
+  self:updateCascadeMask()
+
   return controls, views
 end
 
+-- Walk the 6 gate branches and pack into a 6-bit mask. C++ uses this
+-- to resolve the right-to-left cascade.
+function JF:updateCascadeMask()
+  if not self.objects.cascade then return end
+  local mask = 0
+  for n = 1, 6 do
+    local b = self.branches["trig" .. n .. "N"]
+    if b and b:getInputSource(1) ~= nil then
+      mask = mask + 2 ^ (n - 1)
+    end
+  end
+  self.objects.cascade:hardSet("Bias", mask)
+end
+
+function JF:changeView(view)
+  self:switchView(view)
+end
+
 local menu = {
+  "viewHeader",
+  "viewGlobals",
+  "viewGates",
   "rangeHeader",
   "range",
   "modeHeader",
@@ -269,6 +321,20 @@ local menu = {
 
 function JF:onShowMenu(objects, branches)
   local controls = {}
+
+  controls.viewHeader = MenuHeader {
+    description = "View:"
+  }
+
+  controls.viewGlobals = Task {
+    description = "Globals (default)",
+    task = function() self:changeView("expanded") end
+  }
+
+  controls.viewGates = Task {
+    description = "Gates (1N..6N)",
+    task = function() self:changeView("gates") end
+  }
 
   controls.rangeHeader = MenuHeader {
     description = "Range:"

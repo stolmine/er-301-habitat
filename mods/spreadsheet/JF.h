@@ -25,12 +25,19 @@ namespace stolmine
 #ifndef SWIGLUA
     virtual void process();
 
-    // Inlets — populated in later phases. Phase 1 declares only what the
-    // skeleton wires from Lua. Phase 2 adds the IDENTITY (1N) trigger
-    // inlet to drive the single-voice scalar slope engine.
+    // Inlets. Phase 5 brings the per-voice trigger inlets. The cascade
+    // mask parameter (mCascadeMask, packed 6-bit) is computed Lua-side
+    // by checking each gate sub-chain's getInputSource(1) and tells C++
+    // which inlets are "patched" so unpatched voices fall through to
+    // their rightmost patched neighbor per the JF tech map.
     od::Inlet mVOct{"V/Oct"};
     od::Inlet mFM{"FM In"};
     od::Inlet mTrig1N{"Trig 1N"};
+    od::Inlet mTrig2N{"Trig 2N"};
+    od::Inlet mTrig3N{"Trig 3N"};
+    od::Inlet mTrig4N{"Trig 4N"};
+    od::Inlet mTrig5N{"Trig 5N"};
+    od::Inlet mTrig6N{"Trig 6N"};
 
     // 7 named outlets. Lua-side wraps these into 8 framework sub-outs:
     // Out1+Out2 both source from "Mix" (so vanilla stereo chains get MIX
@@ -52,6 +59,7 @@ namespace stolmine
     od::Parameter mCurve{"Curve", 0.0f};
     od::Parameter mFmDepth{"FmDepth", 0.0f};
     od::Parameter mOut{"Out", 0.0f};        // OUT crossfader 0..6
+    od::Parameter mCascadeMask{"CascadeMask", 0.0f}; // 6-bit packed; bit n = trig N+1 patched
     od::Option mRange{"Range", 1};          // 1 = Shape, 2 = Sound
     od::Option mMode{"Mode", 1};            // 1 = Transient, 2 = Sustain, 3 = Cycle
     od::Option mOutMode{"OutMode", 1};      // 1 = smooth, 2 = snap

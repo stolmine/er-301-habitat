@@ -45,6 +45,11 @@ namespace stolmine
     addInput(mVOct);
     addInput(mFM);
     addInput(mTrig1N);
+    addInput(mTrig2N);
+    addInput(mTrig3N);
+    addInput(mTrig4N);
+    addInput(mTrig5N);
+    addInput(mTrig6N);
     addOutput(mMix);
     addOutput(mOut1N);
     addOutput(mOut2N);
@@ -58,6 +63,7 @@ namespace stolmine
     addParameter(mCurve);
     addParameter(mFmDepth);
     addParameter(mOut);
+    addParameter(mCascadeMask);
     addOption(mRange);
     addOption(mMode);
     addOption(mOutMode);
@@ -138,8 +144,30 @@ namespace stolmine
     const int frames = FRAMELENGTH;
 
     float *vOctBuf = mVOct.buffer();
-    float *trigBuf = mTrig1N.buffer();
     float *fmBuf   = mFM.buffer();
+
+    // 6 per-voice trigger inlets. Lua-side computes mCascadeMask: bit n
+    // (n in 0..5) is set when the corresponding sub-chain has an input
+    // source patched. C++ resolves the right-to-left cascade per the JF
+    // tech map: an unpatched cell inherits from the nearest patched
+    // neighbor to its right; if no rightward source exists the cell has
+    // no trigger source.
+    float *trigSrc[6] = {
+      mTrig1N.buffer(), mTrig2N.buffer(), mTrig3N.buffer(),
+      mTrig4N.buffer(), mTrig5N.buffer(), mTrig6N.buffer()
+    };
+    const int mask = (int)mCascadeMask.value();
+    // effBuf[n] = pointer to the trig buffer voice n should read; nullptr
+    // if voice n has no effective source (treat as silent gate).
+    float *effBuf[6];
+    {
+      float *carry = nullptr;
+      for (int n = 5; n >= 0; n--)
+      {
+        if (mask & (1 << n)) carry = trigSrc[n];
+        effBuf[n] = carry;
+      }
+    }
 
     float *mixBuf  = mMix.buffer();
     float *outs[6] = {
@@ -263,10 +291,21 @@ namespace stolmine
 
     for (int i = 0; i < frames; i++)
     {
-      // Phase 3a: single trigger inlet (1N) drives all 6 voices.
-      // Phase 5 distributes per-voice triggers via cascade.
-      const bool gateNow = (trigBuf[i] > 0.5f);
-      const uint32x4_t gate = gateNow ? vdupq_n_u32(0xFFFFFFFFu) : vdupq_n_u32(0u);
+      // Per-voice gate from cascade-resolved sources. effBuf[n] = nullptr
+      // means voice n has no patched source rightward — silent gate.
+      // Build NEON gate vectors lane-by-lane via vsetq_lane to stay
+      // register-only (avoids :64 hint trap from stack-array gathers).
+      auto gateMask = [](float *buf, int idx) -> uint32_t {
+        return (buf && buf[idx] > 0.5f) ? 0xFFFFFFFFu : 0u;
+      };
+      uint32x4_t gateG0 = vdupq_n_u32(0);
+      gateG0 = vsetq_lane_u32(gateMask(effBuf[0], i), gateG0, 0);
+      gateG0 = vsetq_lane_u32(gateMask(effBuf[1], i), gateG0, 1);
+      gateG0 = vsetq_lane_u32(gateMask(effBuf[2], i), gateG0, 2);
+      gateG0 = vsetq_lane_u32(gateMask(effBuf[3], i), gateG0, 3);
+      uint32x4_t gateG1 = vdupq_n_u32(0);
+      gateG1 = vsetq_lane_u32(gateMask(effBuf[4], i), gateG1, 0);
+      gateG1 = vsetq_lane_u32(gateMask(effBuf[5], i), gateG1, 1);
 
       // FM input — AC-couple in Sound range, passthrough in Shape.
       float fmS = fmBuf[i];
@@ -301,8 +340,9 @@ namespace stolmine
       }
 
       // Voice processing — 4 lanes per group, mode shared.
-      auto pG0 = vG0.process(incG0, gate, mode);
-      auto pG1 = vG1.process(incG1, vandq_u32(gate, g1Mask), mode);
+      // gateG1 already has lanes 2,3 = 0 (initialized via vdupq_n).
+      auto pG0 = vG0.process(incG0, gateG0, mode);
+      auto pG1 = vG1.process(incG1, gateG1, mode);
 
       // Waveshape: RAMP-asymmetric stage progress → CURVE LUT bend, for
       // Cycle/Transient. Sustain feeds phase straight through (it's
