@@ -1086,6 +1086,8 @@ Grid-based sequencer where placement rules from board games drive step generatio
 
 Framework: `planning/redesign/07-multi-output-units.md`. Gating test is **derivability at destination** -- if the relationship between outputs can be reconstructed downstream from one output, decompose to parallel chains instead. Primary output author-declared, sub-outs via local picker (Rolodex stack, author-declared semantic order), controls macro-only at top level, sub-view nav must be mechanically distinct from main-chain nav. See memory `project_multi_output_framework.md` for the full charter. All entries below pass the derivability test.
 
+- [ ] **Multi-out audit refresh — core + habitat.** Walk every existing unit across vanilla `mods/core/` (where applicable) + every habitat package (spreadsheet, biome, catchall, mi, kryos, peaks, scope, porcelain) and identify candidates that would benefit from multi-out exposure. The derivability test is the gate: if a unit currently produces one output but holds internal state that downstream reconstruction couldn't access (e.g. an envelope's gate vs CV pair, an LFO's phase-locked relations, a filter's LP vs BP vs HP outputs in a SVF), it's a candidate. Produce a table of: (1) current unit name + package, (2) what additional outputs are derivable internally only, (3) effort estimate (cheap surface refactor vs DSP path rework), (4) whether the existing UI fits the macro-only-at-top-level rule. Cross-reference earlier audit pass (some entries below already exist from a prior sweep but the catalog is stale post-mi-consolidation). Output: a refreshed candidate list under this section before any new conversion work begins. Highest-leverage targets likely: SVF-based filters (LP/BP/HP), Karplus-style resonators (excitation tap + ringing tap), envelope generators (gate + CV).
+
 ### Quadrature LFO -- proof-of-concept
 
 Start here. Four phase-locked LFO outputs at 0 / 90 / 180 / 270 degrees. Simplest possible multi-out unit -- forces the framework into existence (primary out, sub-out declaration, author-ordered picker, macro rate/shape controls) without DSP complexity obscuring the UI work.
@@ -1146,6 +1148,7 @@ Evaluate these once the framework is live. Each one has semantic output coupling
 - [ ] Stages LFO -- Mutable Instruments Stages (pichenettes/eurorack, MIT)
 - [ ] Loom -- sequencer/pattern generator (ianjhoffman/RigatoniModular, MIT)
 - [ ] Airwindows -- large library of effects (Chris Johnson, MIT). Focus on timbral/spatial/lo-fi effects, reverbs, distortion over mixing utilities
+- [ ] Open303 -- open-source TB-303 model by Robin Schmidt / rs-met. **License confirmed MIT** (https://github.com/RobinSchmidt/Open303). Single-voice acid synth: ladder filter with characteristic resonance sweep, accent + slide behaviour, envelope modulator, square/saw osc. Ships well as a spreadsheet flagship voice alongside Ngoma. Direct port path is open. Determine which sub-package fits best (spreadsheet flagship vs catchall experimental tier) once initial port is integrated and listened-tested.
 
 ### Algorithm reference only (GPLv3, clean-room reimplementation)
 
@@ -1161,7 +1164,7 @@ Evaluate these once the framework is live. Each one has semantic output coupling
 
 - [ ] ProCo Rat emulation -- distortion circuit modeling
 - [ ] Polyphonic sample playback -- manual grains based
-- [ ] Open303 implementation -- open-source TB-303 model (Robin Schmidt / rs-met, GPLv3 clean-room reimplementation path). Ladder filter w/ characteristic resonance sweep, accent + slide behaviour, envelope modulator, square/saw osc. Good candidate for a single-voice synth unit alongside the Analog Macro Drum Voice in the spreadsheet package. Verify license and implementation route (direct port likely unavailable; algorithm reference is the clean path).
+- [ ] Noise Engineering BIA clone (Basimilus Iteritas Alter -- drum voice synth). Algorithm reference / clean-room reimplementation. Six-knob macro drum voice covering kick / snare / hat / cymbal / pitched percussion territory. Core architecture: harmonic-stack oscillator (variable harmonic count + spread), shape morph, fold + chop wave shaping, pitch + decay envelopes. Not the same lineage as Ngoma (which is more analog-808/909 in feel) -- BIA is the digital-aliasing-friendly drum voice by contrast. Could ship in spreadsheet alongside Ngoma OR as a separate offering. License: BIA firmware is closed source; reference DSP work via reverse engineering / public docs only. Generic functional name per `feedback_no_third_party_branding`.
 
 ## Video
 
