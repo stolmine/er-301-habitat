@@ -50,6 +50,14 @@ function JF:onLoadGraph(channelCount)
   tie(jf, "TimeBias", time, "Out")
   self:addMonoBranch("time", time, "In", time, "Out")
 
+  -- INTONE knob — bipolar morph across the 6 voices' frequency ratios.
+  -- CCW (-1): undertone (1N anchor, 6N=1/6); 0: unison detune; CW (+1):
+  -- overtone series 1:2:3:4:5:6. Continuous blend.
+  local intone = self:addObject("intone", app.ParameterAdapter())
+  intone:hardSet("Bias", 0.0)
+  tie(jf, "Intone", intone, "Out")
+  self:addMonoBranch("intone", intone, "In", intone, "Out")
+
   -- FM input (bipolar). Plumbed; DSP consumption arrives in Phase 4.
   local fm = self:addObject("fm", app.GainBias())
   local fmRange = self:addObject("fmRange", app.MinMax())
@@ -78,12 +86,18 @@ function JF:onLoadGraph(channelCount)
 end
 
 local views = {
-  expanded = { "tune", "time", "trig1N", "fm" },
+  expanded = { "tune", "time", "intone", "trig1N", "fm" },
   collapsed = {}
 }
 
 local timeMap = (function()
   local m = app.LinearDialMap(0, 1)
+  m:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return m
+end)()
+
+local intoneMap = (function()
+  local m = app.LinearDialMap(-1, 1)
   m:setSteps(0.1, 0.01, 0.001, 0.0001)
   return m
 end)()
@@ -109,6 +123,18 @@ function JF:onLoadViews(objects, branches)
     biasUnits = app.unitNone,
     biasPrecision = 3,
     initialBias = 0.5
+  }
+
+  controls.intone = GainBias {
+    button = "intone",
+    description = "INTONE",
+    branch = branches.intone,
+    gainbias = objects.intone,
+    range = objects.intone,
+    biasMap = intoneMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.0
   }
 
   controls.trig1N = Gate {
