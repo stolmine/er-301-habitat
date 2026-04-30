@@ -138,25 +138,26 @@ Reuses the Plaits / Helicase synth-voice ply order convention (V/oct-style first
 | 5 | **RAMP** + CV | GainBias. Bipolar per technical map. |
 | 6 | **CURVE** + CV | GainBias. Bipolar (log↔lin↔exp↔sine↔rect morph). |
 | 7 | **FM** + CV | GainBias. Bipolar. |
-| 8 | **RUN** + CV | GainBias. Bipolar (±5V on hardware). Drives SHIFT phase-receptivity sweep. |
-| 9 | **OUT** (output crossfader) | Canals-pattern `ModeSelector` 0..6 (LinearDialMap, 7-position rounded). Selects which signal goes to the **primary outlet**: 0 = MIX, 1 = IDENTITY (1N), 2 = 2N, ..., 6 = 6N. CV-able so the primary out can sweep across outputs at audio/control rate. |
+| 8 | **OUT** (output crossfader) | Canals-pattern `ModeSelector` 0..6 (LinearDialMap, 7-position rounded). Selects which signal goes to the **primary outlet**: 0 = MIX, 1 = IDENTITY (1N), 2 = 2N, ..., 6 = 6N. CV-able so the primary out can sweep across outputs at audio/control rate. |
 
-Scroll depth: 9 plies. Comparable to Plaits' 6 + 3 menu items, no worse than Helicase.
+**Note:** RUN ply is omitted in v1 (no alt-mode personalities ship). v2 adds RUN back as ply 8 ahead of OUT (becomes ply 9), pushing total to 9 + 6 gates = 15 plies.
+
+Scroll depth (v1): 8 plies. Comparable to Plaits' 6 + 3 menu items.
 
 ### Page 2 — gate inputs per function generator (6 plies)
 
 | Ply | Control |
 |---|---|
-| 10 | **gate 1N** (IDENTITY) |
-| 11 | **gate 2N** |
-| 12 | **gate 3N** |
-| 13 | **gate 4N** |
-| 14 | **gate 5N** |
-| 15 | **gate 6N** |
+| 9 | **gate 1N** (IDENTITY) |
+| 10 | **gate 2N** |
+| 11 | **gate 3N** |
+| 12 | **gate 4N** |
+| 13 | **gate 5N** |
+| 14 | **gate 6N** |
 
 Right-to-left cascade resolved Lua-side via the mask pattern from `docs/multi-output-units-author-guide.md` (sub-chain presence detection): for each cell N from 6 down to 1, if `branch:getInputSource(1) == nil`, that voice's effective trigger source is the nearest patched neighbor's. Mask is pushed to C++ as a parameter; C++ reads all 6 inlets and dispatches.
 
-### Total ply count: 15
+### Total ply count: 14 (v1) / 15 (v2 with RUN)
 
 Single-row scroll. Matches existing precedent (Plaits 6, Helicase 7, Larets 8, Alembic 8). Long but legible — gate sub-chains are visually distinct (`Gate` ply graphic) from globals so muscle memory locates the gate bank quickly at the right edge.
 
@@ -164,45 +165,92 @@ Single-row scroll. Matches existing precedent (Plaits 6, Helicase 7, Larets 8, A
 
 RUN-mode personality toggles (when PLUME/FLOOM/SPILL/STRATA/VOLLEY ship), Just-Type / Geode static mode selection. v1 ships with no menu.
 
-## MVP scope (v1)
+## MVP scope (v1) — TIGHTENED 2026-04-30
 
-**In scope:**
-- Sound + Shape base ranges
-- Transient / Sustain / Cycle mode switch
-- TIME (V/oct), INTONE, RAMP, CURVE, FM globals (all with CV)
-- 6 per-voice trigger sub-chains with right-to-left cascade
-- Phase-receptivity via RUN CV in SHIFT cell (reuses Helicase logic)
-- MIX output (sub-out 7 TBD vs. IDENTITY aliasing)
+v1 ships the **6 default base cells only** — Range × Mode = Sound/Shape × Transient/Sustain/Cycle. **No alt-mode RUN personalities.** This is a clean unit on its own: hex-voiced harmonically-coupled slope engine with per-cell trigger dispatch, INTONE morph, shared CURVE/RAMP/FM shaping, MIX summing.
 
-**Explicitly deferred to v2:**
-- **PLUME** (vactrol/LPG model, Sound/Sustain + RUN) — non-trivial DSP
-- **FLOOM** (2-op FM, Sound/Cycle + RUN) — reuses Helicase but needs re-wiring
-- **SPILL** (impulse-train, Sound/Transient + RUN)
-- **STRATA** (ARSR, Shape/Sustain + RUN)
-- **VOLLEY** (burst envelopes, Shape/Cycle + RUN)
-- **Geode** (Just-Type round-robin voice allocator)
-- **i2c / Teletype integration** — habitat has no i2c at all; out of scope permanently
+### v1 — in scope
+- Sound + Shape base ranges (audio-rate vs control-rate slopes; bipolar ±5V vs unipolar 0–8V output domain).
+- Transient / Sustain / Cycle mode switch (the three trigger-response semantics from the tech map).
+- TIME (V/Oct), INTONE, RAMP, CURVE, FM globals (all with CV).
+- 6 per-voice trigger sub-chains with right-to-left cascade.
+- MIX output as primary sub-out (sub-out 1).
+- OUT crossfader on Page 1 for vanilla-friendly per-voice access.
+
+### v2 — alt RUN-mode personalities
+RUN CV unlocks one of six alt personalities depending on the active base cell. **All deferred to v2.** Includes: SHIFT (Shape/Transient + RUN — phase-receptivity sweep), STRATA (Shape/Sustain + RUN — ARSR), VOLLEY (Shape/Cycle + RUN — burst envelopes), SPILL (Sound/Transient + RUN — impulse-train, IDENTITY clocks 2N–6N), PLUME (Sound/Sustain + RUN — vactrol/LPG plucks), FLOOM (Sound/Cycle + RUN — 2-op FM).
+
+v1 omits the RUN ply from Page 1 entirely (was ply 8 in earlier drafts). RUN CV is non-functional in default-mode-only operation per tech map; an inert ply would be confusing. v2 adds back: RUN as ply 8, RUN-mode personality table dispatched off active cell.
+
+### v3 — Just-Type (poly voice + Geode)
+Just-Type is JF's i2c-driven poly voice and Geode round-robin allocator. Out of scope for v1 *and* v2. **Likely impossible** without external sequencing infrastructure habitat doesn't have. Rationale: Just-Type's contract is i2c teletype messages assigning voices to notes/gates programmatically — habitat has no i2c bus, and the hardware ER-301 firmware doesn't expose one either. Geode + poly voice could conceivably be a *standalone separate unit* that uses internal-trigger allocation (Geode-as-its-own-unit was already flagged as a v2 question), but this would be a clean-room reinterpretation, not a JF mode.
+
+**i2c / Teletype integration:** out of scope permanently.
+
+### Why this scope holds together
+- 6 base cells × per-mode trigger dispatch is non-trivial and is the heart of JF's musical character. v1 nails this.
+- INTONE morph + CURVE/RAMP/FM shaping + MIX summing are the core coupling that makes JF *not* decompose to parallel chains — they all ship in v1, so the multi-out justification is preserved.
+- Alt-mode personalities (PLUME's vactrol model, FLOOM's 2-op FM, SPILL's impulse train) are each their own sub-DSP project. Deferring them de-risks v1 to a manageable scope while still proving the framework's flagship use.
 
 ## Port complexity / technical risks
 
 1. **Clean-room from tech map.** Not binary-matching exact DSP — the habitat port will sound *like* JF (harmonically coupled slope engines), not identical sample-for-sample. Acceptable; document the difference.
-2. **Trig LUT on am335x.** CURVE's log→lin→exp→sine→rect morph likely involves `sinf`; must go to the 72-entry LUT (reference: `mods/spreadsheet/FilterResponseGraphic.h` `kLutCos`/`kLutSin`). Emu-only validation will miss this.
-3. **Through-zero linear FM in Sound range.** Tractable but needs care — habitat doesn't currently have TZ-linear FM elsewhere (Helicase's FM is lin/expo but not TZ-linear).
-4. **6 slope engines running at once.** CPU budget concern at audio rate. Profile on hardware early. May need vectorization.
-5. **Sub-chain presence detection API.** First time habitat exercises this. Confirm the ER-301 SDK primitive: `branch:getUnitCount()`? `branch:isEmpty()`? `inlet:isConnected()`? Needs probing before any code.
-6. **Phase-receptivity state-machine per voice.** 6 instances of Helicase's existing logic. Verify it scales (particularly the transition ordering when INTONE remaps frequencies).
-7. **Right-to-left cascade at frame boundary.** Lua-side cascade computation, C++-side consumption. Cascade changes rarely (only when user patches/unpatches), so no audio-rate overhead.
+2. **Trig LUT on am335x.** CURVE's log→lin→exp→sine→rect morph involves `sinf`; must go to the 72-entry LUT (reference: `mods/spreadsheet/FilterResponseGraphic.h` `kLutCos`/`kLutSin`). Emu-only validation will miss this.
+3. **Through-zero linear FM in Sound range.** Tractable but needs care — habitat doesn't currently have TZ-linear FM elsewhere (Helicase's FM is lin/expo but not TZ-linear). Phase accumulator must allow negative-going phase delta when the FM signal swings below zero.
+4. **6 slope engines running at once.** CPU budget concern at audio rate. Resolved by NEON 4-lane SIMD pattern below — see Voice topology / NEON.
+5. **Right-to-left cascade at frame boundary.** Lua-side cascade computation, C++-side consumption. Cascade changes rarely (only on user patch/unpatch); no audio-rate overhead. Pattern verified per author guide.
+
+(SHIFT phase-receptivity dropped — deferred to v2 with the rest of the alt-mode personalities.)
+
+## Voice topology / NEON
+
+Reuses tomf custom-units' polygon pattern (proven on hardware in `er-301-custom-units/mods/polygon/voice.h`). Polygon ships 4 / 8 / 12 voices via `MultiVoice<GROUPS>` where each group is a 4-lane NEON `four::Voice` processing 4 polyphonic instances simultaneously through `float32x4_t` lanes.
+
+**JF mapping:**
+- `MultiVoice<2>` → 2 groups × 4 lanes = 8 lanes total
+- Use 6 lanes (1N…6N), mask 2 lanes off via gate=0 (envelope inert, oscillator output AND'd to zero)
+- Wasted 2 lanes is acceptable — NEON throughput dwarfs the 25% lane-utilization cost vs scalar
+
+**Why this pattern over our recent NEON forays:**
+- Polygon's `four::Voice` composes proven NEON primitives (`dsp::four::Vpo`, `osc::four::DualPhaseReverseSync`, `env::four::SlewEnvelope`, `filter::svf::four::Lowpass`, `util::four::*`). All have shipped on Cortex-A8 since polygon's release without the `:64`-hint codegen issues that bit Ngoma + Pecto.
+- Lane data structure is *struct-of-arrays* implicit — the `float32x4_t` *is* the per-voice fan-out, not a vectorization of a scalar pipeline. GCC has nothing to auto-vectorize and therefore nothing to mis-align.
+- Class-member storage of NEON state matches `feedback_neon_intrinsics_drumvoice` lesson (heap-allocated, no stack-local NEON arrays).
+
+**Vendoring decision:** polygon's DSP infrastructure lives in `er-301-custom-units/common/dsp/{osc.h, env.h, filter.h, pitch.h, latch.h, slew.h, ...}`. **Vendor the needed subset into the JF package**, don't reach across packages — per the cross-package dependency audit policy. Custom-units uses MIT license (verify before importing); files vendored in-tree become part of habitat going forward.
+
+**Subset needed for JF v1 (estimated):**
+- `dsp/osc.h` — phase accumulator, hard-sync, polyBLEP. Adapt for slope-engine semantics (rise+fall instead of saw/tri).
+- `dsp/env.h` — `four::SlewEnvelope`, `four::Coefficients` for Transient/Sustain mode envelopes.
+- `dsp/pitch.h` — `four::Vpo` for V/Oct + INTONE per-voice pitch deltas.
+- `dsp/latch.h` — `four::GateToTrigger` for trigger edge detection.
+- `util/math.h` (or subset) — NEON math helpers (`fast_exp_ns_f32`, `fclamp_unit`, `mix`).
+- `hal/neon.h` — already in firmware SDK; do not vendor.
+
+CURVE's piecewise morph is JF-specific — implement fresh as a 4-lane NEON shaper. polyBLEP for the rect endpoint.
 
 ## Open design questions
 
-1. **Range-switch sample-rate implications.** Sound range runs voices at audio-rate; Shape at control-rate. Internally the habitat DSP must probably run at 48 kHz always, with Shape-range voices simply clamped to control-rate frequencies. Confirm CPU.
-2. **TZ-linear FM implementation.** Through-zero linear FM requires specific phase-accumulator handling (bipolar FM signal crosses zero → phase can run backward). Design the slope engine's phase accumulator with this in mind from the start, even for v1 clamp-to-Sound.
-3. **Geode scope (v2 or later).** Geode fundamentally changes the unit's use model (polyrhythmic allocator). Might belong in its own unit rather than a mode of the main JF unit. Decide when v2 scoping arrives.
+### DSP / behavior
 
-**Resolved 2026-04-30:**
+1. **TIME range and V/Oct mapping.** Hardware spec is roughly 8s slope (slowest LFO-rate Shape) up to ~80 kHz (fastest audio-rate Sound). Settle the V/Oct mapping: anchor pitch (e.g. A4 = 440 Hz at 0V) and how Range switch shifts the operating window. Likely two LinearVoltageMaps gated by Range.
+2. **CURVE morph topology.** Tech map describes log↔lin↔exp↔sine↔rect — confirm continuous (pixel-smooth) vs discrete-stepped morph. Reference recordings on YouTube show continuous; confirm against tech map verbatim before implementing.
+3. **MIX behavior across ranges.** Sound range = tanh-limited sum; Shape range = "analog max" of index-scaled voices (tech map's wording). Implement both and switch on Range. Open question: what does "index-scaled" mean exactly — 1N weighted full, 6N weighted by 1/6? Or all weighted unity then maxed?
+4. **TZ-linear FM phase-accumulator design.** Through-zero linear FM requires the phase accumulator to accept signed delta (bipolar FM signal crosses zero → phase runs backward briefly). Polygon's `osc::four::DualPhase` may already handle this; verify before extending.
+5. **OUT crossfader interpolation.** At intermediate values (e.g. OUT=2.5), should the primary outlet crossfade smoothly between voice 2N and 3N (musical, but slightly defocuses each), or hard-snap to the rounded position (cleaner but zipper-prone under CV)? Recommend: smooth crossfade with cosine taper for interpolation; the Range switch (which IS rounded) sets a different precedent and OUT is more usefully smooth.
+6. **Range-switch sample-rate implications.** DSP runs at 48 kHz always; Shape range simply clamps voice frequencies to LFO domain. Confirm CPU is fine for 6 lanes through full audio-rate pipeline even when only being used at LFO rates — likely yes given polygon's headroom, but verify.
+
+### Implementation
+
+7. **`dsp::four::*` vendoring license.** Confirm tomf's custom-units repo license permits vendoring `common/dsp/` subset into habitat. Check `LICENSE` at repo root before extracting any files.
+8. **CURVE 4-lane shaper implementation.** Write fresh as a NEON `float32x4_t` piecewise function. Decision: lookup table (faster, ~256 entries × interpolate) vs analytic (smaller code but slower per-sample). Probably LUT — fits the trig-LUT lesson pattern.
+
+### Resolved 2026-04-30
 - ~~Sub-out 7 for MIX or absorb into IDENTITY?~~ → MIX = sub-out 1 primary; 1N..6N = sub-outs 2..7. See Output topology.
 - ~~RAMP CV bipolar handling.~~ → bipolar GainBias directly per author-guide control-polarity convention.
 - ~~Trigger sub-chain cascade API ergonomics.~~ → mask-based dispatch per author guide; primitive verified (`branch:getInputSource(1)`).
+- ~~Phase-receptivity state-machine scaling.~~ → SHIFT deferred to v2; v1 has no phase-receptivity logic.
+- ~~Geode scope (v2 or later).~~ → v3 or never. Likely impossible without external sequencing infrastructure habitat doesn't have. If revisited, becomes its own unit (clean-room reinterpretation), not a JF mode.
+- ~~SHIFT in v1 vs v2.~~ → v2 with the rest of the alt-mode personalities.
 
 ## Open UI questions
 
@@ -220,8 +268,8 @@ RUN-mode personality toggles (when PLUME/FLOOM/SPILL/STRATA/VOLLEY ship), Just-T
 
 1. **Validate `subOutLabels` length 7** — extend QuadLFO reference to 7 outs as a half-day pre-flight; confirms picker overlay + M6 cycler render cleanly. Logged firmware-side in `er-301/docs/planning/just-friends-sdk-questions.md`.
 2. **Pick package home.** JF voice + DSP both ship in a single package — no cross-package dependencies (general repo policy; see todo). Open: which package? Likely `spreadsheet` (tier-1, alongside Helicase/Ngoma/Pecto), or new `mannequins` if other Mannequins ports follow (Three Sisters, Cold Mac, Mangrove). Decide before code.
-3. **Review Helicase's phase-receptivity code** as the direct reuse basis for SHIFT mode (per-voice state machine identical shape).
+3. **License + vendor decision for `dsp::four::*`.** Confirm `er-301-custom-units` LICENSE permits vendoring `common/dsp/` subset; if so, copy the needed files into the JF package's tree (subdirectory like `mods/<pkg>/voice/`) to keep the cross-package boundary clean. No `#include "<otherrepo>/..."` paths.
 4. **Review Varishape Osc's polyBLEP** for CURVE morph reusability across sine/tri/saw/square/pulse audio-rate edges.
-5. **Draft the slope-engine struct** — per-voice state object carrying phase, cycle flag, receptivity flag, plus shared-param pointers. 6 instances managed in DSP class.
-6. **Profile plan:** 6 slope engines at 48 kHz on am335x — confirm CPU budget before committing. NEON-vectorize across the 6 voices' phase-accumulator + polyBLEP if needed; reuse Ngoma's 4-lane phasor pattern as starting template.
-7. **Trig LUT sweep.** Audit any `sinf`/`cosf` in the slope-engine + CURVE morph + analog-max MIX combiner; route through `kLutSin`/`kLutCos` per author-guide trig-bug section.
+5. **Draft the per-cell trigger dispatch table** — six base cells × Transient/Sustain/Cycle semantics. Code as a switch on (Range, Mode) inside the trigger-edge handler, dispatching to `startAR()` / `setGate()` / `phaseReset()` per cell.
+6. **Profile plan:** `MultiVoice<2>` × 6 active lanes at 48 kHz on am335x. Confirm CPU budget before committing. Polygon's existing performance on hardware is the lower bound — its 8-voice config runs at audio-rate without issue, so 6 active lanes should be fine.
+7. **Trig LUT sweep.** Audit any `sinf`/`cosf` in the slope-engine + CURVE morph + MIX combiner; route through `kLutSin`/`kLutCos` per author-guide trig-bug section. Polygon uses scalar libm in places — vendor copies will need this swap before hardware-shipping.
