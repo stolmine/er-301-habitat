@@ -32,6 +32,12 @@ namespace stolmine
     jf::four::Voice mVoiceG0;  // 1N, 2N, 3N, 4N
     jf::four::Voice mVoiceG1;  // 5N, 6N, _, _
     jf::four::CurveLut mCurveLut;  // 5 anchors × 256 entries, init in ctor
+
+    // FM AC-coupling state for Sound range. Tech map: FM input is
+    // AC-coupled in Sound for clean TZFM, DC-coupled in Shape. One-pole
+    // HPF, ~5 Hz at 48 kHz: alpha = exp(-2*pi*5/48000) ≈ 0.99934.
+    float mFmHpfX1 = 0.0f;
+    float mFmHpfY1 = 0.0f;
   };
 
   JF::JF()
@@ -123,6 +129,7 @@ namespace stolmine
 
     float *vOctBuf = mVOct.buffer();
     float *trigBuf = mTrig1N.buffer();
+    float *fmBuf   = mFM.buffer();
 
     float *mixBuf  = mMix.buffer();
     float *outs[6] = {
@@ -140,6 +147,7 @@ namespace stolmine
     const float intonePos = mIntone.value();
     const float rampPos = mRamp.value();  // -1..+1 bipolar
     const float curvePos = mCurve.value(); // -1..+1 bipolar
+    const float fmDepth = mFmDepth.value(); // -1..+1 bipolar (signed)
 
     // RAMP threshold T in (eps, 1-eps). Clamp keeps invT / inv(1-T)
     // finite at extremes. T = 0.5 → symmetric triangle (matches Phase 3a
@@ -183,9 +191,10 @@ namespace stolmine
     const float baseFreq = computeBaseFreq(voctV, timeBias, range);
     const float invSr = 1.0f / globalConfig.sampleRate;
 
-    // Per-voice phase increments (NEON across the 4 lanes).
+    // Per-voice base phase increments (NEON across the 4 lanes).
     // g0 lanes = voices 1..4; g1 lanes = voices 5,6 + masked.
-    const float incs[6] = {
+    // FM modulates these per-sample inside the loop.
+    const float baseIncs[6] = {
       baseFreq * intoneMult(1, intonePos) * invSr,
       baseFreq * intoneMult(2, intonePos) * invSr,
       baseFreq * intoneMult(3, intonePos) * invSr,
@@ -194,10 +203,31 @@ namespace stolmine
       baseFreq * intoneMult(6, intonePos) * invSr
     };
 
-    const float32x4_t incG0 = jf::four::make_4(incs[0], incs[1], incs[2], incs[3]);
-    // Lanes 2,3 of g1 are masked-voice; inc value irrelevant but keep
-    // small/finite to avoid NaN propagation.
-    const float32x4_t incG1 = jf::four::make_4(incs[4], incs[5], 0.0f, 0.0f);
+    const float32x4_t baseIncG0 = jf::four::make_4(baseIncs[0], baseIncs[1], baseIncs[2], baseIncs[3]);
+    const float32x4_t baseIncG1 = jf::four::make_4(baseIncs[4], baseIncs[5], 0.0f, 0.0f);
+
+    // FM dispatch:
+    //   fmDepth >= 0 (CW):  linear FM to TIME (all voices equally → TZFM)
+    //   fmDepth <  0 (CCW): linear FM to INTONE (per-voice index-weighted;
+    //                       IDENTITY unaffected, 6N most-affected)
+    //
+    // Linear FM scale: Helicase pattern uses 100/sr for ~100Hz/V FM index
+    // at +1 depth and +1 FM input. Same scale here for parity.
+    const float fmScale = 100.0f * invSr;
+    const bool fmToTime = (fmDepth >= 0.0f);
+    const float fmAbs = fmDepth >= 0.0f ? fmDepth : -fmDepth;
+
+    // Per-voice INTONE-FM weights (1-indexed): voice n weight = (n-1)/5.
+    // Voice 1 IDENTITY weight = 0 (unaffected). Voice 6 weight = 1.
+    const float32x4_t intoneFmWeightG0 =
+        jf::four::make_4(0.0f, 1.0f/5.0f, 2.0f/5.0f, 3.0f/5.0f);
+    const float32x4_t intoneFmWeightG1 =
+        jf::four::make_4(4.0f/5.0f, 1.0f, 0.0f, 0.0f);
+
+    // DC-blocker activation per range. Sound = AC-coupled, Shape = DC.
+    // alpha tuned for ~5 Hz cutoff at 48 kHz.
+    const bool fmAcCouple = (range == 2);
+    const float hpfAlpha = 0.99934f;
 
     // Lane mask: g1 lanes 0,1 are real voices; lanes 2,3 are dummies.
     // Used to gate output.
@@ -212,6 +242,38 @@ namespace stolmine
       // Phase 5 distributes per-voice triggers via cascade.
       const bool gateNow = (trigBuf[i] > 0.5f);
       const uint32x4_t gate = gateNow ? vdupq_n_u32(0xFFFFFFFFu) : vdupq_n_u32(0u);
+
+      // FM input — AC-couple in Sound range, passthrough in Shape.
+      float fmS = fmBuf[i];
+      if (fmAcCouple)
+      {
+        // y[n] = x[n] - x[n-1] + alpha * y[n-1]
+        const float y = fmS - mpInternal->mFmHpfX1 + hpfAlpha * mpInternal->mFmHpfY1;
+        mpInternal->mFmHpfX1 = fmS;
+        mpInternal->mFmHpfY1 = y;
+        fmS = y;
+      }
+
+      // Compute per-lane FM phase increments.
+      float32x4_t incG0, incG1;
+      if (fmToTime)
+      {
+        // Linear FM to TIME — same fm offset added to every voice.
+        // TZFM: when fm goes negative, inc + fmAmount can go negative,
+        // but wrap_phase handles that via the floor trick.
+        const float fmAmount = fmS * fmAbs * fmScale;
+        const float32x4_t fmAmountV = vdupq_n_f32(fmAmount);
+        incG0 = vaddq_f32(baseIncG0, fmAmountV);
+        incG1 = vaddq_f32(baseIncG1, fmAmountV);
+      }
+      else
+      {
+        // Linear FM to INTONE — per-voice weighted.
+        const float fmAmount = fmS * fmAbs * fmScale;
+        const float32x4_t fmAmountV = vdupq_n_f32(fmAmount);
+        incG0 = vaddq_f32(baseIncG0, vmulq_f32(fmAmountV, intoneFmWeightG0));
+        incG1 = vaddq_f32(baseIncG1, vmulq_f32(fmAmountV, intoneFmWeightG1));
+      }
 
       // Voice processing — 4 lanes per group, mode shared.
       auto pG0 = vG0.process(incG0, gate, mode);

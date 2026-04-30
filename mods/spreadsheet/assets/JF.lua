@@ -74,12 +74,22 @@ function JF:onLoadGraph(channelCount)
   tie(jf, "Curve", curve, "Out")
   self:addMonoBranch("curve", curve, "In", curve, "Out")
 
-  -- FM input (bipolar). Plumbed; DSP consumption arrives in Phase 4.
+  -- FM signal input — the audio/CV signal that drives FM. Carries bias
+  -- to allow constant-DC FM offsets (Shape range only; Sound AC-couples
+  -- the inlet C++-side per tech map).
   local fm = self:addObject("fm", app.GainBias())
   local fmRange = self:addObject("fmRange", app.MinMax())
   connect(fm, "Out", jf, "FM In")
   connect(fm, "Out", fmRange, "In")
   self:addMonoBranch("fm", fm, "In", fm, "Out")
+
+  -- FM depth/destination — the JF macro "FM" knob per tech map.
+  -- Bipolar -1..+1: CW = linear FM to TIME (TZFM in Sound range),
+  -- CCW = linear FM to INTONE (per-voice index-weighted), noon = no FM.
+  local fmDepth = self:addObject("fmDepth", app.ParameterAdapter())
+  fmDepth:hardSet("Bias", 0.0)
+  tie(jf, "FmDepth", fmDepth, "Out")
+  self:addMonoBranch("fmDepth", fmDepth, "In", fmDepth, "Out")
 
   -- IDENTITY trigger (1N gate input). Comparator-driven per the
   -- comparator-gate-threshold convention; the C++ side reads >0.5 as
@@ -102,7 +112,7 @@ function JF:onLoadGraph(channelCount)
 end
 
 local views = {
-  expanded = { "tune", "time", "intone", "ramp", "curve", "trig1N", "fm" },
+  expanded = { "tune", "time", "intone", "ramp", "curve", "fmDepth", "fm", "trig1N" },
   collapsed = {}
 }
 
@@ -196,8 +206,20 @@ function JF:onLoadViews(objects, branches)
     comparator = objects.trig1N
   }
 
-  controls.fm = GainBias {
+  controls.fmDepth = GainBias {
     button = "FM",
+    description = "FM Depth (CW: TIME / CCW: INTONE)",
+    branch = branches.fmDepth,
+    gainbias = objects.fmDepth,
+    range = objects.fmDepth,
+    biasMap = curveMap,  -- same -1..+1 bipolar map as RAMP/CURVE
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.0
+  }
+
+  controls.fm = GainBias {
+    button = "FM in",
     description = "FM Input",
     branch = branches.fm,
     gainbias = objects.fm,
