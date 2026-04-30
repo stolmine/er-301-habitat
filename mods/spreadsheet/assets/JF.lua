@@ -19,10 +19,12 @@ JF:include(Unit)
 function JF:init(args)
   args.title = "JF"
   args.mnemonic = "JF"
-  -- 7 sub-outs. Sub-out 1 = MIX = primary (vanilla auto-wires here).
-  -- M6 cycles in author-declared order: mix, then 1N..6N.
-  args.channelCount = 7
-  args.subOutLabels = {"mix", "1N", "2N", "3N", "4N", "5N", "6N"}
+  -- 8 framework sub-outs. The first two BOTH source from the C++ Mix
+  -- outlet (Out1 = chain L, Out2 = chain R) so vanilla stereo chains
+  -- receive MIX on both channels rather than MIX/1N. Sub-outs 3..8 are
+  -- the per-voice taps, reachable on stolmine via the M6 picker cycle.
+  args.channelCount = 8
+  args.subOutLabels = {"mix", "mix R", "1N", "2N", "3N", "4N", "5N", "6N"}
   Unit.init(self, args)
 end
 
@@ -45,15 +47,17 @@ function JF:onLoadGraph(channelCount)
   connect(fm, "Out", fmRange, "In")
   self:addMonoBranch("fm", fm, "In", fm, "Out")
 
-  -- 7 sub-outs wired direct from the JF object to the unit boundary.
-  -- Phase 1 produces silence on each; Phases 2-4 fill in.
-  connect(jf, "Out1", self, "Out1") -- MIX
-  connect(jf, "Out2", self, "Out2") -- 1N
-  connect(jf, "Out3", self, "Out3") -- 2N
-  connect(jf, "Out4", self, "Out4") -- 3N
-  connect(jf, "Out5", self, "Out5") -- 4N
-  connect(jf, "Out6", self, "Out6") -- 5N
-  connect(jf, "Out7", self, "Out7") -- 6N
+  -- Wire 8 framework outlets. Out1 + Out2 both source from C++ Mix so
+  -- vanilla stereo chains see MIX on both L and R. Phase 1 produces
+  -- silence on each; Phases 2-4 fill in.
+  connect(jf, "Mix",   self, "Out1") -- chain L (and mono primary)
+  connect(jf, "Mix",   self, "Out2") -- chain R duplicate of MIX
+  connect(jf, "Out1N", self, "Out3")
+  connect(jf, "Out2N", self, "Out4")
+  connect(jf, "Out3N", self, "Out5")
+  connect(jf, "Out4N", self, "Out6")
+  connect(jf, "Out5N", self, "Out7")
+  connect(jf, "Out6N", self, "Out8")
 end
 
 local views = {

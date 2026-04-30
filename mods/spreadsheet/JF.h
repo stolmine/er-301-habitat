@@ -30,14 +30,17 @@ namespace stolmine
     od::Inlet mVOct{"V/Oct"};
     od::Inlet mFM{"FM In"};
 
-    // 7 sub-outlets. Vanilla auto-wires Out1 (MIX) to chain L.
-    od::Outlet mMix{"Out1"};   // sub-out 1 — MIX (primary)
-    od::Outlet mOut1N{"Out2"}; // sub-out 2 — IDENTITY / 1N
-    od::Outlet mOut2N{"Out3"}; // sub-out 3 — 2N
-    od::Outlet mOut3N{"Out4"}; // sub-out 4 — 3N
-    od::Outlet mOut4N{"Out5"}; // sub-out 5 — 4N
-    od::Outlet mOut5N{"Out6"}; // sub-out 6 — 5N
-    od::Outlet mOut6N{"Out7"}; // sub-out 7 — 6N
+    // 7 named outlets. Lua-side wraps these into 8 framework sub-outs:
+    // Out1+Out2 both source from "Mix" (so vanilla stereo chains get MIX
+    // on both L and R, not MIX/1N), then Out3..Out8 source from 1N..6N.
+    // Picker label sequence: {"mix", "mix R", "1N", ..., "6N"}.
+    od::Outlet mMix{"Mix"};      // chain primary (and stereo R duplicate)
+    od::Outlet mOut1N{"Out1N"};  // IDENTITY
+    od::Outlet mOut2N{"Out2N"};
+    od::Outlet mOut3N{"Out3N"};
+    od::Outlet mOut4N{"Out4N"};
+    od::Outlet mOut5N{"Out5N"};
+    od::Outlet mOut6N{"Out6N"};
 
     // Phase 1 parameters — placeholder set so onLoadGraph can wire faders
     // in v1 layout pass without DSP wired up yet.
