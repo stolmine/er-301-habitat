@@ -1,6 +1,6 @@
 [b]er-301-habitat v2.4.0[/b] -- 2026-04-29
 Requires firmware: v0.7.0-stolmine.9.x
-Packages: spreadsheet 2.3.1 -> 2.5.5.189, catchall 0.1.0 -> 0.3.0, biome 2.1.0 -> 2.2.0, [b]mi 1.0.1 NEW[/b] (consolidates clouds + commotio + grids + marbles + plaits + rings + stratos + warps).
+Packages: spreadsheet 2.3.1 -> 2.6.0, catchall 0.1.0 -> 0.3.0, biome 2.1.0 -> 2.2.0, [b]mi 1.0.1 NEW[/b] (consolidates clouds + commotio + grids + marbles + plaits + rings + stratos + warps).
 
 [b]Highlights[/b]
 Two new full-stack units: [b]Ngoma[/b] (analog macro drum voice, spreadsheet) and [b]Alembic[/b] (sample-trained 4-op phase-mod matrix synth, catchall). Major package reshape: 8 individual MI port packages collapse into one [b]mi[/b] package. Pecto zipper-noise on V/Oct + size sweeps fixed. Shift-handling audit decisions D1-D7 shipped. New utility unit [b]Constant Random[/b] (biome).

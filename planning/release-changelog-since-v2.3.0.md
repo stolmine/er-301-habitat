@@ -332,7 +332,7 @@ New planning files in this cycle (all under `planning/`):
 - Saved-patch break for the 8 retired MI packages.
 
 Patch / minor bumps elsewhere:
-- `spreadsheet` 2.5.5.189 (final, pre-release at HEAD)
+- `spreadsheet` 2.6.0 (release)
 - `catchall` 0.3.0 (Alembic added)
 - `biome` 2.2.0 (Pecto removed earlier; Constant Random added)
 - `mi` 1.0.1 (post-1.0.0 GridsCircle SWIG fix)

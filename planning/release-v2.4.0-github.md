@@ -2,7 +2,7 @@
 
 Release date: 2026-04-29
 
-Package updates: **spreadsheet 2.3.1 -> 2.5.5.189**, **catchall 0.1.0 -> 0.3.0**, **biome 2.1.0 -> 2.2.0** (Pecto removed), **mi 1.0.1 NEW** (consolidates clouds + commotio + grids + marbles + plaits + rings + stratos + warps).
+Package updates: **spreadsheet 2.3.1 -> 2.6.0**, **catchall 0.1.0 -> 0.3.0**, **biome 2.1.0 -> 2.2.0** (Pecto removed), **mi 1.0.1 NEW** (consolidates clouds + commotio + grids + marbles + plaits + rings + stratos + warps).
 
 ## Highlights
 

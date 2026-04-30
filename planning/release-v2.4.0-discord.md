@@ -16,6 +16,6 @@ Two new units: **Ngoma** (analog macro drum voice, spreadsheet) and **Alembic** 
 
 **Migration**: saved patches with old MI port references or `biome.Pecto` need re-binding. Pecto migrated to spreadsheet during v2.4.x dev; Alembic ships fresh in catchall (no migration concern).
 
-Package versions: spreadsheet 2.3.1 → 2.5.5.189, catchall 0.1.0 → 0.3.0, biome 2.1.0 → 2.2.0, mi 1.0.1 (new). All other packages unchanged.
+Package versions: spreadsheet 2.3.1 → 2.6.0, catchall 0.1.0 → 0.3.0, biome 2.1.0 → 2.2.0, mi 1.0.1 (new). All other packages unchanged.
 
 Full notes + binaries: <github release URL>
