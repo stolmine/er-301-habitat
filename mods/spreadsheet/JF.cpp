@@ -137,6 +137,17 @@ namespace stolmine
     const int mode  = mMode.value();    // 1=Transient, 2=Sustain, 3=Cycle
     const float timeBias = mTimeBias.value();
     const float intonePos = mIntone.value();
+    const float rampPos = mRamp.value();  // -1..+1 bipolar
+
+    // RAMP threshold T in (eps, 1-eps). Clamp keeps invT / inv(1-T)
+    // finite at extremes. T = 0.5 → symmetric triangle (matches Phase 3a
+    // when RAMP at noon).
+    float rampT = 0.5f + 0.49f * rampPos;
+    if (rampT < 0.01f) rampT = 0.01f;
+    if (rampT > 0.99f) rampT = 0.99f;
+    const float32x4_t rampTv = vdupq_n_f32(rampT);
+    const float32x4_t invRampTv = vdupq_n_f32(1.0f / rampT);
+    const float32x4_t invOneMinusRampTv = vdupq_n_f32(1.0f / (1.0f - rampT));
 
     // Block-rate base frequency. Per-sample V/Oct + FM in Phase 4.
     const float voctV = vOctBuf[0];
@@ -177,8 +188,10 @@ namespace stolmine
       auto pG0 = vG0.process(incG0, gate, mode);
       auto pG1 = vG1.process(incG1, vandq_u32(gate, g1Mask), mode);
 
-      // Waveshape: triangle for Cycle/Transient, linear for Sustain.
-      // (Sustain phase is already a 0..1 trapezoid level; no fold.)
+      // Waveshape: RAMP-asymmetric for Cycle/Transient, linear for
+      // Sustain. (Sustain phase is already a 0..1 trapezoid level; no
+      // fold. RAMP in Sustain mode would scale rise-rate vs fall-rate
+      // independently — deferred, see planning notes.)
       float32x4_t shapedG0, shapedG1;
       if (mode == jf::four::kSustain)
       {
@@ -187,8 +200,8 @@ namespace stolmine
       }
       else
       {
-        shapedG0 = jf::four::triangle(pG0);
-        shapedG1 = jf::four::triangle(pG1);
+        shapedG0 = jf::four::ramp_triangle(pG0, rampTv, invRampTv, invOneMinusRampTv);
+        shapedG1 = jf::four::ramp_triangle(pG1, rampTv, invRampTv, invOneMinusRampTv);
       }
 
       // Range polarity: Sound = bipolar (±1), Shape = unipolar (0..1).

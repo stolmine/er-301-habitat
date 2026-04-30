@@ -212,5 +212,31 @@ namespace jf
       return vbslq_f32(risingMask, rising, falling);
     }
 
+    // RAMP-shaped slope: per-tech-map "duty cycle" knob.
+    //   threshold T in (0,1) is the phase fraction spent rising.
+    //     T < 0.5: fall-heavy (saw down territory).
+    //     T = 0.5: symmetric triangle.
+    //     T > 0.5: rise-heavy (ramp up territory).
+    // T is clamped externally to keep invT and inv(1-T) finite.
+    // T is shared across lanes (RAMP is a global JF control), so the
+    // reciprocals come in pre-broadcast as scalar arguments — saves
+    // per-sample divides.
+    inline float32x4_t ramp_triangle(
+        float32x4_t phase,
+        float32x4_t thresholdV,
+        float32x4_t invThresholdV,
+        float32x4_t invOneMinusThresholdV
+    )
+    {
+      auto one = vdupq_n_f32(1.0f);
+      auto rising = vmulq_f32(phase, invThresholdV);
+      auto falling = vmulq_f32(vsubq_f32(one, phase), invOneMinusThresholdV);
+      auto risingMask = vcltq_f32(phase, thresholdV);
+      // Clamp to [0,1] so the saw-edge (near-zero division side) doesn't
+      // briefly overshoot due to fp rounding.
+      auto shaped = vbslq_f32(risingMask, rising, falling);
+      return fclamp_n(shaped, 0.0f, 1.0f);
+    }
+
   } // namespace four
 } // namespace jf

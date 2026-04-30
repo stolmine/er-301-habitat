@@ -58,6 +58,14 @@ function JF:onLoadGraph(channelCount)
   tie(jf, "Intone", intone, "Out")
   self:addMonoBranch("intone", intone, "In", intone, "Out")
 
+  -- RAMP knob — bipolar duty-cycle / rise-fall asymmetry per tech map.
+  -- CCW (-1): fall-heavy (saw-down territory); 0: symmetric triangle;
+  -- CW (+1): rise-heavy (ramp-up).
+  local ramp = self:addObject("ramp", app.ParameterAdapter())
+  ramp:hardSet("Bias", 0.0)
+  tie(jf, "Ramp", ramp, "Out")
+  self:addMonoBranch("ramp", ramp, "In", ramp, "Out")
+
   -- FM input (bipolar). Plumbed; DSP consumption arrives in Phase 4.
   local fm = self:addObject("fm", app.GainBias())
   local fmRange = self:addObject("fmRange", app.MinMax())
@@ -86,7 +94,7 @@ function JF:onLoadGraph(channelCount)
 end
 
 local views = {
-  expanded = { "tune", "time", "intone", "trig1N", "fm" },
+  expanded = { "tune", "time", "intone", "ramp", "trig1N", "fm" },
   collapsed = {}
 }
 
@@ -97,6 +105,12 @@ local timeMap = (function()
 end)()
 
 local intoneMap = (function()
+  local m = app.LinearDialMap(-1, 1)
+  m:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return m
+end)()
+
+local rampMap = (function()
   local m = app.LinearDialMap(-1, 1)
   m:setSteps(0.1, 0.01, 0.001, 0.0001)
   return m
@@ -132,6 +146,18 @@ function JF:onLoadViews(objects, branches)
     gainbias = objects.intone,
     range = objects.intone,
     biasMap = intoneMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.0
+  }
+
+  controls.ramp = GainBias {
+    button = "ramp",
+    description = "RAMP",
+    branch = branches.ramp,
+    gainbias = objects.ramp,
+    range = objects.ramp,
+    biasMap = rampMap,
     biasUnits = app.unitNone,
     biasPrecision = 3,
     initialBias = 0.0
