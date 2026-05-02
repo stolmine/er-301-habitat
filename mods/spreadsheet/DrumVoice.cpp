@@ -1,4 +1,5 @@
 #include "DrumVoice.h"
+#include "DrumVoiceSineLUT.h"
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
@@ -119,8 +120,13 @@ namespace stolmine
 
   struct DrumVoice::Internal
   {
-    static float sLUT[257];
-    static bool sLUTInit;
+    // Static reference to the precomputed sine LUT (DrumVoiceSineLUT.h).
+    // The pointer is initialized at class-static-init time from the
+    // already-populated kDrumVoiceSineLUT array — no runtime sinf calls,
+    // no package-trig-bug exposure (per feedback_package_trig_lut.md /
+    // feedback_unit_output_names_table-style hard-faults that have been
+    // killing Ngoma on insertion across multiple firmware builds).
+    static const float *sLUT;
 
     float phase1 = 0.0f;
     float phase2 = 0.0f;
@@ -174,19 +180,9 @@ namespace stolmine
     float cachedShape = 0.0f;
     float cachedGrit = 0.0f;
 
-    void initLUT()
-    {
-      if (!sLUTInit)
-      {
-        for (int i = 0; i <= 256; i++)
-          sLUT[i] = sinf((float)i / 256.0f * (float)M_PI);
-        sLUTInit = true;
-      }
-    }
   };
 
-  float DrumVoice::Internal::sLUT[257] = {};
-  bool DrumVoice::Internal::sLUTInit = false;
+  const float *DrumVoice::Internal::sLUT = kDrumVoiceSineLUT;
 
   DrumVoice::DrumVoice()
   {
@@ -220,7 +216,9 @@ namespace stolmine
     addParameter(mCompAmt);
     addParameter(mOctave);
     mpInternal = new Internal();
-    mpInternal->initLUT();
+    // sLUT is the precomputed kDrumVoiceSineLUT — no runtime trig init
+    // needed. Removes the package-trig-bug fault surface from the
+    // constructor entirely.
   }
 
   DrumVoice::~DrumVoice()
