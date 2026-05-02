@@ -5,17 +5,12 @@ Basimilus Iteritas Alia manual (`manuals.noiseengineering.us/bia/`),
 which documents the algorithm Alter introduced and Alia retains
 unchanged. Clean-room implementation from the technical description.
 
-Working title in this doc: **BIA-clone**. Per the no-third-party-branding
-policy (`feedback_no_third_party_branding`), the shipped unit must
-have a generic habitat name. Candidates to pick from:
+**Locked name: Visadhara** (Sanskrit, "poison-holder" / "venom-stream";
+also an epithet of Shiva for holding the world's venom). Generic, no
+third-party branding per `feedback_no_third_party_branding`.
 
-- **Tympani** — Latin for drum membranes; directly thematic
-- **Saliens** — Latin "leaping/pulsing"; biology coinage
-- **Drupa** — botanical "stone fruit"; short, distinct
-- **Resilient** / **Calyx** — alternates
-
-Pick one before starting Phase 1 code so the C++ class / pkg toc /
-file paths land right the first time.
+**Detailed phase-by-phase implementation plan:
+`planning/visadhara-initial-pass.md`**.
 
 ## Architecture (verbatim from the source manual)
 
