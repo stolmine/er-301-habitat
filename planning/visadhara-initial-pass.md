@@ -48,21 +48,62 @@ expanded). Visadhara's plies:
 | Ply | Control | Notes |
 |---|---|---|
 | 1 | **trig** | Comparator-driven gate input; fires AR envelope on all 6 voices |
-| 2 | **V/Oct** | Pitch CV (1V/oct via the standard Helicase 10x ConstantGain pattern); octave switch on shift sub |
-| 3 | **harmonic** | Per-voice decay + amplitude scaling. Bipolar GainBias |
-| 4 | **spread** | Harmonic-series ↔ prime-series overtone spacing. Bipolar GainBias |
-| 5 | **morph** | Sin → tri → saw → sq continuous waveshape. Bipolar GainBias (or unipolar 0..1) |
-| 6 | **fold** | Threshold-reflection folder; top-quarter mixes pulse train. Unipolar GainBias |
-| 7 | **attack** | Tri-mode: noise (CCW) / instant (center) / slow (CW). Bipolar GainBias |
-| 8 | **decay** | Global AR decay rate. Unipolar GainBias |
-| 9 | **level** | Output level. Unipolar GainBias |
-| 10 | **expanded** | Catchall for anything that doesn't fit; aux controls |
+| 2 | **V/Oct** | Pitch CV (1V/oct via the standard Helicase 10x ConstantGain pattern). **BAT octave switch (±2 oct, 3-pos: Bass / Alto / Treble) on shift sub** — Ngoma pattern. Cycles −2 / 0 / +2 oct. |
+| 3 | **mode** | **CV-able** (Skin / Liquid / Metal). Habitat enhancement over original's hard switch (the original has only a panel toggle, no CV jack); we expose CV per the user's request. Continuous 0..2 Parameter; default behavior is **smooth crossfade** between adjacent modes (mode=1.5 = 50% Liquid + 50% Metal mix). Config menu option **`mode crossfade: smooth / snap`** lets users force original-fidelity hard-snap. |
+| 4 | **spread** | Harmonic-series ↔ prime-series overtone spacing. Bipolar GainBias + CV. **Critical timbral knob** — without it the voice can't traverse from clean drum tones to metallic/cymbal territory. |
+| 5 | **harmonic** | Per-voice decay + amplitude scaling. Unipolar 0..1 GainBias + CV |
+| 6 | **morph** | Sin → tri → saw → sq continuous waveshape. Unipolar 0..1 GainBias + CV |
+| 7 | **fold** | Threshold-reflection folder; top-quarter mixes pulse train. Unipolar GainBias + CV |
+| 8 | **attack** | Tri-mode: noise (CCW) / instant (center) / slow (CW). Bipolar -1..+1 GainBias + CV |
+| 9 | **decay** | Global AR decay rate. Unipolar GainBias + CV |
+| 10 | **level** | Output level. Unipolar GainBias + CV |
 
-Mode (Skin/Liquid/Metal) lives on the **shift sub of V/Oct** as a
-3-position option (octave switch is also there as an alternate mode
-slot, like Ngoma). Or on a config menu — decide during Phase 1.
+**Total: 10 plies.** Comparable to Alembic (8) / JF (14 with gates).
+Single-row horizontal scroll, no menu pages.
 
-Total 10 plies, comparable to Alembic / JF.
+**Reduction candidates** (parked for a Phase 5 trim pass once the
+voice is musically dialed):
+- Could move **level** to expanded view (most habitat units inline it
+  but a few don't).
+- Could fold **attack** into a sub-display under another ply if the
+  tri-mode behavior turns out to be a "set once" choice rather than
+  a frequently-swept parameter.
+- Could put **mode** on a sub-display (V/Oct shift sub already has
+  BAT — could share or split). But mode is CV-able so it really
+  wants its own ply for cable access.
+
+Reduction will be informed by hardware play-testing in Phase 5.
+
+### Mode-CV implementation detail
+
+```cpp
+// Mode parameter: continuous 0..2 (Skin=0, Liquid=1, Metal=2)
+const float modeRaw = mMode.value();
+const int snapMode = (int)mModeSnap.value();   // 0 = smooth, 1 = hard
+
+float skinAmt, liquidAmt, metalAmt;
+if (snapMode) {
+  // Hard-snap: round to nearest, single mode active
+  int m = (int)(modeRaw + 0.5f);
+  if (m < 0) m = 0; if (m > 2) m = 2;
+  skinAmt   = (m == 0) ? 1.0f : 0.0f;
+  liquidAmt = (m == 1) ? 1.0f : 0.0f;
+  metalAmt  = (m == 2) ? 1.0f : 0.0f;
+} else {
+  // Smooth crossfade: tent function across adjacent modes
+  float c = modeRaw < 0.0f ? 0.0f : modeRaw > 2.0f ? 2.0f : modeRaw;
+  skinAmt   = c < 1.0f ? 1.0f - c : 0.0f;
+  liquidAmt = c < 1.0f ? c : (c < 2.0f ? 2.0f - c : 0.0f);
+  metalAmt  = c > 1.0f ? c - 1.0f : 0.0f;
+}
+
+// Final mix:
+out = skinAmt * skinBus + liquidAmt * liquidBus + metalAmt * metalBus;
+```
+
+In Phase 1 only Skin is implemented; modeRaw is treated as 0 always.
+Phase 3 adds the Liquid bus and the smooth/snap dispatch; Phase 4
+adds Metal.
 
 ## Implementation phases
 
@@ -76,8 +117,11 @@ morph mappings.
 
 - [ ] `Visadhara.h` + `Visadhara.cpp` with `od::Object` boilerplate.
   Inlets: `mTrigger`, `mVOct`. Outlet: `mOut` (single mono).
-  Parameters: `mPitch`, `mHarmonic`, `mSpread`, `mMorph`, `mDecay`,
-  `mLevel`. (Attack / Fold / Mode added in later phases.)
+  Parameters: `mHarmonic`, `mSpread`, `mMorph`, `mDecay`, `mLevel`,
+  `mMode` (placeholder, treated as 0 in Phase 1), `mModeSnap`
+  (od::Option, smooth=1 default). Octave: `od::Option mOctave{"Octave", 2}`
+  with values 1=Bass(-2), 2=Alto(0), 3=Treble(+2). (Attack / Fold
+  added in Phase 2.)
 - [ ] `visadhara/voice.h` — adapt `jf::four::Voice` pattern. 6
   tonal lanes via two `four::Voice` instances (lanes [g0:0..3,
   g1:0..1]); g1 lanes 2,3 masked off via gate=0.
@@ -262,11 +306,9 @@ spreadsheet release.
 
 ## Open design questions (parked for in-flight decisions)
 
-1. **Mode placement**: V/Oct shift sub OR config menu? V/Oct shift
-   sub is more discoverable (sub-display label visible) but
-   competes with octave switch. Config menu is cleaner but hides
-   mode switching. Lean toward V/Oct shift sub with a 3-position
-   layout: Skin / Liquid / Metal cycle.
+1. ~~**Mode placement**~~ — RESOLVED 2026-05-02. Mode is its own
+   top-level ply, CV-able. BAT octave gets the V/Oct shift sub.
+   Mode crossfade default smooth, hard-snap behind config option.
 2. **Fold compensation curve**: linear / log / table-driven. Plan:
    8-entry table, calibrated by listening test in Phase 2.
 3. **Liquid pitch sweep depth**: BIA's spec is a fixed character.

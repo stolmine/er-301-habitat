@@ -1,0 +1,250 @@
+local app = app
+local libspreadsheet = require "spreadsheet.libspreadsheet"
+local Class = require "Base.Class"
+local Unit = require "Unit"
+local Pitch = require "Unit.ViewControl.Pitch"
+local GainBias = require "Unit.ViewControl.GainBias"
+local Gate = require "Unit.ViewControl.Gate"
+local OptionControl = require "Unit.MenuControl.OptionControl"
+local MenuHeader = require "Unit.MenuControl.Header"
+local Encoder = require "Encoder"
+
+-- Visadhara — clean-room percussion macro voice based on the public BIA
+-- technical manual. Phase 1: Skin mode skeleton — 6-voice NEON additive
+-- with Spread / Harmonic / Morph / Decay / Level. Trigger fires AR
+-- envelope on all 6 voices. Mode / Attack / Fold added in later phases.
+--
+-- See planning/visadhara-initial-pass.md.
+
+local ply = app.SECTION_PLY
+
+local function floatMap(min, max, c, f, ff, fff)
+  local m = app.LinearDialMap(min, max)
+  m:setSteps(c or 0.1, f or 0.01, ff or 0.001, fff or 0.0001)
+  return m
+end
+
+local pitchMap = (function()
+  local m = app.LinearDialMap(20, 2000)
+  m:setSteps(100, 10, 1, 0.1)
+  return m
+end)()
+
+local unitMap = floatMap(0, 1)
+local bipolarMap = floatMap(-1, 1)
+local modeMap = (function()
+  local m = app.LinearDialMap(0, 2)
+  m:setSteps(0.1, 0.01, 0.001, 0.001)
+  return m
+end)()
+
+local Visadhara = Class {}
+Visadhara:include(Unit)
+
+function Visadhara:init(args)
+  args.title = "Visadhara"
+  args.mnemonic = "Vx"
+  Unit.init(self, args)
+end
+
+function Visadhara:onLoadGraph(channelCount)
+  local op = self:addObject("op", libspreadsheet.Visadhara())
+
+  -- V/Oct (10x scaling, Helicase/Plaits pattern: buffer carries 0.1V/oct,
+  -- multiply by 10 to get 1V/oct into C++).
+  local tune = self:addObject("tune", app.ConstantOffset())
+  local tuneRange = self:addObject("tuneRange", app.MinMax())
+  local voctGain = self:addObject("voctGain", app.ConstantGain())
+  voctGain:hardSet("Gain", 10.0)
+  connect(tune, "Out", voctGain, "In")
+  connect(voctGain, "Out", op, "V/Oct")
+  connect(tune, "Out", tuneRange, "In")
+
+  -- Trigger
+  local trig = self:addObject("trig", app.Comparator())
+  trig:setGateMode()
+  connect(trig, "Out", op, "Trigger")
+  self:addMonoBranch("trig", trig, "In", trig, "Out")
+
+  -- Pitch (base frequency at V/Oct=0).
+  local pitch = self:addObject("pitch", app.ParameterAdapter())
+  pitch:hardSet("Bias", 110.0)
+  tie(op, "Pitch", pitch, "Out")
+  self:addMonoBranch("pitch", pitch, "In", pitch, "Out")
+
+  -- Harmonic
+  local harmonic = self:addObject("harmonic", app.ParameterAdapter())
+  harmonic:hardSet("Bias", 0.5)
+  tie(op, "Harmonic", harmonic, "Out")
+  self:addMonoBranch("harmonic", harmonic, "In", harmonic, "Out")
+
+  -- Spread
+  local spread = self:addObject("spread", app.ParameterAdapter())
+  spread:hardSet("Bias", 0.0)
+  tie(op, "Spread", spread, "Out")
+  self:addMonoBranch("spread", spread, "In", spread, "Out")
+
+  -- Morph
+  local morph = self:addObject("morph", app.ParameterAdapter())
+  morph:hardSet("Bias", 0.0)
+  tie(op, "Morph", morph, "Out")
+  self:addMonoBranch("morph", morph, "In", morph, "Out")
+
+  -- Decay
+  local decay = self:addObject("decay", app.ParameterAdapter())
+  decay:hardSet("Bias", 0.5)
+  tie(op, "Decay", decay, "Out")
+  self:addMonoBranch("decay", decay, "In", decay, "Out")
+
+  -- Level
+  local level = self:addObject("level", app.ParameterAdapter())
+  level:hardSet("Bias", 0.7)
+  tie(op, "Level", level, "Out")
+  self:addMonoBranch("level", level, "In", level, "Out")
+
+  -- Mode (CV-able). Phase 1 stub — Skin only; Phase 3+ wires the
+  -- crossfade between modes.
+  local mode = self:addObject("mode", app.ParameterAdapter())
+  mode:hardSet("Bias", 0.0)
+  tie(op, "Mode", mode, "Out")
+  self:addMonoBranch("mode", mode, "In", mode, "Out")
+
+  -- Output
+  connect(op, "Out", self, "Out1")
+  if channelCount > 1 then
+    connect(op, "Out", self, "Out2")
+  end
+end
+
+local views = {
+  expanded = { "trig", "pitch", "mode", "spread", "harmonic", "morph", "decay", "level" },
+  collapsed = {}
+}
+
+function Visadhara:onLoadViews(objects, branches)
+  local controls = {}
+
+  controls.trig = Gate {
+    button = "trig",
+    description = "Trigger",
+    branch = branches.trig,
+    comparator = objects.trig
+  }
+
+  controls.pitch = Pitch {
+    button = "V/Oct",
+    description = "V/Oct + base pitch",
+    branch = branches.pitch,
+    offset = objects.pitch,
+    range = objects.pitch
+  }
+
+  controls.mode = GainBias {
+    button = "mode",
+    description = "Mode (Skin / Liquid / Metal, CV-able)",
+    branch = branches.mode,
+    gainbias = objects.mode,
+    range = objects.mode,
+    biasMap = modeMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 2,
+    initialBias = 0.0
+  }
+
+  controls.spread = GainBias {
+    button = "spread",
+    description = "Spread (harmonic ↔ prime)",
+    branch = branches.spread,
+    gainbias = objects.spread,
+    range = objects.spread,
+    biasMap = unitMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.0
+  }
+
+  controls.harmonic = GainBias {
+    button = "harm",
+    description = "Harmonic (per-voice decay+amp)",
+    branch = branches.harmonic,
+    gainbias = objects.harmonic,
+    range = objects.harmonic,
+    biasMap = unitMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.5
+  }
+
+  controls.morph = GainBias {
+    button = "morph",
+    description = "Morph (sin → tri → saw → sq)",
+    branch = branches.morph,
+    gainbias = objects.morph,
+    range = objects.morph,
+    biasMap = unitMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.0
+  }
+
+  controls.decay = GainBias {
+    button = "decay",
+    description = "Decay",
+    branch = branches.decay,
+    gainbias = objects.decay,
+    range = objects.decay,
+    biasMap = unitMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.5
+  }
+
+  controls.level = GainBias {
+    button = "level",
+    description = "Level",
+    branch = branches.level,
+    gainbias = objects.level,
+    range = objects.level,
+    biasMap = unitMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.7
+  }
+
+  return controls, views
+end
+
+local menu = {
+  "octaveHeader",
+  "octave",
+  "modeSnapHeader",
+  "modeSnap"
+}
+
+function Visadhara:onShowMenu(objects, branches)
+  local controls = {}
+
+  controls.octaveHeader = MenuHeader {
+    description = "Octave (BAT switch):"
+  }
+
+  controls.octave = OptionControl {
+    description = "Octave",
+    option = objects.op:getOption("Octave"),
+    choices = { "Bass (-2)", "Alto (0)", "Treble (+2)" }
+  }
+
+  controls.modeSnapHeader = MenuHeader {
+    description = "Mode crossfade:"
+  }
+
+  controls.modeSnap = OptionControl {
+    description = "Mode crossfade",
+    option = objects.op:getOption("ModeSnap"),
+    choices = { "smooth", "snap" }
+  }
+
+  return controls, menu
+end
+
+return Visadhara
