@@ -50,8 +50,8 @@ end
 function Visadhara:onLoadGraph(channelCount)
   local op = self:addObject("op", libspreadsheet.Visadhara())
 
-  -- V/Oct (10x scaling, Helicase/Plaits pattern: buffer carries 0.1V/oct,
-  -- multiply by 10 to get 1V/oct into C++).
+  -- V/Oct (Helicase pattern: tune ConstantOffset → ConstantGain ×10 → op
+  -- "V/Oct" so the buffer carries 0.1V/oct and C++ sees 1V/oct).
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
   local voctGain = self:addObject("voctGain", app.ConstantGain())
@@ -59,18 +59,18 @@ function Visadhara:onLoadGraph(channelCount)
   connect(tune, "Out", voctGain, "In")
   connect(voctGain, "Out", op, "V/Oct")
   connect(tune, "Out", tuneRange, "In")
+  self:addMonoBranch("tune", tune, "In", tuneRange, "Out")
+
+  -- Base pitch at V/Oct=0. Hidden internal default (110 Hz). User
+  -- adjusts pitch via V/Oct ply; base shift exposed as a config menu
+  -- option in Phase 2+.
+  op:hardSet("Pitch", 110.0)
 
   -- Trigger
   local trig = self:addObject("trig", app.Comparator())
   trig:setGateMode()
   connect(trig, "Out", op, "Trigger")
   self:addMonoBranch("trig", trig, "In", trig, "Out")
-
-  -- Pitch (base frequency at V/Oct=0).
-  local pitch = self:addObject("pitch", app.ParameterAdapter())
-  pitch:hardSet("Bias", 110.0)
-  tie(op, "Pitch", pitch, "Out")
-  self:addMonoBranch("pitch", pitch, "In", pitch, "Out")
 
   -- Harmonic
   local harmonic = self:addObject("harmonic", app.ParameterAdapter())
@@ -117,7 +117,7 @@ function Visadhara:onLoadGraph(channelCount)
 end
 
 local views = {
-  expanded = { "trig", "pitch", "mode", "spread", "harmonic", "morph", "decay", "level" },
+  expanded = { "trig", "tune", "mode", "spread", "harmonic", "morph", "decay", "level" },
   collapsed = {}
 }
 
@@ -131,12 +131,12 @@ function Visadhara:onLoadViews(objects, branches)
     comparator = objects.trig
   }
 
-  controls.pitch = Pitch {
+  controls.tune = Pitch {
     button = "V/Oct",
-    description = "V/Oct + base pitch",
-    branch = branches.pitch,
-    offset = objects.pitch,
-    range = objects.pitch
+    description = "V/Oct",
+    branch = branches.tune,
+    offset = objects.tune,
+    range = objects.tuneRange
   }
 
   controls.mode = GainBias {
