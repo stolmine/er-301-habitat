@@ -327,11 +327,11 @@ Initial release.
 
 Special thanks to...
 
+Brian Clarkson - For making my favorite instrument and for open-sourcing the 301
+
 tomf - I reused your clever circle graphic for the drum sequencers, and learned a lot from your units
 
 Joe Filbrun - I drew directly from your menu paging schemes in Accents
-
-Brian Clarkson - For making my favorite instrument
 
 Émilie Gillet - For the incredible, generous gift of your code
 
