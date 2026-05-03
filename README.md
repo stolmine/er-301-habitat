@@ -1,4 +1,4 @@
-u# er-301-habitat
+# er-301-habitat
 
 Custom units for the ER-301 sound computer. This repo is currently under constant revision, expect bugs!
 
