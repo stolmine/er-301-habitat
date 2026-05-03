@@ -90,6 +90,18 @@ function Visadhara:onLoadGraph(channelCount)
   tie(op, "Morph", morph, "Out")
   self:addMonoBranch("morph", morph, "In", morph, "Out")
 
+  -- Fold
+  local fold = self:addObject("fold", app.ParameterAdapter())
+  fold:hardSet("Bias", 0.0)
+  tie(op, "Fold", fold, "Out")
+  self:addMonoBranch("fold", fold, "In", fold, "Out")
+
+  -- Attack (bipolar -1..+1: noise / instant / slow)
+  local attack = self:addObject("attack", app.ParameterAdapter())
+  attack:hardSet("Bias", 0.0)
+  tie(op, "Attack", attack, "Out")
+  self:addMonoBranch("attack", attack, "In", attack, "Out")
+
   -- Decay
   local decay = self:addObject("decay", app.ParameterAdapter())
   decay:hardSet("Bias", 0.5)
@@ -117,7 +129,7 @@ function Visadhara:onLoadGraph(channelCount)
 end
 
 local views = {
-  expanded = { "trig", "tune", "mode", "spread", "harmonic", "morph", "decay", "level" },
+  expanded = { "trig", "tune", "mode", "spread", "harmonic", "morph", "fold", "attack", "decay", "level" },
   collapsed = {}
 }
 
@@ -182,6 +194,30 @@ function Visadhara:onLoadViews(objects, branches)
     gainbias = objects.morph,
     range = objects.morph,
     biasMap = unitMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.0
+  }
+
+  controls.fold = GainBias {
+    button = "fold",
+    description = "Fold (top quarter mixes pulse train)",
+    branch = branches.fold,
+    gainbias = objects.fold,
+    range = objects.fold,
+    biasMap = unitMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 3,
+    initialBias = 0.0
+  }
+
+  controls.attack = GainBias {
+    button = "attack",
+    description = "Attack (CCW=noise / 0=instant / CW=slow)",
+    branch = branches.attack,
+    gainbias = objects.attack,
+    range = objects.attack,
+    biasMap = bipolarMap,
     biasUnits = app.unitNone,
     biasPrecision = 3,
     initialBias = 0.0
