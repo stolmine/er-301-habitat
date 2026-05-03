@@ -1,0 +1,12 @@
+[b]er-301-habitat v2.4.1[/b] -- 2026-05-02 (hotfix)
+Requires firmware: v0.7.0-stolmine.9.x
+Single package update: [b]spreadsheet 2.6.0 -> 2.6.1[/b]. All other packages unchanged.
+
+[b]Fix[/b]
+[list]
+[*][b]Ngoma[/b] -- inserting the unit could hard-fault on hardware. Root cause: DrumCubeGraphic had its draw() defined out-of-line, which under GCC's "key function" rule emits a non-COMDAT vtable. Any ABI drift in the od::Graphic vtable layout between firmware and package then drifts the vtable offsets the package was compiled against, and the cube hits a bad slot on insert. Fix: full implementation moved inline into the header so the vtable is COMDAT-linked and immune to firmware-vs-package drift.
+[*]Bundled prevention: docs/graphics-authoring-guide.md (working patterns + anti-patterns) and tools/check-graphic-virtual-defs.sh (lint flagging out-of-line virtual defs in package .cpp files).
+[*]DrumVoice ctor sin init swapped to a precomputed 257-entry LUT (per the known am335x package-trig miscompute).
+[/list]
+
+No other changes. No new units, no UI changes, no API changes.
