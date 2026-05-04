@@ -33,15 +33,35 @@ namespace stolmine
       return kComp[stages];
     }
 
-    // threshold parameter is the reflection point; smaller = harder fold,
-    // larger = passes more cleanly. We compute threshold from the user
-    // fold position via: threshold = 1 - fold * 0.95 (so fold=0 →
-    // threshold=1.0, no fold; fold=1 → threshold=0.05, deep fold).
-    static inline float threshold_from_fold(float fold)
+    // Topology note: Visadhara uses the classic Buchla 259/281 timbre-
+    // folder approach — fixed threshold, variable INPUT DRIVE. As the
+    // fold knob opens up, the signal is amplified into the folder so
+    // every sample (not just rare peaks) experiences reflection. This
+    // gives a perceptually-even progression of fold intensity, in
+    // contrast to a "vary-the-threshold" approach where folding only
+    // bites occasional peaks of the heavy-tailed additive bus until
+    // threshold drops below RMS.
+    //
+    // See drive_from_fold() for the drive curve. Threshold is fixed at
+    // 1.0 at the call site.
+    static inline float drive_from_fold(float fold)
     {
       if (fold < 0.0f) fold = 0.0f;
       if (fold > 1.0f) fold = 1.0f;
-      return 1.0f - fold * 0.95f;
+      return 0.5f + fold * 5.0f;       // 0.5x..5.5x linear
+    }
+
+    // Post-fold output gain compensation. Unfolded signal is just the
+    // input × drive (×0.5 at fold=0); folded signal is bounded near the
+    // threshold and the per-stage compensation table boosts it. Net
+    // result: unfolded output is much quieter than folded output. This
+    // gentle linear compensation brings unfolded perceived loudness up
+    // to match folded — boost 2.5× at fold=0, unity at fold=1.
+    static inline float post_fold_gain(float fold)
+    {
+      if (fold < 0.0f) fold = 0.0f;
+      if (fold > 1.0f) fold = 1.0f;
+      return 1.0f + (1.0f - fold) * 1.5f;
     }
 
     // Threshold-reflection folder. Returns folded sample with compensation.

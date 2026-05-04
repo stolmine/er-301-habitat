@@ -68,6 +68,23 @@ namespace stolmine
       return phase < 0.5f ? 1.0f : -1.0f;
     }
 
+    // Per-shape RMS normalization. With unit peak amplitude:
+    //   sine     RMS = 1/√2   ≈ 0.7071
+    //   triangle RMS = 1/√3   ≈ 0.5774
+    //   saw      RMS = 1/√3   ≈ 0.5774
+    //   square   RMS = 1
+    // To equalize perceived loudness across the morph sweep, scale each
+    // shape so its RMS matches the lowest (triangle / saw). Peak
+    // amplitudes end up ≤ 1 for all shapes — important so the morph
+    // output stays within unit range before the voice-bus gain stage.
+    //
+    // This makes a sine → square sweep evenly loud rather than swelling
+    // (square is +4.8 dB louder than sine without compensation).
+    static const float kSinScale = 0.8165f;   // √(2/3) — bring sine down to tri RMS
+    static const float kTriScale = 1.0f;
+    static const float kSawScale = 1.0f;
+    static const float kSqScale  = 0.5774f;   // 1/√3 — bring square down to tri RMS
+
     // Morph-blend the 4 anchor shapes by position 0..1.
     static inline float sample(float phase, float morph)
     {
@@ -75,10 +92,10 @@ namespace stolmine
       if (morph < 0.0f) morph = 0.0f;
       if (morph > 1.0f) morph = 1.0f;
 
-      const float s_sin = poly_sin(phase);
-      const float s_tri = tri(phase);
-      const float s_saw = saw(phase);
-      const float s_sq  = sq(phase);
+      const float s_sin = poly_sin(phase) * kSinScale;
+      const float s_tri = tri(phase)      * kTriScale;
+      const float s_saw = saw(phase)      * kSawScale;
+      const float s_sq  = sq(phase)       * kSqScale;
 
       // Three crossfade segments. morph=0 → s_sin, morph=1 → s_sq.
       if (morph < 0.333333f)

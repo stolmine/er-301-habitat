@@ -42,10 +42,6 @@ namespace stolmine
       float prevTrig = 0.0f;
 
       uint32_t noiseLcg = 0xDEADBEEFu;
-      int noiseCounter = 0;
-      int noiseStride = 64;
-      float noiseHeld = 0.0f;
-      float noiseBurst = 0.0f;
       float slowAttack = 0.0f;
       float slowAttackInc = 0.0f;
 
@@ -152,18 +148,29 @@ namespace stolmine
       const float invSr = 1.0f / globalConfig.sampleRate;
 
       // ---- Phase 2 block-rate setup ----
-      const float foldThreshold = visadhara_folder::threshold_from_fold(foldPos);
-      s.noiseStride = visadhara_noise::stride_for_freq(baseFreq, globalConfig.sampleRate);
-      if (s.noiseStride < 1) s.noiseStride = 1;
+      // Folder is drive-based (Buchla 259/281 topology): fixed threshold,
+      // variable input drive. Drive curve in folder.h.
+      const float foldDrive    = visadhara_folder::drive_from_fold(foldPos);
+      const float foldThreshold = 1.0f;
+      const float postFoldGain = visadhara_folder::post_fold_gain(foldPos);
 
-      const bool attackNoise = (attackPos < -0.05f);
+      // Attack semantic:
+      //   attackPos > +0.05 → slow ramp (linear AR rise time)
+      //   |attackPos| ≤ 0.05 → instant attack
+      //   attackPos < -0.05 → instant attack + continuous white-noise mix,
+      //                       proportional to |attackPos|
       const bool attackSlow  = (attackPos > +0.05f);
       const float slowAttackTimeSamples =
         attackSlow ? (attackPos * 0.2f * globalConfig.sampleRate) : 0.0f;
-      const float noiseBurstCoeff = expf(-1.0f / (0.015f * globalConfig.sampleRate));
+      const float noiseMix = (attackPos < 0.0f) ? -attackPos : 0.0f;
 
       const float useSlowMask  = (s.slowAttackInc > 0.0f) ? 1.0f : 0.0f;
       const float useDecayMask = 1.0f - useSlowMask;
+
+      // Voice-bus perceptual gain. 6 voices sum unchecked into the bus
+      // for the additive "large" character; this 1/3 keeps the bus
+      // peak (~6 worst case) in a useful pre-drive range.
+      const float voiceGain = 1.0f / 3.0f;
 
       // ---- Per-sample inner loop ----
       for (int i = 0; i < frames; i++)
@@ -188,11 +195,18 @@ namespace stolmine
             s.slowAttack = 1.0f;
             s.slowAttackInc = 0.0f;
           }
-          if (attackNoise) s.noiseBurst = 1.0f;
         }
 
+        // Slow-attack ramp: always advance, clamp at 1, reset Inc on hit
+        // (single one-shot store; not differential heavy work). Once Inc
+        // is 0 the next block flips useSlowMask to 0 and the env
+        // transitions cleanly to the decay path.
         s.slowAttack += s.slowAttackInc;
-        if (s.slowAttack > 1.0f) s.slowAttack = 1.0f;
+        if (s.slowAttack > 1.0f)
+        {
+          s.slowAttack = 1.0f;
+          s.slowAttackInc = 0.0f;
+        }
 
         float sample = 0.0f;
         for (int n = 0; n < 6; n++)
@@ -210,26 +224,32 @@ namespace stolmine
           sample += shaped * s.env[n] * s.ampScale[n];
         }
 
+        // Per-sample white noise: simple LCG, no S&H decimation. Mixed
+        // proportional to noiseMix (block-rate constant from |attackPos|
+        // when attackPos < 0). At attackPos ≥ 0 noiseMix is 0 so noise
+        // is silent regardless of LCG state.
         s.noiseLcg = visadhara_noise::lcg_step(s.noiseLcg);
-        const float candidateNoise = visadhara_noise::lcg_sample(s.noiseLcg);
-        s.noiseCounter--;
-        const int roll = (s.noiseCounter <= 0);
-        const float rollMask = (float)roll;
-        s.noiseHeld = rollMask * candidateNoise + (1.0f - rollMask) * s.noiseHeld;
-        s.noiseCounter += roll * s.noiseStride;
+        const float whiteNoise = visadhara_noise::lcg_sample(s.noiseLcg);
 
-        const float noiseAmt = 0.1f + 0.9f * s.noiseBurst;
-        sample += s.noiseHeld * noiseAmt;
-        s.noiseBurst *= noiseBurstCoeff;
-
-        const float preFold = sample * (1.0f / 7.0f);
+        // Mix: voice bus + white-noise injection, then drive into the
+        // folder (drive ramps with fold). The unattenuated voice sum is
+        // what gives the additive "large" character.
+        const float bussed = sample * voiceGain + whiteNoise * noiseMix;
+        const float preFold = bussed * foldDrive;
 
         const float folded = visadhara_folder::fold(preFold, foldThreshold);
         const float pulse = visadhara_folder::pulse_mix(folded, foldPos, foldThreshold);
         const float foldedSig = folded + pulse;
 
+        // Post-fold compensation gain: brings unfolded signal up to
+        // perceived parity with folded signal (gentle, max 2.5× at
+        // fold=0, unity at fold=1).
+        const float compensated = foldedSig * postFoldGain;
+
+        // Re-apply global envelope (voice-0 envelope as Phase 2 proxy
+        // per the BIA designer note about restoring post-fold dynamics).
         const float finalEnv = s.env[0];
-        const float postEnv = foldedSig * finalEnv;
+        const float postEnv = compensated * finalEnv;
 
         outBuf[i] = postEnv * level;
       }
