@@ -44,6 +44,37 @@ namespace stolmine
              (kPrimeSeries[voiceIdx] - kHarmonicSeries[voiceIdx]) * spreadPos;
     }
 
+    // Harmonic control remap. The native harmonic_voice_params() mapping
+    // packs all the timbrally-interesting motion (voices 2-5 amplitudes
+    // fading in) into the top ~37% of the input range [0.625, 1.0],
+    // while the bottom 62% just toggles voices 0+1 and silently extends
+    // decays. This remap expands the interesting region to fill the top
+    // two-thirds of the user control:
+    //
+    //   user 0.000 → native 0.000  (voice 0 alone)
+    //   user 0.333 → native 0.625  (voices 2-5 onset boundary)
+    //   user 1.000 → native 1.000  (all voices active)
+    //
+    // Bottom 1/3 of user range compresses the old [0, 0.625] segment;
+    // top 2/3 expands the old [0.625, 1.0] segment.
+    static inline float remap_harmonic(float user)
+    {
+      if (user < 0.0f) user = 0.0f;
+      if (user > 1.0f) user = 1.0f;
+      const float kBoundary = 1.0f / 3.0f;
+      if (user < kBoundary)
+      {
+        // [0, 1/3] → [0, 0.625]  (compress old bottom 2/3 into bottom 1/3)
+        return user * (0.625f / kBoundary);   // ×1.875
+      }
+      else
+      {
+        // [1/3, 1] → [0.625, 1.0]  (expand old top 1/3 over top 2/3)
+        const float t = (user - kBoundary) / (1.0f - kBoundary);
+        return 0.625f + t * (1.0f - 0.625f);
+      }
+    }
+
     // Harmonic mapping per the manual:
     //   "Fully left the tone produced is a single harmonic tone. From there
     //    to the first quarter a second tone fades in. The remaining turning

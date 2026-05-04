@@ -112,7 +112,10 @@ namespace stolmine
       float *vOctBuf = mVOct.buffer();
 
       // ---- Block-rate parameter reads ----
-      const float harmonicPos = mHarmonic.value();
+      // Harmonic remap: expand the timbrally-interesting top-third of
+      // the native mapping to cover the top two-thirds of the user
+      // control. See voice.h::remap_harmonic.
+      const float harmonicPos = visadhara::remap_harmonic(mHarmonic.value());
       const float spreadPos   = mSpread.value();
       const float morphPos    = mMorph.value();
       const float foldPos     = mFold.value();
@@ -181,6 +184,13 @@ namespace stolmine
 
         if (risingEdge)
         {
+          // Phase reset: snap all 6 voices to phase=0 so they start
+          // coherent. For sine/triangle morph positions this is a
+          // clean zero crossing (output=0 at phase=0). For saw/square
+          // there's still a residual step discontinuity; mitigation
+          // for those corners is queued for Phase 5 polish.
+          for (int n = 0; n < 6; n++) s.phase[n] = 0.0f;
+
           if (attackSlow)
           {
             for (int n = 0; n < 6; n++) s.env[n] = 0.0f;
