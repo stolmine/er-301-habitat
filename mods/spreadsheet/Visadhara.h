@@ -45,6 +45,12 @@ namespace stolmine
       float slowAttack = 0.0f;
       float slowAttackInc = 0.0f;
 
+      // Liquid mode (Phase 3): per-trigger pitch envelope. Decays
+      // exponentially over ~30ms after each rising edge. Multiplies
+      // every voice's phase-increment by (1 + liquidSweepAmt * pitchEnv)
+      // when liquidAmt > 0.
+      float pitchEnv = 0.0f;
+
       Internal()
       {
         memset(phase, 0, sizeof(phase));
@@ -157,6 +163,47 @@ namespace stolmine
       const float foldThreshold = 1.0f;
       const float postFoldGain = visadhara_folder::post_fold_gain(foldPos);
 
+      // ---- Phase 3 block-rate setup: Mode dispatch + Liquid sweep ----
+      // Mode parameter is continuous 0..2: 0=Skin, 1=Liquid, 2=Metal.
+      // Block-rate dispatch builds three mode-amount masks; the Liquid
+      // path's pitch-envelope-driven frequency boost is gated by
+      // liquidAmt, and the bus output is gated by (skinAmt + liquidAmt)
+      // so Metal territory currently silences (Phase 4 wires Metal in).
+      const float modeRaw = mMode.value();
+      const int modeSnapVal = mModeSnap.value();        // 1=smooth, 2=snap
+      const bool snapMode = (modeSnapVal == 2);
+      float skinAmt, liquidAmt, metalAmt;
+      if (snapMode)
+      {
+        // Hard snap: nearest-mode dispatch.
+        int m = (int)(modeRaw + 0.5f);
+        if (m < 0) m = 0; if (m > 2) m = 2;
+        skinAmt   = (m == 0) ? 1.0f : 0.0f;
+        liquidAmt = (m == 1) ? 1.0f : 0.0f;
+        metalAmt  = (m == 2) ? 1.0f : 0.0f;
+      }
+      else
+      {
+        // Smooth: tent function across adjacent modes.
+        float c = modeRaw < 0.0f ? 0.0f : (modeRaw > 2.0f ? 2.0f : modeRaw);
+        skinAmt   = (c < 1.0f) ? (1.0f - c) : 0.0f;
+        liquidAmt = (c < 1.0f) ? c : ((c < 2.0f) ? (2.0f - c) : 0.0f);
+        metalAmt  = (c > 1.0f) ? (c - 1.0f) : 0.0f;
+      }
+      // Liquid pitch-sweep peak: +1 octave (factor 2 - 1 = 1.0). Times
+      // the mode-blend amount. BIA hardware has a fixed pitch sweep
+      // character; this matches the audible bend depth in the manual's
+      // demos / reference recordings.
+      const float kPitchSweepPeak = 1.0f;
+      const float liquidSweepAmt = liquidAmt * kPitchSweepPeak;
+      // Pitch-envelope decay time constant: 50ms.
+      const float pitchEnvCoeff = expf(-1.0f / (0.050f * globalConfig.sampleRate));
+      // Phase-3 output presence: only Skin and Liquid are implemented.
+      // Metal contributes silence until Phase 4. metalAmt is read here
+      // to suppress the unused-variable warning and signal intent.
+      const float skinLiquidPresence = skinAmt + liquidAmt;
+      (void)metalAmt;
+
       // Attack semantic:
       //   attackPos > +0.05 → slow ramp (linear AR rise time)
       //   |attackPos| ≤ 0.05 → instant attack
@@ -205,7 +252,16 @@ namespace stolmine
             s.slowAttack = 1.0f;
             s.slowAttackInc = 0.0f;
           }
+
+          // Liquid mode pitch envelope: kick to 1.0 on rising edge.
+          // Modulates freq by (1 + liquidSweepAmt * pitchEnv) per voice
+          // until envelope decays back to 0.
+          s.pitchEnv = 1.0f;
         }
+
+        // Pitch envelope decay (per-sample, always running so smooth
+        // crossfade works without per-block dispatch).
+        s.pitchEnv *= pitchEnvCoeff;
 
         // Slow-attack ramp: always advance, clamp at 1, reset Inc on hit
         // (single one-shot store; not differential heavy work). Once Inc
@@ -218,10 +274,15 @@ namespace stolmine
           s.slowAttackInc = 0.0f;
         }
 
+        // Liquid pitch-sweep multiplier. Block-rate liquidSweepAmt × the
+        // per-sample pitchEnv. Branchless: skinAmt path naturally gives
+        // multiplier=1 (no sweep) since liquidSweepAmt=0 there.
+        const float pitchSweep = 1.0f + liquidSweepAmt * s.pitchEnv;
+
         float sample = 0.0f;
         for (int n = 0; n < 6; n++)
         {
-          const float voiceFreq = baseFreq * s.freqMult[n];
+          const float voiceFreq = baseFreq * s.freqMult[n] * pitchSweep;
           s.phase[n] += voiceFreq * invSr;
           if (s.phase[n] >= 1.0f) s.phase[n] -= floorf(s.phase[n]);
 
@@ -261,7 +322,9 @@ namespace stolmine
         const float finalEnv = s.env[0];
         const float postEnv = compensated * finalEnv;
 
-        outBuf[i] = postEnv * level;
+        // Phase 3: gate by Skin+Liquid presence so Mode > ~1.5 dims
+        // toward silence (Metal stub) until Phase 4 lands the PMM bus.
+        outBuf[i] = postEnv * level * skinLiquidPresence;
       }
     }
 #endif
