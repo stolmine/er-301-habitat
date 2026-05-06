@@ -259,3 +259,75 @@ Level ply: MixControl variant with clipper/eq/filter as the three readouts.
 - `mods/spreadsheet/assets/DrumVoice.lua` — Unit definition
 - `mods/spreadsheet/assets/DrumVoiceCharacterControl.lua` — Character ply custom control with cube viz + shape/grit/punch sub-display
 - `mods/spreadsheet/assets/DrumVoiceDecayControl.lua` — Decay ply with hold/attack sub-display
+
+## Post-release polish + investigation todo
+
+Items surfaced from hardware play-testing after the v2.4.0 ship. The
+unit reaches interesting territories but the path to them is opaque
+and the controls feel under-tuned. Phase 6-equivalent work for Ngoma.
+
+### Control tuning
+
+- [ ] **Breakpoint mappings on the main controls**. The knobs feel
+  mostly linear and you have to crawl the full range to find the
+  few sweet spots. Each interesting tonal "state" tends to live in
+  a small region of the control's range, and the user has to fight
+  the whole sweep to land there. Plan: identify the 3-5 canonically
+  interesting states per control (Character, Sweep, Decay, Level)
+  and design piecewise control mappings that put a breakpoint at
+  each — so the encoder dwells on the interesting region and
+  rapidly traverses the in-between. Pattern is similar to the
+  harmonic remap done for Visadhara, but with more segments and
+  applied broadly.
+- [ ] **Level default**: currently initial bias / hardset is wrong.
+  Should be `0.5`. (Verify what it currently is and adjust.)
+
+### Audio path cleanup
+
+The envelope architecture is muddled. Multiple AR / sweep / hold
+envelopes interact in ways that aren't documented and the user
+controls don't map cleanly to the underlying state. Specifically:
+
+- [ ] **What does Decay actually control?** Audit the parameter's
+  destinations — amp envelope time? Pitch envelope timing too?
+  Membrane mode envelopes? Document and consider whether the
+  conflation is intentional or accidental.
+- [ ] **Pitch envelope timing**: where does the hardset/bias for
+  the pitch sweep timing sit? It should be discoverable in the
+  source and ideally exposed (or at least parameter-tied) rather
+  than buried in a constant.
+- [ ] **Shape ↔ Decay coupling**: pushing Shape appears to
+  constrain Decay (shortens audible decay or alters envelope shape
+  in some way). Diagnose: parameter cross-coupling? shared state?
+  unintended side effect of feature-tied decay scaling? Either
+  document or decouple.
+- [ ] **Envelope graph**: produce a clear diagram of all envelopes
+  in DrumVoice and what they each gate / scale / drive. Update
+  `project_ngoma_codex.md` memory with the corrected picture.
+
+### Shift audit failure
+
+- [ ] **Plies forget paramMode setting on cursor exit**, contrary
+  to the convention locked in at D7 of the shift-handling audit
+  (`feedback_parammode_convention.md`: "paramMode preserved across
+  cursor leave/return; not serialized; `paramFocusedReadout` resets
+  to nil on leave"). All Ngoma plies need to be re-audited against
+  that pattern. Likely candidates: DrumVoiceCharacterControl,
+  DrumVoiceDecayControl, DrumVoiceLevelControl, DrumVoiceSweepControl,
+  DrumVoiceRandomGateControl, DrumVoicePitchControl. Walk each ply
+  on hardware and verify shift sub-display state persists.
+
+### Sonic identity / fun factor
+
+- [ ] **The unit could be more fun.** It delivers BIA-alike
+  percussion-voice character but doesn't feel as playful as it
+  could. Possible directions (catalog and listen-test):
+    - Looser modulation between sources (mixed-rate cross-coupling)
+    - More dramatic morph behaviors at the extremes
+    - Per-trigger random variation at the edges of certain controls
+    - Better default randomization spread for the (currently
+      deferred) xform/randomize feature
+
+**Deliverable:** Ngoma feels intuitive at the knob, easy to land in
+interesting territories, consistent with the shift-audit conventions.
+Audio path documented and clean. A fun unit, not just a working one.

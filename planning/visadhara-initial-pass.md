@@ -304,6 +304,76 @@ custom viz, hardware CPU profile, ship.
 **Deliverable:** Visadhara feature-complete, hardware-stable, in next
 spreadsheet release.
 
+### Phase 6 — Sonic identity + control design (post-MVP)
+
+By end of Phase 5 the unit is a faithful BIA clone. Phase 6 takes it
+beyond clone status into something with its own voice. Plus the
+control-surface work that's been accumulating.
+
+**Sonic identity** — make Visadhara sound like Visadhara, not just
+"Skin/Liquid/Metal cloned". Investigation directions:
+- [ ] **Compound fold processing**: the current threshold-reflection
+  folder is functional but dry. Explore stacking it with: a soft
+  saturation pre-stage, post-fold harmonic exciter, asymmetric fold
+  (different positive vs negative thresholds), bit-decimation or
+  sample-rate-reduction in the fold path, or a wave-shaper after
+  the folder. Goal is to give the Fold control a more distinctive
+  sonic signature beyond "just a wavefolder".
+- [ ] **Filter somewhere in the chain**: a SVF or simple LP/BP/HP
+  swept by some control. Open questions:
+    - Pre-fold (limits the harmonic content going into the folder)
+    - Post-fold (tames the fold's high-frequency wash)
+    - Pre-output (shapes overall character)
+    - Mode-specific (different filter behavior per mode)
+  Likely needs an extra control or sub-page since none of the
+  existing knobs naturally maps to a filter cutoff.
+- [ ] **Other distinctive processing** ideas to consider: ring
+  modulation, frequency shifting, comb filtering between voices,
+  granular smearing on long decays, per-voice phase distortion.
+  Catalog and listen-test before committing.
+
+**Pitch envelope work** (currently fixed +1 oct / 50ms exponential):
+- [ ] **Defaults review**: hardware listen test alongside reference
+  recordings. Current values match BIA-ish character but might be
+  worth tuning for Visadhara's distinct identity.
+- [ ] **Routing**: currently a flat per-voice frequency multiplier
+  via `(1 + liquidSweepAmt × pitchEnv)`. Alternative routings:
+    - Asymmetric per-voice depth (lower voices get more sweep)
+    - Spread-dependent depth (more inharmonic ratios → more sweep)
+    - Phase-modulation routing (pitch env modulates a low-rate LFO
+      that detunes voices)
+    - Routes only into PMM operator ratios in Metal mode (not just
+      to skin/liquid voices)
+- [ ] **Curvature**: currently exp(-t/τ). Alternative shapes worth
+  trying — linear ramp, S-curve, double-exponential (fast initial
+  attack of pitch sweep, slow tail), bouncing/wobbling decay for
+  more "alive" character.
+- [ ] **Maybe expose as submenu params** (depth, decay time, shape)
+  once we know what the defaults should be.
+
+**Control design challenge** — too much wants to live on the surface:
+- [ ] Currently 10 plies on the main view (trig, V/Oct, mode, spread,
+  harmonic, morph, fold, attack, decay, level). Already a lot.
+- [ ] Phase 6 will add filter cutoff, pitch-env depth, fold-pre-sat,
+  etc. — easily another 4-6 controls if we expose them all.
+- [ ] **Decisions to make**:
+    - Which of the existing 10 stay top-level?
+    - Which can move to shift sub-displays (paramMode pattern from
+      `feedback_parammode_convention`)?
+    - Which can move to config-menu options (set-once)?
+    - Should we adopt a multi-page main view (à la JF, Pecto) — no
+      precedent for this in original-design voices yet.
+- [ ] **Constraint**: BIA hardware has 8 panel knobs + 8 jacks.
+  Habitat's UI affordance is tighter (single horizontal scroll +
+  shift sub + config menu). Some BIA-faithful 1:1 mapping isn't
+  possible; we have to abstract.
+- [ ] Worth referencing: Helicase's expanded view, JF's 14-ply +
+  gate-page layout, Pecto's expanded sub-display.
+
+**Deliverable:** Visadhara with distinct sonic identity beyond BIA
+clone, refined pitch envelope, and a control surface that's dense
+but coherent.
+
 ## Open design questions (parked for in-flight decisions)
 
 1. ~~**Mode placement**~~ — RESOLVED 2026-05-02. Mode is its own
