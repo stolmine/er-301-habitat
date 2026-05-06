@@ -73,46 +73,94 @@ namespace stolmine
     //   triangle RMS = 1/√3   ≈ 0.5774
     //   saw      RMS = 1/√3   ≈ 0.5774
     //   square   RMS = 1
-    // To equalize perceived loudness across the morph sweep, scale each
-    // shape so its RMS matches the lowest (triangle / saw). Peak
-    // amplitudes end up ≤ 1 for all shapes — important so the morph
-    // output stays within unit range before the voice-bus gain stage.
-    //
-    // This makes a sine → square sweep evenly loud rather than swelling
-    // (square is +4.8 dB louder than sine without compensation).
+    // Scale each shape so its RMS matches the lowest (triangle / saw).
+    // Peak amplitudes end up ≤ 1 for all shapes. Equal-power crossfade
+    // (compute_weights below) handles the cold-spot issue across
+    // shape transitions; perceived-loudness disparity from harmonic
+    // content (saw / sq sound brighter at equal RMS) is preserved as
+    // a deliberate "harmonic build-up" character of the morph sweep.
     static const float kSinScale = 0.8165f;   // √(2/3) — bring sine down to tri RMS
     static const float kTriScale = 1.0f;
     static const float kSawScale = 1.0f;
     static const float kSqScale  = 0.5774f;   // 1/√3 — bring square down to tri RMS
 
-    // Morph-blend the 4 anchor shapes by position 0..1.
-    static inline float sample(float phase, float morph)
+    // Precomputed crossfade weights for one block of samples. Computed
+    // once at block rate via compute_weights(); the per-sample sample_w()
+    // call is then branchless (no per-sample dispatch).
+    //
+    // Weights use equal-power (sqrt) crossfade rather than linear to
+    // keep RMS roughly constant across the morph sweep. The shapes
+    // adjacent in the sweep are not all positively correlated — saw is
+    // anti-correlated with both triangle and square — so a linear
+    // crossfade produces audible RMS dips ("cold spots") at the
+    // midpoints of those transitions. sqrt-equal-power crossfade
+    // maintains RMS exactly for uncorrelated pairs and only mildly
+    // overshoots for correlated pairs (sin↔tri).
+    //
+    // Three of the four weights are 0 in any given segment.
+    struct Weights
     {
-      // Clamp morph to [0, 1].
+      float w_sin;
+      float w_tri;
+      float w_saw;
+      float w_sq;
+    };
+
+    static inline Weights compute_weights(float morph)
+    {
       if (morph < 0.0f) morph = 0.0f;
       if (morph > 1.0f) morph = 1.0f;
 
-      const float s_sin = poly_sin(phase) * kSinScale;
-      const float s_tri = tri(phase)      * kTriScale;
-      const float s_saw = saw(phase)      * kSawScale;
-      const float s_sq  = sq(phase)       * kSqScale;
+      Weights w;
+      w.w_sin = 0.0f;
+      w.w_tri = 0.0f;
+      w.w_saw = 0.0f;
+      w.w_sq  = 0.0f;
 
-      // Three crossfade segments. morph=0 → s_sin, morph=1 → s_sq.
       if (morph < 0.333333f)
       {
         const float a = morph * 3.0f;
-        return s_sin * (1.0f - a) + s_tri * a;
+        w.w_sin = sqrtf(1.0f - a) * kSinScale;
+        w.w_tri = sqrtf(a)        * kTriScale;
       }
       else if (morph < 0.666667f)
       {
         const float a = (morph - 0.333333f) * 3.0f;
-        return s_tri * (1.0f - a) + s_saw * a;
+        w.w_tri = sqrtf(1.0f - a) * kTriScale;
+        w.w_saw = sqrtf(a)        * kSawScale;
       }
       else
       {
         const float a = (morph - 0.666667f) * 3.0f;
-        return s_saw * (1.0f - a) + s_sq * a;
+        w.w_saw = sqrtf(1.0f - a) * kSawScale;
+        w.w_sq  = sqrtf(a)        * kSqScale;
       }
+      return w;
+    }
+
+    // Per-sample evaluation against precomputed weights. Branchless —
+    // computes all four shapes and weights them. CPU cost is roughly 2×
+    // the segmented dispatch but the per-sample loop is straight-line
+    // safe per feedback_runtime_branched_dsp_dispatch.
+    static inline float sample_w(float phase, const Weights &w)
+    {
+      const float s_sin = poly_sin(phase);
+      const float s_tri = tri(phase);
+      const float s_saw = saw(phase);
+      const float s_sq  = sq(phase);
+      return s_sin * w.w_sin
+           + s_tri * w.w_tri
+           + s_saw * w.w_saw
+           + s_sq  * w.w_sq;
+    }
+
+    // Legacy linear-crossfade entry point (Phase 1-4). Kept for
+    // compatibility while migration to sample_w / compute_weights
+    // proceeds. Prefer sample_w going forward.
+    static inline float sample(float phase, float morph)
+    {
+      const Weights w = compute_weights(morph);
+      return sample_w(phase, w);
     }
   }
 }

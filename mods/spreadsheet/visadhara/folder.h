@@ -48,20 +48,33 @@ namespace stolmine
     {
       if (fold < 0.0f) fold = 0.0f;
       if (fold > 1.0f) fold = 1.0f;
-      return 0.5f + fold * 5.0f;       // 0.5x..5.5x linear
+      return 1.0f + fold * 5.0f;       // 1x..6x linear (no low-fold cut)
     }
 
-    // Post-fold output gain compensation. Unfolded signal is just the
-    // input × drive (×0.5 at fold=0); folded signal is bounded near the
-    // threshold and the per-stage compensation table boosts it. Net
-    // result: unfolded output is much quieter than folded output. This
-    // gentle linear compensation brings unfolded perceived loudness up
-    // to match folded — boost 2.5× at fold=0, unity at fold=1.
+    // Post-fold output gain. Folded signal RMS grows with fold drive
+    // (more harmonic content + many fold stages compounding via the
+    // compensation table). To level the perceived loudness across the
+    // fold sweep we attenuate at high fold rather than boost at low
+    // fold: 1.0× unfolded, ~0.35× at fold=1. Linear.
     static inline float post_fold_gain(float fold)
     {
       if (fold < 0.0f) fold = 0.0f;
       if (fold > 1.0f) fold = 1.0f;
-      return 1.0f + (1.0f - fold) * 1.5f;
+      return 1.0f - fold * 0.65f;
+    }
+
+    // Master soft saturator. 3rd-order polynomial soft-knee bounded
+    // ±1; hard clamp beyond ±1.5. Catches residual peaks from extreme
+    // settings (Metal + max fold + max negative attack with cross-
+    // injection, etc.) without introducing dynamics artifacts. No
+    // state, suits percussion transients.
+    //
+    // y = x - x³/6.75   →   y(1.5) = 1, y(-1.5) = -1.
+    static inline float master_sat(float x)
+    {
+      if (x > 1.5f) return 1.0f;
+      if (x < -1.5f) return -1.0f;
+      return x - x * x * x * (1.0f / 6.75f);
     }
 
     // Threshold-reflection folder. Returns folded sample with compensation.

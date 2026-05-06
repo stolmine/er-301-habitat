@@ -22,7 +22,7 @@
 #include "visadhara/voice.h"
 #include "visadhara/morph.h"
 #include "visadhara/folder.h"
-#include "visadhara/noise.h"
+#include "visadhara/pmm.h"
 
 namespace stolmine
 {
@@ -41,7 +41,6 @@ namespace stolmine
 
       float prevTrig = 0.0f;
 
-      uint32_t noiseLcg = 0xDEADBEEFu;
       float slowAttack = 0.0f;
       float slowAttackInc = 0.0f;
 
@@ -50,6 +49,14 @@ namespace stolmine
       // every voice's phase-increment by (1 + liquidSweepAmt * pitchEnv)
       // when liquidAmt > 0.
       float pitchEnv = 0.0f;
+
+      // Metal mode (Phase 4): two parallel 3-op PMM voice chains.
+      // Output is sum of pair1.tick() + pair2.tick(). Always ticked
+      // every sample so smooth crossfade through Metal territory works
+      // without per-sample dispatch (per
+      // feedback_runtime_branched_dsp_dispatch).
+      visadhara_pmm::Voice pmm1;
+      visadhara_pmm::Voice pmm2;
 
       Internal()
       {
@@ -60,6 +67,8 @@ namespace stolmine
         for (int i = 0; i < 6; i++) freqMult[i] = visadhara::kHarmonicSeries[i];
         freqMult[6] = 0.0f;
         freqMult[7] = 0.0f;
+        visadhara_pmm::reset(pmm1);
+        visadhara_pmm::reset(pmm2);
       }
     };
 #endif
@@ -118,10 +127,12 @@ namespace stolmine
       float *vOctBuf = mVOct.buffer();
 
       // ---- Block-rate parameter reads ----
-      // Harmonic remap: expand the timbrally-interesting top-third of
-      // the native mapping to cover the top two-thirds of the user
-      // control. See voice.h::remap_harmonic.
-      const float harmonicPos = visadhara::remap_harmonic(mHarmonic.value());
+      // Raw user harmonic position (0..1) is used for Metal ratio
+      // blending. The Skin path uses a remapped version that expands
+      // the timbrally-interesting top-third of the voice-activation
+      // curve to the top two-thirds of the control (voice.h).
+      const float harmonicPosUser = mHarmonic.value();
+      const float harmonicPos = visadhara::remap_harmonic(harmonicPosUser);
       const float spreadPos   = mSpread.value();
       const float morphPos    = mMorph.value();
       const float foldPos     = mFold.value();
@@ -155,6 +166,12 @@ namespace stolmine
       const float decayCoeff = expf(-1.0f / decayTimeSamples);
 
       const float invSr = 1.0f / globalConfig.sampleRate;
+
+      // Block-rate morph crossfade weights. Equal-power (sqrt) curves
+      // for level-flat sweep across the four shape anchors. Computed
+      // once here; per-sample sample_w() is branchless.
+      const visadhara_morph::Weights morphW =
+        visadhara_morph::compute_weights(morphPos);
 
       // ---- Phase 2 block-rate setup ----
       // Folder is drive-based (Buchla 259/281 topology): fixed threshold,
@@ -198,29 +215,66 @@ namespace stolmine
       const float liquidSweepAmt = liquidAmt * kPitchSweepPeak;
       // Pitch-envelope decay time constant: 50ms.
       const float pitchEnvCoeff = expf(-1.0f / (0.050f * globalConfig.sampleRate));
-      // Phase-3 output presence: only Skin and Liquid are implemented.
-      // Metal contributes silence until Phase 4. metalAmt is read here
-      // to suppress the unused-variable warning and signal intent.
       const float skinLiquidPresence = skinAmt + liquidAmt;
-      (void)metalAmt;
+
+      // ---- Phase 4 block-rate setup: Metal mode PMM ----
+      // Two 3-op PMM pairs. Each pair's operator ratios are
+      // continuously blended between a clean integer-harmonic anchor
+      // (Harmonic CCW) and the natural inharmonic / metallic values
+      // (Harmonic CW). Spread additionally boosts pair 2's FM indices
+      // for more chaotic character at higher Spread settings.
+      //
+      //   Pair 1 anchors:  [1, 2, 3]      natural: [1.0, 1.5, 2.0]
+      //   Pair 2 anchors:  [1, 2, 4]      natural: [1.7, 2.3, 3.5]
+      const float h = harmonicPosUser;     // 0..1 raw
+      const float pmm1_r1 = 1.0f + (1.0f - 1.0f) * h;       // ratio op1 (always 1)
+      const float pmm1_r2 = 2.0f + (1.5f - 2.0f) * h;       // 2.0 → 1.5
+      const float pmm1_r3 = 3.0f + (2.0f - 3.0f) * h;       // 3.0 → 2.0
+      const float pmm2_r1 = 1.0f + (1.7f - 1.0f) * h;       // 1.0 → 1.7
+      const float pmm2_r2 = 2.0f + (2.3f - 2.0f) * h;       // 2.0 → 2.3
+      const float pmm2_r3 = 4.0f + (3.5f - 4.0f) * h;       // 4.0 → 3.5
+
+      const float pmm1_inc1 = baseFreq * pmm1_r1 * invSr;
+      const float pmm1_inc2 = baseFreq * pmm1_r2 * invSr;
+      const float pmm1_inc3 = baseFreq * pmm1_r3 * invSr;
+      const float pmm1_fb    = 0.30f;
+      const float pmm1_mod12 = 0.60f;
+      const float pmm1_mod23 = 0.80f;
+
+      const float pair2Boost = 1.0f + spreadPos * 1.5f;
+      const float pmm2_inc1 = baseFreq * pmm2_r1 * invSr;
+      const float pmm2_inc2 = baseFreq * pmm2_r2 * invSr;
+      const float pmm2_inc3 = baseFreq * pmm2_r3 * invSr;
+      const float pmm2_fb    = 0.30f * pair2Boost;
+      const float pmm2_mod12 = 0.60f * pair2Boost;
+      const float pmm2_mod23 = 0.80f * pair2Boost;
+
+      // Metal bus perceptual gain: PMM produces a denser waveform with
+      // higher peak-to-RMS ratio than the Skin additive bus, so it
+      // measures perceptually louder at the same nominal peak. Scale
+      // down to match Skin/Liquid loudness.
+      const float kMetalBusGain = 0.35f;
 
       // Attack semantic:
       //   attackPos > +0.05 → slow ramp (linear AR rise time)
       //   |attackPos| ≤ 0.05 → instant attack
-      //   attackPos < -0.05 → instant attack + continuous white-noise mix,
-      //                       proportional to |attackPos|
+      //   attackPos < -0.05 → instant attack + cross-mode injection
+      //                       (Metal bus into Skin/Liquid, additive bus
+      //                       into Metal), amount proportional to
+      //                       |attackPos|. See injection block below.
       const bool attackSlow  = (attackPos > +0.05f);
       const float slowAttackTimeSamples =
         attackSlow ? (attackPos * 0.2f * globalConfig.sampleRate) : 0.0f;
-      const float noiseMix = (attackPos < 0.0f) ? -attackPos : 0.0f;
+      const float injectMix = (attackPos < 0.0f) ? -attackPos : 0.0f;
 
       const float useSlowMask  = (s.slowAttackInc > 0.0f) ? 1.0f : 0.0f;
       const float useDecayMask = 1.0f - useSlowMask;
 
       // Voice-bus perceptual gain. 6 voices sum unchecked into the bus
-      // for the additive "large" character; this 1/3 keeps the bus
-      // peak (~6 worst case) in a useful pre-drive range.
-      const float voiceGain = 1.0f / 3.0f;
+      // for the additive "large" character; 1/2 brings the realistic
+      // 2-3 voice RMS into a useful pre-drive range while preserving
+      // the additive headroom for full-harmonic configurations.
+      const float voiceGain = 0.5f;
 
       // ---- Per-sample inner loop ----
       for (int i = 0; i < frames; i++)
@@ -257,6 +311,12 @@ namespace stolmine
           // Modulates freq by (1 + liquidSweepAmt * pitchEnv) per voice
           // until envelope decays back to 0.
           s.pitchEnv = 1.0f;
+
+          // Metal mode PMM phase reset — same coherent-attack discipline
+          // as Skin/Liquid voices. lastOut values reset too so feedback
+          // doesn't hang carryover from the previous trigger.
+          visadhara_pmm::reset(s.pmm1);
+          visadhara_pmm::reset(s.pmm2);
         }
 
         // Pitch envelope decay (per-sample, always running so smooth
@@ -291,21 +351,39 @@ namespace stolmine
           const float slowPath = s.slowAttack;
           s.env[n] = slowPath * useSlowMask + decayPath * useDecayMask;
 
-          const float shaped = visadhara_morph::sample(s.phase[n], morphPos);
+          const float shaped = visadhara_morph::sample_w(s.phase[n], morphW);
           sample += shaped * s.env[n] * s.ampScale[n];
         }
 
-        // Per-sample white noise: simple LCG, no S&H decimation. Mixed
-        // proportional to noiseMix (block-rate constant from |attackPos|
-        // when attackPos < 0). At attackPos ≥ 0 noiseMix is 0 so noise
-        // is silent regardless of LCG state.
-        s.noiseLcg = visadhara_noise::lcg_step(s.noiseLcg);
-        const float whiteNoise = visadhara_noise::lcg_sample(s.noiseLcg);
+        // Metal PMM tick — always run so smooth mode crossfade works
+        // without per-sample dispatch (heavy work outside conditionals).
+        // Morph sweeps each operator's waveshape (sine→tri→saw→sq)
+        // through the FM chain — saw-FM and square-FM produce
+        // dramatically different timbres than sine-FM.
+        const float pmmA = visadhara_pmm::tick(s.pmm1, pmm1_inc1, pmm1_inc2, pmm1_inc3,
+                                                pmm1_fb, pmm1_mod12, pmm1_mod23, morphW);
+        const float pmmB = visadhara_pmm::tick(s.pmm2, pmm2_inc1, pmm2_inc2, pmm2_inc3,
+                                                pmm2_fb, pmm2_mod12, pmm2_mod23, morphW);
+        const float metalBus = (pmmA + pmmB) * kMetalBusGain;
 
-        // Mix: voice bus + white-noise injection, then drive into the
-        // folder (drive ramps with fold). The unattenuated voice sum is
-        // what gives the additive "large" character.
-        const float bussed = sample * voiceGain + whiteNoise * noiseMix;
+        // Mode-blended source. Skin/Liquid additive bus uses voiceGain
+        // to bring its 6-voice sum (peak ~6) into ~peak 2; Metal PMM
+        // bus is loudness-normalized (kMetalBusGain) before mixing.
+        const float skinLiquidPart = sample * voiceGain;
+        const float modeBus = skinLiquidPresence * skinLiquidPart
+                            + metalAmt * metalBus;
+
+        // Cross-mode injection (negative-Attack region). Replaces the
+        // simple white-noise injection: when in Skin/Liquid territory
+        // we inject the Metal bus (PMM at the current panel settings);
+        // when in Metal we inject the Skin/Liquid bus. Smooth blend
+        // through the crossfade region. Free CPU since both buses are
+        // already computed branchlessly.
+        const float injectionSignal = skinLiquidPresence * metalBus
+                                    + metalAmt * skinLiquidPart;
+
+        // Mix: mode bus + cross-mode injection, then drive into folder.
+        const float bussed = modeBus + injectionSignal * injectMix;
         const float preFold = bussed * foldDrive;
 
         const float folded = visadhara_folder::fold(preFold, foldThreshold);
@@ -322,9 +400,10 @@ namespace stolmine
         const float finalEnv = s.env[0];
         const float postEnv = compensated * finalEnv;
 
-        // Phase 3: gate by Skin+Liquid presence so Mode > ~1.5 dims
-        // toward silence (Metal stub) until Phase 4 lands the PMM bus.
-        outBuf[i] = postEnv * level * skinLiquidPresence;
+        // Master soft saturator: catches residual peaks at extreme
+        // settings (Metal + max fold + cross-injection) without
+        // introducing dynamics artifacts. Output bounded ±1.
+        outBuf[i] = visadhara_folder::master_sat(postEnv * level);
       }
     }
 #endif
