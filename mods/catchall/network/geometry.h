@@ -1,0 +1,142 @@
+#pragma once
+
+// Network geometry generator — Phase 1.
+//
+// Owns a 2D virtual reflector field (kMaxNetworkTaps points in [-1, +1]
+// space) and computes per-tap (delay, gainL, gainR) from a moving
+// listener position.
+//
+// The listener moves on a unit circle parameterized by the `motion`
+// macro (0..1 = one full revolution). Per active reflector, distance
+// to the listener gives the tap delay (scaled by `size`); the y
+// component of the unit vector from listener to reflector gives the
+// L/R pan; 1/distance gives the per-tap gain.
+//
+// No libm trig — listener position uses Bhaskara polynomial sin/cos
+// from network/trig_lut.h. Per-tap pan derivation is just `dy/dist`
+// which equals sin(azimuth) without needing atan2.
+//
+// Header-only inline per feedback_no_out_of_line_virtuals.
+
+#include "trig_lut.h"
+#include <math.h>
+#include <stdint.h>
+
+namespace stolmine
+{
+  namespace network_geom
+  {
+    struct Reflector
+    {
+      float x, y;
+    };
+
+    // Max tap distance for a [-1, +1] field with listener on the unit
+    // circle: sqrt((2)² + (2)²) ≈ 2.83. Use 3.0 with a small margin
+    // so dist/kMaxDist ≤ 1 always.
+    static const float kMaxDist = 3.0f;
+
+    // Min distance clamp — reflector right at listener would give 1/r
+    // → infinity. 0.05 caps gain at 20× max.
+    static const float kMinDist = 0.05f;
+
+    // Generate a deterministic reflector field from a uint32 seed.
+    // LCG matches the pattern in mods/spreadsheet/visadhara/pmm.h
+    // (Numerical Recipes constants).
+    static inline void regenerateField(Reflector *reflectors, int n, uint32_t seed)
+    {
+      uint32_t state = seed ? seed : 0xDEADBEEFu;
+      for (int i = 0; i < n; i++)
+      {
+        // Generate two random values per reflector (one per axis).
+        state = state * 1103515245u + 12345u;
+        const float rx = ((float)((state >> 16) & 0xFFFFu) * (1.0f / 32768.0f)) - 1.0f;
+        state = state * 1103515245u + 12345u;
+        const float ry = ((float)((state >> 16) & 0xFFFFu) * (1.0f / 32768.0f)) - 1.0f;
+        reflectors[i].x = rx;
+        reflectors[i].y = ry;
+      }
+    }
+
+    // Per-block geometry computation. Writes into externally-owned
+    // arrays sized for at least `kMaxTaps` entries:
+    //   delayTarget[i] = per-tap delay in samples
+    //   gainL[i], gainR[i] = per-tap L/R gains
+    // Inactive taps (i >= activeTaps) get zeroed.
+    //
+    // density:    number of active taps (allocate-by-distance: closest
+    //             `density` reflectors win)
+    // sizeNorm:   0..1 field scale; multiplies the per-tap delay
+    // motion:     0..1, listener phase around the unit circle
+    // maxDelay:   buffer max-delay in samples; per-tap delay is in
+    //             [0, sizeNorm * (maxDelay-1)]
+    // gainScale:  global gain factor (typically 1.0 — kept for
+    //             callers that want to renormalize)
+    static inline void recomputeTaps(
+      const Reflector *reflectors,
+      int kMaxTaps,
+      int activeTaps,
+      float sizeNorm,
+      float motion,
+      int maxDelay,
+      float gainScale,
+      float *delayTarget,
+      float *gainL,
+      float *gainR)
+    {
+      // Listener position on unit circle. motion 0..1 = full
+      // revolution; values outside [0,1] wrap.
+      const float listenerX = network_trig::poly_cos(motion);
+      const float listenerY = network_trig::poly_sin(motion);
+
+      const float invMaxDist = 1.0f / kMaxDist;
+      const float maxDelayF = (float)(maxDelay - 1);
+
+      // Distance-based active-tap selection: simple "first N reflectors"
+      // for Phase 1. Phase 2+ can replace with sorted-by-distance for
+      // closest-first allocation.
+      const int n = activeTaps < kMaxTaps ? activeTaps : kMaxTaps;
+
+      for (int i = 0; i < n; i++)
+      {
+        const float dx = reflectors[i].x - listenerX;
+        const float dy = reflectors[i].y - listenerY;
+        const float dist2 = dx * dx + dy * dy;
+        // sqrt of dist². Block-rate; Cortex-A8 VFP sqrt is fine.
+        const float dist = sqrtf(dist2);
+        const float distClamped = dist < kMinDist ? kMinDist : dist;
+
+        // Delay: normalize distance to [0, 1], scale by size, scale
+        // to delay buffer.
+        float distNorm = dist * invMaxDist;
+        if (distNorm > 1.0f) distNorm = 1.0f;
+        delayTarget[i] = sizeNorm * distNorm * maxDelayF;
+
+        // Gain: 1/r with min-dist clamp; cap at 5x for sanity.
+        float gain = network_trig::reciprocal(distClamped) * gainScale;
+        if (gain > 5.0f) gain = 5.0f;
+
+        // Pan: dy/dist gives the y-component of the unit vector from
+        // listener to reflector — equivalent to sin(azimuth).
+        const float invDist = network_trig::reciprocal(distClamped);
+        float pan = dy * invDist;
+        if (pan > 1.0f) pan = 1.0f;
+        if (pan < -1.0f) pan = -1.0f;
+
+        // Constant-power-ish L/R split. Linear (not equal-power) for
+        // simplicity; Phase 1 polish can swap to sqrt curves if the
+        // pan sweep feels phase-y.
+        gainL[i] = gain * 0.5f * (1.0f - pan);
+        gainR[i] = gain * 0.5f * (1.0f + pan);
+      }
+
+      // Zero inactive taps.
+      for (int i = n; i < kMaxTaps; i++)
+      {
+        delayTarget[i] = 0.0f;
+        gainL[i] = 0.0f;
+        gainR[i] = 0.0f;
+      }
+    }
+  }
+}

@@ -8,6 +8,7 @@ return {
     { title = "Lambda",  moduleName = "Lambda",       category = "Experimental", keywords = "synthesizer, wavetable, procedural, generator, seed, source" },
     { title = "Flakes",  moduleName = "Flakes",       category = "Experimental", keywords = "freeze, shimmer, delay, granular, effect, flakes" },
     { title = "Som",     moduleName = "Som",          category = "Experimental", keywords = "map, cluster, neural, feature, som, learn, scan" },
-    { title = "Alembic", moduleName = "AlembicVoice", category = "Experimental", keywords = "phase, mod, matrix, fm, synthesis, voice, alembic, sample" }
+    { title = "Alembic", moduleName = "AlembicVoice", category = "Experimental", keywords = "phase, mod, matrix, fm, synthesis, voice, alembic, sample" },
+    { title = "Network", moduleName = "Network",      category = "Effect",       keywords = "reverb, multitap, delay, spatial, network, geometry" }
   }
 }
