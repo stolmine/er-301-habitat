@@ -1,5 +1,5 @@
 PKGNAME ?= catchall
-PKGVERSION ?= 0.3.14
+PKGVERSION ?= 0.3.15
 
 include scripts/env.mk
 

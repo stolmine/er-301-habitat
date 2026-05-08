@@ -43,6 +43,31 @@ namespace stolmine
 
   static const int kMaxNetworkTaps = 64;
 
+  // Allpass diffusion stage delay lengths (samples). Primes for max
+  // decorrelation between stages — no shared resonant subharmonics.
+  // Total chain length ~12ms at 48kHz. Per-stage allpass formula:
+  //   v[n] = x[n] + g·buf[n-D]
+  //   y[n] = -g·v[n] + buf[n-D]
+  //   buf[n] = v[n]
+  // Phase scrambled, magnitude spectrum unchanged. Schroeder/Dattorro
+  // pattern — directly addresses feedback-loop resonance accumulation
+  // by phase-decorrelating the recycled signal each cycle.
+  static const int kNetworkAp1Len = 53;
+  static const int kNetworkAp2Len = 97;
+  static const int kNetworkAp3Len = 167;
+  static const int kNetworkAp4Len = 251;
+
+  static inline float networkAllpassStep(float in, float *buf, int N, int &idx, float g)
+  {
+    const float bufVal = buf[idx];
+    const float v = in + g * bufVal;
+    const float out = -g * v + bufVal;
+    buf[idx] = v;
+    idx++;
+    if (idx >= N) idx = 0;
+    return out;
+  }
+
   // DC-blocker pole coefficient (matches Pecto.cpp DC blocker, ≈7.6Hz
   // cutoff at 48kHz). Network applies three blockers: input, feedback
   // path, and stereo output. Without these, asymmetric tanh
@@ -94,6 +119,7 @@ namespace stolmine
       addParameter(mInputLevel);
       addParameter(mSeed);
       addParameter(mConnectivity);
+      addParameter(mSoften);
 
       // Initial reflector field at default seed.
       mLastSeed = 0xC0FFEE17u;
@@ -127,6 +153,16 @@ namespace stolmine
       mWalkerPos = 0.0f;
       mWalkerVel = 0.0f;
       mWalkerLcg = 0xCAFEBABEu;
+
+      // Allpass diffusion buffers (4-stage Schroeder chain)
+      memset(mApBuf1, 0, sizeof(mApBuf1));
+      memset(mApBuf2, 0, sizeof(mApBuf2));
+      memset(mApBuf3, 0, sizeof(mApBuf3));
+      memset(mApBuf4, 0, sizeof(mApBuf4));
+      mApIdx1 = 0;
+      mApIdx2 = 0;
+      mApIdx3 = 0;
+      mApIdx4 = 0;
     }
 
     virtual ~Network()
@@ -162,6 +198,7 @@ namespace stolmine
     od::Parameter mDensity{"Density", 0.5f};      // 0..1, fraction of reflectors active
     od::Parameter mMotion{"Motion", 0.0f};        // 0..1, listener phase around orbit
     od::Parameter mConnectivity{"Connectivity", 0.0f}; // 0..1, fraction of taps recycling
+    od::Parameter mSoften{"Soften", 0.0f};        // 0..1, allpass diffusion in fb path
     od::Parameter mDecay{"Decay", 0.5f};          // 0..1, feedback gain scaler
     od::Parameter mWet{"Wet", 0.5f};              // 0..1, dry/wet mix
     od::Parameter mInputLevel{"InputLevel", 1.0f};
@@ -214,6 +251,10 @@ namespace stolmine
       if (!(connectivity >= 0.0f)) connectivity = 0.0f;
       if (connectivity > 1.0f) connectivity = 1.0f;
 
+      float soften = mSoften.value();
+      if (!(soften >= 0.0f)) soften = 0.0f;
+      if (soften > 1.0f) soften = 1.0f;
+
       float wet = mWet.value();
       if (!(wet >= 0.0f)) wet = 0.0f;
       if (wet > 1.0f) wet = 1.0f;
@@ -245,7 +286,7 @@ namespace stolmine
         1.0f - expf(-(float)FRAMELENGTH / (0.05f * globalConfig.sampleRate));
       mWalkerVel += (velTarget - mWalkerVel) * blockVelAlpha;
 
-      const float kBaseWalkerHz = 0.125f;            // 8s period
+      const float kBaseWalkerHz = 0.25f;             // 4s period
       const float matrixScale = 1.0f + 4.0f * connectivity * decay;
       const float walkerHz = kBaseWalkerHz * matrixScale;
       const float blockDt = (float)FRAMELENGTH / globalConfig.sampleRate;
@@ -545,9 +586,23 @@ namespace stolmine
         // asymmetric tanh saturation accumulates DC into the loop
         // unless removed each cycle.
         const float fbTanh = networkFastTanh(fbSum);
-        const float fb = fbTanh - mDcFbX1 + kNetworkDcR * mDcFbY1;
+        const float fbDc = fbTanh - mDcFbX1 + kNetworkDcR * mDcFbY1;
         mDcFbX1 = fbTanh;
-        mDcFbY1 = fb;
+        mDcFbY1 = fbDc;
+
+        // Allpass diffusion chain (4 stages, Schroeder pattern).
+        // Phase-decorrelates the recycled signal each cycle. Resonant
+        // accumulation can't outpace this because the spectral
+        // redistribution happens INSTANTLY each loop, not over a slow
+        // walker timescale. Mixed by `soften` parameter — at 0 the
+        // raw fb is used (preserves glitch / event identity); at 1
+        // full diffusion (lush reverb cloud).
+        const float kApG = 0.6f;
+        float diffused = networkAllpassStep(fbDc,    mApBuf1, kNetworkAp1Len, mApIdx1, kApG);
+        diffused       = networkAllpassStep(diffused, mApBuf2, kNetworkAp2Len, mApIdx2, kApG);
+        diffused       = networkAllpassStep(diffused, mApBuf3, kNetworkAp3Len, mApIdx3, kApG);
+        diffused       = networkAllpassStep(diffused, mApBuf4, kNetworkAp4Len, mApIdx4, kApG);
+        const float fb = fbDc + soften * (diffused - fbDc);
 
         // Buffer-write soft saturation: x + fb can reach ±2, but the
         // int16 delay buffer storage clips hard at ±1. Apply tanh
@@ -642,6 +697,15 @@ namespace stolmine
     float mWalkerPos;        // [0, 1) — current orbit phase
     float mWalkerVel;        // smoothed velocity, ~[-1, +1]
     uint32_t mWalkerLcg;     // deterministic random source
+
+    // 4-stage allpass diffusion chain in feedback path. Phase-
+    // decorrelates the recycled signal each cycle, breaking the
+    // resonance accumulation that the walker alone can't outpace.
+    float mApBuf1[kNetworkAp1Len];
+    float mApBuf2[kNetworkAp2Len];
+    float mApBuf3[kNetworkAp3Len];
+    float mApBuf4[kNetworkAp4Len];
+    int mApIdx1, mApIdx2, mApIdx3, mApIdx4;
 
     // Delay buffer.
     char *mBuffer = 0;
