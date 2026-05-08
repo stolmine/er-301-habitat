@@ -43,6 +43,27 @@ namespace stolmine
 
   static const int kMaxNetworkTaps = 64;
 
+  // DC-blocker pole coefficient (matches Pecto.cpp DC blocker, ≈7.6Hz
+  // cutoff at 48kHz). Network applies three blockers: input, feedback
+  // path, and stereo output. Without these, asymmetric tanh
+  // saturation under sustained input + feedback latches the buffer
+  // into DC offset (signal drifts past tanh's saturation range,
+  // output becomes constant +1, speakers hear silence).
+  static const float kNetworkDcR = 0.999f;
+
+  // Fast tanh approximation (Padé 3/3). Lifted from Pecto.cpp:31-37.
+  // Smooth, bounded ±1, monotonic — appropriate for feedback soft-
+  // saturation where a hard clamp would kill DSP via a latched
+  // saturated-buffer state and produce aliasing-rich harmonics that
+  // re-energize the loop.
+  static inline float networkFastTanh(float x)
+  {
+    if (x < -4.0f) return -1.0f;
+    if (x >  4.0f) return  1.0f;
+    const float x2 = x * x;
+    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+  }
+
   // Block-rate copy helper for class-member float arrays. noinline +
   // no-tree-vectorize prevents gcc from auto-vectorizing into quad-D
   // vst1.64 :64 stores, which trap on Cortex-A8 when the destination
@@ -72,6 +93,7 @@ namespace stolmine
       addParameter(mWet);
       addParameter(mInputLevel);
       addParameter(mSeed);
+      addParameter(mConnectivity);
 
       // Initial reflector field at default seed.
       mLastSeed = 0xC0FFEE17u;
@@ -86,12 +108,20 @@ namespace stolmine
         mTapDelaySmoothed[i] = 0.0f;
         mTapGainLSmoothed[i] = 0.0f;
         mTapGainRSmoothed[i] = 0.0f;
+        mFbWeight[i] = 0.0f;
+        mFbWeightSmoothed[i] = 0.0f;
       }
 
       mWriteIndex = 0;
       mBuffer = 0;
       mMaxDelayInSamples = 0;
       mFirstProcess = true;
+
+      // DC blocker state
+      mDcInX1 = 0.0f; mDcInY1 = 0.0f;
+      mDcFbX1 = 0.0f; mDcFbY1 = 0.0f;
+      mDcOutLX1 = 0.0f; mDcOutLY1 = 0.0f;
+      mDcOutRX1 = 0.0f; mDcOutRY1 = 0.0f;
     }
 
     virtual ~Network()
@@ -126,6 +156,7 @@ namespace stolmine
     od::Parameter mSize{"Size", 0.5f};            // 0..1, scales max tap delay
     od::Parameter mDensity{"Density", 0.5f};      // 0..1, fraction of reflectors active
     od::Parameter mMotion{"Motion", 0.0f};        // 0..1, listener phase around orbit
+    od::Parameter mConnectivity{"Connectivity", 0.0f}; // 0..1, fraction of taps recycling
     od::Parameter mDecay{"Decay", 0.5f};          // 0..1, feedback gain scaler
     od::Parameter mWet{"Wet", 0.5f};              // 0..1, dry/wet mix
     od::Parameter mInputLevel{"InputLevel", 1.0f};
@@ -170,6 +201,10 @@ namespace stolmine
       if (!(decay >= 0.0f)) decay = 0.0f;
       if (decay > 0.95f) decay = 0.95f;
 
+      float connectivity = mConnectivity.value();
+      if (!(connectivity >= 0.0f)) connectivity = 0.0f;
+      if (connectivity > 1.0f) connectivity = 1.0f;
+
       float wet = mWet.value();
       if (!(wet >= 0.0f)) wet = 0.0f;
       if (wet > 1.0f) wet = 1.0f;
@@ -200,6 +235,36 @@ namespace stolmine
         mTapGainL,
         mTapGainR);
 
+      // ---- Block-rate feedback selection (Phase 2) ----
+      // Sparse selectable feedback recycling: pick k of activeTaps to
+      // recycle into the write head. "Every-stride" allocation policy
+      // — selected taps are spread across the active range so the
+      // recycled signal has temporal diversity rather than clustering
+      // at the closest-N reflectors.
+      //
+      // Normalization: 1/sqrt(k) per tap. With decorrelated tap
+      // delays (phyllotaxis distribution), the RMS feedback amplitude
+      // is `decay` regardless of k — comparable to a single-tap
+      // recycle. Worst-case constructive sum is sqrt(k)*decay; the
+      // ±1.5 hard clamp on `fb` below catches phase-alignment spikes
+      // that occur statistically.
+      const int kRecycle = (int)(connectivity * (float)activeTaps + 0.5f);
+      const float fbWeightUnit = (kRecycle > 0)
+                                   ? (decay / sqrtf((float)kRecycle))
+                                   : 0.0f;
+      // Zero all targets, then mark selected taps.
+      for (int t = 0; t < kMaxNetworkTaps; t++) mFbWeight[t] = 0.0f;
+      if (kRecycle > 0)
+      {
+        const float ratio = (float)activeTaps / (float)kRecycle;
+        for (int n = 0; n < kRecycle; n++)
+        {
+          int t = (int)(n * ratio);
+          if (t >= activeTaps) t = activeTaps - 1;
+          mFbWeight[t] = fbWeightUnit;
+        }
+      }
+
       // ---- Per-sample LP smoother coefficient ----
       // ~25ms time constant matches Pecto.cpp:486
       // (feedback_doppler_basedelay_smoother). Same alpha used for
@@ -217,6 +282,7 @@ namespace stolmine
           mTapDelaySmoothed[t] = mTapDelayTarget[t];
           mTapGainLSmoothed[t] = mTapGainL[t];
           mTapGainRSmoothed[t] = mTapGainR[t];
+          mFbWeightSmoothed[t] = mFbWeight[t];
         }
         mFirstProcess = false;
       }
@@ -236,7 +302,12 @@ namespace stolmine
       // ---- Per-sample inner loop ----
       for (int i = 0; i < FRAMELENGTH; i++)
       {
-        const float x = in[i] * inputLevel;
+        // Input DC blocker: y[n] = x[n] - x[n-1] + R*y[n-1]. Removes
+        // any DC the user might patch in; protects feedback loop.
+        const float xRaw = in[i] * inputLevel;
+        const float x = xRaw - mDcInX1 + kNetworkDcR * mDcInY1;
+        mDcInX1 = xRaw;
+        mDcInY1 = x;
 
         if (mWriteIndex >= maxDelay) mWriteIndex = 0;
 
@@ -271,6 +342,12 @@ namespace stolmine
             sm  = vld1q_f32(&mTapGainRSmoothed[t]);
             sm = vmlaq_f32(sm, vsubq_f32(tgt, sm), alphaVec);
             vst1q_f32(&mTapGainRSmoothed[t], sm);
+
+            // Feedback weight (Phase 2)
+            tgt = vld1q_f32(&mFbWeight[t]);
+            sm  = vld1q_f32(&mFbWeightSmoothed[t]);
+            sm = vmlaq_f32(sm, vsubq_f32(tgt, sm), alphaVec);
+            vst1q_f32(&mFbWeightSmoothed[t], sm);
           }
         }
 #else
@@ -279,6 +356,7 @@ namespace stolmine
           mTapDelaySmoothed[t] += (mTapDelayTarget[t] - mTapDelaySmoothed[t]) * smoothAlpha;
           mTapGainLSmoothed[t] += (mTapGainL[t] - mTapGainLSmoothed[t]) * smoothAlpha;
           mTapGainRSmoothed[t] += (mTapGainR[t] - mTapGainRSmoothed[t]) * smoothAlpha;
+          mFbWeightSmoothed[t] += (mFbWeight[t] - mFbWeightSmoothed[t]) * smoothAlpha;
         }
 #endif
 #ifdef NETWORK_HAS_NEON
@@ -351,16 +429,18 @@ namespace stolmine
 
         float wetL = 0.0f;
         float wetR = 0.0f;
-        float lastTapOut = 0.0f;
+        float fbSum = 0.0f;
 
 #ifdef NETWORK_HAS_NEON
-        // ---- Pass C (NEON): interpolate + dual-FMA pan + accumulate ----
-        // Two FMAs per tap: one into wetL with gainL, one into wetR
-        // with gainR. Shared idx/frac arrays from Pass A.
+        // ---- Pass C (NEON): interpolate + triple-FMA + accumulate ----
+        // Three FMAs per tap: into wetL (with gainLSmoothed), wetR
+        // (with gainRSmoothed), and fbSum (with fbWeightSmoothed).
+        // Shared idx/frac arrays from Pass A.
         {
           const float32x4_t scaleVec = vdupq_n_f32(scale);
           float32x4_t wetLVec = vdupq_n_f32(0.0f);
           float32x4_t wetRVec = vdupq_n_f32(0.0f);
+          float32x4_t fbVec   = vdupq_n_f32(0.0f);
           int t = 0;
           for (; t + 4 <= activeTaps; t += 4)
           {
@@ -371,20 +451,24 @@ namespace stolmine
             float32x4_t fV = vld1q_f32(&frac[t]);
             float32x4_t gLV = vld1q_f32(&mTapGainLSmoothed[t]);
             float32x4_t gRV = vld1q_f32(&mTapGainRSmoothed[t]);
+            float32x4_t fbWV = vld1q_f32(&mFbWeightSmoothed[t]);
             float32x4_t tapV = vmlaq_f32(aV, vsubq_f32(bV, aV), fV);
             wetLVec = vmlaq_f32(wetLVec, tapV, gLV);
             wetRVec = vmlaq_f32(wetRVec, tapV, gRV);
-            lastTapOut = vgetq_lane_f32(tapV, 3);
+            fbVec   = vmlaq_f32(fbVec,   tapV, fbWV);
           }
-          // Horizontal sum L.
+          // Horizontal sums.
           {
             float32x2_t loHi = vadd_f32(vget_low_f32(wetLVec), vget_high_f32(wetLVec));
             wetL = vget_lane_f32(vpadd_f32(loHi, loHi), 0);
           }
-          // Horizontal sum R.
           {
             float32x2_t loHi = vadd_f32(vget_low_f32(wetRVec), vget_high_f32(wetRVec));
             wetR = vget_lane_f32(vpadd_f32(loHi, loHi), 0);
+          }
+          {
+            float32x2_t loHi = vadd_f32(vget_low_f32(fbVec), vget_high_f32(fbVec));
+            fbSum = vget_lane_f32(vpadd_f32(loHi, loHi), 0);
           }
           // Scalar tail.
           for (; t < activeTaps; t++)
@@ -394,7 +478,7 @@ namespace stolmine
             float tapOut = a + (b - a) * frac[t];
             wetL += tapOut * mTapGainLSmoothed[t];
             wetR += tapOut * mTapGainRSmoothed[t];
-            lastTapOut = tapOut;
+            fbSum += tapOut * mFbWeightSmoothed[t];
           }
         }
 #else
@@ -405,17 +489,26 @@ namespace stolmine
           float tapOut = a + (b - a) * frac[t];
           wetL += tapOut * mTapGainLSmoothed[t];
           wetR += tapOut * mTapGainRSmoothed[t];
-          lastTapOut = tapOut;
+          fbSum += tapOut * mFbWeightSmoothed[t];
         }
 #endif
 
-        // Single global feedback (Phase 0 pattern; Phase 2 replaces
-        // with sparse per-tap weighted recycle).
-        float fb = lastTapOut * decay;
-        if (fb > 1.5f) fb = 1.5f;
-        if (fb < -1.5f) fb = -1.5f;
+        // Sparse feedback recycle (Phase 2): weighted sum of selected
+        // tap outputs, normalized by 1/sqrt(k). Soft-clip via tanh,
+        // then DC-block. The DC blocker is critical here — sustained
+        // asymmetric tanh saturation accumulates DC into the loop
+        // unless removed each cycle.
+        const float fbTanh = networkFastTanh(fbSum);
+        const float fb = fbTanh - mDcFbX1 + kNetworkDcR * mDcFbY1;
+        mDcFbX1 = fbTanh;
+        mDcFbY1 = fb;
 
-        bufWrite(buf, mWriteIndex, x + fb);
+        // Buffer-write soft saturation: x + fb can reach ±2, but the
+        // int16 delay buffer storage clips hard at ±1. Apply tanh
+        // again at write so accumulated input + feedback stays in
+        // [-1, +1] smoothly. Each feedback cycle contributes gentle
+        // tape-style compression rather than digital clipping.
+        bufWrite(buf, mWriteIndex, networkFastTanh(x + fb));
 
         mWriteIndex++;
         if (mWriteIndex >= maxDelay) mWriteIndex = 0;
@@ -423,8 +516,18 @@ namespace stolmine
         // Mix.
         const float mixedL = x * (1.0f - wet) + wetL * wet;
         const float mixedR = x * (1.0f - wet) + wetR * wet;
-        outL[i] = mixedL;
-        outR[i] = mixedR;
+
+        // Output DC blockers (stereo). Catches any DC slipping
+        // through wet from the wet path's own saturation residue.
+        const float outDcL = mixedL - mDcOutLX1 + kNetworkDcR * mDcOutLY1;
+        mDcOutLX1 = mixedL;
+        mDcOutLY1 = outDcL;
+        const float outDcR = mixedR - mDcOutRX1 + kNetworkDcR * mDcOutRY1;
+        mDcOutRX1 = mixedR;
+        mDcOutRY1 = outDcR;
+
+        outL[i] = outDcL;
+        outR[i] = outDcR;
       }
 
     }
@@ -472,6 +575,18 @@ namespace stolmine
     float mTapDelaySmoothed[kMaxNetworkTaps];
     float mTapGainLSmoothed[kMaxNetworkTaps];
     float mTapGainRSmoothed[kMaxNetworkTaps];
+    // Phase 2: per-tap feedback weight (target + smoothed).
+    float mFbWeight[kMaxNetworkTaps];
+    float mFbWeightSmoothed[kMaxNetworkTaps];
+
+    // DC blocker state (one-pole). Three blockers: input, feedback,
+    // stereo output. Prevents DC drift from asymmetric tanh
+    // saturation under sustained feedback (drift latches buffer into
+    // saturated state, kills DSP).
+    float mDcInX1, mDcInY1;
+    float mDcFbX1, mDcFbY1;
+    float mDcOutLX1, mDcOutLY1;
+    float mDcOutRX1, mDcOutRY1;
 
     // Delay buffer.
     char *mBuffer = 0;

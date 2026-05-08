@@ -41,20 +41,54 @@ namespace stolmine
     static const float kMinDist = 0.05f;
 
     // Generate a deterministic reflector field from a uint32 seed.
-    // LCG matches the pattern in mods/spreadsheet/visadhara/pmm.h
-    // (Numerical Recipes constants).
+    //
+    // Phyllotaxis (golden-angle spiral) distribution — same pattern as
+    // sunflower seeds, leaf arrangements, etc. Gives natural, near-
+    // uniform spacing without the clumps and gaps of pure uniform
+    // random. Each reflector at:
+    //   theta = i × golden_angle + seedPhase  (+ small jitter)
+    //   radius = sqrt((i + 0.5) / n)          (+ small jitter)
+    // sqrt scaling makes density uniform per unit area.
+    //
+    // Seed shifts the starting angle and jitter — different seeds give
+    // visibly distinct fields while preserving the phyllotaxis
+    // structure. LCG matches the pattern in
+    // mods/spreadsheet/visadhara/pmm.h.
     static inline void regenerateField(Reflector *reflectors, int n, uint32_t seed)
     {
       uint32_t state = seed ? seed : 0xDEADBEEFu;
+      // Initial seedPhase from one LCG step.
+      state = state * 1103515245u + 12345u;
+      const float seedPhase =
+        (float)((state >> 8) & 0xFFFFFFu) * (1.0f / 16777216.0f);
+
+      // Golden angle in turns: (1 - 1/φ) where φ = (1+√5)/2.
+      // Numerically: ≈ 0.3819660113 turns ≈ 137.5°.
+      const float kGoldenAngle = 0.3819660113f;
+      const float invN = 1.0f / (float)n;
+
       for (int i = 0; i < n; i++)
       {
-        // Generate two random values per reflector (one per axis).
+        // Small angular jitter (±0.01 turns ≈ ±3.6°).
         state = state * 1103515245u + 12345u;
-        const float rx = ((float)((state >> 16) & 0xFFFFu) * (1.0f / 32768.0f)) - 1.0f;
+        const float angleJitter =
+          ((float)((state >> 16) & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f) * 0.02f;
+        float theta = (float)i * kGoldenAngle + seedPhase + angleJitter;
+        // Wrap to [0, 1).
+        theta -= (float)((int)theta);
+        if (theta < 0.0f) theta += 1.0f;
+
+        // Small radial jitter (±0.025 of unit field radius).
         state = state * 1103515245u + 12345u;
-        const float ry = ((float)((state >> 16) & 0xFFFFu) * (1.0f / 32768.0f)) - 1.0f;
-        reflectors[i].x = rx;
-        reflectors[i].y = ry;
+        const float radiusJitter =
+          ((float)((state >> 16) & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f) * 0.05f;
+        const float baseRadius = sqrtf(((float)i + 0.5f) * invN);
+        float radius = baseRadius + radiusJitter;
+        if (radius < 0.0f) radius = 0.0f;
+        if (radius > 1.0f) radius = 1.0f;
+
+        reflectors[i].x = radius * network_trig::poly_cos(theta);
+        reflectors[i].y = radius * network_trig::poly_sin(theta);
       }
     }
 

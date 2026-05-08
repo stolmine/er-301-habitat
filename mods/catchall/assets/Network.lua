@@ -20,6 +20,7 @@ end
 local sizeMap = floatMap(0, 1)
 local densityMap = floatMap(0, 1)
 local motionMap = floatMap(0, 1)
+local connectivityMap = floatMap(0, 1)
 local decayMap = floatMap(0, 1)
 local wetMap = floatMap(0, 1)
 local seedMap = (function()
@@ -72,6 +73,12 @@ function Network:onLoadGraph(channelCount)
   motion:hardSet("Bias", 0.0)
   tieParam("Motion", motion)
   self:addMonoBranch("motion", motion, "In", motion, "Out")
+
+  -- Connectivity
+  local connectivity = self:addObject("connectivity", app.ParameterAdapter())
+  connectivity:hardSet("Bias", 0.0)
+  tieParam("Connectivity", connectivity)
+  self:addMonoBranch("connectivity", connectivity, "In", connectivity, "Out")
 
   -- Decay
   local decay = self:addObject("decay", app.ParameterAdapter())
@@ -127,6 +134,17 @@ function Network:onLoadViews(objects, branches)
       biasPrecision = 3,
       initialBias = 0.0
     },
+    connectivity = GainBias {
+      button = "conn",
+      description = "Connectivity (recycled tap fraction)",
+      branch = branches.connectivity,
+      gainbias = objects.connectivity,
+      range = objects.connectivity,
+      biasMap = connectivityMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 3,
+      initialBias = 0.0
+    },
     decay = GainBias {
       button = "decay",
       description = "Decay (feedback)",
@@ -150,7 +168,7 @@ function Network:onLoadViews(objects, branches)
       initialBias = 0.5
     }
   }, {
-    expanded = { "size", "density", "motion", "decay", "wet" },
+    expanded = { "size", "density", "motion", "connectivity", "decay", "wet" },
     collapsed = {}
   }
 end
