@@ -125,14 +125,14 @@ function Network:onLoadViews(objects, branches)
     },
     motion = GainBias {
       button = "motn",
-      description = "Motion (listener orbit phase)",
+      description = "Motion (auto-modulation depth)",
       branch = branches.motion,
       gainbias = objects.motion,
       range = objects.motion,
       biasMap = motionMap,
       biasUnits = app.unitNone,
       biasPrecision = 3,
-      initialBias = 0.0
+      initialBias = 0.5
     },
     connectivity = GainBias {
       button = "conn",

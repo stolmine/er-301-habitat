@@ -122,6 +122,11 @@ namespace stolmine
       mDcFbX1 = 0.0f; mDcFbY1 = 0.0f;
       mDcOutLX1 = 0.0f; mDcOutLY1 = 0.0f;
       mDcOutRX1 = 0.0f; mDcOutRY1 = 0.0f;
+
+      // Smooth-random listener walker (Phase 2 polish)
+      mWalkerPos = 0.0f;
+      mWalkerVel = 0.0f;
+      mWalkerLcg = 0xCAFEBABEu;
     }
 
     virtual ~Network()
@@ -193,9 +198,13 @@ namespace stolmine
       if (activeTaps < 1) activeTaps = 1;
       if (activeTaps > kMaxNetworkTaps) activeTaps = kMaxNetworkTaps;
 
-      float motion = mMotion.value();
-      // motion wraps modulo 1; allow negative for reverse orbit.
-      motion -= floorf(motion);
+      // Motion now controls modulation DEPTH on a smooth-random walker
+      // that drives the listener position. Continuous walker motion
+      // breaks feedback-loop phase coherence so resonant peaks can't
+      // accumulate. See walker advance below.
+      float motionDepth = mMotion.value();
+      if (!(motionDepth >= 0.0f)) motionDepth = 0.0f;
+      if (motionDepth > 1.0f) motionDepth = 1.0f;
 
       float decay = mDecay.value();
       if (!(decay >= 0.0f)) decay = 0.0f;
@@ -222,13 +231,35 @@ namespace stolmine
         mLastSeed = seedU;
       }
 
+      // ---- Walker advance (block-rate) ----
+      // Smooth-random walker — listener drifts around the orbit
+      // automatically, breaking phase coherence in the feedback loop.
+      // Rate matrix: base 0.125Hz (8s period at full) × (1 + 4·conn·dcy)
+      // — accelerates when feedback is hot, suppressing resonance
+      // buildup at higher loop gain.
+      mWalkerLcg = mWalkerLcg * 1103515245u + 12345u;
+      const float velTarget =
+        (float)((mWalkerLcg >> 16) & 0xFFFFu) * (2.0f / 65535.0f) - 1.0f;
+      // Block-rate velocity smoother (~50ms time constant in equiv).
+      const float blockVelAlpha =
+        1.0f - expf(-(float)FRAMELENGTH / (0.05f * globalConfig.sampleRate));
+      mWalkerVel += (velTarget - mWalkerVel) * blockVelAlpha;
+
+      const float kBaseWalkerHz = 0.125f;            // 8s period
+      const float matrixScale = 1.0f + 4.0f * connectivity * decay;
+      const float walkerHz = kBaseWalkerHz * matrixScale;
+      const float blockDt = (float)FRAMELENGTH / globalConfig.sampleRate;
+      mWalkerPos += mWalkerVel * walkerHz * blockDt * motionDepth;
+      mWalkerPos -= floorf(mWalkerPos);  // wrap to [0,1) (handles negatives)
+      const float listenerMotion = mWalkerPos;
+
       // ---- Block-rate geometry recompute ----
       network_geom::recomputeTaps(
         mReflectors,
         kMaxNetworkTaps,
         activeTaps,
         sizeNorm,
-        motion,
+        listenerMotion,
         maxDelay,
         1.0f,                          // gainScale
         mTapDelayTarget,
@@ -253,6 +284,15 @@ namespace stolmine
                                    ? (decay / sqrtf((float)kRecycle))
                                    : 0.0f;
       // Zero all targets, then mark selected taps.
+      // Sign randomization: each selected tap gets ±fbWeightUnit
+      // determined by a deterministic hash of (t, mLastSeed). Mixing
+      // signs breaks coherent constructive buildup at resonant
+      // frequencies — the comb-filter peaks that produced ringing
+      // become statistically zero. RMS feedback level unchanged
+      // (sqrt(k) scaling holds for both signed and unsigned random
+      // walks). Different seeds → different sign patterns, so
+      // randomizing seed sweeps through different resonance
+      // configurations.
       for (int t = 0; t < kMaxNetworkTaps; t++) mFbWeight[t] = 0.0f;
       if (kRecycle > 0)
       {
@@ -261,7 +301,13 @@ namespace stolmine
         {
           int t = (int)(n * ratio);
           if (t >= activeTaps) t = activeTaps - 1;
-          mFbWeight[t] = fbWeightUnit;
+          // Deterministic ±1 sign from (t, seed) hash. Knuth golden
+          // ratio multiplier × LCG step → reasonably random middle
+          // bits. Bit 16 chosen for stable distribution.
+          uint32_t h = mLastSeed ^ ((uint32_t)t * 2654435761u);
+          h = h * 1103515245u + 12345u;
+          const float sign = ((h >> 16) & 1u) ? 1.0f : -1.0f;
+          mFbWeight[t] = sign * fbWeightUnit;
         }
       }
 
@@ -587,6 +633,15 @@ namespace stolmine
     float mDcFbX1, mDcFbY1;
     float mDcOutLX1, mDcOutLY1;
     float mDcOutRX1, mDcOutRY1;
+
+    // Smooth-random listener walker. Replaces direct motion-as-phase
+    // with motion-as-depth: the walker continuously wanders around
+    // the orbit, breaking feedback-loop phase coherence so resonant
+    // peaks can't accumulate. Rate is matrix-driven from connectivity
+    // × decay (faster modulation when the loop is hot).
+    float mWalkerPos;        // [0, 1) — current orbit phase
+    float mWalkerVel;        // smoothed velocity, ~[-1, +1]
+    uint32_t mWalkerLcg;     // deterministic random source
 
     // Delay buffer.
     char *mBuffer = 0;
