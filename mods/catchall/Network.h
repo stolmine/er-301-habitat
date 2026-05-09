@@ -52,7 +52,9 @@ namespace stolmine
     NETWORK_TAP_NORMAL  = 0,
     NETWORK_TAP_MUTE    = 1,
     NETWORK_TAP_STUTTER = 2,
-    NETWORK_TAP_CRUSH   = 3
+    NETWORK_TAP_CRUSH   = 3,
+    NETWORK_TAP_SCRUB   = 4,
+    NETWORK_TAP_REVERSE = 5
   };
 
   // Allpass diffusion stage delay lengths (samples). Primes for max
@@ -194,6 +196,7 @@ namespace stolmine
         mTapShClock[i] = 0.0f;    // G1 S&H clock phase
         mTapShValue[i] = 0.0f;    // G1 S&H captured snapshot (samples)
         mTapEffectMode[i] = NETWORK_TAP_NORMAL;
+        mTapReadAdvance[i] = 1;
         mTapStutterIterations[i] = 0;
         mTapStutterAnchor[i] = 0;
         mTapStutterLength[i] = 0;
@@ -643,36 +646,44 @@ namespace stolmine
 
       // ---- Mutex mode assignment (block-rate, per-tap) ----
       // Single hash per tap → effect mode in {NORMAL, MUTE,
-      // STUTTER, CRUSH} via cumulative probability thresholds. Each
-      // primitive's setup gates on this mode. Effects no longer
-      // overlap on the same tap, which keeps each character clean
-      // (e.g. a stuttered tap isn't simultaneously bit-crushed).
-      // Effects still stack across taps via the shared feedback
-      // bus, so high-glitch settings keep their layered chaos.
+      // STUTTER, CRUSH, SCRUB, REVERSE} via cumulative probability
+      // thresholds. Effects don't overlap on the same tap; they
+      // still stack across taps via the shared feedback bus.
       //
-      // Probability budget at glitch=1, density=1: pMute=0.15 +
-      // pStutter=0.4 + pCrush=0.4 = 0.95. pNormal=0.05. Sum
-      // reduces gracefully at lower settings since each scales
-      // with glitch.
-      //
-      // Note: stutter prob no longer scales with decay (decay only
-      // biases length and iterations now). Loops should be audible
-      // across the decay range, not gated to high decay.
+      // Probability budget at glitch=1, density=1:
+      //   pMute=0.15 + pStutter=0.40 + pCrush=0.25 + pScrub=0.15 +
+      //   pReverse=0.15 = 1.10 (raw). Cumulative thresholds are
+      //   capped at 65535 so overflow squeezes lowest-priority
+      //   modes (REVERSE first, then SCRUB) without ever giving a
+      //   higher-priority mode less than its budgeted share.
+      // pNormal = remainder (~0–10% at full).
       const float kMaxMute    = 0.15f;
       const float kMaxStutter = 0.40f;
       const float kMaxCrush   = 0.25f;   // density still gates crush coverage
+      const float kMaxScrub   = 0.15f;
+      const float kMaxReverse = 0.15f;
       const float pMute    = glitchAmount * kMaxMute;
       const float pStutter = glitchAmount * kMaxStutter;
       const float pCrush   = glitchAmount * density * kMaxCrush;
-      // Cumulative thresholds in 0..65535 unsigned space.
-      const uint32_t muteThresh    = (uint32_t)(pMute * 65535.0f);
-      const uint32_t stutterThresh = muteThresh + (uint32_t)(pStutter * 65535.0f);
-      const uint32_t crushThresh   = stutterThresh + (uint32_t)(pCrush * 65535.0f);
+      const float pScrub   = glitchAmount * kMaxScrub;
+      const float pReverse = glitchAmount * kMaxReverse;
+      // Cumulative thresholds in 0..65535 unsigned space, capped.
+      uint32_t muteThresh    = (uint32_t)(pMute * 65535.0f);
+      if (muteThresh > 65535u) muteThresh = 65535u;
+      uint32_t stutterThresh = muteThresh + (uint32_t)(pStutter * 65535.0f);
+      if (stutterThresh > 65535u) stutterThresh = 65535u;
+      uint32_t crushThresh   = stutterThresh + (uint32_t)(pCrush * 65535.0f);
+      if (crushThresh > 65535u) crushThresh = 65535u;
+      uint32_t scrubThresh   = crushThresh + (uint32_t)(pScrub * 65535.0f);
+      if (scrubThresh > 65535u) scrubThresh = 65535u;
+      uint32_t reverseThresh = scrubThresh + (uint32_t)(pReverse * 65535.0f);
+      if (reverseThresh > 65535u) reverseThresh = 65535u;
       for (int i = 0; i < activeTaps; i++)
       {
         if (glitchAmount <= 0.0f)
         {
           mTapEffectMode[i] = NETWORK_TAP_NORMAL;
+          mTapReadAdvance[i] = 1;
           continue;
         }
         uint32_t hMode = mGlitchLcg ^
@@ -680,14 +691,18 @@ namespace stolmine
         hMode = hMode * 1103515245u + 12345u;
         const uint32_t modeRand = (hMode >> 16) & 0xFFFFu;
         uint8_t mode = NETWORK_TAP_NORMAL;
-        if (modeRand < muteThresh)         mode = NETWORK_TAP_MUTE;
+        if      (modeRand < muteThresh)    mode = NETWORK_TAP_MUTE;
         else if (modeRand < stutterThresh) mode = NETWORK_TAP_STUTTER;
         else if (modeRand < crushThresh)   mode = NETWORK_TAP_CRUSH;
+        else if (modeRand < scrubThresh)   mode = NETWORK_TAP_SCRUB;
+        else if (modeRand < reverseThresh) mode = NETWORK_TAP_REVERSE;
         mTapEffectMode[i] = mode;
+        mTapReadAdvance[i] = (mode == NETWORK_TAP_REVERSE) ? -1 : 1;
       }
       for (int i = activeTaps; i < kMaxNetworkTaps; i++)
       {
         mTapEffectMode[i] = NETWORK_TAP_NORMAL;
+        mTapReadAdvance[i] = 1;
       }
 
       // ---- G3 mute (mode-gated) ----
@@ -868,6 +883,57 @@ namespace stolmine
         if (idx < 0) idx += maxDelay;
         if (idx >= maxDelay) idx -= maxDelay;
         mTapNewReadIdx[t] = idx;
+      }
+
+      // ---- G5 scrub: per-block randomized read-pointer offset ----
+      // SCRUB-mode taps get a random offset added to mTapNewReadIdx
+      // each block. The dual-read crossfade smears each jump into
+      // a 5ms morph — that morph is the scrub character. Offset
+      // depth scales with size × glitch (per plan: scrubMax =
+      // size × maxBufFrac × glitchAmount, maxBufFrac = 0.25).
+      // Hash mixes in mWriteIndex/FRAMELENGTH (block counter) so
+      // the offset re-randomizes every block, even though
+      // mGlitchLcg is cycle-locked.
+      const float kScrubMaxFrac = 0.25f;
+      const int scrubMaxSamples =
+        (int)(sizeNorm * kScrubMaxFrac * glitchAmount *
+              (float)maxDelay + 0.5f);
+      if (scrubMaxSamples > 0)
+      {
+        const uint32_t blockCounter =
+          (uint32_t)(mWriteIndex / FRAMELENGTH);
+        const int scrubSpan = 2 * scrubMaxSamples + 1;
+        for (int t = 0; t < activeTaps; t++)
+        {
+          if (mTapEffectMode[t] != NETWORK_TAP_SCRUB) continue;
+          uint32_t hScr = mGlitchLcg ^
+            ((uint32_t)t * 2654435761u + 0x59B7C9F1u);
+          hScr = hScr * 1103515245u + 12345u + blockCounter;
+          hScr = hScr * 1103515245u + 12345u;
+          const int offset =
+            (int)((hScr >> 16) % (uint32_t)scrubSpan)
+            - scrubMaxSamples;
+          int idx = mTapNewReadIdx[t] + offset;
+          while (idx < 0)         idx += maxDelay;
+          while (idx >= maxDelay) idx -= maxDelay;
+          mTapNewReadIdx[t] = idx;
+        }
+      }
+
+      // ---- G6 reverse: align mNew with mOld for continuous reverse ----
+      // Without this, the geometry-derived recompute (forward-
+      // positioned) produces a 2*FRAMELENGTH discontinuity per
+      // block on REVERSE taps. Setting mNew = mOld means both
+      // indices stay in lockstep; per-sample Pass A advances both
+      // by mTapReadAdvance (-1 for REVERSE), reading buffer
+      // backwards continuously. Crossfade weight has no effect
+      // (a == b in Pass C).
+      for (int t = 0; t < activeTaps; t++)
+      {
+        if (mTapEffectMode[t] == NETWORK_TAP_REVERSE)
+        {
+          mTapNewReadIdx[t] = mTapOldReadIdx[t];
+        }
       }
 
       // ---- G4 — input transient-triggered tap ricochet ----
@@ -1203,51 +1269,62 @@ namespace stolmine
 #endif
 
         // ---- Pass A (dual-read advance) ----
-        // Doppler-free: each tap's old/new read indices increment by
-        // 1 per sample, wrap at maxDelay. No idx-from-delay math, no
-        // fractional interp. The ER-301 builtin Delay does this same
-        // pattern (Delay.cpp:209-219).
+        // Per-tap signed advance from mTapReadAdvance[t]: +1 for
+        // forward (default) or -1 for REVERSE-mode taps. Wrap is
+        // bidirectional: idx >= maxDelay → idx -= maxDelay,
+        // idx < 0 → idx += maxDelay. Branchless via vbslq_s32.
 #ifdef NETWORK_HAS_NEON
         {
           const int32x4_t maxDelayVec = vdupq_n_s32(maxDelay);
-          const int32x4_t oneVec = vdupq_n_s32(1);
           const int32x4_t zeroIVec = vdupq_n_s32(0);
 
           int t = 0;
           for (; t + 4 <= activeTaps; t += 4)
           {
+            int32x4_t advance = vld1q_s32(&mTapReadAdvance[t]);
+
             // Old read
             int32x4_t oldIdx = vld1q_s32(&mTapOldReadIdx[t]);
-            oldIdx = vaddq_s32(oldIdx, oneVec);
-            uint32x4_t oldWrap = vcgeq_s32(oldIdx, maxDelayVec);
-            oldIdx = vbslq_s32(oldWrap, zeroIVec, oldIdx);
+            oldIdx = vaddq_s32(oldIdx, advance);
+            uint32x4_t hiO = vcgeq_s32(oldIdx, maxDelayVec);
+            oldIdx = vbslq_s32(hiO, vsubq_s32(oldIdx, maxDelayVec), oldIdx);
+            uint32x4_t loO = vcltq_s32(oldIdx, zeroIVec);
+            oldIdx = vbslq_s32(loO, vaddq_s32(oldIdx, maxDelayVec), oldIdx);
             vst1q_s32(&mTapOldReadIdx[t], oldIdx);
 
             // New read
             int32x4_t newIdx = vld1q_s32(&mTapNewReadIdx[t]);
-            newIdx = vaddq_s32(newIdx, oneVec);
-            uint32x4_t newWrap = vcgeq_s32(newIdx, maxDelayVec);
-            newIdx = vbslq_s32(newWrap, zeroIVec, newIdx);
+            newIdx = vaddq_s32(newIdx, advance);
+            uint32x4_t hiN = vcgeq_s32(newIdx, maxDelayVec);
+            newIdx = vbslq_s32(hiN, vsubq_s32(newIdx, maxDelayVec), newIdx);
+            uint32x4_t loN = vcltq_s32(newIdx, zeroIVec);
+            newIdx = vbslq_s32(loN, vaddq_s32(newIdx, maxDelayVec), newIdx);
             vst1q_s32(&mTapNewReadIdx[t], newIdx);
           }
           for (; t < activeTaps; t++)
           {
-            int o = mTapOldReadIdx[t] + 1;
-            if (o >= maxDelay) o = 0;
+            const int adv = mTapReadAdvance[t];
+            int o = mTapOldReadIdx[t] + adv;
+            if (o >= maxDelay) o -= maxDelay;
+            if (o < 0)         o += maxDelay;
             mTapOldReadIdx[t] = o;
-            int n = mTapNewReadIdx[t] + 1;
-            if (n >= maxDelay) n = 0;
+            int n = mTapNewReadIdx[t] + adv;
+            if (n >= maxDelay) n -= maxDelay;
+            if (n < 0)         n += maxDelay;
             mTapNewReadIdx[t] = n;
           }
         }
 #else
         for (int t = 0; t < activeTaps; t++)
         {
-          int o = mTapOldReadIdx[t] + 1;
-          if (o >= maxDelay) o = 0;
+          const int adv = mTapReadAdvance[t];
+          int o = mTapOldReadIdx[t] + adv;
+          if (o >= maxDelay) o -= maxDelay;
+          if (o < 0)         o += maxDelay;
           mTapOldReadIdx[t] = o;
-          int n = mTapNewReadIdx[t] + 1;
-          if (n >= maxDelay) n = 0;
+          int n = mTapNewReadIdx[t] + adv;
+          if (n >= maxDelay) n -= maxDelay;
+          if (n < 0)         n += maxDelay;
           mTapNewReadIdx[t] = n;
         }
 #endif
@@ -1613,6 +1690,11 @@ namespace stolmine
 
     // Per-tap effect mode (mutex assignment, cycle-locked).
     uint8_t  mTapEffectMode[kMaxNetworkTaps];
+
+    // G6 reverse — per-tap signed advance for Pass A read-pointer
+    // step. +1 = forward (NORMAL/MUTE/STUTTER/CRUSH/SCRUB),
+    // -1 = reverse (REVERSE-mode taps). Set per block from mode.
+    int32_t  mTapReadAdvance[kMaxNetworkTaps];
 
     // G2 glitch — per-tap stutter/freeze. Multi-block loops with
     // fractional per-sample read for ×0.5/×1/×2 octave shifts.
