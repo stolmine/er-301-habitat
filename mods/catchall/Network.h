@@ -870,17 +870,17 @@ namespace stolmine
         mTapNewReadIdx[t] = idx;
       }
 
-      // ---- G4 — input transient-triggered events ----
-      // Block-rate envelope follower (fast vs slow). When a
-      // transient is detected (envFast jumps above envSlow ×
-      // threshold and we're past cooldown), perturb K random taps
-      // via one of three sub-effects: flip fb sign, duck gain
-      // (smoother resets to 0; ramps back over ~50ms), or kick
-      // read pointer ±256 samples. K scales with connectivity ×
-      // glitch (max 6 at full settings). G4 events ride over the
-      // mutex modes — STUTTER taps absorb most effects as no-ops
-      // (gains and fbWeight already 0; read kick gets overwritten
-      // by stutter override below).
+      // ---- G4 — input transient-triggered tap ricochet ----
+      // Baseline behavior of the network — fires regardless of
+      // glitch macro. When a transient is detected at the input
+      // (envFast jumps above envSlow × threshold, past cooldown),
+      // perturb K random taps with one of three sub-effects:
+      // flip fb sign, duck gain ~50ms, or kick read pointer ±256
+      // samples. K scales with connectivity × density (max 6 at
+      // both full). At glitch=0 the effects ride over an all-
+      // NORMAL field; at glitch>0 the mutex modes can absorb
+      // some effects as no-ops (STUTTER taps especially) and
+      // the surviving effects layer with the glitch character.
       {
         // Block peak input level.
         float blockMaxAbs = 0.0f;
@@ -900,8 +900,7 @@ namespace stolmine
         {
           mTransientCooldown--;
         }
-        else if (mEnvFast > mEnvSlow * 3.0f && mEnvFast > 0.05f &&
-                 glitchAmount > 0.0f)
+        else if (mEnvFast > mEnvSlow * 3.0f && mEnvFast > 0.05f)
         {
           transientFired = true;
           mTransientCooldown = 10;   // ~53ms refractory at 187 blocks/s
@@ -910,8 +909,11 @@ namespace stolmine
         if (transientFired)
         {
           const int kMaxK = 6;
-          const int K = (int)(connectivity * (float)kMaxK *
-                              glitchAmount + 0.5f);
+          // Baseline ricochet — independent of glitch. Both conn
+          // and density gate intensity so high-conn-high-density
+          // patches ricochet most strongly.
+          const int K = (int)(connectivity * density *
+                              (float)kMaxK + 0.5f);
           for (int n = 0; n < K; n++)
           {
             uint32_t h = mGlitchLcg ^
