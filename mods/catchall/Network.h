@@ -121,6 +121,7 @@ namespace stolmine
       addParameter(mInputLevel);
       addParameter(mSeed);
       addParameter(mConnectivity);
+      addParameter(mGlitch);
 
       // Initial reflector field at default seed.
       mLastSeed = 0xC0FFEE17u;
@@ -163,7 +164,13 @@ namespace stolmine
         mLfoRate[i] = 0.5f;       // initial uniform; recomputed each block
         mTapLpState[i] = 0.0f;    // L3 LP state
         mTapLpCoeff[i] = 0.5f;    // initial; recomputed each block
+        mTapShClock[i] = 0.0f;    // G1 S&H clock phase
+        mTapShValue[i] = 0.0f;    // G1 S&H captured snapshot (samples)
       }
+
+      // Glitch macro RNG state — independent of mWalkerLcg so glitch
+      // event timing doesn't lock to motion phase.
+      mGlitchLcg = 0xFEEDF00Du;
 
       // Allpass diffusion buffers (4-stage Schroeder chain)
       memset(mApBuf1, 0, sizeof(mApBuf1));
@@ -216,6 +223,7 @@ namespace stolmine
     od::Parameter mWet{"Wet", 0.5f};              // 0..1, dry/wet mix
     od::Parameter mInputLevel{"InputLevel", 1.0f};
     od::Parameter mSeed{"Seed", 0.0f};            // hashed to uint32 for field regen
+    od::Parameter mGlitch{"Glitch", 0.0f};        // 0..1, Character macro: lush→glitch
 
     virtual void process()
     {
@@ -277,6 +285,15 @@ namespace stolmine
       float wet = mWet.value();
       if (!(wet >= 0.0f)) wet = 0.0f;
       if (wet > 1.0f) wet = 1.0f;
+
+      float glitchAmount = mGlitch.value();
+      if (!(glitchAmount >= 0.0f)) glitchAmount = 0.0f;
+      if (glitchAmount > 1.0f) glitchAmount = 1.0f;
+
+      // Per-block glitch RNG advance — gives time-varying randomness
+      // for per-block glitch decisions (mute, etc.) so the same taps
+      // don't get stuck in the same state.
+      mGlitchLcg = mGlitchLcg * 1103515245u + 12345u;
 
       float inputLevel = mInputLevel.value();
 
@@ -376,6 +393,27 @@ namespace stolmine
       const float baseCoeff =
         1.0f - expf(-baseCutoffHz * kTwoPiOverSr);
 
+      // G1: S&H on tap positions. Clock rate scales with motion ×
+      // glitch — minimum non-zero rate (1Hz) at glitch tip-on, up to
+      // 16Hz at glitch=1 with full motion. At motion=0, clock is
+      // halted and snapshots persist (held forever).
+      const float kShMinClkHz = 1.0f;
+      const float kShMaxClkHz = 16.0f;
+      const float shClkHz = motionDepth * (kShMinClkHz +
+                            (kShMaxClkHz - kShMinClkHz) * glitchAmount);
+      const float shClkAdvance = shClkHz * blockDt;
+
+      // G3: probabilistic mute. Density gates eligibility, glitch
+      // scales probability. Linear with floor: at glitch tip-on the
+      // probability jumps to minP, then ramps to maxP at glitch=1.
+      // Scaled to 16-bit threshold for cheap unsigned compare.
+      const float kMuteMinP = 0.02f;
+      const float kMuteMaxP = 0.40f;
+      const float mutePf = (glitchAmount > 0.0f)
+        ? density * (kMuteMinP + (kMuteMaxP - kMuteMinP) * glitchAmount)
+        : 0.0f;
+      const uint32_t muteThresh = (uint32_t)(mutePf * 65535.0f);
+
       for (int i = 0; i < activeTaps; i++)
       {
         // Per-tap LFO rate (S2). Hash for seeded per-tap variation
@@ -408,6 +446,45 @@ namespace stolmine
 
         mTapDelayTarget[i] += modOffset + pitchDetune;
         if (mTapDelayTarget[i] < 0.0f) mTapDelayTarget[i] = 0.0f;
+
+        // G1 — S&H on tap positions. Snapshot on initial activation
+        // (clock at 0 = freshly engaged or never wrapped) OR on clock
+        // wrap. Lerp continuous→snapshot by glitchAmount: at
+        // glitchAmount=0 we never enter this block; at glitchAmount=1
+        // we replace continuous with snapshot entirely.
+        if (glitchAmount > 0.0f)
+        {
+          const bool justActivated = (mTapShClock[i] == 0.0f);
+          mTapShClock[i] += shClkAdvance;
+          const bool wrapped = (mTapShClock[i] >= 1.0f);
+          if (wrapped) mTapShClock[i] -= floorf(mTapShClock[i]);
+          if (justActivated || wrapped)
+            mTapShValue[i] = mTapDelayTarget[i];
+          mTapDelayTarget[i] +=
+            glitchAmount * (mTapShValue[i] - mTapDelayTarget[i]);
+          if (mTapDelayTarget[i] < 0.0f) mTapDelayTarget[i] = 0.0f;
+        }
+        else
+        {
+          // Reset clock so the next re-engagement re-snapshots.
+          mTapShClock[i] = 0.0f;
+        }
+
+        // G3 — probabilistic mute. Multiplicative gain mask; smoother
+        // ramps to silence over the block, no clicks. Decision is
+        // re-evaluated each block (mGlitchLcg advances), so muted
+        // taps don't stick.
+        if (muteThresh > 0u)
+        {
+          uint32_t hMute = mGlitchLcg ^ ((uint32_t)i * 2654435761u + 0x33333333u);
+          hMute = hMute * 1103515245u + 12345u;
+          const uint32_t muteRand = (hMute >> 16) & 0xFFFFu;
+          if (muteRand < muteThresh)
+          {
+            mTapGainL[i] = 0.0f;
+            mTapGainR[i] = 0.0f;
+          }
+        }
 
         // L3 per-tap LP coefficient. ±30% cutoff variation around
         // the decay-driven base. Different XOR mask again to keep
@@ -499,7 +576,8 @@ namespace stolmine
       }
 
       // First-block snap: align oldRead with newRead so first block
-      // doesn't crossfade from a stale (zero-init) position.
+      // doesn't crossfade from a stale (zero-init) position. Also
+      // seed G1 S&H value so first activation has a sensible snapshot.
       if (mFirstProcess)
       {
         for (int t = 0; t < kMaxNetworkTaps; t++)
@@ -508,6 +586,7 @@ namespace stolmine
           mTapGainLSmoothed[t] = mTapGainL[t];
           mTapGainRSmoothed[t] = mTapGainR[t];
           mFbWeightSmoothed[t] = mFbWeight[t];
+          mTapShValue[t] = mTapDelayTarget[t];
         }
         mFirstProcess = false;
       }
@@ -883,6 +962,17 @@ namespace stolmine
     // accumulation in Pass C.
     float mTapLpState[kMaxNetworkTaps];
     float mTapLpCoeff[kMaxNetworkTaps];   // computed block-rate
+
+    // G1 glitch — per-tap sample-and-hold on tap delay positions.
+    // Clock phase advances at motion × glitch-scaled Hz; on wrap,
+    // snapshots the current (post-S1, post-S2) delay target. Lerp
+    // continuous→snapshot scaled by glitchAmount for smooth fade-in.
+    float mTapShClock[kMaxNetworkTaps];
+    float mTapShValue[kMaxNetworkTaps];
+
+    // Glitch RNG — separate from mWalkerLcg so glitch event timing
+    // is independent of motion phase.
+    uint32_t mGlitchLcg;
 
     // 4-stage allpass diffusion chain in feedback path. Phase-
     // decorrelates the recycled signal each cycle, breaking the

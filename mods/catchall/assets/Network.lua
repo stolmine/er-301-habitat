@@ -22,6 +22,7 @@ local densityMap = floatMap(0, 1)
 local motionMap = floatMap(0, 1)
 local connectivityMap = floatMap(0, 1)
 local decayMap = floatMap(0, 1)
+local glitchMap = floatMap(0, 1)
 local wetMap = floatMap(0, 1)
 local seedMap = (function()
   local m = app.LinearDialMap(0, 1)
@@ -85,6 +86,12 @@ function Network:onLoadGraph(channelCount)
   decay:hardSet("Bias", 0.5)
   tieParam("Decay", decay)
   self:addMonoBranch("decay", decay, "In", decay, "Out")
+
+  -- Glitch (Character macro — lush↔glitch)
+  local glitch = self:addObject("glitch", app.ParameterAdapter())
+  glitch:hardSet("Bias", 0.0)
+  tieParam("Glitch", glitch)
+  self:addMonoBranch("glitch", glitch, "In", glitch, "Out")
 
   -- Wet
   local wet = self:addObject("wet", app.ParameterAdapter())
@@ -156,6 +163,17 @@ function Network:onLoadViews(objects, branches)
       biasPrecision = 3,
       initialBias = 0.5
     },
+    glitch = GainBias {
+      button = "gltch",
+      description = "Glitch (Character macro)",
+      branch = branches.glitch,
+      gainbias = objects.glitch,
+      range = objects.glitch,
+      biasMap = glitchMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 3,
+      initialBias = 0.0
+    },
     wet = GainBias {
       button = "wet",
       description = "Dry/Wet mix",
@@ -168,7 +186,7 @@ function Network:onLoadViews(objects, branches)
       initialBias = 0.5
     }
   }, {
-    expanded = { "size", "density", "motion", "connectivity", "decay", "wet" },
+    expanded = { "size", "density", "motion", "connectivity", "decay", "glitch", "wet" },
     collapsed = {}
   }
 end
