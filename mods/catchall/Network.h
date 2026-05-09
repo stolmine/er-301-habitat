@@ -166,6 +166,14 @@ namespace stolmine
         mTapLpCoeff[i] = 0.5f;    // initial; recomputed each block
         mTapShClock[i] = 0.0f;    // G1 S&H clock phase
         mTapShValue[i] = 0.0f;    // G1 S&H captured snapshot (samples)
+        mTapStutterRemaining[i] = 0;  // G2 stutter: 0 = NORMAL
+        mTapStutterAnchor[i] = 0;     // G2 stutter anchor (read idx)
+        mTapCrushMask[i] = 0.0f;      // G8 crush: 0 = un-crushed
+        mTapCrushBitLvl[i] = 1.0f;    // identity bitcrush
+        mTapCrushInvBitLvl[i] = 1.0f;
+        mTapDecimFactorF[i] = 1.0f;   // factor=1 → decimate identity
+        mTapDecimCounterF[i] = 0.0f;
+        mTapDecimHold[i] = 0.0f;
       }
 
       // Glitch macro RNG state — independent of mWalkerLcg so glitch
@@ -499,6 +507,70 @@ namespace stolmine
         mTapLpCoeff[i] = coeff;
       }
 
+      // ---- G8 — bitcrush + decimate subset (block-rate setup) ----
+      // Per-tap subset chosen probabilistically: frac = density ×
+      // maxFrac × glitch, capped at 60% so we never reach 100%
+      // coverage. Per-affected-tap bit depth and decimate factor
+      // hashed independently so the crushed subset has flavor
+      // variation (some taps gritty 9-bit, others crushed 2.5-bit
+      // and held; etc.). Un-crushed taps get identity values so the
+      // per-sample NEON path is mathematically a no-op for them.
+      const float kCrushMaxFrac = 0.6f;
+      const float crushFrac = density * kCrushMaxFrac * glitchAmount;
+      const uint32_t crushFracThresh =
+        (uint32_t)(crushFrac * 65535.0f);
+      for (int i = 0; i < activeTaps; i++)
+      {
+        // Subset pick — same hash seed style as other glitch
+        // primitives, with G8's XOR mask.
+        uint32_t hCrush = mGlitchLcg ^
+          ((uint32_t)i * 2654435761u + 0xC3C3C3C3u);
+        hCrush = hCrush * 1103515245u + 12345u;
+        const uint32_t crushRand = (hCrush >> 16) & 0xFFFFu;
+        if (glitchAmount > 0.0f && crushRand < crushFracThresh)
+        {
+          mTapCrushMask[i] = 1.0f;
+
+          // Per-tap bit depth — Larets formula. bitParam ∈ [0.3, 1.0]
+          // → bitLvl ∈ [~568 (≈9-bit), ~5.66 (≈2.5-bit)]. Even the
+          // gentlest crushed tap is audibly bit-reduced.
+          hCrush = hCrush * 1103515245u + 12345u;
+          const float bitFrac =
+            (float)((hCrush >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
+          const float bitParam = 0.3f + 0.7f * bitFrac;
+          const float bitLvl = powf(2.0f, 12.0f - bitParam * 9.5f);
+          mTapCrushBitLvl[i] = bitLvl;
+          mTapCrushInvBitLvl[i] = 1.0f / bitLvl;
+
+          // Per-tap decimate factor — Larets formula, narrowed range.
+          // decimParam ∈ [0.0, 0.7] → factor ∈ [1, 23]. Avoid full
+          // ×32 freeze (overlaps G2 stutter character).
+          hCrush = hCrush * 1103515245u + 12345u;
+          const float decimFrac =
+            (float)((hCrush >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
+          const float decimParam = decimFrac * 0.7f;
+          int factor = 1 + (int)(decimParam * 31.0f);
+          mTapDecimFactorF[i] = (float)factor;
+        }
+        else
+        {
+          // Un-crushed: identity values. crushMask=0 makes the
+          // per-sample blend a no-op regardless of crushed branch.
+          mTapCrushMask[i] = 0.0f;
+          mTapCrushBitLvl[i] = 1.0f;
+          mTapCrushInvBitLvl[i] = 1.0f;
+          mTapDecimFactorF[i] = 1.0f;
+        }
+      }
+      // Inactive taps — identity.
+      for (int i = activeTaps; i < kMaxNetworkTaps; i++)
+      {
+        mTapCrushMask[i] = 0.0f;
+        mTapCrushBitLvl[i] = 1.0f;
+        mTapCrushInvBitLvl[i] = 1.0f;
+        mTapDecimFactorF[i] = 1.0f;
+      }
+
       // ---- Block-rate feedback selection (Phase 2) ----
       // Sparse selectable feedback recycling: pick k of activeTaps to
       // recycle into the write head. "Every-stride" allocation policy
@@ -573,6 +645,70 @@ namespace stolmine
         if (idx < 0) idx += maxDelay;
         if (idx >= maxDelay) idx -= maxDelay;
         mTapNewReadIdx[t] = idx;
+      }
+
+      // ---- G2 stutter/freeze override ----
+      // Per-tap state machine evaluated at block-rate. NORMAL taps
+      // can transition to STUTTER via probabilistic trigger. STUTTER
+      // taps override both old/new read indices to the captured
+      // anchor: the dual-read pair both advance equally from there
+      // through the block, reading a 256-sample forward window from
+      // history. Each block restarts at the anchor → 5ms-loop
+      // stutter audible at the block-boundary discontinuity.
+      //
+      // Trigger probability scales with decay × glitch (linear with
+      // floor; long-decay reverbs hold stutter audibly longer).
+      // Duration hashed 1..16 blocks (≈5..85ms at 48k/256-sample).
+      const float kStutterMinTrigP = 0.005f;
+      const float kStutterMaxTrigP = 0.05f;
+      const float stutterPf = (glitchAmount > 0.0f)
+        ? decay * (kStutterMinTrigP +
+                   (kStutterMaxTrigP - kStutterMinTrigP) * glitchAmount)
+        : 0.0f;
+      const uint32_t stutterTriggerThresh =
+        (uint32_t)(stutterPf * 65535.0f);
+      if (glitchAmount > 0.0f)
+      {
+        for (int t = 0; t < activeTaps; t++)
+        {
+          if (mTapStutterRemaining[t] > 0)
+          {
+            // Currently stuttering — override both indices to
+            // anchor. Per-sample Pass A advances both equally → 5ms
+            // forward read window from history.
+            mTapNewReadIdx[t] = mTapStutterAnchor[t];
+            mTapOldReadIdx[t] = mTapStutterAnchor[t];
+            mTapStutterRemaining[t]--;
+          }
+          else if (stutterTriggerThresh > 0u)
+          {
+            // NORMAL: hash decision to enter stutter.
+            uint32_t hStut = mGlitchLcg ^ ((uint32_t)t * 2654435761u + 0x66666666u);
+            hStut = hStut * 1103515245u + 12345u;
+            const uint32_t triggerRand = (hStut >> 16) & 0xFFFFu;
+            if (triggerRand < stutterTriggerThresh)
+            {
+              // Capture anchor at current read position.
+              mTapStutterAnchor[t] = mTapNewReadIdx[t];
+              // Hash for duration 1..16 blocks.
+              hStut = hStut * 1103515245u + 12345u;
+              const uint32_t durRand = (hStut >> 16) & 0xFu;
+              mTapStutterRemaining[t] = (uint8_t)(durRand + 1);
+              // Apply override this block.
+              mTapOldReadIdx[t] = mTapStutterAnchor[t];
+              mTapNewReadIdx[t] = mTapStutterAnchor[t];
+              mTapStutterRemaining[t]--;
+            }
+          }
+        }
+      }
+      else
+      {
+        // Glitch off: clear stutter state so re-engagement is fresh.
+        for (int t = 0; t < kMaxNetworkTaps; t++)
+        {
+          mTapStutterRemaining[t] = 0;
+        }
       }
 
       // First-block snap: align oldRead with newRead so first block
@@ -757,6 +893,33 @@ namespace stolmine
             lpState = vmlaq_f32(lpState, vsubq_f32(tapV, lpState), lpCoeff);
             vst1q_f32(&mTapLpState[t], lpState);
             tapV = lpState;
+
+            // G8: branchless bitcrush + decimate. Every tap pays the
+            // work; mTapCrushMask blends crushed vs original (un-
+            // crushed taps have identity bitLvl=1, factor=1, so the
+            // computed crushed value equals tapV anyway, and mask=0
+            // gates it out). Decimate state advances regardless.
+            float32x4_t cnt  = vld1q_f32(&mTapDecimCounterF[t]);
+            float32x4_t fct  = vld1q_f32(&mTapDecimFactorF[t]);
+            cnt = vaddq_f32(cnt, vdupq_n_f32(1.0f));
+            uint32x4_t wrapM = vcgeq_f32(cnt, fct);
+            float32x4_t held = vld1q_f32(&mTapDecimHold[t]);
+            held = vbslq_f32(wrapM, tapV, held);
+            cnt  = vbslq_f32(wrapM, vdupq_n_f32(0.0f), cnt);
+            vst1q_f32(&mTapDecimHold[t], held);
+            vst1q_f32(&mTapDecimCounterF[t], cnt);
+            // Bitcrush via integer truncation (NEON Cortex-A8 has no
+            // round-to-nearest; trunc-toward-zero gives slight
+            // asymmetry that the output DC blocker absorbs).
+            float32x4_t bLvl   = vld1q_f32(&mTapCrushBitLvl[t]);
+            float32x4_t invBL  = vld1q_f32(&mTapCrushInvBitLvl[t]);
+            float32x4_t scaled = vmulq_f32(held, bLvl);
+            int32x4_t   truncI = vcvtq_s32_f32(scaled);
+            float32x4_t crushed = vmulq_f32(vcvtq_f32_s32(truncI), invBL);
+            // Blend: tapV += crushMask × (crushed - tapV)
+            float32x4_t crM = vld1q_f32(&mTapCrushMask[t]);
+            tapV = vmlaq_f32(tapV, vsubq_f32(crushed, tapV), crM);
+
             wetLVec = vmlaq_f32(wetLVec, tapV, gLV);
             wetRVec = vmlaq_f32(wetRVec, tapV, gRV);
             fbVec   = vmlaq_f32(fbVec,   tapV, fbWV);
@@ -783,6 +946,17 @@ namespace stolmine
             // L3 per-tap LP.
             mTapLpState[t] += mTapLpCoeff[t] * (tapOut - mTapLpState[t]);
             tapOut = mTapLpState[t];
+            // G8 bitcrush + decimate (Larets formula in scalar path).
+            mTapDecimCounterF[t] += 1.0f;
+            if (mTapDecimCounterF[t] >= mTapDecimFactorF[t])
+            {
+              mTapDecimHold[t] = tapOut;
+              mTapDecimCounterF[t] = 0.0f;
+            }
+            const float crushedS =
+              floorf(mTapDecimHold[t] * mTapCrushBitLvl[t] + 0.5f)
+              * mTapCrushInvBitLvl[t];
+            tapOut += mTapCrushMask[t] * (crushedS - tapOut);
             wetL += tapOut * mTapGainLSmoothed[t];
             wetR += tapOut * mTapGainRSmoothed[t];
             fbSum += tapOut * mFbWeightSmoothed[t];
@@ -797,6 +971,17 @@ namespace stolmine
           // L3 per-tap LP.
           mTapLpState[t] += mTapLpCoeff[t] * (tapOut - mTapLpState[t]);
           tapOut = mTapLpState[t];
+          // G8 bitcrush + decimate (Larets formula).
+          mTapDecimCounterF[t] += 1.0f;
+          if (mTapDecimCounterF[t] >= mTapDecimFactorF[t])
+          {
+            mTapDecimHold[t] = tapOut;
+            mTapDecimCounterF[t] = 0.0f;
+          }
+          const float crushedS =
+            floorf(mTapDecimHold[t] * mTapCrushBitLvl[t] + 0.5f)
+            * mTapCrushInvBitLvl[t];
+          tapOut += mTapCrushMask[t] * (crushedS - tapOut);
           wetL += tapOut * mTapGainLSmoothed[t];
           wetR += tapOut * mTapGainRSmoothed[t];
           fbSum += tapOut * mFbWeightSmoothed[t];
@@ -969,6 +1154,30 @@ namespace stolmine
     // continuous→snapshot scaled by glitchAmount for smooth fade-in.
     float mTapShClock[kMaxNetworkTaps];
     float mTapShValue[kMaxNetworkTaps];
+
+    // G2 glitch — per-tap stutter/freeze. mTapStutterRemaining is
+    // the block-countdown (0 = NORMAL, n>0 = STUTTER for n more
+    // blocks). mTapStutterAnchor is the captured read index that
+    // both old/new pointers reset to at the start of each stuttered
+    // block — the dual-read pair both advance equally from there,
+    // producing a 256-sample (≈5ms at 48k) forward window per block.
+    // Block-to-block discontinuity at the loop boundary is the
+    // stutter character.
+    uint8_t mTapStutterRemaining[kMaxNetworkTaps];
+    int mTapStutterAnchor[kMaxNetworkTaps];
+
+    // G8 glitch — per-tap bitcrush + sample-rate decimate. Subset of
+    // taps chosen probabilistically each block; per-affected-tap
+    // bit depth and decimate factor seeded. Branchless NEON apply
+    // in Pass C: every tap pays the work, crushMask blends crushed
+    // vs original (mask=0 → identity, mask=1 → fully crushed).
+    // Lifted from mods/spreadsheet/Larets.cpp:265-278.
+    float mTapCrushMask[kMaxNetworkTaps];      // 0 or 1, block-rate
+    float mTapCrushBitLvl[kMaxNetworkTaps];    // 2^(12 - bitParam·9.5)
+    float mTapCrushInvBitLvl[kMaxNetworkTaps]; // 1/bitLvl
+    float mTapDecimFactorF[kMaxNetworkTaps];   // hold-and-resample factor (≥1)
+    float mTapDecimCounterF[kMaxNetworkTaps];  // per-sample counter
+    float mTapDecimHold[kMaxNetworkTaps];      // per-sample held value
 
     // Glitch RNG — separate from mWalkerLcg so glitch event timing
     // is independent of motion phase.
