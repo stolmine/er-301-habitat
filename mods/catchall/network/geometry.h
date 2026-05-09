@@ -118,10 +118,15 @@ namespace stolmine
       float *gainL,
       float *gainR)
     {
-      // Listener position on unit circle. motion 0..1 = full
-      // revolution; values outside [0,1] wrap.
-      const float listenerX = network_trig::poly_cos(motion);
-      const float listenerY = network_trig::poly_sin(motion);
+      // Listener position on circle of radius 1.3 (slightly outside
+      // the unit-disc reflector field). Keeps minimum distance from
+      // any reflector at ~0.3, preventing the close-pass amplitude
+      // spikes that produced the 30-50Hz periodic-impulse artifacts
+      // when the orbit radius matched the field radius. Listener still
+      // moves spatially through the field, just doesn't pierce it.
+      const float kListenerRadius = 1.3f;
+      const float listenerX = network_trig::poly_cos(motion) * kListenerRadius;
+      const float listenerY = network_trig::poly_sin(motion) * kListenerRadius;
 
       const float invMaxDist = 1.0f / kMaxDist;
       const float maxDelayF = (float)(maxDelay - 1);
@@ -146,9 +151,16 @@ namespace stolmine
         if (distNorm > 1.0f) distNorm = 1.0f;
         delayTarget[i] = sizeNorm * distNorm * maxDelayF;
 
-        // Gain: 1/r with min-dist clamp; cap at 5x for sanity.
-        float gain = network_trig::reciprocal(distClamped) * gainScale;
-        if (gain > 5.0f) gain = 5.0f;
+        // Constant per-tap magnitude (distance-independent). Schroeder/
+        // Dattorro pattern — uniform tap gains, spatial illusion comes
+        // from delay distribution + stereo placement only. Eliminates
+        // the close-pass amplitude modulation that was the source of
+        // the periodic-impulse train at walker traversal frequency:
+        // total per-tap energy (gainL + gainR) = 0.5 is invariant
+        // under listener motion, so mono output amplitude is constant.
+        // Pan (below) still tracks azimuth, so stereo direction still
+        // moves with the listener.
+        const float gain = 0.5f * gainScale;
 
         // Pan: dy/dist gives the y-component of the unit vector from
         // listener to reflector — equivalent to sin(azimuth).

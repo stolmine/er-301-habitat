@@ -21,7 +21,6 @@ local sizeMap = floatMap(0, 1)
 local densityMap = floatMap(0, 1)
 local motionMap = floatMap(0, 1)
 local connectivityMap = floatMap(0, 1)
-local softenMap = floatMap(0, 1)
 local decayMap = floatMap(0, 1)
 local wetMap = floatMap(0, 1)
 local seedMap = (function()
@@ -80,12 +79,6 @@ function Network:onLoadGraph(channelCount)
   connectivity:hardSet("Bias", 0.0)
   tieParam("Connectivity", connectivity)
   self:addMonoBranch("connectivity", connectivity, "In", connectivity, "Out")
-
-  -- Soften (allpass diffusion in feedback path)
-  local soften = self:addObject("soften", app.ParameterAdapter())
-  soften:hardSet("Bias", 0.0)
-  tieParam("Soften", soften)
-  self:addMonoBranch("soften", soften, "In", soften, "Out")
 
   -- Decay
   local decay = self:addObject("decay", app.ParameterAdapter())
@@ -152,17 +145,6 @@ function Network:onLoadViews(objects, branches)
       biasPrecision = 3,
       initialBias = 0.0
     },
-    soften = GainBias {
-      button = "soft",
-      description = "Soften (feedback diffusion)",
-      branch = branches.soften,
-      gainbias = objects.soften,
-      range = objects.soften,
-      biasMap = softenMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 3,
-      initialBias = 0.0
-    },
     decay = GainBias {
       button = "decay",
       description = "Decay (feedback)",
@@ -186,7 +168,7 @@ function Network:onLoadViews(objects, branches)
       initialBias = 0.5
     }
   }, {
-    expanded = { "size", "density", "motion", "connectivity", "soften", "decay", "wet" },
+    expanded = { "size", "density", "motion", "connectivity", "decay", "wet" },
     collapsed = {}
   }
 end

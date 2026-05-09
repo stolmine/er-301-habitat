@@ -45,17 +45,19 @@ namespace stolmine
 
   // Allpass diffusion stage delay lengths (samples). Primes for max
   // decorrelation between stages — no shared resonant subharmonics.
-  // Total chain length ~12ms at 48kHz. Per-stage allpass formula:
+  // Total chain length ~32ms at 48kHz (matches mid-range Schroeder
+  // diffuser; previous 12ms was too short for noticeable spectral
+  // smearing below ~1kHz). Per-stage allpass formula:
   //   v[n] = x[n] + g·buf[n-D]
   //   y[n] = -g·v[n] + buf[n-D]
   //   buf[n] = v[n]
   // Phase scrambled, magnitude spectrum unchanged. Schroeder/Dattorro
   // pattern — directly addresses feedback-loop resonance accumulation
   // by phase-decorrelating the recycled signal each cycle.
-  static const int kNetworkAp1Len = 53;
-  static const int kNetworkAp2Len = 97;
-  static const int kNetworkAp3Len = 167;
-  static const int kNetworkAp4Len = 251;
+  static const int kNetworkAp1Len = 167;
+  static const int kNetworkAp2Len = 263;
+  static const int kNetworkAp3Len = 419;
+  static const int kNetworkAp4Len = 677;
 
   static inline float networkAllpassStep(float in, float *buf, int N, int &idx, float g)
   {
@@ -68,13 +70,13 @@ namespace stolmine
     return out;
   }
 
-  // DC-blocker pole coefficient (matches Pecto.cpp DC blocker, ≈7.6Hz
-  // cutoff at 48kHz). Network applies three blockers: input, feedback
-  // path, and stereo output. Without these, asymmetric tanh
-  // saturation under sustained input + feedback latches the buffer
-  // into DC offset (signal drifts past tanh's saturation range,
-  // output becomes constant +1, speakers hear silence).
-  static const float kNetworkDcR = 0.999f;
+  // High-pass coefficient (~50Hz cutoff at 48kHz: R = 1 - 2π·50/48000).
+  // Network applies three HPFs: input, feedback path, and stereo
+  // output. Without these, asymmetric tanh saturation under
+  // sustained feedback latches the buffer into DC offset.
+  // Bumped from 0.999 (~7.6Hz cutoff) to suppress sub-bass standing
+  // waves that accrue in low-frequency reaches of the feedback loop.
+  static const float kNetworkDcR = 0.9935f;
 
   // Fast tanh approximation (Padé 3/3). Lifted from Pecto.cpp:31-37.
   // Smooth, bounded ±1, monotonic — appropriate for feedback soft-
@@ -119,7 +121,6 @@ namespace stolmine
       addParameter(mInputLevel);
       addParameter(mSeed);
       addParameter(mConnectivity);
-      addParameter(mSoften);
 
       // Initial reflector field at default seed.
       mLastSeed = 0xC0FFEE17u;
@@ -131,11 +132,12 @@ namespace stolmine
         mTapDelayTarget[i] = 0.0f;
         mTapGainL[i] = 0.0f;
         mTapGainR[i] = 0.0f;
-        mTapDelaySmoothed[i] = 0.0f;
         mTapGainLSmoothed[i] = 0.0f;
         mTapGainRSmoothed[i] = 0.0f;
         mFbWeight[i] = 0.0f;
         mFbWeightSmoothed[i] = 0.0f;
+        mTapOldReadIdx[i] = 0;
+        mTapNewReadIdx[i] = 0;
       }
 
       mWriteIndex = 0;
@@ -153,6 +155,9 @@ namespace stolmine
       mWalkerPos = 0.0f;
       mWalkerVel = 0.0f;
       mWalkerLcg = 0xCAFEBABEu;
+
+      // Per-tap shimmer LFO
+      mLfoPhase = 0.0f;
 
       // Allpass diffusion buffers (4-stage Schroeder chain)
       memset(mApBuf1, 0, sizeof(mApBuf1));
@@ -198,7 +203,9 @@ namespace stolmine
     od::Parameter mDensity{"Density", 0.5f};      // 0..1, fraction of reflectors active
     od::Parameter mMotion{"Motion", 0.0f};        // 0..1, listener phase around orbit
     od::Parameter mConnectivity{"Connectivity", 0.0f}; // 0..1, fraction of taps recycling
-    od::Parameter mSoften{"Soften", 0.0f};        // 0..1, allpass diffusion in fb path
+    // Soften (allpass diffusion in fb path) is now driven 1:1 by
+    // connectivity — diffusion strength scales with feedback intensity
+    // automatically. No separate ply.
     od::Parameter mDecay{"Decay", 0.5f};          // 0..1, feedback gain scaler
     od::Parameter mWet{"Wet", 0.5f};              // 0..1, dry/wet mix
     od::Parameter mInputLevel{"InputLevel", 1.0f};
@@ -224,7 +231,11 @@ namespace stolmine
 
       // ---- Block-rate parameter reads + clamps ----
       float sizeNorm = mSize.value();
-      if (!(sizeNorm >= 0.0f)) sizeNorm = 0.0f;
+      if (!(sizeNorm >= 0.01f)) sizeNorm = 0.01f;     // sub-1% causes
+                                                      // major problems
+                                                      // (taps collapse
+                                                      // to 0 delay,
+                                                      // direct fb path)
       if (sizeNorm > 1.0f) sizeNorm = 1.0f;
 
       float density = mDensity.value();
@@ -251,9 +262,11 @@ namespace stolmine
       if (!(connectivity >= 0.0f)) connectivity = 0.0f;
       if (connectivity > 1.0f) connectivity = 1.0f;
 
-      float soften = mSoften.value();
-      if (!(soften >= 0.0f)) soften = 0.0f;
-      if (soften > 1.0f) soften = 1.0f;
+      // Soften ties 1:1 to connectivity — diffusion auto-scales with
+      // feedback intensity (more recycling = more diffusion to suppress
+      // resonance buildup). User experiences it as conn-dependent
+      // smoothness, no separate knob.
+      const float soften = connectivity;
 
       float wet = mWet.value();
       if (!(wet >= 0.0f)) wet = 0.0f;
@@ -307,6 +320,31 @@ namespace stolmine
         mTapGainL,
         mTapGainR);
 
+      // ---- Per-tap shimmer LFO (Rings-style chorus) ----
+      // Rings's reverb (eurorack/rings/dsp/fx/reverb.h:111,123)
+      // modulates its long delay reads with slow LFOs (0.3, 0.5 Hz)
+      // at depth 40-50 samples (~1ms). This is what gives Rings its
+      // characteristic shimmer and breaks comb-filter coherence in
+      // the feedback loop. We apply the same idea: single global
+      // LFO advanced at 0.5 Hz, per-tap phase offset via golden
+      // angle so each tap wobbles independently. Mod depth small
+      // (~8 samples / 0.17ms) — just enough to break coherence
+      // without audible chorus pitch wobble.
+      const float kLfoHz = 0.5f;
+      const float kLfoDepthSamples = 8.0f;
+      const float kGoldenAngleTurns = 0.3819660113f;
+      mLfoPhase += kLfoHz * blockDt;
+      mLfoPhase -= floorf(mLfoPhase);
+      for (int i = 0; i < activeTaps; i++)
+      {
+        float tapPhase = mLfoPhase + (float)i * kGoldenAngleTurns;
+        tapPhase -= floorf(tapPhase);
+        const float modOffset =
+          network_trig::poly_sin(tapPhase) * kLfoDepthSamples;
+        mTapDelayTarget[i] += modOffset;
+        if (mTapDelayTarget[i] < 0.0f) mTapDelayTarget[i] = 0.0f;
+      }
+
       // ---- Block-rate feedback selection (Phase 2) ----
       // Sparse selectable feedback recycling: pick k of activeTaps to
       // recycle into the write head. "Every-stride" allocation policy
@@ -353,20 +391,43 @@ namespace stolmine
       }
 
       // ---- Per-sample LP smoother coefficient ----
-      // ~25ms time constant matches Pecto.cpp:486
-      // (feedback_doppler_basedelay_smoother). Same alpha used for
-      // delay, gainL, gainR smoothers.
-      const float smoothAlpha = 1.0f / (0.025f * globalConfig.sampleRate);
+      // 50ms time constant for gain (pan-tracking, density-change
+      // fade) and fb_weight (user-driven changes). Delay is no longer
+      // smoothed here — replaced by dual-read crossfade pattern below.
+      const float smoothAlpha = 1.0f / (0.05f * globalConfig.sampleRate);
 
-      // First-block snap: prime the smoothed arrays to current targets
-      // so the unit doesn't sweep audibly from 0 to target on insert.
-      // Plain inline loop (no noinline helper) — tries to avoid the
-      // crash signature the previous Phase 1.alpha bisect localized.
+      // ---- Block-rate dual-read shift ----
+      // Doppler-free crossfading delay (ER-301 builtin Delay pattern,
+      // mods/core/objects/delays/Delay.cpp:184). Each block: shift
+      // mTapOldReadIdx[t] = mTapNewReadIdx[t] (carry over previous
+      // block's "new" position), then compute fresh mTapNewReadIdx[t]
+      // from current geometry-derived integer delay. Both indices
+      // advance by 1 per sample within the block (no rate slewing →
+      // no Doppler chirp). Pass C below crossfades from old read to
+      // new read across the block via per-sample weight w (1 → 0).
+      // Every block triggers a one-block-long fade. Fades chain
+      // continuously, eliminating the singularity that produces
+      // close-pass impulses.
+      for (int t = 0; t < kMaxNetworkTaps; t++)
+      {
+        mTapOldReadIdx[t] = mTapNewReadIdx[t];   // carry over
+        // Quantize current delay target to integer samples.
+        int newDelay = (int)(mTapDelayTarget[t] + 0.5f);
+        if (newDelay < 0) newDelay = 0;
+        if (newDelay >= maxDelay) newDelay = maxDelay - 1;
+        int idx = mWriteIndex - newDelay;
+        if (idx < 0) idx += maxDelay;
+        if (idx >= maxDelay) idx -= maxDelay;
+        mTapNewReadIdx[t] = idx;
+      }
+
+      // First-block snap: align oldRead with newRead so first block
+      // doesn't crossfade from a stale (zero-init) position.
       if (mFirstProcess)
       {
         for (int t = 0; t < kMaxNetworkTaps; t++)
         {
-          mTapDelaySmoothed[t] = mTapDelayTarget[t];
+          mTapOldReadIdx[t] = mTapNewReadIdx[t];
           mTapGainLSmoothed[t] = mTapGainL[t];
           mTapGainRSmoothed[t] = mTapGainR[t];
           mFbWeightSmoothed[t] = mFbWeight[t];
@@ -374,10 +435,11 @@ namespace stolmine
         mFirstProcess = false;
       }
 
+      // Crossfade weight ramp (1 → 0 across block). Precomputed once
+      // since it's the same every block.
+      const float kInvFrameLengthMinus1 = 1.0f / (float)(FRAMELENGTH - 1);
+
       // ---- Scratch arrays for 3-pass tap processing ----
-      int32_t idx0[kMaxNetworkTaps];
-      int32_t idx1[kMaxNetworkTaps];
-      float frac[kMaxNetworkTaps];
       int16_t sA[kMaxNetworkTaps];
       int16_t sB[kMaxNetworkTaps];
       const float scale = 1.0f / 32767.0f;
@@ -398,29 +460,23 @@ namespace stolmine
 
         if (mWriteIndex >= maxDelay) mWriteIndex = 0;
 
-        const float writeIdxF = (float)mWriteIndex;
-        const float maxDelayF = (float)maxDelay;
+        // Crossfade weight: 1 at i=0, 0 at i=FRAMELENGTH-1. Per-sample
+        // scalar, broadcast in NEON Pass C.
+        const float w = 1.0f - (float)i * kInvFrameLengthMinus1;
 
-        // ---- Per-sample smoother step ----
-        // One-pole LP on each per-tap target → smoothed. Iterates over
-        // kMaxNetworkTaps so taps fading from inactive→active (or
-        // vice-versa as density changes) get smooth transitions in
-        // gain (target=0 for inactive). Pass A/C read smoothed arrays
-        // below.
+        // ---- Per-sample gain/fb_weight smoother step ----
+        // One-pole LP on per-tap gain and fb_weight targets. Iterates
+        // over kMaxNetworkTaps so taps fading from inactive→active
+        // (density changes) get smooth gain ramps. Delay smoothing
+        // is gone — replaced by dual-read crossfade below.
 #ifdef NETWORK_HAS_NEON
         {
           int t = 0;
           for (; t + 4 <= kMaxNetworkTaps; t += 4)
           {
-            // Tap delay
-            float32x4_t tgt = vld1q_f32(&mTapDelayTarget[t]);
-            float32x4_t sm  = vld1q_f32(&mTapDelaySmoothed[t]);
-            sm = vmlaq_f32(sm, vsubq_f32(tgt, sm), alphaVec);
-            vst1q_f32(&mTapDelaySmoothed[t], sm);
-
             // Gain L
-            tgt = vld1q_f32(&mTapGainL[t]);
-            sm  = vld1q_f32(&mTapGainLSmoothed[t]);
+            float32x4_t tgt = vld1q_f32(&mTapGainL[t]);
+            float32x4_t sm  = vld1q_f32(&mTapGainLSmoothed[t]);
             sm = vmlaq_f32(sm, vsubq_f32(tgt, sm), alphaVec);
             vst1q_f32(&mTapGainLSmoothed[t], sm);
 
@@ -430,7 +486,7 @@ namespace stolmine
             sm = vmlaq_f32(sm, vsubq_f32(tgt, sm), alphaVec);
             vst1q_f32(&mTapGainRSmoothed[t], sm);
 
-            // Feedback weight (Phase 2)
+            // Feedback weight
             tgt = vld1q_f32(&mFbWeight[t]);
             sm  = vld1q_f32(&mFbWeightSmoothed[t]);
             sm = vmlaq_f32(sm, vsubq_f32(tgt, sm), alphaVec);
@@ -440,18 +496,19 @@ namespace stolmine
 #else
         for (int t = 0; t < kMaxNetworkTaps; t++)
         {
-          mTapDelaySmoothed[t] += (mTapDelayTarget[t] - mTapDelaySmoothed[t]) * smoothAlpha;
           mTapGainLSmoothed[t] += (mTapGainL[t] - mTapGainLSmoothed[t]) * smoothAlpha;
           mTapGainRSmoothed[t] += (mTapGainR[t] - mTapGainRSmoothed[t]) * smoothAlpha;
           mFbWeightSmoothed[t] += (mFbWeight[t] - mFbWeightSmoothed[t]) * smoothAlpha;
         }
 #endif
+
+        // ---- Pass A (dual-read advance) ----
+        // Doppler-free: each tap's old/new read indices increment by
+        // 1 per sample, wrap at maxDelay. No idx-from-delay math, no
+        // fractional interp. The ER-301 builtin Delay does this same
+        // pattern (Delay.cpp:209-219).
 #ifdef NETWORK_HAS_NEON
-        // ---- Pass A (NEON): compute idx0 / idx1 / frac per tap ----
         {
-          const float32x4_t writeIdxVec = vdupq_n_f32(writeIdxF);
-          const float32x4_t zeroVec = vdupq_n_f32(0.0f);
-          const float32x4_t maxDelayFVec = vdupq_n_f32(maxDelayF);
           const int32x4_t maxDelayVec = vdupq_n_s32(maxDelay);
           const int32x4_t oneVec = vdupq_n_s32(1);
           const int32x4_t zeroIVec = vdupq_n_s32(0);
@@ -459,59 +516,51 @@ namespace stolmine
           int t = 0;
           for (; t + 4 <= activeTaps; t += 4)
           {
-            float32x4_t delay = vld1q_f32(&mTapDelaySmoothed[t]);
-            float32x4_t p = vsubq_f32(writeIdxVec, delay);
-            uint32x4_t negMask = vcltq_f32(p, zeroVec);
-            float32x4_t pWrap = vaddq_f32(p, maxDelayFVec);
-            p = vbslq_f32(negMask, pWrap, p);
-            int32x4_t i0v = vcvtq_s32_f32(p);
-            // idx0 ulp-edge guard — feedback_multitap_idx_wrap_ulp.
-            uint32x4_t i0WrapMask = vcgeq_s32(i0v, maxDelayVec);
-            i0v = vbslq_s32(i0WrapMask, zeroIVec, i0v);
-            int32x4_t i1v = vaddq_s32(i0v, oneVec);
-            uint32x4_t i1WrapMask = vcgeq_s32(i1v, maxDelayVec);
-            i1v = vbslq_s32(i1WrapMask, zeroIVec, i1v);
-            float32x4_t fracV = vsubq_f32(p, vcvtq_f32_s32(i0v));
-            vst1q_s32(&idx0[t], i0v);
-            vst1q_s32(&idx1[t], i1v);
-            vst1q_f32(&frac[t], fracV);
+            // Old read
+            int32x4_t oldIdx = vld1q_s32(&mTapOldReadIdx[t]);
+            oldIdx = vaddq_s32(oldIdx, oneVec);
+            uint32x4_t oldWrap = vcgeq_s32(oldIdx, maxDelayVec);
+            oldIdx = vbslq_s32(oldWrap, zeroIVec, oldIdx);
+            vst1q_s32(&mTapOldReadIdx[t], oldIdx);
+
+            // New read
+            int32x4_t newIdx = vld1q_s32(&mTapNewReadIdx[t]);
+            newIdx = vaddq_s32(newIdx, oneVec);
+            uint32x4_t newWrap = vcgeq_s32(newIdx, maxDelayVec);
+            newIdx = vbslq_s32(newWrap, zeroIVec, newIdx);
+            vst1q_s32(&mTapNewReadIdx[t], newIdx);
           }
           for (; t < activeTaps; t++)
           {
-            float p = writeIdxF - mTapDelaySmoothed[t];
-            if (p < 0.0f) p += maxDelayF;
-            int i0 = (int)p;
-            if (i0 >= maxDelay) i0 = 0;
-            int i1 = i0 + 1;
-            if (i1 >= maxDelay) i1 = 0;
-            idx0[t] = i0;
-            idx1[t] = i1;
-            frac[t] = p - (float)i0;
+            int o = mTapOldReadIdx[t] + 1;
+            if (o >= maxDelay) o = 0;
+            mTapOldReadIdx[t] = o;
+            int n = mTapNewReadIdx[t] + 1;
+            if (n >= maxDelay) n = 0;
+            mTapNewReadIdx[t] = n;
           }
         }
 #else
         for (int t = 0; t < activeTaps; t++)
         {
-          float p = writeIdxF - mTapDelaySmoothed[t];
-          if (p < 0.0f) p += maxDelayF;
-          int i0 = (int)p;
-          if (i0 >= maxDelay) i0 = 0;
-          int i1 = i0 + 1;
-          if (i1 >= maxDelay) i1 = 0;
-          idx0[t] = i0;
-          idx1[t] = i1;
-          frac[t] = p - (float)i0;
+          int o = mTapOldReadIdx[t] + 1;
+          if (o >= maxDelay) o = 0;
+          mTapOldReadIdx[t] = o;
+          int n = mTapNewReadIdx[t] + 1;
+          if (n >= maxDelay) n = 0;
+          mTapNewReadIdx[t] = n;
         }
 #endif
 
         // ---- Pass B (scalar gather + 8-ahead prefetch) ----
+        // sA from old read pointer, sB from new read pointer.
         for (int t = 0; t < activeTaps; t++)
         {
           int pfIdx = t + 8;
           if (pfIdx < activeTaps)
-            __builtin_prefetch(&buf[idx0[pfIdx]], 0, 1);
-          sA[t] = buf[idx0[t]];
-          sB[t] = buf[idx1[t]];
+            __builtin_prefetch(&buf[mTapOldReadIdx[pfIdx]], 0, 1);
+          sA[t] = buf[mTapOldReadIdx[t]];
+          sB[t] = buf[mTapNewReadIdx[t]];
         }
 
         float wetL = 0.0f;
@@ -528,6 +577,11 @@ namespace stolmine
           float32x4_t wetLVec = vdupq_n_f32(0.0f);
           float32x4_t wetRVec = vdupq_n_f32(0.0f);
           float32x4_t fbVec   = vdupq_n_f32(0.0f);
+          // Crossfade weight: per-sample scalar w in [0, 1] broadcast
+          // across all 4-tap iterations. tapV = bV + (aV - bV) * w.
+          // At i=0, w=1 → all sA. At i=FRAMELENGTH-1, w=0 → all sB.
+          // Smooth blend across block from old read to new read.
+          const float32x4_t wVec = vdupq_n_f32(w);
           int t = 0;
           for (; t + 4 <= activeTaps; t += 4)
           {
@@ -535,11 +589,11 @@ namespace stolmine
             int16x4_t sBi = vld1_s16(&sB[t]);
             float32x4_t aV = vmulq_f32(vcvtq_f32_s32(vmovl_s16(sAi)), scaleVec);
             float32x4_t bV = vmulq_f32(vcvtq_f32_s32(vmovl_s16(sBi)), scaleVec);
-            float32x4_t fV = vld1q_f32(&frac[t]);
             float32x4_t gLV = vld1q_f32(&mTapGainLSmoothed[t]);
             float32x4_t gRV = vld1q_f32(&mTapGainRSmoothed[t]);
             float32x4_t fbWV = vld1q_f32(&mFbWeightSmoothed[t]);
-            float32x4_t tapV = vmlaq_f32(aV, vsubq_f32(bV, aV), fV);
+            // Crossfade old → new read via shared per-sample weight.
+            float32x4_t tapV = vmlaq_f32(bV, vsubq_f32(aV, bV), wVec);
             wetLVec = vmlaq_f32(wetLVec, tapV, gLV);
             wetRVec = vmlaq_f32(wetRVec, tapV, gRV);
             fbVec   = vmlaq_f32(fbVec,   tapV, fbWV);
@@ -562,7 +616,7 @@ namespace stolmine
           {
             float a = (float)sA[t] * scale;
             float b = (float)sB[t] * scale;
-            float tapOut = a + (b - a) * frac[t];
+            float tapOut = b + (a - b) * w;
             wetL += tapOut * mTapGainLSmoothed[t];
             wetR += tapOut * mTapGainRSmoothed[t];
             fbSum += tapOut * mFbWeightSmoothed[t];
@@ -573,7 +627,7 @@ namespace stolmine
         {
           float a = (float)sA[t] * scale;
           float b = (float)sB[t] * scale;
-          float tapOut = a + (b - a) * frac[t];
+          float tapOut = b + (a - b) * w;
           wetL += tapOut * mTapGainLSmoothed[t];
           wetR += tapOut * mTapGainRSmoothed[t];
           fbSum += tapOut * mFbWeightSmoothed[t];
@@ -597,11 +651,14 @@ namespace stolmine
         // walker timescale. Mixed by `soften` parameter — at 0 the
         // raw fb is used (preserves glitch / event identity); at 1
         // full diffusion (lush reverb cloud).
-        const float kApG = 0.6f;
-        float diffused = networkAllpassStep(fbDc,    mApBuf1, kNetworkAp1Len, mApIdx1, kApG);
-        diffused       = networkAllpassStep(diffused, mApBuf2, kNetworkAp2Len, mApIdx2, kApG);
-        diffused       = networkAllpassStep(diffused, mApBuf3, kNetworkAp3Len, mApIdx3, kApG);
-        diffused       = networkAllpassStep(diffused, mApBuf4, kNetworkAp4Len, mApIdx4, kApG);
+        //
+        // Progressive g per stage: gentler at start (less ringing,
+        // more "blur"), stronger at end (more recursive scrambling)
+        // — matches Schroeder's original recommendation.
+        float diffused = networkAllpassStep(fbDc,    mApBuf1, kNetworkAp1Len, mApIdx1, 0.55f);
+        diffused       = networkAllpassStep(diffused, mApBuf2, kNetworkAp2Len, mApIdx2, 0.65f);
+        diffused       = networkAllpassStep(diffused, mApBuf3, kNetworkAp3Len, mApIdx3, 0.70f);
+        diffused       = networkAllpassStep(diffused, mApBuf4, kNetworkAp4Len, mApIdx4, 0.75f);
         const float fb = fbDc + soften * (diffused - fbDc);
 
         // Buffer-write soft saturation: x + fb can reach ±2, but the
@@ -673,9 +730,27 @@ namespace stolmine
     // smoother with ~25ms time constant — same pattern as Pecto's
     // mSmoothedBaseDelay (feedback_doppler_basedelay_smoother) but
     // per-tap instead of global.
-    float mTapDelaySmoothed[kMaxNetworkTaps];
+    // Smoothed gain (target) values — pan tracking, density-change
+    // fade-in/out. Delay smoothing has been replaced by the dual-read
+    // crossfade pattern (mTapOldReadIdx / mTapNewReadIdx below) so
+    // there's no mTapDelaySmoothed array anymore. Math credit:
+    // ER-301 builtin Delay (mods/core/objects/delays/Delay.cpp:184),
+    // PDF design notes (planning/refs/multitap-comb-design-notes.pdf).
     float mTapGainLSmoothed[kMaxNetworkTaps];
     float mTapGainRSmoothed[kMaxNetworkTaps];
+
+    // Dual read indices per tap. Per ER-301 builtin Delay pattern
+    // (Doppler-free crossfading delay): each block we shift
+    // mTapOldReadIdx[t] = mTapNewReadIdx[t] (carry-over) and compute
+    // a new mTapNewReadIdx[t] from the current geometry-derived
+    // integer delay. Within the block, both indices advance by 1
+    // per sample (no rate slewing, no Doppler chirp). Pass C
+    // crossfades from sA (old read) to sB (new read) via a per-
+    // sample weight w that ramps 1 → 0 across the block — every
+    // block boundary triggers a one-block-long fade, fades chain
+    // continuously without gap.
+    int32_t mTapOldReadIdx[kMaxNetworkTaps];
+    int32_t mTapNewReadIdx[kMaxNetworkTaps];
     // Phase 2: per-tap feedback weight (target + smoothed).
     float mFbWeight[kMaxNetworkTaps];
     float mFbWeightSmoothed[kMaxNetworkTaps];
@@ -697,6 +772,13 @@ namespace stolmine
     float mWalkerPos;        // [0, 1) — current orbit phase
     float mWalkerVel;        // smoothed velocity, ~[-1, +1]
     uint32_t mWalkerLcg;     // deterministic random source
+
+    // Per-tap delay LFO phase. Single global phase advanced each block
+    // at ~0.5 Hz (matches Rings reverb's chorus-LFO frequency). Per-
+    // tap modulation phase = mLfoPhase + i × goldenAngle. Adds
+    // shimmer/chorus character and breaks comb-filter coherence at
+    // quasi-static listener positions. Modulation depth ~8 samples.
+    float mLfoPhase;
 
     // 4-stage allpass diffusion chain in feedback path. Phase-
     // decorrelates the recycled signal each cycle, breaking the
