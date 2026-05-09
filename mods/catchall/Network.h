@@ -78,6 +78,21 @@ namespace stolmine
   // waves that accrue in low-frequency reaches of the feedback loop.
   static const float kNetworkDcR = 0.9935f;
 
+  // Triangular distribution sampler. Maps a uniform [0,1] hash to a
+  // [0,1] value with density peak at `mode`. Both extremes always
+  // reachable; just less frequent the further from `mode`. Used by
+  // glitch primitives to weight per-event continuum-distributed
+  // values (loop length, duration, crush severity, ...) toward an
+  // anchor parameter while keeping the full range available
+  // regardless of where the anchor sits.
+  // One sqrtf per call; called only on rare events (block-rate per
+  // crushed tap or per stutter trigger), so cheap on Cortex-A8.
+  static inline float networkTriangularSample(float u, float mode)
+  {
+    if (u < mode) return sqrtf(u * mode);
+    return 1.0f - sqrtf((1.0f - u) * (1.0f - mode));
+  }
+
   // Fast tanh approximation (Padé 3/3). Lifted from Pecto.cpp:31-37.
   // Smooth, bounded ±1, monotonic — appropriate for feedback soft-
   // saturation where a hard clamp would kill DSP via a latched
@@ -168,6 +183,8 @@ namespace stolmine
         mTapShValue[i] = 0.0f;    // G1 S&H captured snapshot (samples)
         mTapStutterRemaining[i] = 0;  // G2 stutter: 0 = NORMAL
         mTapStutterAnchor[i] = 0;     // G2 stutter anchor (read idx)
+        mTapStutterLength[i] = 0;     // G2 loop length (blocks)
+        mTapStutterPos[i] = 0;        // G2 position within loop
         mTapCrushMask[i] = 0.0f;      // G8 crush: 0 = un-crushed
         mTapCrushBitLvl[i] = 1.0f;    // identity bitcrush
         mTapCrushInvBitLvl[i] = 1.0f;
@@ -297,11 +314,14 @@ namespace stolmine
       float glitchAmount = mGlitch.value();
       if (!(glitchAmount >= 0.0f)) glitchAmount = 0.0f;
       if (glitchAmount > 1.0f) glitchAmount = 1.0f;
-
-      // Per-block glitch RNG advance — gives time-varying randomness
-      // for per-block glitch decisions (mute, etc.) so the same taps
-      // don't get stuck in the same state.
-      mGlitchLcg = mGlitchLcg * 1103515245u + 12345u;
+      // Glitch RNG is reseeded on walker wrap (below, after walker
+      // advance). Within a walker revolution, mGlitchLcg is held
+      // constant — every per-tap glitch decision (mute mask, crush
+      // subset, stutter trigger/length/duration) is deterministic
+      // for the duration of the cycle. This produces a "locked
+      // character" that holds for the cycle then shuffles on the
+      // next revolution. Motion controls cycle frequency, so motion
+      // controls how often glitch patterns shuffle.
 
       float inputLevel = mInputLevel.value();
 
@@ -335,8 +355,24 @@ namespace stolmine
       const float walkerHz = kBaseWalkerHz * matrixScale;
       const float blockDt = (float)FRAMELENGTH / globalConfig.sampleRate;
       mWalkerPos += mWalkerVel * walkerHz * blockDt * motionDepth;
-      mWalkerPos -= floorf(mWalkerPos);  // wrap to [0,1) (handles negatives)
+      // Wrap detection — walker revolutions drive global glitch
+      // reseed (see below). At motion=0, walker is stationary, so
+      // glitch state stays frozen for a "stuck character" cycle.
+      // At high motion, frequent wraps → glitch patterns shuffle.
+      const float walkerFloor = floorf(mWalkerPos);
+      const bool walkerWrapped = (walkerFloor != 0.0f);
+      mWalkerPos -= walkerFloor;        // wrap to [0,1) (handles negatives)
       const float listenerMotion = mWalkerPos;
+
+      // Glitch reseed on walker wrap. Within a cycle, mGlitchLcg is
+      // constant; on wrap, perturb to shuffle glitch patterns.
+      // Combine with mLastSeed so changing the user seed also
+      // changes the cycle-locked patterns.
+      if (walkerWrapped)
+      {
+        mGlitchLcg = mGlitchLcg * 1103515245u + 12345u +
+                     (mLastSeed ^ 0xDEADBEEFu);
+      }
 
       // ---- Block-rate geometry recompute ----
       // Density-compensated gain: per-tap magnitude scales as
@@ -511,10 +547,13 @@ namespace stolmine
       // Per-tap subset chosen probabilistically: frac = density ×
       // maxFrac × glitch, capped at 60% so we never reach 100%
       // coverage. Per-affected-tap bit depth and decimate factor
-      // hashed independently so the crushed subset has flavor
-      // variation (some taps gritty 9-bit, others crushed 2.5-bit
-      // and held; etc.). Un-crushed taps get identity values so the
-      // per-sample NEON path is mathematically a no-op for them.
+      // sampled from full Larets ranges (bitParam ∈ [0,1] →
+      // bitLvl ∈ [4096 (12-bit), 5.66 (~2.5-bit)]; decimParam ∈
+      // [0,1] → factor ∈ [1, 32]) but each sampled via triangular
+      // distribution with mode=density: low density → severities
+      // bias toward gentle, high density → toward heavy. Both
+      // extremes always reachable regardless of density (the
+      // continuum rule).
       const float kCrushMaxFrac = 0.6f;
       const float crushFrac = density * kCrushMaxFrac * glitchAmount;
       const uint32_t crushFracThresh =
@@ -531,24 +570,22 @@ namespace stolmine
         {
           mTapCrushMask[i] = 1.0f;
 
-          // Per-tap bit depth — Larets formula. bitParam ∈ [0.3, 1.0]
-          // → bitLvl ∈ [~568 (≈9-bit), ~5.66 (≈2.5-bit)]. Even the
-          // gentlest crushed tap is audibly bit-reduced.
+          // Per-tap bit depth — Larets full range, triangular
+          // sampled with mode=density.
           hCrush = hCrush * 1103515245u + 12345u;
-          const float bitFrac =
+          const float bitU =
             (float)((hCrush >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
-          const float bitParam = 0.3f + 0.7f * bitFrac;
+          const float bitParam = networkTriangularSample(bitU, density);
           const float bitLvl = powf(2.0f, 12.0f - bitParam * 9.5f);
           mTapCrushBitLvl[i] = bitLvl;
           mTapCrushInvBitLvl[i] = 1.0f / bitLvl;
 
-          // Per-tap decimate factor — Larets formula, narrowed range.
-          // decimParam ∈ [0.0, 0.7] → factor ∈ [1, 23]. Avoid full
-          // ×32 freeze (overlaps G2 stutter character).
+          // Per-tap decimate factor — Larets full range [1, 32],
+          // triangular sampled with mode=density.
           hCrush = hCrush * 1103515245u + 12345u;
-          const float decimFrac =
+          const float decimU =
             (float)((hCrush >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
-          const float decimParam = decimFrac * 0.7f;
+          const float decimParam = networkTriangularSample(decimU, density);
           int factor = 1 + (int)(decimParam * 31.0f);
           mTapDecimFactorF[i] = (float)factor;
         }
@@ -650,15 +687,19 @@ namespace stolmine
       // ---- G2 stutter/freeze override ----
       // Per-tap state machine evaluated at block-rate. NORMAL taps
       // can transition to STUTTER via probabilistic trigger. STUTTER
-      // taps override both old/new read indices to the captured
-      // anchor: the dual-read pair both advance equally from there
-      // through the block, reading a 256-sample forward window from
-      // history. Each block restarts at the anchor → 5ms-loop
-      // stutter audible at the block-boundary discontinuity.
+      // taps loop over a multi-block window:
+      //   readIdx[block] = anchor + pos * FRAMELENGTH (mod maxDelay)
+      //   pos = (pos + 1) mod length
+      // Loop length is musical: 24..96 blocks → ~125ms..512ms
+      // (16th-note..quarter-note @120BPM). Triangular-distributed
+      // with mode=decay so low decay → expected loop length near
+      // 16th-note, high decay → expected near quarter-note. Both
+      // extremes always reachable. Duration also triangular-decay
+      // mapped to 2..32 blocks (long enough for at least one full
+      // cycle of the longest loops).
       //
       // Trigger probability scales with decay × glitch (linear with
       // floor; long-decay reverbs hold stutter audibly longer).
-      // Duration hashed 1..16 blocks (≈5..85ms at 48k/256-sample).
       const float kStutterMinTrigP = 0.005f;
       const float kStutterMaxTrigP = 0.05f;
       const float stutterPf = (glitchAmount > 0.0f)
@@ -667,36 +708,72 @@ namespace stolmine
         : 0.0f;
       const uint32_t stutterTriggerThresh =
         (uint32_t)(stutterPf * 65535.0f);
+      const int kStutterMinLenBlocks = 24;   // ~125ms (16th @ 120BPM)
+      const int kStutterMaxLenBlocks = 96;   // ~512ms (quarter @ 120BPM)
+      const int kStutterMinDurBlocks = 2;
+      const int kStutterMaxDurBlocks = 32;
       if (glitchAmount > 0.0f)
       {
         for (int t = 0; t < activeTaps; t++)
         {
           if (mTapStutterRemaining[t] > 0)
           {
-            // Currently stuttering — override both indices to
-            // anchor. Per-sample Pass A advances both equally → 5ms
-            // forward read window from history.
-            mTapNewReadIdx[t] = mTapStutterAnchor[t];
-            mTapOldReadIdx[t] = mTapStutterAnchor[t];
+            // Currently stuttering — read at anchor + pos*FRAME.
+            // Pass A then advances per-sample to anchor +
+            // (pos+1)*FRAME by block end (continuous in-loop), then
+            // next block's override jumps back when pos wraps.
+            int idx = mTapStutterAnchor[t] +
+                      (int)mTapStutterPos[t] * (int)FRAMELENGTH;
+            // Wrap into buffer (loop length × FRAMELENGTH ≤
+            // maxDelay/2 by config, so single subtraction suffices,
+            // but loop in case of edge cases).
+            while (idx >= maxDelay) idx -= maxDelay;
+            while (idx < 0) idx += maxDelay;
+            mTapNewReadIdx[t] = idx;
+            mTapOldReadIdx[t] = idx;
+            // Advance pos within loop.
+            uint16_t nextPos = (uint16_t)(mTapStutterPos[t] + 1u);
+            if (nextPos >= mTapStutterLength[t]) nextPos = 0;
+            mTapStutterPos[t] = nextPos;
             mTapStutterRemaining[t]--;
           }
           else if (stutterTriggerThresh > 0u)
           {
             // NORMAL: hash decision to enter stutter.
-            uint32_t hStut = mGlitchLcg ^ ((uint32_t)t * 2654435761u + 0x66666666u);
+            uint32_t hStut = mGlitchLcg ^
+              ((uint32_t)t * 2654435761u + 0x66666666u);
             hStut = hStut * 1103515245u + 12345u;
             const uint32_t triggerRand = (hStut >> 16) & 0xFFFFu;
             if (triggerRand < stutterTriggerThresh)
             {
               // Capture anchor at current read position.
               mTapStutterAnchor[t] = mTapNewReadIdx[t];
-              // Hash for duration 1..16 blocks.
+
+              // Loop length — triangular with mode=decay.
               hStut = hStut * 1103515245u + 12345u;
-              const uint32_t durRand = (hStut >> 16) & 0xFu;
-              mTapStutterRemaining[t] = (uint8_t)(durRand + 1);
-              // Apply override this block.
+              const float lenU =
+                (float)((hStut >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
+              const float lenShaped = networkTriangularSample(lenU, decay);
+              const int lenBlocks = kStutterMinLenBlocks +
+                (int)((kStutterMaxLenBlocks - kStutterMinLenBlocks)
+                      * lenShaped + 0.5f);
+              mTapStutterLength[t] = (uint16_t)lenBlocks;
+              mTapStutterPos[t] = 0;
+
+              // Duration — triangular with mode=decay.
+              hStut = hStut * 1103515245u + 12345u;
+              const float durU =
+                (float)((hStut >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
+              const float durShaped = networkTriangularSample(durU, decay);
+              const int durBlocks = kStutterMinDurBlocks +
+                (int)((kStutterMaxDurBlocks - kStutterMinDurBlocks)
+                      * durShaped + 0.5f);
+              mTapStutterRemaining[t] = (uint8_t)durBlocks;
+
+              // Apply override this block (pos=0).
               mTapOldReadIdx[t] = mTapStutterAnchor[t];
               mTapNewReadIdx[t] = mTapStutterAnchor[t];
+              mTapStutterPos[t] = 1;
               mTapStutterRemaining[t]--;
             }
           }
@@ -708,6 +785,8 @@ namespace stolmine
         for (int t = 0; t < kMaxNetworkTaps; t++)
         {
           mTapStutterRemaining[t] = 0;
+          mTapStutterPos[t] = 0;
+          mTapStutterLength[t] = 0;
         }
       }
 
@@ -1155,16 +1234,20 @@ namespace stolmine
     float mTapShClock[kMaxNetworkTaps];
     float mTapShValue[kMaxNetworkTaps];
 
-    // G2 glitch — per-tap stutter/freeze. mTapStutterRemaining is
-    // the block-countdown (0 = NORMAL, n>0 = STUTTER for n more
-    // blocks). mTapStutterAnchor is the captured read index that
-    // both old/new pointers reset to at the start of each stuttered
-    // block — the dual-read pair both advance equally from there,
-    // producing a 256-sample (≈5ms at 48k) forward window per block.
-    // Block-to-block discontinuity at the loop boundary is the
-    // stutter character.
-    uint8_t mTapStutterRemaining[kMaxNetworkTaps];
-    int mTapStutterAnchor[kMaxNetworkTaps];
+    // G2 glitch — per-tap stutter/freeze. Multi-block loops:
+    // mTapStutterAnchor is captured at trigger; mTapStutterLength
+    // is total loop length in blocks (musical: 24..96 blocks =
+    // ~125ms..512ms = 16th-note..quarter-note @120BPM); mTapStutterPos
+    // is the current block index within the loop [0, length).
+    // mTapStutterRemaining is duration countdown (block units, 2..32).
+    // Each stuttered block sets both read indices to
+    //   anchor + pos*FRAMELENGTH (mod maxDelay)
+    // and increments pos mod length. Loop discontinuity is the
+    // stutter character; in-loop block transitions are continuous.
+    uint8_t  mTapStutterRemaining[kMaxNetworkTaps];
+    int      mTapStutterAnchor[kMaxNetworkTaps];
+    uint16_t mTapStutterLength[kMaxNetworkTaps];
+    uint16_t mTapStutterPos[kMaxNetworkTaps];
 
     // G8 glitch — per-tap bitcrush + sample-rate decimate. Subset of
     // taps chosen probabilistically each block; per-affected-tap
