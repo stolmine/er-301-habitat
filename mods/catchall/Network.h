@@ -308,6 +308,15 @@ namespace stolmine
       const float listenerMotion = mWalkerPos;
 
       // ---- Block-rate geometry recompute ----
+      // Density-compensated gain: per-tap magnitude scales as
+      // C/√activeTaps so summed wet RMS is roughly constant as
+      // density sweeps (purely a structural / spatial-richness
+      // control). The constant C controls absolute output level —
+      // 1.0 was too quiet relative to chain headroom; 2.5 brings
+      // peak-to-peak output to a usable range without exceeding
+      // tanh saturation in the wet bus (the fb path uses its own
+      // 1/√k normalization independent of this constant).
+      const float densityCompGain = 2.5f / sqrtf((float)activeTaps);
       network_geom::recomputeTaps(
         mReflectors,
         kMaxNetworkTaps,
@@ -315,7 +324,7 @@ namespace stolmine
         sizeNorm,
         listenerMotion,
         maxDelay,
-        1.0f,                          // gainScale
+        densityCompGain,
         mTapDelayTarget,
         mTapGainL,
         mTapGainR);
