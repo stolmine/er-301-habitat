@@ -910,6 +910,20 @@ namespace stolmine
       // since it's the same every block.
       const float kInvFrameLengthMinus1 = 1.0f / (float)(FRAMELENGTH - 1);
 
+      // ---- Active-stutter list (built block-rate) ----
+      // Per-sample stutter pass iterates only this list, avoiding
+      // 64 conditional checks per sample at high density.
+      int activeStutterTaps[kMaxNetworkTaps];
+      int activeStutterCount = 0;
+      for (int t = 0; t < activeTaps; t++)
+      {
+        if (mTapEffectMode[t] == NETWORK_TAP_STUTTER &&
+            mTapStutterIterations[t] > 0)
+        {
+          activeStutterTaps[activeStutterCount++] = t;
+        }
+      }
+
       // ---- Scratch arrays for 3-pass tap processing ----
       int16_t sA[kMaxNetworkTaps];
       int16_t sB[kMaxNetworkTaps];
@@ -1167,51 +1181,46 @@ namespace stolmine
         }
 #endif
 
-        // ---- Scalar stutter playback pass ----
-        // Per-sample fractional reads for STUTTER-mode taps with
-        // active iterations. Bypasses Pass A/B/C entirely: reads
-        // buffer at fractional pointer with linear interp, advances
-        // by per-tap speed (×0.5/×1/×2), wraps at loop end, decrements
-        // iterations. Uses static stutter gains (set at trigger);
-        // smoother on lush gain ramps Pass C contribution out
-        // independently. Only iterates active stutter taps.
-        for (int t = 0; t < activeTaps; t++)
+        // ---- Scalar stutter playback pass (optimized inner) ----
+        // Iterates only the precomputed active-stutter list so we
+        // don't pay 64 conditional checks per sample. Wrap checks
+        // are single-subtraction (ptr advance ≤ 2/sample, can't
+        // overshoot maxDelay by more than that). frac uses int cast
+        // (ptr ≥ 0 always post-wrap, so equiv to floorf). Prefetch
+        // 16 samples ahead reduces L1 misses on the random buffer
+        // gather.
+        for (int s = 0; s < activeStutterCount; s++)
         {
-          if (mTapStutterIterations[t] == 0) continue;
-          if (mTapEffectMode[t] != NETWORK_TAP_STUTTER) continue;
-
-          // Linear-interp fractional read.
+          const int t = activeStutterTaps[s];
           float ptr = mTapStutterReadPtr[t];
           int iptr  = (int)ptr;
-          // Wrap into buffer.
-          while (iptr >= maxDelay) iptr -= maxDelay;
-          while (iptr < 0)         iptr += maxDelay;
+          if (iptr >= maxDelay) iptr -= maxDelay;
           int iptr2 = iptr + 1;
           if (iptr2 >= maxDelay) iptr2 -= maxDelay;
-          const float frac = ptr - floorf(ptr);
+          const float frac = ptr - (float)iptr;
           const float a = (float)buf[iptr]  * scale;
           const float b = (float)buf[iptr2] * scale;
           const float sample = a + (b - a) * frac;
 
-          // Accumulate into wet/fb with static stutter gains.
+          // Prefetch ~16 samples ahead at this tap's speed.
+          const float speed = mTapStutterSpeed[t];
+          int prefetchIdx = iptr + 16;
+          if (prefetchIdx >= maxDelay) prefetchIdx -= maxDelay;
+          __builtin_prefetch(&buf[prefetchIdx], 0, 1);
+
           wetL  += sample * mTapStutterGainL[t];
           wetR  += sample * mTapStutterGainR[t];
           fbSum += sample * mTapStutterFbW[t];
 
-          // Advance pointer by speed.
-          const float speed = mTapStutterSpeed[t];
           mTapStutterReadPtr[t]   = ptr + speed;
           mTapStutterPosInLoop[t] += speed;
           if (mTapStutterPosInLoop[t] >= mTapStutterLoopSamples[t])
           {
             mTapStutterPosInLoop[t] -= mTapStutterLoopSamples[t];
-            // Re-anchor read pointer to loop start + leftover frac.
-            mTapStutterReadPtr[t] =
+            float reanchored =
               (float)mTapStutterAnchor[t] + mTapStutterPosInLoop[t];
-            // Wrap absolute pointer into buffer.
-            while (mTapStutterReadPtr[t] >= (float)maxDelay)
-              mTapStutterReadPtr[t] -= (float)maxDelay;
-            // Iteration completed.
+            if (reanchored >= (float)maxDelay) reanchored -= (float)maxDelay;
+            mTapStutterReadPtr[t] = reanchored;
             if (mTapStutterIterations[t] > 0) mTapStutterIterations[t]--;
           }
         }
