@@ -662,9 +662,22 @@ namespace stolmine
       const float kMaxCrush   = 0.25f;   // density still gates crush coverage
       const float kMaxScrub   = 0.075f;  // halved from 0.15 to preserve lush bed
       const float kMaxReverse = 0.075f;  // halved from 0.15 to preserve lush bed
+      // Density-stretch for glitch-effect coverage. Audition showed
+      // most musically interesting glitch character lives in the
+      // bottom ~65% of the density knob — above that, the field
+      // gets cluttered without much character gain. Map the user's
+      // [0, 1] density range onto a stretched [0, 1] for glitch
+      // effects (saturates above 0.65), so the full glitch
+      // intensity is reachable at user-density 0.65 instead of 1.
+      // Lush body parameters (activeTaps, densityCompGain, fb
+      // recycle count) keep using raw density — only glitch-effect
+      // coverage uses glitchDensity.
+      const float kGlitchDensityKnee = 0.65f;
+      float glitchDensity = density * (1.0f / kGlitchDensityKnee);
+      if (glitchDensity > 1.0f) glitchDensity = 1.0f;
       const float pMute    = glitchAmount * kMaxMute;
       const float pStutter = glitchAmount * kMaxStutter;
-      const float pCrush   = glitchAmount * density * kMaxCrush;
+      const float pCrush   = glitchAmount * glitchDensity * kMaxCrush;
       const float pScrub   = glitchAmount * kMaxScrub;
       const float pReverse = glitchAmount * kMaxReverse;
       // Cumulative thresholds in 0..65535 unsigned space, capped.
