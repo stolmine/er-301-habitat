@@ -92,6 +92,84 @@ namespace stolmine
   // waves that accrue in low-frequency reaches of the feedback loop.
   static const float kNetworkDcR = 0.9935f;
 
+  // Sign-change zero-crossing search in a circular int16 buffer.
+  // Returns the index of the nearest zero crossing within ±range
+  // around `center`. Algorithm follows
+  // od::Grain::snapToZeroCrossing — search forward and backward
+  // for first sign change (rising or falling), pick whichever
+  // direction is closer; among the two samples straddling the
+  // crossing, pick the one closer to zero. Falls back to
+  // min-magnitude search if no sign change is found in the range
+  // (e.g., DC-dominated signals); preserves the previous
+  // 0.3.43-era behavior as a safety net.
+  static inline int networkFindNearestZeroCrossing(
+    int center, int range, const int16_t *buf, int maxDelay)
+  {
+    int forward = -1, forwardDist = range + 1;
+    int backward = -1, backwardDist = range + 1;
+
+    // Forward: walk +1, detect sign change between prev and cur.
+    {
+      int idx = center;
+      int16_t prev = buf[idx];
+      for (int off = 1; off <= range; off++)
+      {
+        idx = center + off;
+        if (idx >= maxDelay) idx -= maxDelay;
+        const int16_t cur = buf[idx];
+        if ((prev <= 0 && cur > 0) || (prev >= 0 && cur < 0))
+        {
+          int prevIdx = idx - 1;
+          if (prevIdx < 0) prevIdx += maxDelay;
+          forward = (abs((int)prev) < abs((int)cur)) ? prevIdx : idx;
+          forwardDist = off;
+          break;
+        }
+        prev = cur;
+      }
+    }
+
+    // Backward: walk -1, same logic.
+    {
+      int idx = center;
+      int16_t prev = buf[idx];
+      for (int off = 1; off <= range; off++)
+      {
+        idx = center - off;
+        if (idx < 0) idx += maxDelay;
+        const int16_t cur = buf[idx];
+        if ((cur <= 0 && prev > 0) || (cur >= 0 && prev < 0))
+        {
+          int nextIdx = idx + 1;
+          if (nextIdx >= maxDelay) nextIdx -= maxDelay;
+          backward = (abs((int)prev) < abs((int)cur)) ? nextIdx : idx;
+          backwardDist = off;
+          break;
+        }
+        prev = cur;
+      }
+    }
+
+    if (forward >= 0 && forwardDist <= backwardDist) return forward;
+    if (backward >= 0)                                return backward;
+
+    // Fallback: min-magnitude search.
+    int bestIdx = center;
+    int bestMag = abs((int)buf[center]);
+    for (int off = 1; off <= range && bestMag > 0; off++)
+    {
+      for (int sg = -1; sg <= 1; sg += 2)
+      {
+        int i = center + sg * off;
+        while (i < 0)         i += maxDelay;
+        while (i >= maxDelay) i -= maxDelay;
+        const int mag = abs((int)buf[i]);
+        if (mag < bestMag) { bestMag = mag; bestIdx = i; }
+      }
+    }
+    return bestIdx;
+  }
+
   // Triangular distribution sampler. Maps a uniform [0,1] hash to a
   // [0,1] value with density peak at `mode`. Both extremes always
   // reachable; just less frequent the further from `mode`. Used by
@@ -1113,51 +1191,26 @@ namespace stolmine
         mTapStutterLength[t] = (uint16_t)lenBlocks;
 
         // Zero-crossing alignment — shift both anchor and loop end
-        // to nearest minimum-magnitude buffer sample within ±FRAME
-        // samples (~5ms each side). Loop wrap discontinuity drops
-        // from arbitrary-sample-step to near-silent residual,
-        // killing the click. Loop length shifts by at most ±10ms,
-        // imperceptible against the musical-length budget.
+        // to nearest sign-change zero crossing within ±FRAME samples.
+        // Sign-change is more rigorous than min-magnitude: it
+        // guarantees the boundary is exactly at a zero crossing
+        // (residual = 1 LSB int16), so wrap step is silent. Falls
+        // back to min-magnitude when no sign change found in range.
+        // Loop length shifts by at most ±10ms, imperceptible
+        // against the musical-length budget.
         const int kZCSearchRange = (int)FRAMELENGTH;
         // Anchor refinement.
-        {
-          int bestAnchor = mTapStutterAnchor[t];
-          int bestMag = abs((int)buf[bestAnchor]);
-          for (int off = 1; off < kZCSearchRange && bestMag > 0; off++)
-          {
-            for (int sg = -1; sg <= 1; sg += 2)
-            {
-              int idx = mTapStutterAnchor[t] + sg * off;
-              while (idx < 0)         idx += maxDelay;
-              while (idx >= maxDelay) idx -= maxDelay;
-              const int mag = abs((int)buf[idx]);
-              if (mag < bestMag) { bestMag = mag; bestAnchor = idx; }
-            }
-          }
-          mTapStutterAnchor[t] = bestAnchor;
-        }
+        mTapStutterAnchor[t] = networkFindNearestZeroCrossing(
+          mTapStutterAnchor[t], kZCSearchRange, buf, maxDelay);
         // Loop-end refinement.
         const int baseLoopSamples = lenBlocks * (int)FRAMELENGTH;
         int targetEnd = mTapStutterAnchor[t] + baseLoopSamples;
         while (targetEnd >= maxDelay) targetEnd -= maxDelay;
-        {
-          int bestEnd = targetEnd;
-          int bestMag = abs((int)buf[bestEnd]);
-          for (int off = 1; off < kZCSearchRange && bestMag > 0; off++)
-          {
-            for (int sg = -1; sg <= 1; sg += 2)
-            {
-              int idx = targetEnd + sg * off;
-              while (idx < 0)         idx += maxDelay;
-              while (idx >= maxDelay) idx -= maxDelay;
-              const int mag = abs((int)buf[idx]);
-              if (mag < bestMag) { bestMag = mag; bestEnd = idx; }
-            }
-          }
-          int adjusted = bestEnd - mTapStutterAnchor[t];
-          if (adjusted < 0) adjusted += maxDelay;
-          mTapStutterLoopSamples[t] = (float)adjusted;
-        }
+        const int alignedEnd = networkFindNearestZeroCrossing(
+          targetEnd, kZCSearchRange, buf, maxDelay);
+        int adjusted = alignedEnd - mTapStutterAnchor[t];
+        if (adjusted < 0) adjusted += maxDelay;
+        mTapStutterLoopSamples[t] = (float)adjusted;
 
         // Iterations — triangular with mode=decay.
         hStut = hStut * 1103515245u + 12345u;
