@@ -156,8 +156,14 @@ namespace stolmine
       mWalkerVel = 0.0f;
       mWalkerLcg = 0xCAFEBABEu;
 
-      // Per-tap shimmer LFO
-      mLfoPhase = 0.0f;
+      // Per-tap shimmer LFO (S2 lush half — rate varies per tap)
+      for (int i = 0; i < kMaxNetworkTaps; i++)
+      {
+        mLfoPhase[i] = 0.0f;
+        mLfoRate[i] = 0.5f;       // initial uniform; recomputed each block
+        mTapLpState[i] = 0.0f;    // L3 LP state
+        mTapLpCoeff[i] = 0.5f;    // initial; recomputed each block
+      }
 
       // Allpass diffusion buffers (4-stage Schroeder chain)
       memset(mApBuf1, 0, sizeof(mApBuf1));
@@ -341,17 +347,79 @@ namespace stolmine
       // without audible chorus pitch wobble.
       const float kLfoHz = 0.5f;
       const float kLfoDepthSamples = 8.0f;
-      const float kGoldenAngleTurns = 0.3819660113f;
-      mLfoPhase += kLfoHz * blockDt;
-      mLfoPhase -= floorf(mLfoPhase);
+
+      // S2: per-tap LFO rate spread. ±20% base + up to ±50% scaled
+      // by motion. At motion=0 taps still have rate variation
+      // (chorus baseline). At motion=1 rates diverge widely (true
+      // polyphonic shimmer).
+      const float kBaseRateSpread = 0.2f;
+      const float kMotionRateSpread = 0.5f;
+      const float rateSpread = kBaseRateSpread + kMotionRateSpread * motionDepth;
+
+      // S1: per-tap pitch detune. Static delay offset hashed from
+      // (t, mLastSeed), scaled by connectivity. Pragmatic substitute
+      // for per-tap pitch shift that preserves the PDF's purpose
+      // (destroy integer-ratio comb peaks via delay incoherence)
+      // while integrating with the dual-read crossfading delay.
+      // ±0.5ms (~24 samples at 48kHz) at full connectivity.
+      const float kMaxPitchDetuneSamples = 24.0f;
+
+      // L3: per-tap LP filter base coefficient. Maps decay 0..1
+      // logarithmically to cutoff 18kHz..3kHz (Rings reverb damping
+      // convention). Per-tap variation in the same loop below.
+      const float kMaxCutoffHz = 18000.0f;
+      const float kCutoffRatio = 6.0f;   // 18k / 3k
+      const float baseCutoffHz =
+        kMaxCutoffHz * expf(-decay * logf(kCutoffRatio));
+      const float kTwoPiOverSr =
+        2.0f * 3.14159265358979f / globalConfig.sampleRate;
+      const float baseCoeff =
+        1.0f - expf(-baseCutoffHz * kTwoPiOverSr);
+
       for (int i = 0; i < activeTaps; i++)
       {
-        float tapPhase = mLfoPhase + (float)i * kGoldenAngleTurns;
-        tapPhase -= floorf(tapPhase);
+        // Per-tap LFO rate (S2). Hash for seeded per-tap variation
+        // — different XOR mask from the S1 detune hash to keep
+        // them uncorrelated.
+        uint32_t hRate = mLastSeed ^ ((uint32_t)i * 2654435761u + 0x3C3C3C3Cu);
+        hRate = hRate * 1103515245u + 12345u;
+        const float rateOffset =
+          ((float)((hRate >> 16) & 0xFFFFu) * (2.0f / 65535.0f)) - 1.0f;  // [-1, +1]
+        mLfoRate[i] = kLfoHz * (1.0f + rateOffset * rateSpread);
+
+        // Advance per-tap phase at its own rate.
+        mLfoPhase[i] += mLfoRate[i] * blockDt;
+        mLfoPhase[i] -= floorf(mLfoPhase[i]);
+
+        // Existing shimmer modulation, now from per-tap phase.
         const float modOffset =
-          network_trig::poly_sin(tapPhase) * kLfoDepthSamples;
-        mTapDelayTarget[i] += modOffset;
+          network_trig::poly_sin(mLfoPhase[i]) * kLfoDepthSamples;
+
+        // S1 per-tap pitch detune. Different XOR mask from the rate
+        // hash to keep uncorrelated.
+        uint32_t hDetune = mLastSeed ^ ((uint32_t)i * 2654435761u + 0xA5A5A5A5u);
+        hDetune = hDetune * 1103515245u + 12345u;
+        const float detuneSign = ((hDetune >> 16) & 1u) ? 1.0f : -1.0f;
+        hDetune = hDetune * 1103515245u + 12345u;
+        const float detuneFrac =
+          (float)((hDetune >> 16) & 0xFFFFu) * (1.0f / 65535.0f);  // [0,1]
+        const float pitchDetune = connectivity * kMaxPitchDetuneSamples
+                                  * detuneSign * detuneFrac;
+
+        mTapDelayTarget[i] += modOffset + pitchDetune;
         if (mTapDelayTarget[i] < 0.0f) mTapDelayTarget[i] = 0.0f;
+
+        // L3 per-tap LP coefficient. ±30% cutoff variation around
+        // the decay-driven base. Different XOR mask again to keep
+        // uncorrelated with detune / rate hashes.
+        uint32_t hLp = mLastSeed ^ ((uint32_t)i * 2654435761u + 0x77777777u);
+        hLp = hLp * 1103515245u + 12345u;
+        const float lpVariation =
+          0.7f + 0.6f * ((float)((hLp >> 16) & 0xFFFFu) * (1.0f / 65535.0f));
+        float coeff = baseCoeff * lpVariation;
+        if (coeff > 1.0f) coeff = 1.0f;   // stability clamp
+        if (coeff < 0.0f) coeff = 0.0f;
+        mTapLpCoeff[i] = coeff;
       }
 
       // ---- Block-rate feedback selection (Phase 2) ----
@@ -603,6 +671,13 @@ namespace stolmine
             float32x4_t fbWV = vld1q_f32(&mFbWeightSmoothed[t]);
             // Crossfade old → new read via shared per-sample weight.
             float32x4_t tapV = vmlaq_f32(bV, vsubq_f32(aV, bV), wVec);
+            // L3: per-tap one-pole LP. state += coeff * (tap - state);
+            // tap = state. Five ops per lane.
+            float32x4_t lpState = vld1q_f32(&mTapLpState[t]);
+            float32x4_t lpCoeff = vld1q_f32(&mTapLpCoeff[t]);
+            lpState = vmlaq_f32(lpState, vsubq_f32(tapV, lpState), lpCoeff);
+            vst1q_f32(&mTapLpState[t], lpState);
+            tapV = lpState;
             wetLVec = vmlaq_f32(wetLVec, tapV, gLV);
             wetRVec = vmlaq_f32(wetRVec, tapV, gRV);
             fbVec   = vmlaq_f32(fbVec,   tapV, fbWV);
@@ -626,6 +701,9 @@ namespace stolmine
             float a = (float)sA[t] * scale;
             float b = (float)sB[t] * scale;
             float tapOut = b + (a - b) * w;
+            // L3 per-tap LP.
+            mTapLpState[t] += mTapLpCoeff[t] * (tapOut - mTapLpState[t]);
+            tapOut = mTapLpState[t];
             wetL += tapOut * mTapGainLSmoothed[t];
             wetR += tapOut * mTapGainRSmoothed[t];
             fbSum += tapOut * mFbWeightSmoothed[t];
@@ -637,6 +715,9 @@ namespace stolmine
           float a = (float)sA[t] * scale;
           float b = (float)sB[t] * scale;
           float tapOut = b + (a - b) * w;
+          // L3 per-tap LP.
+          mTapLpState[t] += mTapLpCoeff[t] * (tapOut - mTapLpState[t]);
+          tapOut = mTapLpState[t];
           wetL += tapOut * mTapGainLSmoothed[t];
           wetR += tapOut * mTapGainRSmoothed[t];
           fbSum += tapOut * mFbWeightSmoothed[t];
@@ -782,12 +863,26 @@ namespace stolmine
     float mWalkerVel;        // smoothed velocity, ~[-1, +1]
     uint32_t mWalkerLcg;     // deterministic random source
 
-    // Per-tap delay LFO phase. Single global phase advanced each block
-    // at ~0.5 Hz (matches Rings reverb's chorus-LFO frequency). Per-
-    // tap modulation phase = mLfoPhase + i × goldenAngle. Adds
-    // shimmer/chorus character and breaks comb-filter coherence at
-    // quasi-static listener positions. Modulation depth ~8 samples.
-    float mLfoPhase;
+    // Per-tap delay LFO. Each tap has its own phase + per-block-
+    // computed rate. Base rate kLfoHz × (1 + seedHash × spread), where
+    // spread always has a ±20% baseline plus up to ±50% scaled by
+    // motion — so even at motion=0 taps have some rate variation
+    // (chorus character), and at motion=1 the field has true
+    // polyphonic divergence rather than synchronized swirl.
+    // Rates updated each block from motion + seed (block-rate cost
+    // negligible). Ring reverb pattern (eurorack/rings/dsp/fx/reverb.h:
+    // SetLFOFrequency) but per-tap.
+    float mLfoPhase[kMaxNetworkTaps];
+    float mLfoRate[kMaxNetworkTaps];   // computed block-rate
+
+    // L3 lush half — per-tap one-pole LP filter scaled by decay.
+    // Base cutoff maps decay 0..1 logarithmically to 18kHz..3kHz
+    // (Rings reverb damping convention, set_lp pattern). Per-tap
+    // ±30% cutoff variation hashed from seed gives L3's "random
+    // cutoffs" character. Per-sample LP step on tapV before gain/fb
+    // accumulation in Pass C.
+    float mTapLpState[kMaxNetworkTaps];
+    float mTapLpCoeff[kMaxNetworkTaps];   // computed block-rate
 
     // 4-stage allpass diffusion chain in feedback path. Phase-
     // decorrelates the recycled signal each cycle, breaking the
