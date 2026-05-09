@@ -904,12 +904,12 @@ namespace stolmine
                  glitchAmount > 0.0f)
         {
           transientFired = true;
-          mTransientCooldown = 10;   // ~53ms refractory at 187 blocks/s
+          mTransientCooldown = 25;   // ~134ms refractory at 187 blocks/s
         }
 
         if (transientFired)
         {
-          const int kMaxK = 6;
+          const int kMaxK = 2;       // was 6 — too aggressive at full
           const int K = (int)(connectivity * (float)kMaxK *
                               glitchAmount + 0.5f);
           for (int n = 0; n < K; n++)
@@ -918,6 +918,9 @@ namespace stolmine
               ((uint32_t)n * 2654435761u + 0xE777E777u);
             h = h * 1103515245u + 12345u;
             const int t = (int)((h >> 16) % (uint32_t)activeTaps);
+            // Skip G4 effects on STUTTER mode taps (no-op anyway,
+            // wastes a slot).
+            if (mTapEffectMode[t] == NETWORK_TAP_STUTTER) continue;
             h = h * 1103515245u + 12345u;
             const uint32_t effect = (h >> 16) % 3u;
             if (effect == 0u)
