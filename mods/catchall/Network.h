@@ -354,6 +354,14 @@ namespace stolmine
       const float matrixScale = 1.0f + 4.0f * connectivity * decay;
       const float walkerHz = kBaseWalkerHz * matrixScale;
       const float blockDt = (float)FRAMELENGTH / globalConfig.sampleRate;
+
+      // Characteristic cycle period in blocks (assuming vel ≈ 1.0).
+      // Used by G2 soft motion-cycle sync to bias stutter loop
+      // lengths toward subdivisions of the walker cycle. Zero when
+      // motion is too low to define a cycle.
+      const float cyclePeriodBlocks = (motionDepth > 0.01f)
+        ? (1.0f / (walkerHz * blockDt * motionDepth))
+        : 0.0f;
       mWalkerPos += mWalkerVel * walkerHz * blockDt * motionDepth;
       // Wrap detection — walker revolutions drive global glitch
       // reseed (see below). At motion=0, walker is stationary, so
@@ -538,6 +546,11 @@ namespace stolmine
         const float lpVariation =
           0.7f + 0.6f * ((float)((hLp >> 16) & 0xFFFFu) * (1.0f / 65535.0f));
         float coeff = baseCoeff * lpVariation;
+        // Glitch attenuates LP — pulls coefficient toward 1 (less
+        // filtering) so HF survives in feedback at high glitch,
+        // making the texture brighter and grittier. At glitch=0
+        // full LP; at glitch=1, ~30% of the original LP effect.
+        coeff = coeff + glitchAmount * 0.7f * (1.0f - coeff);
         if (coeff > 1.0f) coeff = 1.0f;   // stability clamp
         if (coeff < 0.0f) coeff = 0.0f;
         mTapLpCoeff[i] = coeff;
@@ -545,16 +558,16 @@ namespace stolmine
 
       // ---- G8 — bitcrush + decimate subset (block-rate setup) ----
       // Per-tap subset chosen probabilistically: frac = density ×
-      // maxFrac × glitch, capped at 60% so we never reach 100%
-      // coverage. Per-affected-tap bit depth and decimate factor
-      // sampled from full Larets ranges (bitParam ∈ [0,1] →
-      // bitLvl ∈ [4096 (12-bit), 5.66 (~2.5-bit)]; decimParam ∈
-      // [0,1] → factor ∈ [1, 32]) but each sampled via triangular
-      // distribution with mode=density: low density → severities
-      // bias toward gentle, high density → toward heavy. Both
-      // extremes always reachable regardless of density (the
-      // continuum rule).
-      const float kCrushMaxFrac = 0.6f;
+      // maxFrac × glitch, capped at 40% so the crush character
+      // doesn't dominate the field. Per-affected-tap bit depth and
+      // decimate factor sampled from full Larets ranges (bitParam
+      // ∈ [0,1] → bitLvl ∈ [4096 (12-bit), 5.66 (~2.5-bit)];
+      // decimParam ∈ [0,1] → factor ∈ [1, 32]) but each sampled
+      // via triangular distribution with mode=density: low density
+      // → severities bias toward gentle, high density → toward
+      // heavy. Both extremes always reachable regardless of
+      // density (the continuum rule).
+      const float kCrushMaxFrac = 0.4f;
       const float crushFrac = density * kCrushMaxFrac * glitchAmount;
       const uint32_t crushFracThresh =
         (uint32_t)(crushFrac * 65535.0f);
@@ -700,8 +713,17 @@ namespace stolmine
       //
       // Trigger probability scales with decay × glitch (linear with
       // floor; long-decay reverbs hold stutter audibly longer).
-      const float kStutterMinTrigP = 0.005f;
-      const float kStutterMaxTrigP = 0.05f;
+      // With cycle-locked seed, pTrig is effectively the per-cycle
+      // fraction of taps that stutter — 0.4 max → ~40% of active
+      // taps stutter for the duration of each motion cycle.
+      const float kStutterMinTrigP = 0.02f;
+      const float kStutterMaxTrigP = 0.4f;
+      // Stutter taps get a gain boost so the looped fragments are
+      // perceptually louder than the surrounding lush taps. Applied
+      // on top of recomputeTaps's geometry-derived gain in the
+      // override pass below. Combined with G3 mute (which zeroes
+      // the gain), a stuttered+muted tap stays silent.
+      const float kStutterGainBoost = 1.5f;
       const float stutterPf = (glitchAmount > 0.0f)
         ? decay * (kStutterMinTrigP +
                    (kStutterMaxTrigP - kStutterMinTrigP) * glitchAmount)
@@ -736,6 +758,9 @@ namespace stolmine
             if (nextPos >= mTapStutterLength[t]) nextPos = 0;
             mTapStutterPos[t] = nextPos;
             mTapStutterRemaining[t]--;
+            // Audibility boost on stutter taps.
+            mTapGainL[t] *= kStutterGainBoost;
+            mTapGainR[t] *= kStutterGainBoost;
           }
           else if (stutterTriggerThresh > 0u)
           {
@@ -754,9 +779,44 @@ namespace stolmine
               const float lenU =
                 (float)((hStut >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
               const float lenShaped = networkTriangularSample(lenU, decay);
-              const int lenBlocks = kStutterMinLenBlocks +
-                (int)((kStutterMaxLenBlocks - kStutterMinLenBlocks)
-                      * lenShaped + 0.5f);
+              float baseLen = (float)kStutterMinLenBlocks +
+                (float)(kStutterMaxLenBlocks - kStutterMinLenBlocks)
+                * lenShaped;
+
+              // Soft motion-cycle sync — bias loop length toward the
+              // nearest cycle subdivision in [min, max] range, but
+              // halfway-snapped so continuous variation around the
+              // subdivisions is preserved. At motion=0 (no cycle),
+              // base length used unchanged.
+              if (cyclePeriodBlocks > 0.0f)
+              {
+                const int kSubdivCount = 11;
+                const int kSubdivs[] =
+                  { 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64 };
+                float bestSubdiv = baseLen;
+                float bestDist = 1e9f;
+                for (int s = 0; s < kSubdivCount; s++)
+                {
+                  const float candidate =
+                    cyclePeriodBlocks / (float)kSubdivs[s];
+                  if (candidate >= (float)kStutterMinLenBlocks &&
+                      candidate <= (float)kStutterMaxLenBlocks)
+                  {
+                    const float d = fabsf(candidate - baseLen);
+                    if (d < bestDist)
+                    {
+                      bestDist = d;
+                      bestSubdiv = candidate;
+                    }
+                  }
+                }
+                const float kSnapStrength = 0.5f;
+                baseLen = baseLen + kSnapStrength * (bestSubdiv - baseLen);
+              }
+
+              int lenBlocks = (int)(baseLen + 0.5f);
+              if (lenBlocks < kStutterMinLenBlocks) lenBlocks = kStutterMinLenBlocks;
+              if (lenBlocks > kStutterMaxLenBlocks) lenBlocks = kStutterMaxLenBlocks;
               mTapStutterLength[t] = (uint16_t)lenBlocks;
               mTapStutterPos[t] = 0;
 
@@ -775,6 +835,9 @@ namespace stolmine
               mTapNewReadIdx[t] = mTapStutterAnchor[t];
               mTapStutterPos[t] = 1;
               mTapStutterRemaining[t]--;
+              // Audibility boost on stutter taps.
+              mTapGainL[t] *= kStutterGainBoost;
+              mTapGainR[t] *= kStutterGainBoost;
             }
           }
         }
