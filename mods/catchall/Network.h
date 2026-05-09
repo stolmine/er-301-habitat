@@ -181,7 +181,7 @@ namespace stolmine
         mTapLpCoeff[i] = 0.5f;    // initial; recomputed each block
         mTapShClock[i] = 0.0f;    // G1 S&H clock phase
         mTapShValue[i] = 0.0f;    // G1 S&H captured snapshot (samples)
-        mTapStutterRemaining[i] = 0;  // G2 stutter: 0 = NORMAL
+        mTapStutterIterations[i] = 0; // G2 stutter: 0 = NORMAL
         mTapStutterAnchor[i] = 0;     // G2 stutter anchor (read idx)
         mTapStutterLength[i] = 0;     // G2 loop length (blocks)
         mTapStutterPos[i] = 0;        // G2 position within loop
@@ -732,32 +732,42 @@ namespace stolmine
         (uint32_t)(stutterPf * 65535.0f);
       const int kStutterMinLenBlocks = 24;   // ~125ms (16th @ 120BPM)
       const int kStutterMaxLenBlocks = 96;   // ~512ms (quarter @ 120BPM)
-      const int kStutterMinDurBlocks = 2;
-      const int kStutterMaxDurBlocks = 32;
+      // Duration in LOOP ITERATIONS (not blocks) — guarantees the
+      // loop is always heard at least minIter full traversals before
+      // re-anchoring. Otherwise a sub-iteration duration sounds like
+      // discontinuous fragments (the "underrun" character) rather
+      // than a perceptual loop.
+      const int kStutterMinIterations = 2;
+      const int kStutterMaxIterations = 8;
       if (glitchAmount > 0.0f)
       {
         for (int t = 0; t < activeTaps; t++)
         {
-          if (mTapStutterRemaining[t] > 0)
+          if (mTapStutterIterations[t] > 0)
           {
             // Currently stuttering — read at anchor + pos*FRAME.
             // Pass A then advances per-sample to anchor +
             // (pos+1)*FRAME by block end (continuous in-loop), then
             // next block's override jumps back when pos wraps.
+            // Iteration counter decrements only when pos wraps, so
+            // the loop is heard for its full length each iteration.
             int idx = mTapStutterAnchor[t] +
                       (int)mTapStutterPos[t] * (int)FRAMELENGTH;
-            // Wrap into buffer (loop length × FRAMELENGTH ≤
-            // maxDelay/2 by config, so single subtraction suffices,
-            // but loop in case of edge cases).
+            // Wrap into buffer (loop length × FRAMELENGTH may exceed
+            // maxDelay over many iterations, so loop just in case).
             while (idx >= maxDelay) idx -= maxDelay;
             while (idx < 0) idx += maxDelay;
             mTapNewReadIdx[t] = idx;
             mTapOldReadIdx[t] = idx;
-            // Advance pos within loop.
+            // Advance pos within loop; on wrap, complete one
+            // iteration → decrement remaining.
             uint16_t nextPos = (uint16_t)(mTapStutterPos[t] + 1u);
-            if (nextPos >= mTapStutterLength[t]) nextPos = 0;
+            if (nextPos >= mTapStutterLength[t])
+            {
+              nextPos = 0;
+              mTapStutterIterations[t]--;
+            }
             mTapStutterPos[t] = nextPos;
-            mTapStutterRemaining[t]--;
             // Audibility boost on stutter taps.
             mTapGainL[t] *= kStutterGainBoost;
             mTapGainR[t] *= kStutterGainBoost;
@@ -820,21 +830,23 @@ namespace stolmine
               mTapStutterLength[t] = (uint16_t)lenBlocks;
               mTapStutterPos[t] = 0;
 
-              // Duration — triangular with mode=decay.
+              // Iterations — triangular with mode=decay. Counts
+              // full loop traversals; decrements on pos wrap.
               hStut = hStut * 1103515245u + 12345u;
-              const float durU =
+              const float iterU =
                 (float)((hStut >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
-              const float durShaped = networkTriangularSample(durU, decay);
-              const int durBlocks = kStutterMinDurBlocks +
-                (int)((kStutterMaxDurBlocks - kStutterMinDurBlocks)
-                      * durShaped + 0.5f);
-              mTapStutterRemaining[t] = (uint8_t)durBlocks;
+              const float iterShaped = networkTriangularSample(iterU, decay);
+              const int iterations = kStutterMinIterations +
+                (int)((kStutterMaxIterations - kStutterMinIterations)
+                      * iterShaped + 0.5f);
+              mTapStutterIterations[t] = (uint8_t)iterations;
 
-              // Apply override this block (pos=0).
+              // Apply override this block (this counts as block 0
+              // of iteration 0 → next block resumes at pos=1; iter
+              // doesn't decrement until first wrap).
               mTapOldReadIdx[t] = mTapStutterAnchor[t];
               mTapNewReadIdx[t] = mTapStutterAnchor[t];
               mTapStutterPos[t] = 1;
-              mTapStutterRemaining[t]--;
               // Audibility boost on stutter taps.
               mTapGainL[t] *= kStutterGainBoost;
               mTapGainR[t] *= kStutterGainBoost;
@@ -847,7 +859,7 @@ namespace stolmine
         // Glitch off: clear stutter state so re-engagement is fresh.
         for (int t = 0; t < kMaxNetworkTaps; t++)
         {
-          mTapStutterRemaining[t] = 0;
+          mTapStutterIterations[t] = 0;
           mTapStutterPos[t] = 0;
           mTapStutterLength[t] = 0;
         }
@@ -1302,12 +1314,13 @@ namespace stolmine
     // is total loop length in blocks (musical: 24..96 blocks =
     // ~125ms..512ms = 16th-note..quarter-note @120BPM); mTapStutterPos
     // is the current block index within the loop [0, length).
-    // mTapStutterRemaining is duration countdown (block units, 2..32).
-    // Each stuttered block sets both read indices to
-    //   anchor + pos*FRAMELENGTH (mod maxDelay)
-    // and increments pos mod length. Loop discontinuity is the
-    // stutter character; in-loop block transitions are continuous.
-    uint8_t  mTapStutterRemaining[kMaxNetworkTaps];
+    // mTapStutterIterations is duration in *full loop traversals*
+    // (2..8 triangular by decay). Decrements when pos wraps; the
+    // stutter ends when it reaches 0 at a wrap. This guarantees
+    // the loop is heard repeating at least 2× before re-anchoring,
+    // which is the perceptual difference between "loop" and
+    // "underrun click."
+    uint8_t  mTapStutterIterations[kMaxNetworkTaps];
     int      mTapStutterAnchor[kMaxNetworkTaps];
     uint16_t mTapStutterLength[kMaxNetworkTaps];
     uint16_t mTapStutterPos[kMaxNetworkTaps];
