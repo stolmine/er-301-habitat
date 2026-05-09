@@ -216,6 +216,18 @@ namespace stolmine
       // event timing doesn't lock to motion phase.
       mGlitchLcg = 0xFEEDF00Du;
 
+      // G4 transient detector — start envelopes at 0; cooldown 0.
+      mEnvFast = 0.0f;
+      mEnvSlow = 0.0f;
+      mTransientCooldown = 0;
+
+      // G7 respawn — zero life means "needs initial seeding" on
+      // first motion×glitch>0 block.
+      for (int i = 0; i < kMaxNetworkTaps; i++)
+      {
+        mTapLifeRemaining[i] = 0;
+      }
+
       // Allpass diffusion buffers (4-stage Schroeder chain)
       memset(mApBuf1, 0, sizeof(mApBuf1));
       memset(mApBuf2, 0, sizeof(mApBuf2));
@@ -399,6 +411,71 @@ namespace stolmine
       {
         mGlitchLcg = mGlitchLcg * 1103515245u + 12345u +
                      (mLastSeed ^ 0xDEADBEEFu);
+      }
+
+      // ---- G7 — tap respawn (lifetime-driven reflector reset) ----
+      // Per-tap countdown in blocks. On expiration, the tap's
+      // reflector position is re-hashed (new x,y in unit disk) and
+      // life is reset to a random fraction of target. Respawn rate
+      // scales with motion × glitch so motion=0 or glitch=0 stops
+      // all respawns. Geometry recomputed below picks up the new
+      // reflector positions.
+      const float kMaxRespawnHz = 2.0f;        // max 2 respawns/sec/tap
+      const float respawnRateHz = motionDepth * glitchAmount * kMaxRespawnHz;
+      const int targetLifeBlocks = (respawnRateHz > 0.01f)
+        ? (int)(1.0f / (respawnRateHz * blockDt))
+        : 0;
+      if (targetLifeBlocks > 0)
+      {
+        for (int t = 0; t < activeTaps; t++)
+        {
+          if (mTapLifeRemaining[t] == 0)
+          {
+            // Initial seeding — randomize so taps don't all respawn
+            // simultaneously.
+            uint32_t hLife = mGlitchLcg ^
+              ((uint32_t)t * 2654435761u + 0xACE0BEEFu);
+            hLife = hLife * 1103515245u + 12345u;
+            const float lifeFrac =
+              0.5f + (float)((hLife >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
+            mTapLifeRemaining[t] =
+              (uint16_t)((float)targetLifeBlocks * lifeFrac);
+            continue;
+          }
+          mTapLifeRemaining[t]--;
+          if (mTapLifeRemaining[t] == 0)
+          {
+            // Respawn — hash new (x, y) in unit disk.
+            uint32_t hPos = mGlitchLcg ^
+              ((uint32_t)t * 2654435761u + 0x0CAFE0CDu);
+            hPos = hPos * 1103515245u + 12345u;
+            float xRaw =
+              (float)((hPos >> 16) & 0xFFFFu) * (2.0f / 65535.0f) - 1.0f;
+            hPos = hPos * 1103515245u + 12345u;
+            float yRaw =
+              (float)((hPos >> 16) & 0xFFFFu) * (2.0f / 65535.0f) - 1.0f;
+            float r2 = xRaw * xRaw + yRaw * yRaw;
+            if (r2 > 1.0f)
+            {
+              const float invR = 1.0f / sqrtf(r2);
+              xRaw *= invR; yRaw *= invR;
+            }
+            mReflectors[t].x = xRaw;
+            mReflectors[t].y = yRaw;
+            // Reset life with hash variation so subsequent respawns
+            // also stay desynchronized.
+            hPos = hPos * 1103515245u + 12345u;
+            const float lifeFrac =
+              0.5f + (float)((hPos >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
+            mTapLifeRemaining[t] =
+              (uint16_t)((float)targetLifeBlocks * lifeFrac);
+          }
+        }
+      }
+      else
+      {
+        // Disabled — clear so reactivation re-seeds randomly.
+        for (int t = 0; t < kMaxNetworkTaps; t++) mTapLifeRemaining[t] = 0;
       }
 
       // ---- Block-rate geometry recompute ----
@@ -780,6 +857,82 @@ namespace stolmine
         if (idx < 0) idx += maxDelay;
         if (idx >= maxDelay) idx -= maxDelay;
         mTapNewReadIdx[t] = idx;
+      }
+
+      // ---- G4 — input transient-triggered events ----
+      // Block-rate envelope follower (fast vs slow). When a
+      // transient is detected (envFast jumps above envSlow ×
+      // threshold and we're past cooldown), perturb K random taps
+      // via one of three sub-effects: flip fb sign, duck gain
+      // (smoother resets to 0; ramps back over ~50ms), or kick
+      // read pointer ±256 samples. K scales with connectivity ×
+      // glitch (max 6 at full settings). G4 events ride over the
+      // mutex modes — STUTTER taps absorb most effects as no-ops
+      // (gains and fbWeight already 0; read kick gets overwritten
+      // by stutter override below).
+      {
+        // Block peak input level.
+        float blockMaxAbs = 0.0f;
+        for (int i = 0; i < FRAMELENGTH; i++)
+        {
+          const float a = fabsf(in[i]);
+          if (a > blockMaxAbs) blockMaxAbs = a;
+        }
+        // Fast env: short time-constant peak follower (~16ms).
+        mEnvFast = (blockMaxAbs > mEnvFast * 0.7f)
+                     ? blockMaxAbs : mEnvFast * 0.7f;
+        // Slow env: long-time-constant moving average (~1s).
+        mEnvSlow += (blockMaxAbs - mEnvSlow) * 0.005f;
+
+        bool transientFired = false;
+        if (mTransientCooldown > 0)
+        {
+          mTransientCooldown--;
+        }
+        else if (mEnvFast > mEnvSlow * 3.0f && mEnvFast > 0.05f &&
+                 glitchAmount > 0.0f)
+        {
+          transientFired = true;
+          mTransientCooldown = 10;   // ~53ms refractory at 187 blocks/s
+        }
+
+        if (transientFired)
+        {
+          const int kMaxK = 6;
+          const int K = (int)(connectivity * (float)kMaxK *
+                              glitchAmount + 0.5f);
+          for (int n = 0; n < K; n++)
+          {
+            uint32_t h = mGlitchLcg ^
+              ((uint32_t)n * 2654435761u + 0xE777E777u);
+            h = h * 1103515245u + 12345u;
+            const int t = (int)((h >> 16) % (uint32_t)activeTaps);
+            h = h * 1103515245u + 12345u;
+            const uint32_t effect = (h >> 16) % 3u;
+            if (effect == 0u)
+            {
+              // Flip fb sign.
+              mFbWeight[t] = -mFbWeight[t];
+            }
+            else if (effect == 1u)
+            {
+              // Duck gain — smoother snaps to 0, ramps back over
+              // ~50ms via the per-sample smoother.
+              mTapGainLSmoothed[t] = 0.0f;
+              mTapGainRSmoothed[t] = 0.0f;
+            }
+            else
+            {
+              // Kick read pointer ±256 samples.
+              h = h * 1103515245u + 12345u;
+              const int offset = ((int)(h >> 16) & 0x1FF) - 0x100;
+              int kickIdx = mTapNewReadIdx[t] + offset;
+              while (kickIdx < 0)         kickIdx += maxDelay;
+              while (kickIdx >= maxDelay) kickIdx -= maxDelay;
+              mTapNewReadIdx[t] = kickIdx;
+            }
+          }
+        }
       }
 
       // ---- G2 stutter — block-rate trigger / state ----
@@ -1438,6 +1591,22 @@ namespace stolmine
     // Glitch RNG — separate from mWalkerLcg so glitch event timing
     // is independent of motion phase.
     uint32_t mGlitchLcg;
+
+    // G4 — input transient detector. Block-rate envelope follower
+    // (fast vs slow). When fast envelope shoots above slow ×
+    // threshold, fire a transient event that perturbs K random
+    // taps with one of {flip fb sign, duck gain, kick read ptr}.
+    // K scales with connectivity × glitch.
+    float mEnvFast;
+    float mEnvSlow;
+    int   mTransientCooldown;   // block counter, prevents back-to-back fires
+
+    // G7 — per-tap respawn lifetime. When countdown hits 0, the
+    // tap's reflector gets re-randomized and life resets. Rate
+    // scales with motion × glitch (motion=0 or glitch=0 → no
+    // respawns ever; respawn period ranges from ~500ms at full
+    // settings to several seconds at low).
+    uint16_t mTapLifeRemaining[kMaxNetworkTaps];
 
     // 4-stage allpass diffusion chain in feedback path. Phase-
     // decorrelates the recycled signal each cycle, breaking the
