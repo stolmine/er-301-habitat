@@ -660,8 +660,8 @@ namespace stolmine
       const float kMaxMute    = 0.15f;
       const float kMaxStutter = 0.40f;
       const float kMaxCrush   = 0.25f;   // density still gates crush coverage
-      const float kMaxScrub   = 0.15f;
-      const float kMaxReverse = 0.15f;
+      const float kMaxScrub   = 0.075f;  // halved from 0.15 to preserve lush bed
+      const float kMaxReverse = 0.075f;  // halved from 0.15 to preserve lush bed
       const float pMute    = glitchAmount * kMaxMute;
       const float pStutter = glitchAmount * kMaxStutter;
       const float pCrush   = glitchAmount * density * kMaxCrush;
