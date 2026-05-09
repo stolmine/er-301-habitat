@@ -659,9 +659,13 @@ namespace stolmine
       // pNormal = remainder (~0–10% at full).
       const float kMaxMute    = 0.15f;
       const float kMaxStutter = 0.40f;
-      const float kMaxCrush   = 0.25f;
-      const float kMaxScrub   = 0.075f;
-      const float kMaxReverse = 0.075f;
+      // CRUSH / SCRUB / REVERSE / NORMAL split the remaining 45%
+      // equally at glitch=1 (11.25% each). Stutter remains the
+      // dominant glitch-mode character; mute is the second
+      // dominant; the rest are evenly distributed flavors.
+      const float kMaxCrush   = 0.1125f;
+      const float kMaxScrub   = 0.1125f;
+      const float kMaxReverse = 0.1125f;
       // All glitch-mode coverages are now purely probabilistic via
       // the glitch fader. Density no longer gates any glitch effect
       // — it only controls actual tap count (lush body) and feeds
