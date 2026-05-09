@@ -1193,8 +1193,12 @@ namespace stolmine
         {
           const int t = activeStutterTaps[s];
           float ptr = mTapStutterReadPtr[t];
+          // Wrap ptr into [0, maxDelay) BEFORE deriving iptr/frac.
+          // Otherwise frac = ptr - (float)iptr (with iptr wrapped)
+          // produces a huge value, scaling sample to nonsense and
+          // clipping the wet bus.
+          if (ptr >= (float)maxDelay) ptr -= (float)maxDelay;
           int iptr  = (int)ptr;
-          if (iptr >= maxDelay) iptr -= maxDelay;
           int iptr2 = iptr + 1;
           if (iptr2 >= maxDelay) iptr2 -= maxDelay;
           const float frac = ptr - (float)iptr;
