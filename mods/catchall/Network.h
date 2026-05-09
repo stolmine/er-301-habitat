@@ -445,15 +445,26 @@ namespace stolmine
           mTapLifeRemaining[t]--;
           if (mTapLifeRemaining[t] == 0)
           {
-            // Respawn — hash new (x, y) in unit disk.
+            // Respawn — drift the reflector by a small random delta
+            // (rather than fully re-randomizing). Big position jumps
+            // produce audible 5ms morph artifacts via the dual-read
+            // crossfade (which is only one block long) — full
+            // re-randomization at high event rate sounds like a
+            // continuous underrun stream. Delta of 0.15 in the unit
+            // disk caps delay change to ~75ms worst case.
+            const float kRespawnMaxDelta = 0.15f;
             uint32_t hPos = mGlitchLcg ^
               ((uint32_t)t * 2654435761u + 0x0CAFE0CDu);
             hPos = hPos * 1103515245u + 12345u;
-            float xRaw =
-              (float)((hPos >> 16) & 0xFFFFu) * (2.0f / 65535.0f) - 1.0f;
+            const float dx =
+              ((float)((hPos >> 16) & 0xFFFFu) * (2.0f / 65535.0f)
+               - 1.0f) * kRespawnMaxDelta;
             hPos = hPos * 1103515245u + 12345u;
-            float yRaw =
-              (float)((hPos >> 16) & 0xFFFFu) * (2.0f / 65535.0f) - 1.0f;
+            const float dy =
+              ((float)((hPos >> 16) & 0xFFFFu) * (2.0f / 65535.0f)
+               - 1.0f) * kRespawnMaxDelta;
+            float xRaw = mReflectors[t].x + dx;
+            float yRaw = mReflectors[t].y + dy;
             float r2 = xRaw * xRaw + yRaw * yRaw;
             if (r2 > 1.0f)
             {
