@@ -1,365 +1,241 @@
-# Network — Character macro (glitch side, gltch ply)
+# Network — Character macro (gltch ply)
 
-## Context
+**Status: feature-complete at catchall 0.3.50.** This doc was a
+forward plan and is now an as-shipped reference. Original plan
+preserved at the bottom for context. Primary new doc for resuming
+work is the **Polish backlog** at the top.
 
-Network at catchall 0.3.27 has its lush side fully developed:
-geometry-driven multitap with dual-read crossfading delay, density-
-compensated tap gain, per-tap pitch detune (S1, anchored to conn),
-per-tap LFO rate variation (S2, anchored to motion), per-tap LP
-filter (L3, anchored to decay), in-loop allpass diffusion, sparse
-feedback recycle, tanh saturation, DC blockers. It sounds clean and
-reverb-like.
+---
 
-The unit's design vision per `planning/network-design-notes.md` is a
-spectrum from lush continuous reverb to discrete event-driven
-glitch, controlled by a single Character macro. With lush now solid,
-this plan adds the macro and the glitch-side primitives.
+## Polish backlog (open work)
 
-**User-locked architecture (decided in interview, see conversation
-2026-05-09):**
+### Stutter loop boundary discontinuity (refinement of 0.3.43 ZC pass)
 
-- **Q1 — Unified ramp**: a single `glitchAmount` float (read from
-  the new `gltch` ply parameter, clamped 0..1) is multiplied into
-  every glitch primitive's event probability. No staggered fade-in;
-  all primitives ramp together.
-- **Q2 — Lush stays on at glitch=1**: this is "glitchy reverb," not
-  two distinct sonic regions. S1/S2/L3, geometry, allpass diffusion,
-  feedback recycle, saturation — all keep running unmodified
-  underneath the glitch primitives.
-- **Q3 — Probability semantics**: events fire at `glitchAmount ×
-  primitiveMaxRate` probability per evaluation tick (block-rate or
-  per-sample depending on the primitive). Cheap, deterministic per
-  seed.
-- **Q4 — UI**: a 7th ply named `gltch` inserted before `wet` in the
-  expanded layout. (User: "we will be folding some stuff together on
-  an overview ply eventually, for now we can just add a 7th ply.")
-- **Q5 — Per-primitive flavor anchors** (each glitch primitive's
-  *flavor* is scaled by an existing param while macro controls
-  *amount*):
+Current behavior: at trigger time, anchor and `mTapStutterLoopSamples`
+are both nudged ±FRAMELENGTH samples to land on the smallest-
+magnitude buffer sample (best zero approximation in range). Soft but
+not silent — residual click remains audible at high stutter density.
 
-  | Primitive | Anchored to | Flavor effect |
-  |---|---|---|
-  | G1 — S&H on tap positions | `motion` | Higher motion → faster S&H clock rate, more abrupt position steps. |
-  | G3 — Probabilistic mute | `density` | Higher density → more taps eligible to mute. |
-  | G2 — Per-tap stutter/freeze | `decay` | Higher decay → longer stutter durations, longer freezes. |
-  | G4 — Transient-triggered events | `connectivity` | Higher conn → transients ricochet through more taps. |
-  | G5/G6 — Scrub + reverse reads | `size` | Higher size → larger scrub depth in samples. |
-  | G8 — Bitcrush + decimate subset | `density` | Higher density → larger affected tap subset (capped < 100% coverage); per-tap bit-depth and decimate factor seeded. |
-  | G7 — Tap respawn | `motion` | Higher motion → faster respawn rate. (User said "conn or motion"; motion chosen for narrative coherence with G1: motion = all geometric flux.) |
+**Proper fix (deferred):**
 
-  Two primitives on density (G3, G8) and two on motion (G1, G7).
-  Connectivity, decay, size each get one. All spreads are
-  intentional.
+1. Replace min-magnitude ZC search with **sign-change ZC detection**
+   per `er-301/mods/core/objects/granular/Grain.cpp:65`
+   (`od::Grain::snapToZeroCrossing`). Searches forward for
+   negative→positive crossing, backward for positive→negative
+   crossing, picks closer direction. More rigorous than min-magnitude
+   when residual signal is non-zero (which is most of the time).
 
-- **Q6 — Curve**: linear with per-primitive minimum-probability
-  floor. `glitch == 0` → all primitives fully off (bit-exact lush).
-  `glitch > 0` → each primitive's probability jumps to its floor,
-  then ramps linearly to its max as `glitch → 1`. So nudging the
-  macro just-on produces a "tasting menu" of all glitch characters
-  at low rate immediately.
+2. **Add a small Hanning fade window at loop boundaries.** Last
+   N samples of loop (~32–64) crossfade with first N of next
+   iteration. Hides any residual sample-step at wrap. ER-301's
+   `od::Grain` uses linear fade (`mFade` samples ramp); a Hann or
+   sine half-period works equally well. Apply on top of the static
+   stutter gain (no smoother needed since fade applies symmetrically
+   to both ends per loop iteration).
 
-  Formula per primitive:
-  ```cpp
-  float p = (glitch <= 0.0f) ? 0.0f
-          : minP + (maxP - minP) * glitch;
-  ```
+3. Implementation outline:
+   - At trigger time, sign-change ZC search ±FRAMELENGTH around
+     anchor and around `anchor + loopSamples`.
+   - Per-sample stutter pass: when `posInLoop > loopSamples - fadeN`,
+     compute fade weight `w = (loopSamples - posInLoop) / fadeN`
+     and apply `sample *= w`. Symmetrical at loop start (`posInLoop
+     < fadeN` → `w = posInLoop / fadeN`).
+   - Cost: per-trigger ZC scan is fine; per-sample fade is the hot
+     path. Use a precomputed 64-entry LUT for the Hann window or
+     just compute `0.5f - 0.5f * cosf(...)` (block-rate constant
+     not viable here since trigger varies). LUT is cleanest.
 
-## Architecture
+### Stutter CPU at high density (open)
 
-### Glitch infrastructure (added once, used by every primitive)
+At density=1, glitch=1 we hit ~91% CPU. Optimizations from 0.3.38
+helped but per-sample scalar stutter pass is the dominant cost.
+Possible follow-ups:
+- Cap absolute max stutter taps regardless of mode budget.
+- NEON-vectorize the stutter pass (with scalar gather since
+  Cortex-A8 has no proper gather instruction).
+- Pre-batch stutter reads per-tap-then-per-sample for better cache
+  locality.
 
-- **New ply / parameter**: `Glitch` float Parameter on Network,
-  exposed via SWIG, ply named `gltch` placed before `wet` in
-  `Network.lua`'s expanded layout. Default bias `0.0`, range
-  [0, 1]. Standard GainBias control (CV branch like the others).
-- **Block-rate read** in `process()`: `float glitchAmount =
-  CLAMP(0.0f, 1.0f, glitch);` alongside the existing param reads.
-- **Glitch RNG state** (separate from walker's `mWalkerLcg` so that
-  glitch event timing is independent of motion phase):
-  `uint32_t mGlitchLcg;` initialized in constructor from a fixed
-  seed; advanced one step per evaluation tick where used.
-- **Hash mask allocation** for per-tap, per-primitive seeded
-  variation (4th XOR mask onward; lush polish used `0xA5A5A5A5`,
-  `0x3C3C3C3C`, `0x77777777`):
+Defer until polish round; not critical for hardware audition.
 
-  | Primitive | XOR mask | Used for |
-  |---|---|---|
-  | G1 S&H | `0xCCCCCCCCu` | per-tap S&H clock phase + step pattern |
-  | G3 mute | `0x33333333u` | per-tap, per-tick mute decision |
-  | G2 stutter | `0x66666666u` | per-tap stutter trigger + duration |
-  | G4 transient | `0x99999999u` | per-event affected-tap selection |
-  | G5/G6 scrub/rev | `0xF0F0F0F0u` | per-tap direction + scrub depth |
-  | G8 crush | `0xC3C3C3C3u` | per-tap bit-depth + decimate factor |
-  | G7 respawn | `0x3CC33CC3u` | per-tap respawn timing |
+---
 
-### Per-primitive design
+## As-shipped architecture (catchall 0.3.50)
 
-#### G3 — Probabilistic mute (simplest; ship first)
+### UI
 
-- **Mechanism**: per-tap, per-block, decide mute/unmute. Apply as a
-  multiplicative mask on `mTapGainLSmoothed[t]` and
-  `mTapGainRSmoothed[t]` smoothed targets. Smoothed gain ramp
-  prevents click on mute transition.
-- **Probability**: `pMute(t) = density × (minMute + (maxMute -
-  minMute) × glitchAmount)` where `minMute = 0.02`, `maxMute = 0.4`.
-  Density gates eligibility, glitch scales probability.
-- **State**: none (decision is recomputed per block from new hash;
-  smoothed gain absorbs the transitions).
-- **Where**: in the existing per-tap LFO loop (Network.h:379–423),
-  after L3 LP coeff.
+7-ply layout left→right: `size`, `dens`, `motn`, `conn`, `decay`,
+`gltch`, `wet`. All standard GainBias controls with CV branches.
 
-#### G1 — S&H on tap positions
+### Lush body (always-on)
 
-- **Mechanism**: each tap has an S&H clock phase. When the clock
-  ticks, the tap snapshots its current `mTapDelayTarget[t]` (post-
-  geometry, post-S1 detune, post-S2 LFO — the full lush-side
-  position). Until the next tick, the snapshot replaces the
-  continuous value, freezing the tap's delay at a discrete step.
-- **Clock rate**: `clkHz(t) = motion × (minClk + (maxClk - minClk) ×
-  glitchAmount)` where `minClk = 1.0 Hz`, `maxClk = 16.0 Hz`. Motion
-  governs absolute speed; glitch governs how stepwise the motion
-  becomes.
-- **State**: `mTapShClock[64]` (phase 0..1), `mTapShValue[64]`
-  (snapshot in samples).
-- **Where**: in the per-tap LFO loop. After computing the lush-side
-  `mTapDelayTarget[t]`, advance S&H clock by `clkHz × blockDt`. On
-  wraparound, snapshot. Then if glitchAmount > 0, blend in S&H
-  value: `mTapDelayTarget[t] = lerp(continuous, snapshot,
-  glitchAmount)` — gives smooth introduction. At glitch=1, full
-  replacement.
+- **S1** per-tap pitch detune (XOR mask `0xA5A5A5A5`,
+  `connectivity`-anchored — ±0.5ms delay offset hashed per tap).
+- **S2** per-tap LFO rate variation (`0x3C3C3C3C`,
+  `motion`-anchored — per-tap LFO rate ±50% spread at full motion).
+- **L3** per-tap LP filter (`0x77777777`, `decay`-anchored, glitch-
+  attenuated — coefficient pulled toward 1.0 at high glitch so
+  HF survives in feedback for grittier texture).
+- **4-stage allpass diffusion** in feedback path
+  (`connectivity`-driven via `soften` mix).
+- **Sparse selectable feedback recycle** (`kRecycle = conn ×
+  activeTaps`, signed-random `mFbWeight` magnitudes for resonance-
+  break).
+- **Density-compensated tap gain** `2.5 × N^(-0.4)` (softened from
+  statistical √N to preserve presence at high density).
+- **DC blockers** on input, feedback, and L/R output.
+- **Tanh saturation** on feedback recycle (Padé 3/3).
+- **Smooth-random listener walker** drives geometry / tap
+  delays/pans; rate scales with `1 + 4 × conn × decay`.
+- **G7 reflector drift** (motion × glitch driven, ±0.15 unit-disk
+  delta per respawn — smooth field evolution, no teleport clicks).
 
-#### G2 — Per-tap stutter/freeze
+### Glitch macro (gltch ply, mutex modes per cycle)
 
-- **Mechanism**: per-tap state machine with two states: NORMAL
-  (default) and STUTTER. In STUTTER, the tap's read pointer is
-  frozen — it re-reads the same N-sample loop until exit. State
-  evaluated per block.
-- **Trigger probability**: `pTrig(t) = decay × (minTrig + (maxTrig -
-  minTrig) × glitchAmount)` per block, where `minTrig = 0.005`,
-  `maxTrig = 0.05`. Decay scales probability (long-decay reverbs
-  hold the stutter audibly longer).
-- **Stutter duration**: hashed per-trigger as 1..16 blocks (≈4..64
-  ms at 48k/256-sample blocks).
-- **Implementation**: per-tap state → frozen read indices. Easiest:
-  freeze `mTapNewReadIdx[t]` and `mTapOldReadIdx[t]` to their
-  pre-stutter values for the duration. The dual-read crossfade then
-  produces a held loop with no per-sample writes overhead.
-- **State**: `mTapStutterRemaining[64]` (uint8 — 0 = NORMAL, n =
-  STUTTER for n more blocks), `mTapStutterIdxA[64]`,
-  `mTapStutterIdxB[64]` (the frozen indices).
+Cycle-locked seed (`mGlitchLcg`). Reseeds on each walker revolution
+wrap → glitch decisions stay deterministic within a cycle, shuffle
+on cycle wrap. Motion thus controls glitch pattern shuffle rate.
 
-#### G4 — Transient-triggered events
+Mode mutex: each tap gets exactly one of {NORMAL, MUTE, STUTTER,
+CRUSH, SCRUB, REVERSE} per cycle via cumulative-threshold dispatch
+(single hash, XOR mask `0xDD55DD55`).
 
-- **Mechanism**: input transient detector (one-pole envelope
-  follower difference) generates a rare global event. On event,
-  randomly affect K taps (K ∝ connectivity × glitchAmount): pick
-  one of {flip fb sign, mute for 1 block, kick the read pointer
-  forward by a random offset}.
-- **Detector**: `envFast = max(absInput, envFast × 0.95)`,
-  `envSlow = envSlow × 0.999 + absInput × 0.001`. Transient when
-  `envFast > envSlow × thresh` and not currently in cooldown.
-- **State**: `mEnvFast`, `mEnvSlow` (scalar floats),
-  `mTransientCooldown` (block counter).
-- **Affected-tap count**: `K = (int)(connectivity × maxK ×
-  glitchAmount)` where `maxK = 6`.
-- **Per-event hash**: `mGlitchLcg` advances; pick K indices with
-  rejection-free golden-ratio sampling.
-- **Block rate**, applied between block-rate setup and per-sample
-  loop.
+**At glitch=1 (any density):**
 
-#### G5/G6 — Scrub + reverse reads
+| Mode | Share | Behavior |
+|---|---|---|
+| MUTE | 15% | gain + fbWeight zeroed; smoother absorbs ramp |
+| STUTTER | 40% | multi-block loop with iter-counted duration |
+| CRUSH | 11.25% | bitcrush+decimate sub-modes |
+| SCRUB | 11.25% | block-rate position offset |
+| REVERSE | 11.25% | reverse Pass A advance |
+| NORMAL | 11.25% | clean lush tap |
 
-- **Mechanism**: per-tap direction flag (forward/reverse) and per-
-  tap scrub offset. When reverse is active, read pointer advances
-  the opposite direction during the block. When scrub is active,
-  read pointer offset is randomly perturbed each block.
-- **Scrub depth**: `scrubMax = size × maxBufFrac × glitchAmount`
-  where `maxBufFrac = 0.25` of buffer length.
-- **Reverse probability**: per-tap, per-block, hash decides. `pRev =
-  minRev + (maxRev - minRev) × glitchAmount` with `minRev = 0.01`,
-  `maxRev = 0.15`.
-- **Implementation**: this primitive interacts with the dual-read
-  delay differently from the others — needs careful design to avoid
-  unwinding the dual-read crossfade. **Defer details to Phase 3c
-  design pass; sketch only here.** Likely requires per-tap
-  read-direction flags piped through the existing read-index
-  advance code (~Pass A in process()).
-- **State**: `mTapRevFlag[64]` (uint8), `mTapScrubOffset[64]`
-  (samples).
+All glitch coverage is purely glitch-fader-scaled. Density only
+controls active-tap count + level compensation (decoupled).
 
-#### G8 — Bitcrush + decimate subset
+### Glitch primitives (in-mode behaviors)
 
-- **Mechanism**: per-tap independent bitcrush + sample-rate
-  decimate, applied to `tapV` *after* L3 LP and *before*
-  `wetL/wetR/fbVec` accumulation in Pass C. Only a subset of taps
-  affected, chosen probabilistically per block. Per-affected-tap
-  bit-depth and decimate factor varied via seed hash.
-- **Affected fraction**: `frac = density × maxFrac × glitchAmount`
-  where `maxFrac = 0.6` (user constraint: never 100% coverage).
-  Each tap independently passes the threshold check.
-- **Bitcrush** (lifted from `mods/spreadsheet/Larets.cpp:265-271`):
-  ```cpp
-  float lvl = powf(2.0f, 12.0f - bitParam * 9.5f);
-  out = floorf(in * lvl + 0.5f) / lvl;
-  ```
-  `bitParam` per-tap from G8 hash: range [0.3, 1.0] so even minimal
-  crush is audibly bit-reduced.
-- **Decimate** (lifted from `Larets.cpp:273-278`):
-  ```cpp
-  int factor = 1 + (int)(decimParam * 31.0f);
-  if (++counter[t] >= factor) { hold[t] = in; counter[t] = 0; }
-  out = hold[t];
-  ```
-  `decimParam` per-tap from G8 hash: range [0.0, 0.7] so factors
-  span 1..23 (avoid full ×32 freeze; that overlaps G2).
-- **State**: `mTapCrushMask[64]` (uint8 enabled flag, block-rate),
-  `mTapCrushBitLvl[64]` (float `lvl`, block-rate),
-  `mTapDecimFactor[64]` (uint8, block-rate),
-  `mTapDecimCounter[64]` (uint8, per-sample),
-  `mTapDecimHold[64]` (float, per-sample).
-- **Per-sample apply**: scalar per-tap (NEON-unfriendly because
-  decimate has per-tap counter branch); fall back to scalar tail
-  loop when crushed-tap fraction is high. At low fractions, branch
-  predicts well.
-- **Where**: insert in Pass C after L3 LP filter, before gain/fb
-  accumulation. **Note**: the "subset" mask makes Pass C's NEON
-  4-wide harder. Implementation strategy: keep the NEON path for
-  un-crushed taps (mask = 0), then a scalar second-pass over the
-  crushed-tap subset that computes their contribution and adds to
-  wet/fb. This preserves NEON throughput on the common (mostly-
-  uncrushed) case.
+- **G3 MUTE** — `mTapGainL/R` and `mFbWeight` zeroed for MUTE-mode
+  taps. Smoother handles the transition (~50ms ramp).
 
-#### G7 — Tap respawn (lifetimes)
+- **G2 STUTTER** — per-tap multi-block loop:
+  - Loop length 24..96 blocks (~125ms..512ms = 16th–quarter @120BPM),
+    triangular distribution mode-biased by `decay`.
+  - Soft motion-cycle subdivision snap (loop length halfway-snapped
+    to nearest cycle/N for N in {2,3,4,6,8,12,16,24,32,48,64} that
+    falls in range).
+  - Iterations 2..8 (full loop traversals), triangular by `decay`.
+  - Speed picked uniformly from {×0.5, ×1, ×2} (octave shift).
+  - Anchor + loop end snapped to min-magnitude buffer samples
+    (±FRAMELENGTH search) at trigger.
+  - Separate scalar per-sample playback path with float read
+    pointer + linear interp; bypasses Pass A/B/C (which are zeroed
+    via gain=0 for STUTTER taps).
+  - Static stutter gain captured at trigger = lush gain × 1.5
+    boost.
+  - mTapStutterFbW = 0 (stutter doesn't recycle into feedback,
+    avoids long-stutter self-feedback runaway).
 
-- **Mechanism**: per-tap lifetime counter. When it expires, the tap
-  re-randomizes its reflector position (single tap call into
-  `network_geom::regenerateField` for one index, with a new sub-
-  seed) and resets the counter.
-- **Lifetime**: `lifeBlocks = (int)(motion ⁻¹ × baseLife ×
-  (1 - glitchAmount))` — higher motion or glitch → shorter life.
-  At glitch=0, lifetime is effectively infinite (no respawns).
-- **Per-tap hash**: G7 mask seeds initial-life randomization so
-  respawns aren't synchronized.
-- **State**: `mTapLifeRemaining[64]` (int).
-- **Implementation note**: respawn writes one `mReflectors[t]`
-  entry. Geometry is recomputed per block from these reflectors via
-  `recomputeTaps()`, so the new position takes effect within one
-  block (≈5ms). No special crossfade — the existing dual-read
-  delay's crossfade absorbs the discontinuity.
+- **G8 CRUSH** — per-tap bitcrush + sample-rate decimate, three
+  sub-modes hashed equally (`0x55555555`):
+  - BITCRUSH_ONLY (factor=1, just bit reduction)
+  - DECIMATE_ONLY (16-bit clean, just rate reduction)
+  - BOTH (combined)
+  - bit depth: uniform [0,1] hash (XOR `0xC3C3C3C3`) → bitLvl in
+    [4096 (12-bit), 5.66 (~2.5-bit)] (Larets formula)
+  - decim factor: uniform [0,1] hash (XOR `0x99CC55AA`) → factor
+    1..32 (Larets formula)
+  - Per-sample branchless NEON 4-wide in Pass C; mask blend with
+    un-crushed tapV.
 
-## Implementation order (incremental, each shippable)
+- **G5 SCRUB** — per-block randomized offset on `mTapNewReadIdx`
+  for SCRUB-mode taps (XOR `0x59B7C9F1`, mixed with
+  `mWriteIndex/FRAMELENGTH` block counter for per-block variation
+  while mGlitchLcg stays cycle-locked). Offset depth = `size ×
+  glitch × 0.25 × maxDelay`. Dual-read crossfade smears each jump
+  into a 5ms morph — that morph is the scrub character.
 
-Each step bumps PKGVERSION and produces an installable build. Order
-chosen for cheapest-first / biggest-impact-first:
+- **G6 REVERSE** — per-tap signed advance in Pass A
+  (`mTapReadAdvance[t] = -1` for REVERSE-mode taps, `+1`
+  otherwise). Block-rate alignment of `mNewReadIdx ← mOldReadIdx`
+  for REVERSE taps (prevents 2×FRAMELENGTH discontinuity from
+  geometry-derived recompute fighting reverse playback). Pass A
+  NEON modified to use per-tap advance + bidirectional wrap
+  (`vcgeq` for upper, `vcltq` for lower, branchless `vbslq`).
 
-**Phase 3a — Macro infrastructure + simplest primitives** (0.3.28):
-1. Add `Glitch` Parameter, `gltch` ply, SWIG, `glitchAmount` read.
-2. **G3 — probabilistic mute** (multiplicative gain mask in per-tap
-   loop; cheapest possible primitive).
-3. **G1 — S&H on tap positions** (snapshot + clock in per-tap loop).
+### Baseline-mode glitch (always-on, not gated by glitch macro)
 
-**Phase 3b — Per-tap state machines** (0.3.29):
-4. **G2 — per-tap stutter/freeze** (state machine, frozen read
-   indices).
-5. **G8 — bitcrush/decimate subset** (Larets-derived per-tap, mask).
+- **G4 input transient ricochet** — block-rate envelope detector
+  (fast vs slow follower); on transient, perturb K random taps
+  (K = `conn × density × 6`) with one of {flip fb sign, duck gain
+  ~50ms, kick read pointer ±256 samples}. STUTTER-mode taps
+  skipped (no-op anyway). Audible in lush mode (glitch=0) too —
+  feels like sidechain ducking + tap re-allocation on input
+  transients. Default cooldown 10 blocks (~53ms refractory).
 
-### Polish backlog (post-Phase 3c)
+### Effect interaction summary
 
-- **Stutter loop boundary discontinuity.** Even with min-magnitude
-  ZC alignment landed in 0.3.43, residual click at loop wrap is
-  audible. ER-301's `od::Grain::snapToZeroCrossing` (in
-  `er-301/mods/core/objects/granular/Grain.cpp:65`) does proper
-  sign-change detection (negative-to-positive forward, positive-to-
-  negative backward, pick closer direction) — more rigorous than
-  smallest-magnitude. Combined with `od::Grain`'s Hanning fade
-  window at grain boundaries (linear fade with `mFade` samples
-  ramp-in/out), the residual click could be eliminated entirely.
-  Aping that pattern: switch to true ZC sign-change detection at
-  trigger time, and add a small (32–64 sample) Hanning fade at
-  each loop boundary applied on top of the static stutter gain.
-  Cost-aware: per-trigger ZC scan is fine; per-sample fade is the
-  hot path so use a precomputed small fade LUT or a cheap polynomial.
+Effects are **mutex per tap, per cycle** but **stack across taps
+via the shared feedback bus**. A STUTTER tap's wet-bus
+contribution writes to the buffer (via the feedback recycle), where
+a CRUSH tap on the next cycle reads it and crushes the stuttered
+material. Same with all combinations. So at high glitch, the
+character is layered (one tap producing the loop, another reading
++ crushing it, another reading + reversing it) without any single
+tap doing multiple things at once.
 
-**Phase 3c — Most complex** (0.3.30+):
-6. **G4 — transient-triggered events** (input envelope detector,
-   global event, K-tap modifier).
-7. **G7 — tap respawn** (lifetime + single-tap regeneration).
-8. **G5/G6 — scrub + reverse** (deferred to last; needs careful
-   integration with dual-read; may want a focused planning pass
-   before this one).
+### Key tunable constants (Network.h)
 
-After each phase, audition on hardware to validate:
-- glitch=0 still produces bit-exact lush (no regression).
-- glitch>0 immediately produces audible character (minimum-
-  probability floor working).
-- glitch=1 character matches the primitive's intent.
+| Constant | Value | Role |
+|---|---|---|
+| `kMaxMute` | 0.15 | MUTE coverage at glitch=1 |
+| `kMaxStutter` | 0.40 | STUTTER coverage at glitch=1 |
+| `kMaxCrush` | 0.1125 | CRUSH coverage at glitch=1 |
+| `kMaxScrub` | 0.1125 | SCRUB coverage at glitch=1 |
+| `kMaxReverse` | 0.1125 | REVERSE coverage at glitch=1 |
+| `kStutterMinLenBlocks` | 24 | Stutter loop min length (~125ms @48k) |
+| `kStutterMaxLenBlocks` | 96 | Stutter loop max length (~512ms @48k) |
+| `kStutterMinIterations` | 2 | Stutter min loop iterations |
+| `kStutterMaxIterations` | 8 | Stutter max loop iterations |
+| `kStutterGainBoost` | 1.5 | Stutter gain × lush gain at trigger |
+| `kScrubMaxFrac` | 0.25 | Scrub depth fraction of buffer at full |
+| `kMaxRespawnHz` | 2.0 | G7 max respawn rate per tap |
+| `kRespawnMaxDelta` | 0.15 | G7 max position drift per respawn |
+| `kZCSearchRange` | FRAMELENGTH | Stutter ZC alignment search ±range |
+| `kStutterSnapStrength` | 0.5 | Cycle-subdivision snap strength |
+| `kGlitchReseedXOR` | 0xDEADBEEF | Cycle-wrap reseed perturbation |
+| `kMaxK` (G4) | 6 | G4 max ricochet count |
 
-## Critical files
+---
 
-**To modify (in stages):**
+## Original plan archive (pre-implementation, 2026-05-09)
 
-- `mods/catchall/Network.h` — class members, ctor init, process()
-  block-rate setup, per-tap LFO loop, Pass C insertion (G8). All
-  primitive state arrays land here.
-- `mods/catchall/assets/Network.lua` — add `gltch` ply + GainBias
-  view, splice into expanded layout before `wet`.
-- `mods/catchall/mod.mk` — PKGVERSION bump per phase.
+The architecture below was the forward plan; deviations during
+implementation:
 
-**To reference (no edit):**
+- **Decay decoupling from stutter trigger** (0.3.34) — original
+  formula coupled stutter trigger probability to `decay × glitch`;
+  refactored to glitch-only after audition showed loops weren't
+  audible across the decay range.
+- **Mutex modes** (0.3.34) — original plan had primitives
+  independently triggered per tap (could overlap). Audition showed
+  this muddied character; refactored to mutex.
+- **G4 promoted to baseline** (0.3.45) — original plan had G4
+  glitch-gated. Audition showed musically useful in lush mode too.
+- **G5/G6 design pass** (0.3.46) — deferred during initial Phase 3c
+  per plan; designed in `network-g5-g6-plan.md` and shipped.
+- **CRUSH severity collapse fix** (0.3.36) — original plan used
+  triangular distribution with mode=density which collapsed to a
+  single severity at extremes. Refactored to uniform-uncorrelated
+  hashes with categorical sub-modes.
+- **CRUSH density-decoupled** (0.3.49) — final state: CRUSH coverage
+  is glitch-only, no density coupling.
 
-- `mods/spreadsheet/Larets.cpp:265-278` — bitcrush + decimate
-  source for G8.
-- `mods/catchall/network/geometry.h` — `regenerateField()` for G7
-  per-tap respawn (will need a single-index variant or call the
-  full regenerate with reseeded RNG).
-- `planning/refs/multitap-comb-design-notes.pdf` — original brief.
-- `planning/network-design-notes.md` — full G1–G8 categorization
-  doc; cross-reference for design intent.
+Rest of original plan (verification procedures, file references,
+memory rules) still applies. Implementation order shipped: Phase
+3a (0.3.28) → Phase 3b (0.3.30) → Phase 3c (0.3.40) → tuning
+rounds (0.3.31..0.3.50).
 
-## Verification — end-to-end (per phase)
-
-1. **Build clean**: `make ARCH=linux PKGNAME=catchall` and
-   `make ARCH=am335x PKGNAME=catchall` both succeed (force-clean
-   SWIG wrapper between header changes).
-2. **NEON hint check**: `arm-none-eabi-objdump -d
-   testing/am335x/mods/catchall/Network.o | grep -cE
-   '\.32.*:(64|128)'` returns 0. (G8 in particular needs verifying;
-   adding scalar second-pass shouldn't regress this.)
-3. **Lint**: `tools/check-graphic-virtual-defs.sh` exits clean.
-4. **vtable check**: `arm-none-eabi-nm -C
-   testing/am335x/libcatchall.so | grep 'vtable for stolmine::Network'`
-   shows `V` (COMDAT vague-linkage).
-5. **Hardware audition (per phase)**:
-   - **glitch=0 regression test**: confirm lush sound is unchanged
-     vs. the prior phase's installed build.
-   - **glitch nudge test**: at glitch=0.05, confirm primitive
-     introduced this phase produces audible event(s) within 30s.
-   - **glitch=1 test**: confirm character is "the right kind of
-     glitch" (e.g. mute = audible holes, S&H = stepped position
-     wobble, stutter = held buffer loop, crush = digital grit on a
-     subset of taps).
-   - **flavor-anchor test**: sweep the anchor param while glitch=1.
-     Confirm character changes coherently (e.g. for G1 on motion:
-     low motion → slow steps; high motion → fast steps).
-6. **No-crash insert test**: insert/remove Network many times after
-   each phase; the unit has had crash-on-insert hazards.
-
-## Memory references (rules to comply with)
-
-- Header-only inline preserved (no new .cpp).
-- NEON 4-wide patterns retained where applicable; G8's per-tap
-  branching needs the "scalar second pass over subset" pattern to
-  avoid breaking the NEON path.
-- No per-sample dispatch branches on `glitchAmount`; multiplicative
-  scaling on probabilities is the safe pattern (per
-  `feedback_runtime_branched_dsp_dispatch`).
-- All new NEON-touched state must be class members
-  (`feedback_neon_intrinsics_drumvoice`).
-- Force-clean SWIG wrapper between header edits
-  (`feedback_swig_header_dep`).
-- No libm trig in package paths at per-sample rate; `powf` for
-  bitcrush level computation is OK because it's block-rate per
-  affected tap.
-- PKGVERSION bump per build (`feedback_package_version_bump`).
-- `cp testing/linux/catchall-X.Y.Z.pkg ~/.od/rear/` after each
-  linux build (`feedback_linux_build_auto_install`).
+For G5/G6 design rationale specifically, see
+`planning/network-g5-g6-plan.md`.
