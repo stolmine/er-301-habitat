@@ -214,51 +214,158 @@ effort.
 > Running both in parallel and crossfading via a macro gets a huge
 > range out of one tap structure.
 
-Network's current trajectory is firmly on path 1. Adding path 2 as
-a parallel signal with a macro-crossfade is exactly the
-Plexiphon-axis goal from the original brief.
+Network as of 0.3.22 is firmly on the lush side. The eventual
+**Character macro** crossfades between lush and glitch pipelines
+that share the same underlying delay buffer + tap geometry.
 
-This could land as a `mode` or `character` parameter that morphs
-between:
-- 0.0: glitch — S&H tap positions, probabilistic mute, granular
-  reads, no smoothing
-- 1.0: lush — current state + per-tap pitch shift + per-tap delay
-  modulation rates
+The macro can land as a top-level ply or as the headline `character`
+control. 0.0 = pure glitch, 1.0 = pure lush, midpoint = blend.
+
+---
+
+## Lush vs. glitch categorization
+
+Each future move maps to exactly one of three buckets: **Lush**
+(turns on with macro→1), **Glitch** (turns on with macro→0), or
+**Spanning** (parameter values morph as macro sweeps; same code path
+on both sides, different config).
+
+### LUSH side (continuous, smearing, reverb-flavored)
+
+| # | Move | Status | Implementation note |
+|---|---|---|---|
+| L1 | Per-tap modulated allpass diffusion (per-tap chains, slow LFO on coefficient) | queued | Schroeder/Dattorro per-tap. Heavyweight — ~32 × 4-stage allpass. Could share a diffusion bank pool with random per-tap routing. |
+| L2 | Cross-feedback sparse FDN with unitary (Hadamard / Householder) mixing | queued | Promote feedback path from "selectable recycle" to "proper sparse FDN". Mathematical reverb-tail behavior. Heaviest move but biggest payoff. |
+| L3 | Per-tap LP filter with seed-derived random cutoffs | queued | One-pole LP per tap. Cheap. Adds timbre evolution. |
+| L4 | Existing in-loop allpass diffusion (4-stage Schroeder, ~32ms) | shipped 0.3.16 | Currently mixed by `connectivity`-driven internal soften. Already on lush side. |
+| L5 | Existing per-tap shimmer LFO (0.5Hz, golden-angle phases, ±8 samples) | shipped 0.3.19 | Always on. Lush by nature; on glitch side could be silenced or repurposed as S&H source. |
+| L6 | Existing dual-read crossfading delay (Doppler-free, smooth blocks) | shipped 0.3.22 | Always on (foundational). Lush by design. On glitch side, could be replaced by single-read with abrupt position jumps. |
+
+### GLITCH side (discontinuous, event-driven, addressable)
+
+| # | Move | Status | Implementation note |
+|---|---|---|---|
+| G1 | S&H on tap positions at irregular trigger rates | queued | Per-tap LFSR-clocked sample-and-hold of (delay, pan) — quantum-jump topology. Smoothing OFF. Macro=0 enables. |
+| G2 | Per-tap stutter / freeze | queued | Tap latches buffer contents and loops a slice for N ms. Per-tap state: latch flag + slice start position + position counter. |
+| G3 | Probabilistic tap mute/unmute on clock | queued | Each tap has a probability gate that fires on internal clock divisions. Like Euclidean rhythm across the tap field. |
+| G4 | Transient-triggered events | queued | Input transient detector triggers random tap to jump position / freeze / pitch-shift momentarily. |
+| G5 | Buffer scrub | queued | Read pointer occasionally jumps to a random position in the delay line for a tap. Per-tap "scrub probability" parameter. |
+| G6 | Reverse-buffer reads | queued | Per-tap flag: read pointer decrements instead of incrementing. Plays buffer backwards through that tap. |
+| G7 | Tap respawn (lifetimes) | queued | Each tap has a random lifetime; fades out and reappears at a new random position. Topology evolves over time. |
+| G8 | Bitcrush / SR-reduce subset of taps | queued | Per-tap bitcrush state (target bit depth, hold counter for downsampling). Selected by hash from tap index. |
+
+### SPANNING (same code path, parameter morphs along the macro axis)
+
+| # | Move | Lush config | Glitch config | Implementation note |
+|---|---|---|---|---|
+| S1 | Per-tap pitch shift | ±5–30 cents random per tap (PDF's primary lush move) | Per-tap pitch S&H jumping ±semitones at irregular rates | Current LFO is 0.5Hz / ±8 samples = lush. At glitch end, S&H replaces continuous LFO. |
+| S2 | Per-tap delay-modulation rate | All taps slow LFO (~0.5 Hz, golden-angle phases) | Per-tap rates jitter wildly (sub-second, divergent) | Single mechanism, macro modulates rate distribution. |
+| S3 | Per-tap waveshaping / soft-sat | Gentle soft-clip per tap (subtle nonlinear character) | Hard distortion / random curves per tap (unpredictable timbre per tap) | Per-tap waveshaper with curve-strength macro. |
+| S4 | Ring-mod (per tap, per pair, or against slow sine) | Slow sine ring-mod (~5Hz subaudio detune) | Audio-rate ring-mod against random other tap (chaotic coupling) | Frequency parameter morphs with macro. |
+| S5 | Tap probability per region of space | Stable density gradient (some regions dense, some sparse) | Jittery density (regions flicker active/inactive at clock rate) | Spatial probability map with rate macro. |
+| S6 | Granular tap output | Long grains, dense overlap (continuous texture) | Short grains, sparse trigger (event identity preserved) | Grain size + density macros bound by character. |
+
+### MACRO-INDEPENDENT (always on, both sides)
+
+These shipped or queued items aren't crossfade subjects — they're
+foundational infrastructure that runs identically regardless of
+character position:
+
+- Phyllotaxis reflector field (geometry)
+- Smooth-random listener walker (motion source)
+- Constant per-tap magnitude (no distance-amplitude dep)
+- Pan from azimuth (`dy/dist`), gainL/R smoothers
+- DC blockers (input / fb / stereo output @ 50Hz)
+- Two-stage tanh saturation (fb path + buffer-write)
+- Sign randomization on fb_weight
+- 1/√k feedback normalization
+- Per-tap fb_weight dual smoothers
+- **Density-compensated tap gain** (queued — not yet shipped).
+  Per-tap magnitude scales by `1/√activeTaps` so summed wet RMS
+  stays roughly constant as density sweeps. Without this, density
+  doubles as a level knob: at high density the wet bus accumulates
+  enough energy to push tanh saturation hard (or force the chain
+  output to clip), so users currently have to either lower the
+  input gain or back off density to avoid clipping. With it,
+  density becomes purely a structural / spatial-richness control
+  uncoupled from amplitude. One-line fix in the gainScale arg
+  passed to `network_geom::recomputeTaps()`.
+
+### Macro architecture options
+
+**Option A: two parallel signal paths.** Lush bus and glitch bus
+each compute their own wetL/wetR from the shared delay buffer, with
+their own tap-readout strategies. Macro crossfades the buses.
+
+- Pros: clearest separation; each side optimized for its purpose;
+  PDF's recommended approach.
+- Cons: ~2× CPU at midpoint where both pipelines run; more state.
+- Best when: lush and glitch readouts are fundamentally different
+  (lush continuous interp vs. glitch S&H jumps).
+
+**Option B: one pipeline with macro-modulated parameters.** Single
+tap-readout path; macro modulates parameter values along the
+spanning items (S1-S6) and gates lush-only items (L1-L3) /
+glitch-only items (G1-G8) with a bias.
+
+- Pros: cheaper CPU, simpler state.
+- Cons: extreme ends are less differentiated; some items (S&H vs.
+  smooth) don't morph cleanly.
+
+**Recommendation**: hybrid. Single delay buffer + tap geometry
+(macro-independent). Two parallel readout pipelines for items where
+lush and glitch are fundamentally different (read strategy, time
+domain). Single pipeline with macro-modulated parameters for items
+where they're the same mechanism with different settings (spanning
+S1-S6). Macro biases gating of items in L vs G categories.
 
 ---
 
 ## Concrete next-action queue (in priority order)
 
-Based on the PDF's "highest leverage" ranking and our current state:
+Reorganized by macro side:
 
-1. **If 0.3.21 still has audible impulses**: run the per-sample
-   d(delay)/dt + d(pan)/dt diagnostic. We've removed magnitude
-   modulation but if delay or pan rates are still spiking, those
-   are the residual sources. Choose remediation (dual-read, 1/(r+ε)
-   spatial fade, etc.) per finding.
+### Lush side polish (low-hanging fruit, no macro needed)
 
-2. **Per-tap static pitch offset** (~30 cents range, hash from
-   seed). Cheapest move with biggest character impact per the PDF.
-   Adds shimmer, breaks integer-ratio comb peaks.
+1. **S1 lush half: per-tap static pitch offset** (~30 cents range,
+   hash from seed). Cheapest move with biggest character impact per
+   the PDF. Breaks integer-ratio comb peaks. **Do first.**
+2. **S2 lush half: per-tap LFO rate variation**. Currently all taps
+   share 0.5 Hz; give each tap its own rate. Trivial code change,
+   large perceptual impact. **Do second.**
+3. **L3: per-tap LP filter with seed-derived random cutoffs**. Adds
+   timbre evolution per tap. One-pole LP, cheap.
+4. **L4 already shipped (in-loop allpass diffusion)** — currently
+   mixed by `connectivity`. Could expose a separate `diffusion`
+   parameter or fold differently into the lush macro.
 
-3. **Per-tap LFO rate variation**. Currently all taps share 0.5 Hz;
-   give each tap its own rate. Trivial code change, large
-   perceptual impact ("synchronized chorus" → "truly choral").
+### Macro framework
 
-4. **Cross-feedback FDN matrix**. Promote feedback path from
-   "sparse selectable recycle" to "proper sparse FDN with unitary
-   mixing". Mathematical reverb-tail behavior. Significant
-   restructure but high payoff.
+5. **Add the Character macro**. Architecture decision (Option A / B
+   / Hybrid) needs to be made before Phase 6+ work proceeds. Hybrid
+   recommended.
 
-5. **Per-tap character module** — pick 1-2 from the PDF's stacking
-   list (e.g., per-tap LP filter with seed-derived random cutoffs,
-   per-tap soft saturator). Bind to a new `color` parameter.
+### Glitch side build-out (after macro framework)
 
-6. **Glitch path** as a parallel character — second tap-readout
-   pipeline using S&H positions + probabilistic gates, crossfaded
-   against the lush path via a macro.
+6. **G1: S&H on tap positions** — first glitch primitive. Foundation
+   for subsequent G items.
+7. **G3: probabilistic tap mute/unmute on internal clock**. Cheap,
+   immediately characterful.
+8. **G2: per-tap stutter / freeze**. State machine per tap.
+9. **G4: transient-triggered events**. Input transient detector +
+   random tap modulator.
+10. **G5/G6: buffer scrub + reverse reads**. Per-tap state flags.
+11. **G8: bitcrush/SR-reduce subset of taps**. Per-tap state.
+12. **G7: tap respawn (lifetimes)**. Most complex glitch item.
 
-Items 1-3 are roughly Phase 2.5 work. Items 4-6 are Phase 3+ scope.
+### Heavyweight architectural
+
+13. **L2: cross-feedback sparse FDN with unitary mixing**. The
+    biggest reverb-quality move. Significant restructure of the
+    feedback path. After macro framework lands.
+
+Items 1-4 are roughly Phase 2.6+ scope (extending Phase 2). Items
+5-13 are Phase 3+ scope.
 
 ## Cross-references
 
