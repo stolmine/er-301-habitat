@@ -603,50 +603,91 @@ namespace stolmine
       }
 
       // ---- G3 mute (mode-gated) ----
-      // MUTE-mode taps zero their gain. Smoother absorbs the
-      // transition (~50ms ramp), no clicks.
+      // MUTE-mode taps zero their gain AND fbWeight. Smoother
+      // absorbs the L/R transition (~50ms ramp), no clicks.
+      // (Previously fbWeight was left untouched, so muted taps
+      // still contributed to feedback — a subtle semantic bug.)
       for (int i = 0; i < activeTaps; i++)
       {
         if (mTapEffectMode[i] == NETWORK_TAP_MUTE)
         {
           mTapGainL[i] = 0.0f;
           mTapGainR[i] = 0.0f;
+          mFbWeight[i] = 0.0f;
         }
       }
 
-      // ---- G8 — bitcrush + decimate (mode-gated) ----
-      // CRUSH-mode taps get crush enabled with severities sampled
-      // uniform [0,1] from independent hashes (decoupled XOR masks
-      // → bit depth and decimate factor vary independently per
-      // tap, even at extreme density). Larets full ranges:
+      // ---- G8 — bitcrush + decimate (mode-gated, sub-classed) ----
+      // CRUSH-mode taps get one of 3 sub-modes (equal probability
+      // via independent hash):
+      //   0: BITCRUSH_ONLY  — only bit reduction (gritty harmonic
+      //                       distortion, no rate reduction)
+      //   1: DECIMATE_ONLY  — only sample-rate reduction (clean
+      //                       bit depth, aliased lo-fi steppy)
+      //   2: BOTH           — combined crush (current character)
+      // Sub-modes have categorically different artifact signatures
+      // so the ear can separate them as distinct voices even with
+      // many playing. Per-effect-applied param (bit depth or
+      // decimate factor) is uniform [0,1] from independent
+      // decoupled XOR-mask hashes. Identity values used for the
+      // bypassed effect.
+      // Larets ranges:
       //   bitParam ∈ [0,1] → bitLvl ∈ [4096 (12-bit), 5.66 (~2.5-bit)]
       //   decimParam ∈ [0,1] → factor ∈ [1, 32]
+      // Identity bitLvl = 32768 (16-bit, finer than int16 input
+      // → no audible quantization).
       for (int i = 0; i < activeTaps; i++)
       {
         if (mTapEffectMode[i] == NETWORK_TAP_CRUSH)
         {
           mTapCrushMask[i] = 1.0f;
 
-          // Bit depth hash (G8 bit XOR mask).
+          // Sub-mode hash (independent XOR mask).
+          uint32_t hSub = mGlitchLcg ^
+            ((uint32_t)i * 2654435761u + 0x55555555u);
+          hSub = hSub * 1103515245u + 12345u;
+          const uint32_t subSel = (hSub >> 16) % 3u;
+
+          // Bit depth hash (used for BITCRUSH_ONLY and BOTH).
           uint32_t hBit = mGlitchLcg ^
             ((uint32_t)i * 2654435761u + 0xC3C3C3C3u);
           hBit = hBit * 1103515245u + 12345u;
           const float bitParam =
             (float)((hBit >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
           const float bitLvl = powf(2.0f, 12.0f - bitParam * 9.5f);
-          mTapCrushBitLvl[i] = bitLvl;
-          mTapCrushInvBitLvl[i] = 1.0f / bitLvl;
 
-          // Decimate factor hash (G8 decim XOR mask — decoupled
-          // from bit hash so the two parameters vary
-          // independently per tap).
+          // Decimate factor hash (used for DECIMATE_ONLY and BOTH).
           uint32_t hDecim = mGlitchLcg ^
             ((uint32_t)i * 2654435761u + 0x99CC55AAu);
           hDecim = hDecim * 1103515245u + 12345u;
           const float decimParam =
             (float)((hDecim >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
           const int factor = 1 + (int)(decimParam * 31.0f);
-          mTapDecimFactorF[i] = (float)factor;
+
+          // Identity values for bypassed effect.
+          const float kIdentityBitLvl = 32768.0f;   // 16-bit, sub-input quantization
+
+          if (subSel == 0u)
+          {
+            // BITCRUSH_ONLY
+            mTapCrushBitLvl[i] = bitLvl;
+            mTapCrushInvBitLvl[i] = 1.0f / bitLvl;
+            mTapDecimFactorF[i] = 1.0f;
+          }
+          else if (subSel == 1u)
+          {
+            // DECIMATE_ONLY
+            mTapCrushBitLvl[i] = kIdentityBitLvl;
+            mTapCrushInvBitLvl[i] = 1.0f / kIdentityBitLvl;
+            mTapDecimFactorF[i] = (float)factor;
+          }
+          else
+          {
+            // BOTH
+            mTapCrushBitLvl[i] = bitLvl;
+            mTapCrushInvBitLvl[i] = 1.0f / bitLvl;
+            mTapDecimFactorF[i] = (float)factor;
+          }
         }
         else
         {
