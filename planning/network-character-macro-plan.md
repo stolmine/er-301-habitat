@@ -263,6 +263,23 @@ chosen for cheapest-first / biggest-impact-first:
    indices).
 5. **G8 — bitcrush/decimate subset** (Larets-derived per-tap, mask).
 
+### Polish backlog (post-Phase 3c)
+
+- **Stutter loop boundary discontinuity.** Even with min-magnitude
+  ZC alignment landed in 0.3.43, residual click at loop wrap is
+  audible. ER-301's `od::Grain::snapToZeroCrossing` (in
+  `er-301/mods/core/objects/granular/Grain.cpp:65`) does proper
+  sign-change detection (negative-to-positive forward, positive-to-
+  negative backward, pick closer direction) — more rigorous than
+  smallest-magnitude. Combined with `od::Grain`'s Hanning fade
+  window at grain boundaries (linear fade with `mFade` samples
+  ramp-in/out), the residual click could be eliminated entirely.
+  Aping that pattern: switch to true ZC sign-change detection at
+  trigger time, and add a small (32–64 sample) Hanning fade at
+  each loop boundary applied on top of the static stutter gain.
+  Cost-aware: per-trigger ZC scan is fine; per-sample fade is the
+  hot path so use a precomputed small fade LUT or a cheap polynomial.
+
 **Phase 3c — Most complex** (0.3.30+):
 6. **G4 — transient-triggered events** (input envelope detector,
    global event, K-tap modifier).

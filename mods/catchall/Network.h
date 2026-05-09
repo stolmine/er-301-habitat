@@ -904,12 +904,12 @@ namespace stolmine
                  glitchAmount > 0.0f)
         {
           transientFired = true;
-          mTransientCooldown = 25;   // ~134ms refractory at 187 blocks/s
+          mTransientCooldown = 10;   // ~53ms refractory at 187 blocks/s
         }
 
         if (transientFired)
         {
-          const int kMaxK = 2;       // was 6 — too aggressive at full
+          const int kMaxK = 6;
           const int K = (int)(connectivity * (float)kMaxK *
                               glitchAmount + 0.5f);
           for (int n = 0; n < K; n++)
