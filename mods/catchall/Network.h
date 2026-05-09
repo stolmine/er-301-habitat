@@ -1033,7 +1033,53 @@ namespace stolmine
         if (lenBlocks < kStutterMinLenBlocks) lenBlocks = kStutterMinLenBlocks;
         if (lenBlocks > kStutterMaxLenBlocks) lenBlocks = kStutterMaxLenBlocks;
         mTapStutterLength[t] = (uint16_t)lenBlocks;
-        mTapStutterLoopSamples[t] = (float)lenBlocks * (float)FRAMELENGTH;
+
+        // Zero-crossing alignment — shift both anchor and loop end
+        // to nearest minimum-magnitude buffer sample within ±FRAME
+        // samples (~5ms each side). Loop wrap discontinuity drops
+        // from arbitrary-sample-step to near-silent residual,
+        // killing the click. Loop length shifts by at most ±10ms,
+        // imperceptible against the musical-length budget.
+        const int kZCSearchRange = (int)FRAMELENGTH;
+        // Anchor refinement.
+        {
+          int bestAnchor = mTapStutterAnchor[t];
+          int bestMag = abs((int)buf[bestAnchor]);
+          for (int off = 1; off < kZCSearchRange && bestMag > 0; off++)
+          {
+            for (int sg = -1; sg <= 1; sg += 2)
+            {
+              int idx = mTapStutterAnchor[t] + sg * off;
+              while (idx < 0)         idx += maxDelay;
+              while (idx >= maxDelay) idx -= maxDelay;
+              const int mag = abs((int)buf[idx]);
+              if (mag < bestMag) { bestMag = mag; bestAnchor = idx; }
+            }
+          }
+          mTapStutterAnchor[t] = bestAnchor;
+        }
+        // Loop-end refinement.
+        const int baseLoopSamples = lenBlocks * (int)FRAMELENGTH;
+        int targetEnd = mTapStutterAnchor[t] + baseLoopSamples;
+        while (targetEnd >= maxDelay) targetEnd -= maxDelay;
+        {
+          int bestEnd = targetEnd;
+          int bestMag = abs((int)buf[bestEnd]);
+          for (int off = 1; off < kZCSearchRange && bestMag > 0; off++)
+          {
+            for (int sg = -1; sg <= 1; sg += 2)
+            {
+              int idx = targetEnd + sg * off;
+              while (idx < 0)         idx += maxDelay;
+              while (idx >= maxDelay) idx -= maxDelay;
+              const int mag = abs((int)buf[idx]);
+              if (mag < bestMag) { bestMag = mag; bestEnd = idx; }
+            }
+          }
+          int adjusted = bestEnd - mTapStutterAnchor[t];
+          if (adjusted < 0) adjusted += maxDelay;
+          mTapStutterLoopSamples[t] = (float)adjusted;
+        }
 
         // Iterations — triangular with mode=decay.
         hStut = hStut * 1103515245u + 12345u;
