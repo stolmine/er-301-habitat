@@ -1,26 +1,30 @@
 #pragma once
 
-// Network overview viz — 3D phase-space disc + geometry overlay.
+// Network overview viz — sonar + per-tap activity hybrid.
 //
-// Reflects the Network unit's geometry, glitch state, and audio
-// content on the gltch ply. Layered render (back-to-front):
+// Listener emits sonar pings (concentric rings expanding from
+// current listener position) at a steady cadence. When a ring's
+// 3D radius equals the distance to a reflector, that reflector
+// flashes — the ping has "arrived." Glitch modes modulate the
+// flash signature (silent for MUTE, sustained for STUTTER, etc).
 //
-//   1. Phase-space points from wet bus output ring (Rauschen
-//      pattern: 254 points, (s[i], s[i+1], s[i+2]) as 3D coord).
-//      Auto-scaled, additive into persistence buffer.
-//   2. Stutter wrap ghosts (per-loop-wrap spawn into persistence).
-//   3. Persistence buffer rendered (fades 1/frame).
-//   4. Listener trajectory trace (last 128 walker positions,
-//      brightness fades by age).
-//   5. Tap dots (size-scaled disc, mode-encoded Z displacement).
-//   6. Listener marker (cross at current position).
+// Layered render (back-to-front):
+//   1. Persistence buffer fade (stutter ghosts only).
+//   2. Stutter wrap → ghost spawn into persistence.
+//   3. Sonar ping update: spawn new ping on cadence; for each ping,
+//      detect reflector crossings → set mTapPingFlash; render ring.
+//   4. Persistence rendered.
+//   5. Listener trajectory trace (fading by age).
+//   6. Tap dots — mode color, ping flash boost, ricochet flash boost,
+//      wet-level pulse, mode-encoded Z displacement.
+//   7. Listener marker (cross at current orbit position).
 //
-// Size knob contracts/expands the disc (scale = sizeNorm × base).
-// Phase-space layer stays fixed-scale (auto-normalized to its own
-// dynamic range).
+// Size knob contracts/expands the entire disc (geomScale).
+// Phase-space layer removed in this redesign — sonar provides the
+// rhythmic visual energy phase-space couldn't deliver for a
+// reverb-like signal.
 //
-// Header-only inline per feedback_no_out_of_line_virtuals — vtable
-// must be COMDAT-linked.
+// Header-only inline per feedback_no_out_of_line_virtuals.
 
 #include <od/graphics/Graphic.h>
 #include <math.h>
@@ -37,10 +41,17 @@ namespace stolmine
     {
       memset(mPixels, 0, sizeof(mPixels));
       memset(mLastStutterIter, 0, sizeof(mLastStutterIter));
+      memset(mTapPingFlash, 0, sizeof(mTapPingFlash));
       mRotAngle = 0.0f;
       mFrameCounter = 0;
-      mScaleMin = -1.0f;
-      mScaleMax = 1.0f;
+      mPingCount = 0;
+      mPingTimer = 0;
+      for (int i = 0; i < kMaxPings; i++)
+      {
+        mPings[i].emitX = 0.0f;
+        mPings[i].emitY = 0.0f;
+        mPings[i].age = 0;
+      }
     }
 
     virtual ~NetworkOverviewGraphic()
@@ -69,20 +80,30 @@ namespace stolmine
     float mRotAngle;
     int   mFrameCounter;
 
-    // Phase-space auto-scale (smoothed min/max with fast expand,
-    // slow contract — matches Rauschen).
-    float mScaleMin;
-    float mScaleMax;
+    // ---- Sonar state ----
+    // Rings emitted from listener position, expanding at constant
+    // 3D-units/frame. Each ping has its own emit position so it
+    // continues from where it was spawned (listener may have moved
+    // by the next ping).
+    static const int   kMaxPings        = 4;
+    static const int   kPingMaxAge      = 90;     // frames; ~1.5s @60fps
+    static const int   kPingFlashFrames = 12;     // per-tap flash dur
+    struct Ping { float emitX, emitY; int age; };
+    Ping mPings[kMaxPings];
+    int  mPingCount;
+    int  mPingTimer;
 
-    // Project a 3D point through current rotation/tilt to a 2D
-    // pixel at the given scale (in pixels per unit).
+    // Per-tap flash from ping crossings.
+    uint8_t mTapPingFlash[kMaxNetworkTaps];
+
+    // Project a 3D point through current rotation/tilt to a 2D pixel.
     inline void project3D(float x, float y, float z, float scale,
                           int *outPx, int *outPy, float *outDepth) const
     {
       const float cosA = cosf(mRotAngle);
       const float sinA = sinf(mRotAngle);
-      const float costilt = 0.9553f;   // cos(0.3)
-      const float sintilt = 0.2955f;   // sin(0.3)
+      const float costilt = 0.9553f;
+      const float sintilt = 0.2955f;
       const float rx    = x * cosA + z * sinA;
       const float rzNew = -x * sinA + z * cosA;
       const float ry    = y;
@@ -96,16 +117,13 @@ namespace stolmine
       *outDepth = depth;
     }
 
-    // Z displacement per glitch mode + state.
     inline float tapZ(int t) const
     {
       const int mode = mpNetwork->getTapMode(t);
       switch (mode)
       {
-        case NETWORK_TAP_NORMAL:
-          return 0.0f;
-        case NETWORK_TAP_MUTE:
-          return -1.0f;
+        case NETWORK_TAP_NORMAL: return 0.0f;
+        case NETWORK_TAP_MUTE:   return -1.0f;
         case NETWORK_TAP_STUTTER:
         {
           const float p = mpNetwork->getTapStutterPosNorm(t);
@@ -132,8 +150,7 @@ namespace stolmine
           if (norm < -1.0f) norm = -1.0f;
           return 0.4f * norm;
         }
-        case NETWORK_TAP_REVERSE:
-          return -0.4f;
+        case NETWORK_TAP_REVERSE: return -0.4f;
       }
       return 0.0f;
     }
@@ -153,77 +170,38 @@ namespace stolmine
 
       mFrameCounter++;
 
-      // Disc render scale (geometry layer) follows the Size knob;
-      // phase-space layer stays at fixed unit-disc scale.
+      // Disc render scale follows Size knob.
       const float sizeNorm = mpNetwork->getSizeNorm();
       const float kBaseScale = 26.0f;
       const float geomScale = sizeNorm * kBaseScale;
-      const float phaseScale = kBaseScale;
+
+      // Listener current position (3D).
+      const float listenerPhase = mpNetwork->getListenerPhase();
+      const float kListenerR = 1.3f;
+      const float listenerX = cosf(2.0f * 3.14159265f * listenerPhase) * kListenerR;
+      const float listenerY = sinf(2.0f * 3.14159265f * listenerPhase) * kListenerR;
+
+      // Wet-level boost — RMS of last 16 ring samples gives a
+      // global "intensity" used to pulse NORMAL tap brightness.
+      float wetLvlSq = 0.0f;
+      const int ringSize = mpNetwork->getOutputRingSize();
+      for (int i = ringSize - 16; i < ringSize; i++)
+      {
+        const float s = mpNetwork->getOutputSample(i);
+        if (!(s == s)) continue;
+        wetLvlSq += s * s;
+      }
+      const float wetLvl = sqrtf(wetLvlSq * (1.0f / 16.0f));
+      int wetBoost = (int)(wetLvl * 8.0f);
+      if (wetBoost > 4) wetBoost = 4;
 
       // ---- 1. Fade persistence buffer ----
       for (int i = 0; i < w * h; i++)
       {
-        if (mPixels[i] > 0)
-          mPixels[i]--;
+        if (mPixels[i] > 0) mPixels[i]--;
       }
 
-      // ---- 2. Phase-space auto-scale ----
-      const int ringSize = mpNetwork->getOutputRingSize();
-      float curMin = 1e10f, curMax = -1e10f;
-      for (int i = 0; i < ringSize; i++)
-      {
-        const float s = mpNetwork->getOutputSample(i);
-        if (!(s == s) || s > 1e6f || s < -1e6f) continue;
-        if (s < curMin) curMin = s;
-        if (s > curMax) curMax = s;
-      }
-      if (curMin > curMax) { curMin = -1.0f; curMax = 1.0f; }
-      const float expandRate = 0.5f;
-      const float contractRate = 0.02f;
-      if (curMin < mScaleMin)
-        mScaleMin += (curMin - mScaleMin) * expandRate;
-      else
-        mScaleMin += (curMin - mScaleMin) * contractRate;
-      if (curMax > mScaleMax)
-        mScaleMax += (curMax - mScaleMax) * expandRate;
-      else
-        mScaleMax += (curMax - mScaleMax) * contractRate;
-      if (!(mScaleMin == mScaleMin)) mScaleMin = -1.0f;
-      if (!(mScaleMax == mScaleMax)) mScaleMax = 1.0f;
-      if (mScaleMax <= mScaleMin) mScaleMax = mScaleMin + 0.01f;
-      float range = mScaleMax - mScaleMin;
-      if (range < 0.01f)
-      {
-        const float mid = (mScaleMin + mScaleMax) * 0.5f;
-        mScaleMin = mid - 0.005f;
-        mScaleMax = mid + 0.005f;
-        range = 0.01f;
-      }
-      const float invRange = 1.0f / range;
-
-      // ---- 3. Plot phase-space points (additive persistence) ----
-      for (int i = 0; i < ringSize - 2; i++)
-      {
-        const float s0 = mpNetwork->getOutputSample(i);
-        const float s1 = mpNetwork->getOutputSample(i + 1);
-        const float s2 = mpNetwork->getOutputSample(i + 2);
-        if (!(s0 == s0) || !(s1 == s1) || !(s2 == s2)) continue;
-        // Normalize to [-0.5, 0.5] in each axis.
-        const float nx = (s0 - mScaleMin) * invRange - 0.5f;
-        const float ny = (s1 - mScaleMin) * invRange - 0.5f;
-        const float nz = (s2 - mScaleMin) * invRange - 0.5f;
-        int px, py;
-        float pz;
-        project3D(nx, ny, nz, phaseScale, &px, &py, &pz);
-        if (px >= 0 && px < w && py >= 0 && py < h)
-        {
-          int b = (int)mPixels[py * w + px] + 4;
-          if (b > 12) b = 12;
-          mPixels[py * w + px] = (uint8_t)b;
-        }
-      }
-
-      // ---- 4. Stutter wrap → ghost spawn into persistence ----
+      // ---- 2. Stutter wrap → ghost spawn into persistence ----
       const int activeCount = mpNetwork->getActiveTapCount();
       for (int t = 0; t < activeCount; t++)
       {
@@ -252,15 +230,75 @@ namespace stolmine
         mLastStutterIter[t] = (uint8_t)curIter;
       }
 
-      // ---- 5. Advance rotation ----
+      // ---- 3. Sonar pings ----
+      // Decay per-tap ping-flash counters.
+      for (int t = 0; t < kMaxNetworkTaps; t++)
+      {
+        if (mTapPingFlash[t] > 0) mTapPingFlash[t]--;
+      }
+
+      // Spawn new ping on cadence.
+      mPingTimer--;
+      if (mPingTimer <= 0)
+      {
+        // ~24-frame period → ~2.5 pings/sec at 60fps.
+        mPingTimer = 24;
+        if (mPingCount < kMaxPings)
+        {
+          mPings[mPingCount].emitX = listenerX;
+          mPings[mPingCount].emitY = listenerY;
+          mPings[mPingCount].age = 0;
+          mPingCount++;
+        }
+      }
+
+      // Update ping state: detect reflector crossings, age each
+      // ping, drop expired. (Render below, after fb clear.)
+      // Ping speed: covers full unit-disc diagonal over kPingMaxAge.
+      const float kPingSpeed3D = 2.6f / (float)kPingMaxAge;
+      for (int p = 0; p < mPingCount; )
+      {
+        Ping *ping = &mPings[p];
+        const float r3D     = (float)ping->age       * kPingSpeed3D;
+        const float r3DPrev = (float)(ping->age - 1) * kPingSpeed3D;
+
+        for (int t = 0; t < activeCount; t++)
+        {
+          if (mpNetwork->getTapMode(t) == NETWORK_TAP_MUTE)
+            continue;
+          const float dx = mpNetwork->getReflectorX(t) - ping->emitX;
+          const float dy = mpNetwork->getReflectorY(t) - ping->emitY;
+          const float dist = sqrtf(dx * dx + dy * dy);
+          if (dist > r3DPrev && dist <= r3D)
+          {
+            uint8_t flashLen = kPingFlashFrames;
+            if (mpNetwork->getTapMode(t) == NETWORK_TAP_STUTTER)
+              flashLen = kPingFlashFrames * 2;
+            mTapPingFlash[t] = flashLen;
+          }
+        }
+
+        ping->age++;
+        if (ping->age >= kPingMaxAge)
+        {
+          mPings[p] = mPings[mPingCount - 1];
+          mPingCount--;
+        }
+        else
+        {
+          p++;
+        }
+      }
+
+      // ---- 4. Advance rotation ----
       mRotAngle += 0.01f;
       if (mRotAngle > 6.2832f) mRotAngle -= 6.2832f;
 
-      // Clear framebuffer region.
+      // Clear framebuffer.
       fb.fill(BLACK, mWorldLeft, mWorldBottom,
               mWorldLeft + mWidth - 1, mWorldBottom + mHeight - 1);
 
-      // ---- 6. Render persistence (phase space + ghosts) ----
+      // ---- 5. Render persistence (stutter ghosts) ----
       for (int y = 0; y < h; y++)
       {
         for (int x = 0; x < w; x++)
@@ -271,21 +309,44 @@ namespace stolmine
         }
       }
 
-      // ---- 7. Listener trajectory trace (fading by age) ----
+      // ---- 6. Re-render ping rings (state already updated above) ----
+      for (int p = 0; p < mPingCount; p++)
+      {
+        const Ping *ping = &mPings[p];
+        const float r3D = (float)ping->age * kPingSpeed3D;
+        int cx, cy;
+        float cz;
+        project3D(ping->emitX, ping->emitY, 0.0f,
+                  geomScale, &cx, &cy, &cz);
+        const float screenR = r3D * geomScale;
+        if (screenR < 0.5f) continue;
+        const int brightness = 7 - (7 * ping->age) / kPingMaxAge;
+        if (brightness <= 0) continue;
+        const int steps = (int)(6.2832f * screenR + 8.0f);
+        const float invSteps = 1.0f / (float)steps;
+        for (int s = 0; s < steps; s++)
+        {
+          const float a = (float)s * invSteps * 6.2832f;
+          const int px = cx + (int)(screenR * cosf(a));
+          const int py = cy + (int)(screenR * sinf(a));
+          if (px >= 0 && px < w && py >= 0 && py < h)
+          {
+            fb.pixel(brightness, mWorldLeft + px, mWorldBottom + py);
+          }
+        }
+      }
+
+      // ---- 7. Listener trajectory trace ----
       const int traceSize = mpNetwork->getListenerTraceSize();
-      const float kListenerR = 1.3f;
       for (int i = 0; i < traceSize; i++)
       {
         const float phase = mpNetwork->getListenerTracePhase(i);
-        const float tx =
-          cosf(2.0f * 3.14159265f * phase) * kListenerR;
-        const float ty =
-          sinf(2.0f * 3.14159265f * phase) * kListenerR;
+        const float tx = cosf(2.0f * 3.14159265f * phase) * kListenerR;
+        const float ty = sinf(2.0f * 3.14159265f * phase) * kListenerR;
         int px, py;
         float pz;
         project3D(tx, ty, 0.0f, geomScale, &px, &py, &pz);
         if (px < 0 || px >= w || py < 0 || py >= h) continue;
-        // 0 = oldest, traceSize-1 = newest. Brightness 3..11.
         int brightness = 3 + (8 * i) / traceSize;
         if (brightness > 11) brightness = 11;
         fb.pixel(brightness, mWorldLeft + px, mWorldBottom + py);
@@ -308,9 +369,7 @@ namespace stolmine
         bool hollow = false;
         switch (mode)
         {
-          case NETWORK_TAP_MUTE:
-            brightness = 3;
-            break;
+          case NETWORK_TAP_MUTE:    brightness = 3; break;
           case NETWORK_TAP_CRUSH:
           {
             uint32_t hh = (uint32_t)t * 2654435761u +
@@ -319,41 +378,39 @@ namespace stolmine
             brightness = ((hh >> 16) & 1u) ? 13 : 7;
             break;
           }
-          case NETWORK_TAP_REVERSE:
-            brightness = 11;
-            hollow = true;
-            break;
+          case NETWORK_TAP_REVERSE: brightness = 11; hollow = true; break;
+          case NETWORK_TAP_NORMAL:  brightness = 9 + wetBoost; break;
           case NETWORK_TAP_STUTTER:
           case NETWORK_TAP_SCRUB:
-          case NETWORK_TAP_NORMAL:
-          default:
-            brightness = 13;
-            break;
+          default:                  brightness = 12; break;
         }
 
-        const int flash = mpNetwork->getRicochetFlash(t);
-        if (flash > 0 && flashMax > 0)
+        // Ricochet flash boost.
+        const int rflash = mpNetwork->getRicochetFlash(t);
+        if (rflash > 0 && flashMax > 0)
         {
-          brightness += (flash * 6) / flashMax;
-          if (brightness > 15) brightness = 15;
+          brightness += (rflash * 5) / flashMax;
         }
+        // Ping flash boost (when sonar ring crosses reflector).
+        const int pflash = (int)mTapPingFlash[t];
+        if (pflash > 0)
+        {
+          brightness += (pflash * 6) / kPingFlashFrames;
+        }
+        if (brightness > 15) brightness = 15;
 
         if (hollow)
         {
           for (int dy = -1; dy <= 1; dy++)
-          {
             for (int dx = -1; dx <= 1; dx++)
             {
               if (dx == 0 && dy == 0) continue;
               const int rpx = px + dx;
               const int rpy = py + dy;
               if (rpx >= 0 && rpx < w && rpy >= 0 && rpy < h)
-              {
                 fb.pixel(brightness,
                          mWorldLeft + rpx, mWorldBottom + rpy);
-              }
             }
-          }
         }
         else
         {
@@ -361,13 +418,11 @@ namespace stolmine
         }
       }
 
-      // ---- 9. Listener marker (current position) ----
-      const float listenerPhase = mpNetwork->getListenerPhase();
-      const float lx = cosf(2.0f * 3.14159265f * listenerPhase) * kListenerR;
-      const float ly = sinf(2.0f * 3.14159265f * listenerPhase) * kListenerR;
+      // ---- 9. Listener marker ----
       int lpx, lpy;
       float lpz;
-      project3D(lx, ly, 0.0f, geomScale, &lpx, &lpy, &lpz);
+      project3D(listenerX, listenerY, 0.0f,
+                geomScale, &lpx, &lpy, &lpz);
       if (lpx >= 1 && lpx < w - 1 && lpy >= 1 && lpy < h - 1)
       {
         fb.pixel(WHITE, mWorldLeft + lpx,     mWorldBottom + lpy);
