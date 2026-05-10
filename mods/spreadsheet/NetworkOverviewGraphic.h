@@ -137,6 +137,55 @@ namespace stolmine
       *outDepth = depth;
     }
 
+    // Simple parametric line draw.
+    inline void drawLine(od::FrameBuffer &fb,
+                         int x0, int y0, int x1, int y1,
+                         int brightness) const
+    {
+      const int w = mWidth < kMaxW ? mWidth : kMaxW;
+      const int h = mHeight < kMaxH ? mHeight : kMaxH;
+      const int dx = x1 - x0;
+      const int dy = y1 - y0;
+      const int adx = dx < 0 ? -dx : dx;
+      const int ady = dy < 0 ? -dy : dy;
+      const int steps = adx > ady ? adx : ady;
+      if (steps == 0) return;
+      const float invSteps = 1.0f / (float)steps;
+      for (int s = 0; s <= steps; s++)
+      {
+        const float u = (float)s * invSteps;
+        const int x = x0 + (int)((float)dx * u);
+        const int y = y0 + (int)((float)dy * u);
+        if (x >= 0 && x < w && y >= 0 && y < h)
+          fb.pixel(brightness, mWorldLeft + x, mWorldBottom + y);
+      }
+    }
+
+    // Per-tap effective disc position with glitch-mode displacement.
+    // STUTTER taps orbit a small circle around their reflector pos
+    // in disc plane (instead of radial Z pulse) — the circular
+    // motion reads as continuous orbital movement on the sphere
+    // rather than the previous zig-zag.
+    inline void getEffectiveDiscPos(int t,
+                                    float *outX, float *outY, float *outZ) const
+    {
+      const float rx = mpNetwork->getReflectorX(t);
+      const float ry = mpNetwork->getReflectorY(t);
+      const int mode = mpNetwork->getTapMode(t);
+      *outX = rx;
+      *outY = ry;
+      *outZ = tapZ(t);
+      if (mode == NETWORK_TAP_STUTTER)
+      {
+        const float p = mpNetwork->getTapStutterPosNorm(t);
+        const float orbitR = 0.12f;
+        const float phase = p * 6.2832f;
+        *outX += cosf(phase) * orbitR;
+        *outY += sinf(phase) * orbitR;
+        *outZ = 0.0f;   // replace Z with disc-plane orbit
+      }
+    }
+
     inline float tapZ(int t) const
     {
       const int mode = mpNetwork->getTapMode(t);
@@ -146,8 +195,8 @@ namespace stolmine
         case NETWORK_TAP_MUTE:   return -1.0f;
         case NETWORK_TAP_STUTTER:
         {
-          const float p = mpNetwork->getTapStutterPosNorm(t);
-          return 0.5f * sinf(2.0f * 3.14159265f * p);
+          // Z is overridden by orbit in getEffectiveDiscPos.
+          return 0.0f;
         }
         case NETWORK_TAP_CRUSH:
         {
@@ -233,11 +282,10 @@ namespace stolmine
         const int lastIter = (int)mLastStutterIter[t];
         if (curIter > 0 && curIter < lastIter)
         {
-          const float rx = mpNetwork->getReflectorX(t);
-          const float ry = mpNetwork->getReflectorY(t);
-          const float rz = tapZ(t);
+          float ex, ey, ez;
+          getEffectiveDiscPos(t, &ex, &ey, &ez);
           float sx, sy, sz;
-          diskToSphere(rx, ry, rz, &sx, &sy, &sz);
+          diskToSphere(ex, ey, ez, &sx, &sy, &sz);
           // Small sphere-tangent jitter.
           uint32_t hg = (uint32_t)t * 2654435761u +
                         (uint32_t)curIter;
@@ -321,11 +369,10 @@ namespace stolmine
       // sphere rotates.
       for (int t = 0; t < activeCount; t++)
       {
-        const float rx = mpNetwork->getReflectorX(t);
-        const float ry = mpNetwork->getReflectorY(t);
-        const float rz = tapZ(t);
+        float ex, ey, ez;
+        getEffectiveDiscPos(t, &ex, &ey, &ez);
         float sx, sy, sz;
-        diskToSphere(rx, ry, rz, &sx, &sy, &sz);
+        diskToSphere(ex, ey, ez, &sx, &sy, &sz);
         int px, py;
         float pz;
         projectSphere(sx, sy, sz, sphereRot, sphereRad,
@@ -398,15 +445,67 @@ namespace stolmine
         fb.pixel(brightness, mWorldLeft + px, mWorldBottom + py);
       }
 
+      // ---- 8b. Connectivity shell ----
+      // Each feedback-selected tap (mFbWeight != 0) is a "shell
+      // node." Connect each shell node to its 2 nearest neighbors
+      // among other shell nodes via thin dim lines. Higher conn →
+      // more selected taps → denser shell forming around listener.
+      // Skip back-of-sphere nodes (pz < 0) so we only see the
+      // front face of the shell.
+      {
+        int shellPx[kMaxNetworkTaps];
+        int shellPy[kMaxNetworkTaps];
+        int shellCount = 0;
+        for (int t = 0; t < activeCount; t++)
+        {
+          if (mpNetwork->getFbWeight(t) == 0.0f) continue;
+          float ex, ey, ez;
+          getEffectiveDiscPos(t, &ex, &ey, &ez);
+          float sx, sy, sz;
+          diskToSphere(ex, ey, ez, &sx, &sy, &sz);
+          int px, py;
+          float pz;
+          projectSphere(sx, sy, sz, sphereRot, sphereRad,
+                        &px, &py, &pz);
+          if (px < 0 || px >= w || py < 0 || py >= h) continue;
+          if (pz < 0.0f) continue;   // hide back-of-sphere edges
+          shellPx[shellCount] = px;
+          shellPy[shellCount] = py;
+          shellCount++;
+        }
+        // Connect each shell node to its 2 nearest neighbors. Lines
+        // are drawn dim (4) so they read as a structural shell
+        // without dominating tap dots (12-15).
+        for (int i = 0; i < shellCount; i++)
+        {
+          int n1 = -1, n2 = -1;
+          long d1 = 1L << 30, d2 = 1L << 30;
+          for (int j = 0; j < shellCount; j++)
+          {
+            if (i == j) continue;
+            const long dx = shellPx[i] - shellPx[j];
+            const long dy = shellPy[i] - shellPy[j];
+            const long d = dx * dx + dy * dy;
+            if (d < d1) { n2 = n1; d2 = d1; n1 = j; d1 = d; }
+            else if (d < d2) { n2 = j; d2 = d; }
+          }
+          if (n1 >= 0 && i < n1)
+            drawLine(fb, shellPx[i], shellPy[i],
+                     shellPx[n1], shellPy[n1], 4);
+          if (n2 >= 0 && i < n2)
+            drawLine(fb, shellPx[i], shellPy[i],
+                     shellPx[n2], shellPy[n2], 4);
+        }
+      }
+
       // ---- 9. Render tap dots ----
       const int flashMax = mpNetwork->getRicochetFlashMax();
       for (int t = 0; t < activeCount; t++)
       {
-        const float rx = mpNetwork->getReflectorX(t);
-        const float ry = mpNetwork->getReflectorY(t);
-        const float rz = tapZ(t);
+        float ex, ey, ez;
+        getEffectiveDiscPos(t, &ex, &ey, &ez);
         float sx, sy, sz;
-        diskToSphere(rx, ry, rz, &sx, &sy, &sz);
+        diskToSphere(ex, ey, ez, &sx, &sy, &sz);
         int px, py;
         float pz;
         projectSphere(sx, sy, sz, sphereRot, sphereRad,
