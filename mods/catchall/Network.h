@@ -35,7 +35,6 @@
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
-#include <hal/simd.h>
 #define NETWORK_HAS_NEON 1
 #endif
 
@@ -829,109 +828,65 @@ namespace stolmine
       //   decimParam ∈ [0,1] → factor ∈ [1, 32]
       // Identity bitLvl = 32768 (16-bit, finer than int16 input
       // → no audible quantization).
-      // Pass 1 (per-tap): hash, sub-mode pick, bitParam/decimParam.
-      // Collect CRUSH-mode taps for batched powf.
-      int crushTapList[kMaxNetworkTaps];
-      float crushBitParams[kMaxNetworkTaps];
-      uint8_t crushSubSels[kMaxNetworkTaps];
-      uint8_t crushFactors[kMaxNetworkTaps];   // 1..32 fits in uint8
-      int crushCount = 0;
       for (int i = 0; i < activeTaps; i++)
       {
-        if (mTapEffectMode[i] != NETWORK_TAP_CRUSH)
+        if (mTapEffectMode[i] == NETWORK_TAP_CRUSH)
+        {
+          mTapCrushMask[i] = 1.0f;
+
+          // Sub-mode hash (independent XOR mask).
+          uint32_t hSub = mGlitchLcg ^
+            ((uint32_t)i * 2654435761u + 0x55555555u);
+          hSub = hSub * 1103515245u + 12345u;
+          const uint32_t subSel = (hSub >> 16) % 3u;
+
+          // Bit depth hash (used for BITCRUSH_ONLY and BOTH).
+          uint32_t hBit = mGlitchLcg ^
+            ((uint32_t)i * 2654435761u + 0xC3C3C3C3u);
+          hBit = hBit * 1103515245u + 12345u;
+          const float bitParam =
+            (float)((hBit >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
+          const float bitLvl = powf(2.0f, 12.0f - bitParam * 9.5f);
+
+          // Decimate factor hash (used for DECIMATE_ONLY and BOTH).
+          uint32_t hDecim = mGlitchLcg ^
+            ((uint32_t)i * 2654435761u + 0x99CC55AAu);
+          hDecim = hDecim * 1103515245u + 12345u;
+          const float decimParam =
+            (float)((hDecim >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
+          const int factor = 1 + (int)(decimParam * 31.0f);
+
+          // Identity values for bypassed effect.
+          const float kIdentityBitLvl = 32768.0f;   // 16-bit, sub-input quantization
+
+          if (subSel == 0u)
+          {
+            // BITCRUSH_ONLY
+            mTapCrushBitLvl[i] = bitLvl;
+            mTapCrushInvBitLvl[i] = 1.0f / bitLvl;
+            mTapDecimFactorF[i] = 1.0f;
+          }
+          else if (subSel == 1u)
+          {
+            // DECIMATE_ONLY
+            mTapCrushBitLvl[i] = kIdentityBitLvl;
+            mTapCrushInvBitLvl[i] = 1.0f / kIdentityBitLvl;
+            mTapDecimFactorF[i] = (float)factor;
+          }
+          else
+          {
+            // BOTH
+            mTapCrushBitLvl[i] = bitLvl;
+            mTapCrushInvBitLvl[i] = 1.0f / bitLvl;
+            mTapDecimFactorF[i] = (float)factor;
+          }
+        }
+        else
         {
           mTapCrushMask[i] = 0.0f;
           mTapCrushBitLvl[i] = 1.0f;
           mTapCrushInvBitLvl[i] = 1.0f;
           mTapDecimFactorF[i] = 1.0f;
-          continue;
-        }
-        mTapCrushMask[i] = 1.0f;
-
-        uint32_t hSub = mGlitchLcg ^
-          ((uint32_t)i * 2654435761u + 0x55555555u);
-        hSub = hSub * 1103515245u + 12345u;
-        const uint32_t subSel = (hSub >> 16) % 3u;
-
-        uint32_t hBit = mGlitchLcg ^
-          ((uint32_t)i * 2654435761u + 0xC3C3C3C3u);
-        hBit = hBit * 1103515245u + 12345u;
-        const float bitParam =
-          (float)((hBit >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
-
-        uint32_t hDecim = mGlitchLcg ^
-          ((uint32_t)i * 2654435761u + 0x99CC55AAu);
-        hDecim = hDecim * 1103515245u + 12345u;
-        const float decimParam =
-          (float)((hDecim >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
-
-        crushTapList[crushCount] = i;
-        crushBitParams[crushCount] = bitParam;
-        crushSubSels[crushCount] = (uint8_t)subSel;
-        crushFactors[crushCount] = (uint8_t)(1 + (int)(decimParam * 31.0f));
-        crushCount++;
-      }
-
-      // Pass 2 (NEON 4-wide): batch bitLvl + invBitLvl via simd_pow.
-      // m = 12 - bitParam × 9.5; bitLvl = 2^m.
-      float crushBitLvls[kMaxNetworkTaps];
-      float crushInvBitLvls[kMaxNetworkTaps];
-#ifdef NETWORK_HAS_NEON
-      {
-        const float32x4_t baseVec  = vdupq_n_f32(2.0f);
-        const float32x4_t twelveV  = vdupq_n_f32(12.0f);
-        const float32x4_t nineFiveV = vdupq_n_f32(9.5f);
-        int b = 0;
-        for (; b + 4 <= crushCount; b += 4)
-        {
-          const float32x4_t bp = vld1q_f32(&crushBitParams[b]);
-          const float32x4_t mV = vsubq_f32(twelveV,
-                                           vmulq_f32(bp, nineFiveV));
-          const float32x4_t lvl = simd_pow(baseVec, mV);
-          const float32x4_t invLvl = simd_invert(lvl);
-          vst1q_f32(&crushBitLvls[b], lvl);
-          vst1q_f32(&crushInvBitLvls[b], invLvl);
-        }
-        for (; b < crushCount; b++)
-        {
-          const float lvl = powf(2.0f, 12.0f - crushBitParams[b] * 9.5f);
-          crushBitLvls[b] = lvl;
-          crushInvBitLvls[b] = 1.0f / lvl;
-        }
-      }
-#else
-      for (int b = 0; b < crushCount; b++)
-      {
-        const float lvl = powf(2.0f, 12.0f - crushBitParams[b] * 9.5f);
-        crushBitLvls[b] = lvl;
-        crushInvBitLvls[b] = 1.0f / lvl;
-      }
-#endif
-
-      // Pass 3 (per-crushed-tap): dispatch sub-mode, write final state.
-      const float kIdentityBitLvl = 32768.0f;
-      const float kIdentityInvBitLvl = 1.0f / 32768.0f;
-      for (int c = 0; c < crushCount; c++)
-      {
-        const int i = crushTapList[c];
-        const uint8_t subSel = crushSubSels[c];
-        if (subSel == 0u)
-        {
-          mTapCrushBitLvl[i] = crushBitLvls[c];
-          mTapCrushInvBitLvl[i] = crushInvBitLvls[c];
-          mTapDecimFactorF[i] = 1.0f;
-        }
-        else if (subSel == 1u)
-        {
-          mTapCrushBitLvl[i] = kIdentityBitLvl;
-          mTapCrushInvBitLvl[i] = kIdentityInvBitLvl;
-          mTapDecimFactorF[i] = (float)crushFactors[c];
-        }
-        else
-        {
-          mTapCrushBitLvl[i] = crushBitLvls[c];
-          mTapCrushInvBitLvl[i] = crushInvBitLvls[c];
-          mTapDecimFactorF[i] = (float)crushFactors[c];
         }
       }
       // Inactive taps — identity.
