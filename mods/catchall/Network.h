@@ -625,9 +625,10 @@ namespace stolmine
       // logarithmically to cutoff 18kHz..3kHz (Rings reverb damping
       // convention). Per-tap variation in the same loop below.
       const float kMaxCutoffHz = 18000.0f;
-      const float kCutoffRatio = 6.0f;   // 18k / 3k
+      // logf(6.0f) precomputed — eliminates a libm call per block.
+      const float kLogCutoffRatio = 1.7917595f;
       const float baseCutoffHz =
-        kMaxCutoffHz * expf(-decay * logf(kCutoffRatio));
+        kMaxCutoffHz * expf(-decay * kLogCutoffRatio);
       const float kTwoPiOverSr =
         2.0f * 3.14159265358979f / globalConfig.sampleRate;
       const float baseCoeff =
@@ -1398,13 +1399,19 @@ namespace stolmine
         }
 #endif
 
-        // ---- Pass B (scalar gather + 8-ahead prefetch) ----
-        // sA from old read pointer, sB from new read pointer.
+        // ---- Pass B (scalar gather + 8-ahead prefetch on both reads) ----
+        // sA from old read pointer, sB from new read pointer. Both
+        // reads come from random-access regions of the delay buffer
+        // (per-tap delays); prefetching ahead on both halves the
+        // L1-miss exposure during the scalar gather.
         for (int t = 0; t < activeTaps; t++)
         {
           int pfIdx = t + 8;
           if (pfIdx < activeTaps)
+          {
             __builtin_prefetch(&buf[mTapOldReadIdx[pfIdx]], 0, 1);
+            __builtin_prefetch(&buf[mTapNewReadIdx[pfIdx]], 0, 1);
+          }
           sA[t] = buf[mTapOldReadIdx[t]];
           sB[t] = buf[mTapNewReadIdx[t]];
         }
