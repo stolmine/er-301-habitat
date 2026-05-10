@@ -1,35 +1,42 @@
 #pragma once
 
-// Network overview viz — listener-centered sphere + sonar.
+// Network overview viz — listener-centered sphere with per-tap
+// trails and sonar pings.
 //
-// Reframes the spatial model: listener is fixed at view center,
-// reflectors are mapped to an invisible unit sphere around them.
-// As the listener orbits the audio field, the sphere appears to
-// rotate around the central viewpoint. Glitch Z displacement
-// lifts reflectors off the sphere surface as a screen-y offset.
+// Reflectors are mapped to a unit sphere by treating their 2D
+// disk position as longitude/latitude:
+//   longitude  = atan2(ry, rx)            // covers full [-π, π]
+//   latitude   = (disk_radius - 0.5) × π  // covers [-π/2, π/2]
+// This guarantees a phyllotaxis-style spread across the whole
+// sphere instead of the front-hemisphere clustering you'd get from
+// a naive listener-relative projection. Glitch Z displacement
+// scales the sphere radius locally per tap (lifts/pushes off
+// surface).
 //
-// Sonar pings expand from center (listener) as concentric screen-
-// space rings. Each reflector retains its actual world-space
-// distance from listener; reflectors flash when ping_actual_radius
-// equals their actual_distance, so pings sweep through reflectors
-// in distance order even though their visual positions are
-// equidistant on the unit sphere.
+// Listener motion drives an additional sphere rotation so as the
+// listener orbits the audio field, the sphere visually responds.
 //
-// Layered render (back-to-front):
-//   1. Persistence buffer fade (stutter ghosts only).
-//   2. Stutter wrap → ghost spawn into persistence at sphere pos.
-//   3. Sonar ping update: spawn, detect reflector crossings, age.
+// Sonar pings emanate from view center; ring crossings against
+// each reflector's ACTUAL world-space distance from listener
+// trigger flashes (preserving audio time-of-flight in the temporal
+// dimension while sphere position handles the spatial dimension).
+//
+// Per-tap trails: each frame, each tap deposits a low-brightness
+// pixel into the persistence buffer at its current screen
+// position. As the sphere rotates, the tap moves on screen and
+// leaves a fading arc behind it.
+//
+// Layered render:
+//   1. Persistence buffer fade.
+//   2. Stutter wrap → ghost spawn into persistence.
+//   3. Sonar ping update + reflector cross detection.
 //   4. Rotation advance.
-//   5. Clear fb + render persistence.
-//   6. Render ping rings (screen-space circles centered on view).
-//   7. Render listener trajectory trace as sphere-pole movement.
-//   8. Render tap dots: sphere position, mode color, ping flash,
-//      ricochet flash, wet boost, glitch Z lift.
-//   9. Render listener marker at view center.
-//
-// Size knob contracts/expands the rendered sphere radius.
-//
-// Header-only inline per feedback_no_out_of_line_virtuals.
+//   5. Clear fb.
+//   6. Per-tap trail deposit + persistence render.
+//   7. Render ping rings.
+//   8. Render listener trace.
+//   9. Render tap dots.
+//   10. Render listener marker at center.
 
 #include <od/graphics/Graphic.h>
 #include <math.h>
@@ -51,25 +58,19 @@ namespace stolmine
       mFrameCounter = 0;
       mPingCount = 0;
       mPingTimer = 0;
-      for (int i = 0; i < kMaxPings; i++)
-      {
-        mPings[i].age = 0;
-      }
+      for (int i = 0; i < kMaxPings; i++) mPings[i].age = 0;
     }
 
     virtual ~NetworkOverviewGraphic()
     {
-      if (mpNetwork)
-        mpNetwork->release();
+      if (mpNetwork) mpNetwork->release();
     }
 
     void follow(Network *p)
     {
-      if (mpNetwork)
-        mpNetwork->release();
+      if (mpNetwork) mpNetwork->release();
       mpNetwork = p;
-      if (mpNetwork)
-        mpNetwork->attach();
+      if (mpNetwork) mpNetwork->attach();
     }
 
 #ifndef SWIGLUA
@@ -83,10 +84,6 @@ namespace stolmine
     float mRotAngle;
     int   mFrameCounter;
 
-    // Sonar — pings emanate from view center (listener) as expanding
-    // screen-space rings. Each ping has an age; reflector flashes
-    // are triggered by the ping's actual-distance threshold sweeping
-    // past each reflector's actual distance from listener.
     static const int   kMaxPings        = 4;
     static const int   kPingMaxAge      = 90;
     static const int   kPingFlashFrames = 12;
@@ -97,54 +94,37 @@ namespace stolmine
 
     uint8_t mTapPingFlash[kMaxNetworkTaps];
 
-    // Compute listener-frame coords (right, up, forward) for a
-    // world reflector position with optional Z displacement.
-    // Returns actual distance via *outActualDist.
-    inline void worldToListener(float rx, float ry, float rz,
-                                float cosM, float sinM,
-                                float listenerX, float listenerY,
-                                float *outR, float *outU, float *outF,
-                                float *outActualDist) const
+    // Map reflector world-disk position to a 3D point on the
+    // unit sphere. Glitch Z lifts radially.
+    inline void diskToSphere(float rx, float ry, float zGlitch,
+                             float *sx, float *sy, float *sz) const
     {
-      const float vx = rx - listenerX;
-      const float vy = ry - listenerY;
-      const float vz = rz;
-      // Listener forward = -(cosM, sinM, 0); right = (-sinM, cosM, 0).
-      *outR = -vx * sinM + vy * cosM;
-      *outU = vz;
-      *outF = -vx * cosM - vy * sinM;
-      const float d2 = (*outR)*(*outR) + (*outU)*(*outU) + (*outF)*(*outF);
-      *outActualDist = sqrtf(d2);
+      const float phi = atan2f(ry, rx);
+      const float r = sqrtf(rx * rx + ry * ry);
+      const float theta = (r - 0.5f) * 3.14159265f;
+      const float ct = cosf(theta);
+      const float st = sinf(theta);
+      const float radial = 1.0f + zGlitch * 0.3f;
+      *sx = ct * cosf(phi) * radial;
+      *sy = st             * radial;
+      *sz = ct * sinf(phi) * radial;
     }
 
-    // Project listener-frame 3D point through sphere normalization
-    // + view tumble + screen scale to a 2D pixel.
-    // sphereRad: render scale in pixels (spheres unit radius mapped here)
-    // Returns view-z depth via *outDepth (front-of-sphere = positive).
-    inline void projectSphere(float lr, float lu, float lf,
-                              float dist, float sphereRad,
+    // Project a 3D sphere point through view rotation (mRotAngle
+    // + listener-motion sphere-rotation) and X tilt to a 2D pixel.
+    // Returns view-z depth via *outDepth (front-of-sphere positive).
+    inline void projectSphere(float sx, float sy, float sz,
+                              float sphereRot, float scale,
                               int *outPx, int *outPy, float *outDepth) const
     {
-      // Normalize to unit sphere.
-      float sx, sy, sz;
-      if (dist > 0.001f)
-      {
-        const float invD = 1.0f / dist;
-        sx = lr * invD;
-        sy = lu * invD;
-        sz = lf * invD;
-      }
-      else
-      {
-        sx = sy = sz = 0.0f;
-      }
-      // View tumble around Y axis.
-      const float cosA = cosf(mRotAngle);
-      const float sinA = sinf(mRotAngle);
+      // Sphere rotation around Y axis (combined view tumble +
+      // listener-motion spin).
+      const float cosA = cosf(mRotAngle + sphereRot);
+      const float sinA = sinf(mRotAngle + sphereRot);
       const float rx    =  sx * cosA + sz * sinA;
       const float rzNew = -sx * sinA + sz * cosA;
       const float ry    =  sy;
-      // X-axis tilt.
+      // X-axis tilt for 2.5D depth feel.
       const float costilt = 0.9553f;
       const float sintilt = 0.2955f;
       const float fx = rx;
@@ -152,8 +132,8 @@ namespace stolmine
       const float depth = rzNew * costilt + ry * sintilt;
       const int w = mWidth < kMaxW ? mWidth : kMaxW;
       const int h = mHeight < kMaxH ? mHeight : kMaxH;
-      *outPx = (int)(fx * sphereRad) + w / 2;
-      *outPy = (int)(fy * sphereRad) + h / 2;
+      *outPx = (int)(fx * scale) + w / 2;
+      *outPy = (int)(fy * scale) + h / 2;
       *outDepth = depth;
     }
 
@@ -210,12 +190,11 @@ namespace stolmine
 
       mFrameCounter++;
 
-      // Sphere render scale follows Size knob.
       const float sizeNorm = mpNetwork->getSizeNorm();
       const float kBaseScale = 26.0f;
       const float sphereRad = sizeNorm * kBaseScale;
 
-      // Listener world position (orbit at radius 1.3).
+      // Listener world position + listener-motion sphere rotation.
       const float listenerPhase = mpNetwork->getListenerPhase();
       const float kListenerR = 1.3f;
       const float twoPi = 2.0f * 3.14159265f;
@@ -223,8 +202,11 @@ namespace stolmine
       const float sinM = sinf(twoPi * listenerPhase);
       const float listenerX = cosM * kListenerR;
       const float listenerY = sinM * kListenerR;
+      // As listener orbits, sphere appears to rotate opposite
+      // direction (visual response to listener motion).
+      const float sphereRot = -twoPi * listenerPhase;
 
-      // Wet-level pulse from output ring RMS.
+      // Wet-level pulse from output ring.
       const int ringSize = mpNetwork->getOutputRingSize();
       float wetLvlSq = 0.0f;
       for (int i = ringSize - 16; i < ringSize; i++)
@@ -254,19 +236,18 @@ namespace stolmine
           const float rx = mpNetwork->getReflectorX(t);
           const float ry = mpNetwork->getReflectorY(t);
           const float rz = tapZ(t);
-          float lr, lu, lf, dist;
-          worldToListener(rx, ry, rz, cosM, sinM,
-                          listenerX, listenerY,
-                          &lr, &lu, &lf, &dist);
-          // Ghost offset: small angular jitter on sphere surface.
+          float sx, sy, sz;
+          diskToSphere(rx, ry, rz, &sx, &sy, &sz);
+          // Small sphere-tangent jitter.
           uint32_t hg = (uint32_t)t * 2654435761u +
                         (uint32_t)curIter;
           hg = hg * 1103515245u + 12345u;
           const float jitter =
-            ((float)((hg >> 16) & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f) * 0.2f;
+            ((float)((hg >> 16) & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f) * 0.15f;
           int px, py;
           float pz;
-          projectSphere(lr + jitter, lu, lf, dist, sphereRad,
+          projectSphere(sx + jitter, sy, sz,
+                        sphereRot, sphereRad,
                         &px, &py, &pz);
           if (px >= 0 && px < w && py >= 0 && py < h)
           {
@@ -277,17 +258,16 @@ namespace stolmine
       }
 
       // ---- 3. Sonar pings ----
-      // Decay flash counters.
       for (int t = 0; t < kMaxNetworkTaps; t++)
       {
         if (mTapPingFlash[t] > 0) mTapPingFlash[t]--;
       }
 
-      // Spawn cadence.
       mPingTimer--;
       if (mPingTimer <= 0)
       {
-        mPingTimer = 24;
+        // Slower cadence — ~48 frames between pings (1.25/sec).
+        mPingTimer = 48;
         if (mPingCount < kMaxPings)
         {
           mPings[mPingCount].age = 0;
@@ -295,26 +275,21 @@ namespace stolmine
         }
       }
 
-      // Ping speed in actual-distance space: covers 2.6 (max
-      // listener-to-reflector distance) over kPingMaxAge frames.
       const float kPingSpeedDist = 2.6f / (float)kPingMaxAge;
-      // Update + age + reflector-cross detection.
       for (int p = 0; p < mPingCount; )
       {
         Ping *ping = &mPings[p];
         const float r3D     = (float)ping->age       * kPingSpeedDist;
         const float r3DPrev = (float)(ping->age - 1) * kPingSpeedDist;
 
+        // Reflector cross detection uses ACTUAL world distance
+        // from listener (preserved separately from sphere viz pos).
         for (int t = 0; t < activeCount; t++)
         {
           if (mpNetwork->getTapMode(t) == NETWORK_TAP_MUTE) continue;
-          const float rx = mpNetwork->getReflectorX(t);
-          const float ry = mpNetwork->getReflectorY(t);
-          const float rz = tapZ(t);
-          float lr, lu, lf, dist;
-          worldToListener(rx, ry, rz, cosM, sinM,
-                          listenerX, listenerY,
-                          &lr, &lu, &lf, &dist);
+          const float dx = mpNetwork->getReflectorX(t) - listenerX;
+          const float dy = mpNetwork->getReflectorY(t) - listenerY;
+          const float dist = sqrtf(dx * dx + dy * dy);
           if (dist > r3DPrev && dist <= r3D)
           {
             uint8_t flashLen = kPingFlashFrames;
@@ -340,7 +315,30 @@ namespace stolmine
       mRotAngle += 0.01f;
       if (mRotAngle > 6.2832f) mRotAngle -= 6.2832f;
 
-      // ---- 5. Clear fb + render persistence ----
+      // ---- 5. Per-tap trail deposit into persistence ----
+      // Each tap deposits a low-bright pixel each frame at its
+      // current sphere position, building a fading arc as the
+      // sphere rotates.
+      for (int t = 0; t < activeCount; t++)
+      {
+        const float rx = mpNetwork->getReflectorX(t);
+        const float ry = mpNetwork->getReflectorY(t);
+        const float rz = tapZ(t);
+        float sx, sy, sz;
+        diskToSphere(rx, ry, rz, &sx, &sy, &sz);
+        int px, py;
+        float pz;
+        projectSphere(sx, sy, sz, sphereRot, sphereRad,
+                      &px, &py, &pz);
+        if (px < 0 || px >= w || py < 0 || py >= h) continue;
+        // Skip MUTE — silent reflectors leave no trail.
+        if (mpNetwork->getTapMode(t) == NETWORK_TAP_MUTE) continue;
+        int b = (int)mPixels[py * w + px] + 5;
+        if (b > 11) b = 11;
+        mPixels[py * w + px] = (uint8_t)b;
+      }
+
+      // ---- 6. Clear fb + render persistence ----
       fb.fill(BLACK, mWorldLeft, mWorldBottom,
               mWorldLeft + mWidth - 1, mWorldBottom + mHeight - 1);
       for (int y = 0; y < h; y++)
@@ -353,11 +351,7 @@ namespace stolmine
         }
       }
 
-      // ---- 6. Render ping rings (centered on view = listener) ----
-      // Ping is rendered at screen-space radius proportional to its
-      // actual-distance radius. Scale: same as sphere render scale
-      // so the ring at distance=1.0 sits at the sphere's apparent
-      // radius. Ping reaches max ring at distance=2.6 ≈ 2.6×sphereRad.
+      // ---- 7. Render ping rings (centered on view) ----
       const int viewCx = w / 2;
       const int viewCy = h / 2;
       for (int p = 0; p < mPingCount; p++)
@@ -382,48 +376,41 @@ namespace stolmine
         }
       }
 
-      // ---- 7. Listener trace as orbit-relative trail ----
-      // Past walker positions are rendered RELATIVE TO CURRENT
-      // listener (i.e., in listener frame). They show "where the
-      // field has been" recently, around the central listener.
+      // ---- 8. Listener trace as relative-to-current trail ----
       const int traceSize = mpNetwork->getListenerTraceSize();
       for (int i = 0; i < traceSize; i++)
       {
-        // Sample old listener world pos.
         const float oldPhase = mpNetwork->getListenerTracePhase(i);
+        // Past listener positions in world frame.
         const float oldX = cosf(twoPi * oldPhase) * kListenerR;
         const float oldY = sinf(twoPi * oldPhase) * kListenerR;
-        // Treat the OLD listener as a "field point" relative to
-        // CURRENT listener. Transform through current listener frame.
-        float lr, lu, lf, dist;
-        worldToListener(oldX, oldY, 0.0f, cosM, sinM,
-                        listenerX, listenerY,
-                        &lr, &lu, &lf, &dist);
-        if (dist < 0.001f) continue;
+        // Map old position to sphere coords (treat as a "ghost
+        // listener" in the field).
+        float sx, sy, sz;
+        diskToSphere(oldX, oldY, 0.0f, &sx, &sy, &sz);
         int px, py;
         float pz;
-        projectSphere(lr, lu, lf, dist, sphereRad, &px, &py, &pz);
+        projectSphere(sx, sy, sz, sphereRot, sphereRad,
+                      &px, &py, &pz);
         if (px < 0 || px >= w || py < 0 || py >= h) continue;
         int brightness = 3 + (8 * i) / traceSize;
         if (brightness > 11) brightness = 11;
         fb.pixel(brightness, mWorldLeft + px, mWorldBottom + py);
       }
 
-      // ---- 8. Render tap dots ----
+      // ---- 9. Render tap dots ----
       const int flashMax = mpNetwork->getRicochetFlashMax();
       for (int t = 0; t < activeCount; t++)
       {
         const float rx = mpNetwork->getReflectorX(t);
         const float ry = mpNetwork->getReflectorY(t);
         const float rz = tapZ(t);
-        float lr, lu, lf, dist;
-        worldToListener(rx, ry, rz, cosM, sinM,
-                        listenerX, listenerY,
-                        &lr, &lu, &lf, &dist);
-        if (dist < 0.001f) continue;
+        float sx, sy, sz;
+        diskToSphere(rx, ry, rz, &sx, &sy, &sz);
         int px, py;
         float pz;
-        projectSphere(lr, lu, lf, dist, sphereRad, &px, &py, &pz);
+        projectSphere(sx, sy, sz, sphereRot, sphereRad,
+                      &px, &py, &pz);
         if (px < 0 || px >= w || py < 0 || py >= h) continue;
 
         const int mode = mpNetwork->getTapMode(t);
@@ -447,9 +434,7 @@ namespace stolmine
           default:                  brightness = 12; break;
         }
 
-        // Depth dim: back-of-sphere darker than front.
-        // pz in roughly [-1, 1]; front (pz>0) keeps brightness,
-        // back fades by up to 4.
+        // Depth dim for back-of-sphere taps.
         if (pz < 0.0f)
         {
           const int dim = (int)((-pz) * 4.0f + 0.5f);
@@ -485,7 +470,7 @@ namespace stolmine
         }
       }
 
-      // ---- 9. Listener marker (always at view center) ----
+      // ---- 10. Listener marker at view center ----
       if (viewCx >= 1 && viewCx < w - 1 && viewCy >= 1 && viewCy < h - 1)
       {
         fb.pixel(WHITE, mWorldLeft + viewCx,     mWorldBottom + viewCy);
