@@ -10,7 +10,6 @@
 #include "SomSphereGraphic.h"
 #include "AlembicVoice.h"
 #include "AlembicSphereGraphic.h"
-#include "Network.h"
 #define SWIGLUA
 %}
 
@@ -21,4 +20,3 @@
 %include "SomSphereGraphic.h"
 %include "AlembicVoice.h"
 %include "AlembicSphereGraphic.h"
-%include "Network.h"

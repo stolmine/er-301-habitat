@@ -1,5 +1,5 @@
 local app = app
-local libcatchall = require "catchall.libcatchall"
+local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
@@ -40,7 +40,7 @@ function Network:init(args)
 end
 
 function Network:onLoadGraph(channelCount)
-  local op = self:addObject("op", libcatchall.Network())
+  local op = self:addObject("op", libspreadsheet.Network())
   -- Allocate up to 1 second of delay buffer.
   op:allocateTimeUpTo(1.0)
 

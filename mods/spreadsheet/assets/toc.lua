@@ -19,6 +19,7 @@ return {
     { title = "Pecto",     moduleName = "Pecto",              category = "Spreadsheet", keywords = "comb, resonator, filter, delay, karplus, pecto" },
     { title = "Ngoma",        moduleName = "DrumVoice",           category = "Spreadsheet", keywords = "drum, percussion, voice, synth, kick, snare" },
     { title = "JF",           moduleName = "JF",                  category = "Spreadsheet", keywords = "voice, slope, function, generator, multi, multiout, hex, polyphonic, jf" },
-    { title = "Visadhara",    moduleName = "Visadhara",           category = "Spreadsheet", keywords = "drum, percussion, voice, synth, additive, fold, kick, snare, cymbal, bia" }
+    { title = "Visadhara",    moduleName = "Visadhara",           category = "Spreadsheet", keywords = "drum, percussion, voice, synth, additive, fold, kick, snare, cymbal, bia" },
+    { title = "Network",      moduleName = "Network",             category = "Spreadsheet", keywords = "reverb, multitap, delay, spatial, network, geometry, glitch" }
   }
 }

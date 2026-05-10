@@ -40,6 +40,7 @@
 #include "DrumCubeGraphic.h"
 #include "JF.h"
 #include "Visadhara.h"
+#include "Network.h"
 #define SWIGLUA
 %}
 
@@ -80,3 +81,4 @@
 %include "DrumCubeGraphic.h"
 %include "JF.h"
 %include "Visadhara.h"
+%include "Network.h"
