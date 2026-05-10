@@ -1254,12 +1254,18 @@ namespace stolmine
       // since it's the same every block.
       const float kInvFrameLengthMinus1 = 1.0f / (float)(FRAMELENGTH - 1);
 
-      // ---- Active-stutter list (built block-rate) ----
-      // Per-sample stutter pass iterates only this list, avoiding
-      // 64 conditional checks per sample at high density.
-      int activeStutterTaps[kMaxNetworkTaps];
+      // ---- Active-stutter list (built block-rate, capped) ----
+      // Per-sample stutter pass iterates only this list. Hard cap
+      // at kMaxActiveStutterTaps=16 — at density=1, glitch=1 the
+      // STUTTER mode budget gives ~26 taps; capping to 16 ensures
+      // a CPU ceiling. Excess STUTTER-mode taps stay silent
+      // (mTapGainL/R + mFbWeight already zeroed by mode setup);
+      // they just don't get scalar playback time.
+      const int kMaxActiveStutterTaps = 16;
+      int activeStutterTaps[kMaxActiveStutterTaps];
       int activeStutterCount = 0;
-      for (int t = 0; t < activeTaps; t++)
+      for (int t = 0; t < activeTaps &&
+                     activeStutterCount < kMaxActiveStutterTaps; t++)
       {
         if (mTapEffectMode[t] == NETWORK_TAP_STUTTER &&
             mTapStutterIterations[t] > 0)
