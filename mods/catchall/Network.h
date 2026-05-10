@@ -831,10 +831,12 @@ namespace stolmine
       // → no audible quantization).
       // Pass 1 (per-tap): hash, sub-mode pick, bitParam/decimParam.
       // Collect CRUSH-mode taps for batched powf.
-      int crushTapList[kMaxNetworkTaps];
-      float crushBitParams[kMaxNetworkTaps];
-      uint8_t crushSubSels[kMaxNetworkTaps];
-      uint8_t crushFactors[kMaxNetworkTaps];   // 1..32 fits in uint8
+      // aligned(16) so the simd_pow batch's vld1q reads have safe
+      // alignment regardless of stack offset.
+      int crushTapList[kMaxNetworkTaps]     __attribute__((aligned(16)));
+      float crushBitParams[kMaxNetworkTaps] __attribute__((aligned(16)));
+      uint8_t crushSubSels[kMaxNetworkTaps] __attribute__((aligned(16)));
+      uint8_t crushFactors[kMaxNetworkTaps] __attribute__((aligned(16)));
       int crushCount = 0;
       for (int i = 0; i < activeTaps; i++)
       {
@@ -874,8 +876,8 @@ namespace stolmine
 
       // Pass 2 (NEON 4-wide): batch bitLvl + invBitLvl via simd_pow.
       // m = 12 - bitParam × 9.5; bitLvl = 2^m.
-      float crushBitLvls[kMaxNetworkTaps];
-      float crushInvBitLvls[kMaxNetworkTaps];
+      float crushBitLvls[kMaxNetworkTaps]    __attribute__((aligned(16)));
+      float crushInvBitLvls[kMaxNetworkTaps] __attribute__((aligned(16)));
 #ifdef NETWORK_HAS_NEON
       {
         const float32x4_t baseVec  = vdupq_n_f32(2.0f);
@@ -1338,15 +1340,18 @@ namespace stolmine
       // don't change during stutter playback, so no scatter back.
       // Mutable fields (ptr, posInLoop, iter) are scattered after
       // the per-sample loop.
-      float   stutPtr[kMaxActiveStutterTaps];
-      float   stutPosInLoop[kMaxActiveStutterTaps];
-      float   stutLoopSamples[kMaxActiveStutterTaps];
-      float   stutSpeed[kMaxActiveStutterTaps];
-      int     stutAnchor[kMaxActiveStutterTaps];
-      float   stutGainL[kMaxActiveStutterTaps];
-      float   stutGainR[kMaxActiveStutterTaps];
-      float   stutFbW[kMaxActiveStutterTaps];
-      uint8_t stutIter[kMaxActiveStutterTaps];
+      // aligned(16) per feedback_neon_intrinsics_drumvoice — without
+      // it, GCC emits vld1.32 [reg :64] alignment hints that trap on
+      // Cortex-A8 when the stack offset isn't 8-byte aligned.
+      float   stutPtr[kMaxActiveStutterTaps]         __attribute__((aligned(16)));
+      float   stutPosInLoop[kMaxActiveStutterTaps]   __attribute__((aligned(16)));
+      float   stutLoopSamples[kMaxActiveStutterTaps] __attribute__((aligned(16)));
+      float   stutSpeed[kMaxActiveStutterTaps]       __attribute__((aligned(16)));
+      int     stutAnchor[kMaxActiveStutterTaps]      __attribute__((aligned(16)));
+      float   stutGainL[kMaxActiveStutterTaps]       __attribute__((aligned(16)));
+      float   stutGainR[kMaxActiveStutterTaps]       __attribute__((aligned(16)));
+      float   stutFbW[kMaxActiveStutterTaps]         __attribute__((aligned(16)));
+      uint8_t stutIter[kMaxActiveStutterTaps]        __attribute__((aligned(16)));
       for (int s = 0; s < activeStutterCount; s++)
       {
         const int t = activeStutterTaps[s];
@@ -1654,22 +1659,30 @@ namespace stolmine
             int32x4_t iptrV  = vcvtq_s32_f32(ptrV);
             float32x4_t fracV = vsubq_f32(ptrV, vcvtq_f32_s32(iptrV));
 
-            // Scalar gather: extract iptrs, load buf[iptr] and
-            // buf[iptr+1] (with wrap) for 4 lanes.
-            int32_t iptrs[4];
-            vst1q_s32(iptrs, iptrV);
-            float a4[4], b4[4];
-            for (int k = 0; k < 4; k++)
-            {
-              const int i0 = (int)iptrs[k];
-              int i1 = i0 + 1;
-              if (i1 >= maxDelay) i1 -= maxDelay;
-              a4[k] = (float)buf[i0];
-              b4[k] = (float)buf[i1];
-            }
+            // Scalar gather via lane extracts (avoids stack-store
+            // intermediate arrays that emit :128 alignment hints).
+            const int i0_0 = vgetq_lane_s32(iptrV, 0);
+            const int i0_1 = vgetq_lane_s32(iptrV, 1);
+            const int i0_2 = vgetq_lane_s32(iptrV, 2);
+            const int i0_3 = vgetq_lane_s32(iptrV, 3);
+            int i1_0 = i0_0 + 1; if (i1_0 >= maxDelay) i1_0 -= maxDelay;
+            int i1_1 = i0_1 + 1; if (i1_1 >= maxDelay) i1_1 -= maxDelay;
+            int i1_2 = i0_2 + 1; if (i1_2 >= maxDelay) i1_2 -= maxDelay;
+            int i1_3 = i0_3 + 1; if (i1_3 >= maxDelay) i1_3 -= maxDelay;
+            // Build 4-wide vectors via lane sets (no stack store).
+            float32x4_t aV = vdupq_n_f32(0.0f);
+            aV = vsetq_lane_f32((float)buf[i0_0], aV, 0);
+            aV = vsetq_lane_f32((float)buf[i0_1], aV, 1);
+            aV = vsetq_lane_f32((float)buf[i0_2], aV, 2);
+            aV = vsetq_lane_f32((float)buf[i0_3], aV, 3);
+            float32x4_t bV = vdupq_n_f32(0.0f);
+            bV = vsetq_lane_f32((float)buf[i1_0], bV, 0);
+            bV = vsetq_lane_f32((float)buf[i1_1], bV, 1);
+            bV = vsetq_lane_f32((float)buf[i1_2], bV, 2);
+            bV = vsetq_lane_f32((float)buf[i1_3], bV, 3);
+            aV = vmulq_f32(aV, scaleV);
+            bV = vmulq_f32(bV, scaleV);
             // Linear interp: sample = a + (b - a) * frac.
-            float32x4_t aV = vmulq_f32(vld1q_f32(a4), scaleV);
-            float32x4_t bV = vmulq_f32(vld1q_f32(b4), scaleV);
             float32x4_t sampleV = vmlaq_f32(aV,
                                             vsubq_f32(bV, aV), fracV);
 
@@ -1696,14 +1709,17 @@ namespace stolmine
                              vsubq_f32(posV, loopV), posV);
             vst1q_f32(&stutPosInLoop[s], posV);
 
-            // Per-lane wrap handling: re-anchor ptr and decrement
-            // iter counter. Scalar since iter is uint8 and the
-            // re-anchor needs anchor[s] + posInLoop[s].
-            uint32_t wrapBits[4] __attribute__((aligned(16)));
-            vst1q_u32(wrapBits, wrapMask);
+            // Per-lane wrap handling via vgetq_lane_u32 (no stack
+            // store): re-anchor ptr + decrement iter on lanes that
+            // wrapped. Scalar since iter is uint8.
+            const uint32_t w0 = vgetq_lane_u32(wrapMask, 0);
+            const uint32_t w1 = vgetq_lane_u32(wrapMask, 1);
+            const uint32_t w2 = vgetq_lane_u32(wrapMask, 2);
+            const uint32_t w3 = vgetq_lane_u32(wrapMask, 3);
+            const uint32_t wbits[4] = { w0, w1, w2, w3 };
             for (int k = 0; k < 4; k++)
             {
-              if (wrapBits[k])
+              if (wbits[k])
               {
                 const int idx = s + k;
                 float reanchored =
