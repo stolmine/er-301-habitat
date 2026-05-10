@@ -57,53 +57,49 @@ items aren't worth the complexity.
 
 ### Opt 1 — NEON-vectorize per-sample stutter pass *(highest gain)*
 
-**Loop**: stutter scalar playback at lines ~1547, runs over `activeStutterCount`
-(0..16) per sample × FRAMELENGTH. Currently scalar:
-- Load `mTapStutterReadPtr[t]`, conditional wrap, compute iptr/iptr2, frac.
-- 2 random buffer reads (scalar — gather stays scalar on A8).
-- Linear interp.
-- 3 accumulate FMAs into wetL/wetR/fbSum.
-- Advance ptr + posInLoop, conditional loop-wrap reanchor.
+**Reference pattern**: `er-301/mods/core/objects/granular/MonoGrain.cpp:90-128` — canonical scalar-gather-4 + SIMD-interp loop. Per output sample: scalar-gather 4 (phase + 3 buffer values) into stack arrays, then one call to `simd_quadratic_interpolate_with_return(...)`. Same template applied to our stutter playback (linear interp, not quadratic) with `simd_linear_interpolate`.
 
-**NEON approach**:
-- Process 4 stutter taps per inner iteration (when activeStutterCount ≥ 4).
-- Load 4 ptrs as `float32x4_t`; vectorize wrap, iptr conversion, frac.
-- Per-lane scalar gather (extract iptr/iptr2 from vector, load buf[]); pack 4 sample-pair results back into `float32x4_t a` and `float32x4_t b`.
-- NEON FMA for linear interp `sample = a + (b - a) * frac`.
-- 3 NEON FMAs into accumulator vectors (per-tap-gain × sample → wet[L/R/fb]Vec).
-- After loop, horizontal-sum the accumulator vectors.
-- Advance: 4 ptrs += speed in NEON, posInLoop += speed in NEON.
-- Loop wrap: branchy, falls back to per-lane scalar if any lane wraps. Or
-  branchless mask-blend: `posInLoop = (posInLoop >= loopSamples) ? (posInLoop - loopSamples) : posInLoop`. Iteration decrement still scalar.
+**Loop**: stutter scalar playback at lines ~1547. Currently per stutter tap per sample: load ptr, wrap, compute iptr/iptr2/frac, 2 buf reads, linear interp, 3 FMA accumulate, advance + loop-wrap reanchor.
+
+**NEON approach** (per-sample, 4 stutter taps in parallel):
+- For each batch of 4 stutter taps within the per-sample loop:
+  - Load 4 `mTapStutterReadPtr` as `float32x4_t`. Wrap branchlessly (vbsl + vsubq).
+  - Convert to int via `vcvtq_s32_f32`; compute frac = ptr − cvtq_f32_s32(int).
+  - **Scalar gather**: extract 4 lanes via `vgetq_lane_s32`, load `recent0[i] = buf[iptr] * scale`, `recent1[i] = buf[iptr+1] * scale`. (Gather stays scalar — Cortex-A8 has no NEON gather. Same compromise as Pass B.)
+  - Call `simd_linear_interpolate(out, recent0, recent1, frac_array)` to get 4 interpolated sample values.
+  - Vector multiply-accumulate into 3 accumulator vectors: `wetLVec`, `wetRVec`, `fbVec` using gathered `mTapStutterGainL/R/FbW`.
+  - Advance: 4 ptrs += speed (NEON), posInLoop += speed (NEON), branchless loop-wrap (compare + bsl).
+- Horizontal-sum accumulators at end of stutter pass (vpadd pattern from Pass C).
 - Tail loop for activeStutterCount % 4 remainder.
 
-**Per-tap gain accumulators**: instead of scalar `wetL +=`, build per-iteration `float32x4_t wetLAcc` etc. and horizontal-sum once at end of stutter pass. Already the pattern in Pass C.
+**Iteration counter**: still scalar (per-tap state, not per-sample state machine). Decrement happens inside the loop-wrap branch — extract per-lane wrap mask, scalar decrement only on lanes that wrapped. Cheap.
 
-**Expected gain**: ~30–40% reduction on stutter pass cost. At full settings (~16 stutter taps × 256 samples × ~20 ops scalar → ~80K ops/block), NEON 4-wide cuts the math to ~20K ops/block plus gather. Net CPU savings: ~8–12 percentage points.
+**Expected gain**: ~30–40% reduction on stutter pass cost. ~16 stutter taps × 256 samples × ~20 ops scalar → ~80K ops/block; NEON 4-wide cuts math+ptr-management to ~20K + gather (gather ~20K reads stays). Net CPU savings: ~8–12 percentage points.
 
-**Risk**: medium. Per-lane gather requires careful int extract from int32x4_t. Loop wrap on per-lane basis needs branchless mask. NEON state arrays (posInLoop, readPtr, speed, etc.) need 16-byte alignment guarantees.
+**Risk**: medium. Per-lane gather via `vgetq_lane_s32` requires careful index extraction. Loop wrap branchless mask must handle per-lane independently. State arrays already 64-element float — naturally aligned to cache lines but check NEON load alignment hints in objdump output.
 
-**State changes**: none. Existing state arrays already 64-element `float[]`, naturally aligned to cache lines.
+**Reuses from `hal/simd.h`**: `simd_linear_interpolate`. Possibly `simd_invert` if we precompute `1/loopSamples` (currently we compare directly).
 
-**Verification**: NEON :64/:128 hint check, audible regression test (glitch=1 should sound identical).
+**Verification**: NEON :64/:128 hint check (must stay 0), audible bit-match at glitch=1, CPU meter shows ~8% drop at full settings.
 
-### Opt 2 — `powf` → LUT for G8 bitcrush level *(easy win)*
+### Opt 2 — `powf` → `simd_pow` 4-wide for G8 bitcrush level *(easy win)*
 
-**Loop**: G8 crush setup (line ~755), `powf(2.0f, 12.0f - bitParam * 9.5f)`
-called per CRUSH-mode tap per block (~12 taps max, ~187 blocks/sec → ~2200 calls/sec).
+ER-301 publishes `hal/simd.h` (extern "C") with `simd_pow(float32x4_t x, float32x4_t m)` — NEON 4-wide transcendental. Cleaner than a LUT, full precision, and processes 4 CRUSH-mode taps in one call.
 
-**LUT approach**:
-- Precompute static `kBitcrushLvlLUT[64]` at compile time: `lvl[i] = pow(2, 12 - i/63 × 9.5)` for i in [0, 63].
-- Lookup: `int lutIdx = (int)(bitParam * 63.5f)` (clamped to [0, 63]); `bitLvl = kBitcrushLvlLUT[lutIdx]`.
-- Inverse: precompute `kBitcrushInvLvlLUT[64]` to skip the divide too.
+**Loop**: G8 crush setup (line ~755), `powf(2.0f, 12.0f - bitParam * 9.5f)` called per CRUSH-mode tap per block.
 
-**Expected gain**: ~80 cycles/call → ~3 cycles/call = ~1.5% CPU reduction at glitch=1, density=1. Modest but free.
+**Approach**:
+- Build a list of CRUSH-mode tap indices at block-rate (similar to active-stutter list pattern).
+- Process in batches of 4: load 4 `bitParam` values, compute `12.0f - bitParam × 9.5f` in NEON, call `simd_pow(2.0f, result)`, store 4 `bitLvl` values. Use `simd_invert` for `1/bitLvl`.
+- Tail loop for activeCrush % 4 remainder.
 
-**Risk**: low. LUT quantizes bitParam to 64 levels; perceptually indistinguishable. Both lvl and invLvl LUTs can be `static const float[64]` initialized at compile time via `constexpr` calls or hand-precomputed table.
+**Expected gain**: ~80 cycles/call scalar → ~25 cycles per 4-tap NEON call ≈ ~85% reduction in time spent in this path. Net CPU saving small (G8 is block-rate, ~12 taps/block) but easy.
 
-**State changes**: 2 × 256-byte static const arrays. Trivial.
+**Risk**: low. `simd_pow` is bit-exact NEON; values match scalar `powf` to ULP. Need to add `#include <hal/simd.h>` and ensure linker pulls in the implementation (it's in `er-301/hal/...`).
 
-**Verification**: spot-check a few LUT entries match `powf` to 6+ decimals. Audible test: bitcrush character at extreme settings unchanged.
+**State changes**: none. Just compute the same values via the simd helper.
+
+**Verification**: spot-check a few values match scalar `powf`. Audible: bitcrush character unchanged.
 
 ### Opt 3 — NEON-vectorize block-rate per-tap LFO loop *(medium gain, more code)*
 
@@ -114,20 +110,19 @@ called per CRUSH-mode tap per block (~12 taps max, ~187 blocks/sec → ~2200 cal
 - G1 S&H clock advance + snapshot
 - L3 LP coefficient hash + compute
 
-**NEON approach**:
-- Per-iteration of 4 taps: load 4 mLfoPhase, advance, wrap, store. Trivial NEON.
-- Hash compute (LCG step with golden-ratio multiplier) is NEON-friendly: vmulq_u32 + vaddq_u32. 4 hashes in parallel.
-- `poly_sin(phase)` is the bottleneck — LUT lookup or polynomial. Currently scalar; check if poly_sin is small enough to inline 4-wide. If polynomial-based, it vectorizes; if LUT-based, gather stays scalar.
-- L3 LP coeff: hash-based variation × baseCoeff. Vectorizable.
-- G1 S&H: per-tap conditional snapshot. Could mask-blend.
+**NEON approach (now viable thanks to `hal/simd.h`)**:
+- Hashes (LCG step + golden-ratio multiplier) → NEON 4-wide via vmulq_u32 + vaddq_u32.
+- `poly_sin(phase)` was the bottleneck — replaced by `simd_sin(phase × 2π)` from `hal/simd.h`. 4 sins per call.
+- LFO phase advance, modOffset compute, S1 detune, L3 LP coeff: all NEON-friendly arithmetic.
+- G1 S&H is per-tap conditional — branchless mask-blend (compare clock vs threshold, bsl-blend snapshot value).
 
-**Expected gain**: ~3–5% block-rate CPU. Block-rate is a smaller fraction of total than per-sample, so even good NEON gains here are modest.
+**Expected gain**: ~3–5% block-rate CPU. Block-rate is smaller fraction of total than per-sample, so gains modest. But code becomes cleaner once helpers do the heavy lifting.
 
-**Risk**: medium-high. The LFO loop has many independent computations (S1/S2/L3/G1), each per-tap. Re-architecting to be NEON-friendly while maintaining current behavior is non-trivial. Benefit uncertain until measured.
+**Risk**: medium. Re-architecting per-tap independent computations into 4-wide is non-trivial; needs careful per-tap state alignment. Some bit-divergence between `simd_sin` and our existing `network_trig::poly_sin` is possible (different polynomial approximation). Need spot-check audible match.
 
-**State changes**: ensure all per-tap state arrays are vectorizable layout (already are).
+**State changes**: ensure per-tap state arrays are 16-byte aligned (already are by virtue of `kMaxNetworkTaps = 64` × 4 bytes = cache-line aligned).
 
-**Verification**: NEON :64/:128 hint check, A/B with 0.3.53 — bit-exact match expected for deterministic hashes.
+**Verification**: NEON :64/:128 hint check, A/B audible match. If `simd_sin` produces audibly different LFO character vs `poly_sin`, may need to keep the existing trig helper for lush primitives and only NEONize the parts that don't depend on it.
 
 ### Opt 4 — Tune Pass B prefetch distance *(near-zero effort)*
 
@@ -162,6 +157,34 @@ called per CRUSH-mode tap per block (~12 taps max, ~187 blocks/sec → ~2200 cal
 The G8 decimate counter is already branchless NEON in Pass C (vbsl-based wrap). No further work.
 
 ---
+
+## Reusable infrastructure: ER-301 `hal/simd.h`
+
+Public header `er-301/hal/simd.h` (extern "C") provides NEON 4-wide
+helpers we should use throughout:
+
+- **Transcendentals**: `simd_log`, `simd_exp`, `simd_pow`,
+  `simd_sin`, `simd_cos`, `simd_sincos`, `simd_invert`.
+- **Interpolation**: `simd_linear_interpolate`,
+  `simd_quadratic_interpolate_with_return`,
+  `simd_interpolate_env_accumulate`.
+- **Envelopes**: `simd_sine_env`, `simd_hanning`.
+- **Comparisons**: `simd_any_greater`, `simd_first_positive`.
+
+Implementation lives in the firmware itself
+(`er-301/hal/...`); no symbol-resolution issues for packages.
+
+Reference uses:
+- `er-301/mods/core/objects/granular/MonoGrain.cpp:90-128` —
+  scalar-gather-4 + SIMD-interp template, identical structure to
+  what we need for the stutter pass.
+- `er-301/mods/core/objects/granular/Grain.cpp:142,161` —
+  `simd_sine_env` and `simd_hanning` window generation.
+
+Adopt these instead of writing our own NEON for trig/interp paths.
+The remaining bespoke NEON in Network — Pass A advance with
+bidirectional wrap, Pass C crossfade-with-LP-and-crush — has no
+direct simd.h equivalent and stays hand-written.
 
 ## Implementation order
 
