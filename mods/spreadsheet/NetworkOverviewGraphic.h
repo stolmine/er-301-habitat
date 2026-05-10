@@ -1,28 +1,33 @@
 #pragma once
 
-// Network overview viz — sonar + per-tap activity hybrid.
+// Network overview viz — listener-centered sphere + sonar.
 //
-// Listener emits sonar pings (concentric rings expanding from
-// current listener position) at a steady cadence. When a ring's
-// 3D radius equals the distance to a reflector, that reflector
-// flashes — the ping has "arrived." Glitch modes modulate the
-// flash signature (silent for MUTE, sustained for STUTTER, etc).
+// Reframes the spatial model: listener is fixed at view center,
+// reflectors are mapped to an invisible unit sphere around them.
+// As the listener orbits the audio field, the sphere appears to
+// rotate around the central viewpoint. Glitch Z displacement
+// lifts reflectors off the sphere surface as a screen-y offset.
+//
+// Sonar pings expand from center (listener) as concentric screen-
+// space rings. Each reflector retains its actual world-space
+// distance from listener; reflectors flash when ping_actual_radius
+// equals their actual_distance, so pings sweep through reflectors
+// in distance order even though their visual positions are
+// equidistant on the unit sphere.
 //
 // Layered render (back-to-front):
 //   1. Persistence buffer fade (stutter ghosts only).
-//   2. Stutter wrap → ghost spawn into persistence.
-//   3. Sonar ping update: spawn new ping on cadence; for each ping,
-//      detect reflector crossings → set mTapPingFlash; render ring.
-//   4. Persistence rendered.
-//   5. Listener trajectory trace (fading by age).
-//   6. Tap dots — mode color, ping flash boost, ricochet flash boost,
-//      wet-level pulse, mode-encoded Z displacement.
-//   7. Listener marker (cross at current orbit position).
+//   2. Stutter wrap → ghost spawn into persistence at sphere pos.
+//   3. Sonar ping update: spawn, detect reflector crossings, age.
+//   4. Rotation advance.
+//   5. Clear fb + render persistence.
+//   6. Render ping rings (screen-space circles centered on view).
+//   7. Render listener trajectory trace as sphere-pole movement.
+//   8. Render tap dots: sphere position, mode color, ping flash,
+//      ricochet flash, wet boost, glitch Z lift.
+//   9. Render listener marker at view center.
 //
-// Size knob contracts/expands the entire disc (geomScale).
-// Phase-space layer removed in this redesign — sonar provides the
-// rhythmic visual energy phase-space couldn't deliver for a
-// reverb-like signal.
+// Size knob contracts/expands the rendered sphere radius.
 //
 // Header-only inline per feedback_no_out_of_line_virtuals.
 
@@ -48,8 +53,6 @@ namespace stolmine
       mPingTimer = 0;
       for (int i = 0; i < kMaxPings; i++)
       {
-        mPings[i].emitX = 0.0f;
-        mPings[i].emitY = 0.0f;
         mPings[i].age = 0;
       }
     }
@@ -80,40 +83,77 @@ namespace stolmine
     float mRotAngle;
     int   mFrameCounter;
 
-    // ---- Sonar state ----
-    // Rings emitted from listener position, expanding at constant
-    // 3D-units/frame. Each ping has its own emit position so it
-    // continues from where it was spawned (listener may have moved
-    // by the next ping).
+    // Sonar — pings emanate from view center (listener) as expanding
+    // screen-space rings. Each ping has an age; reflector flashes
+    // are triggered by the ping's actual-distance threshold sweeping
+    // past each reflector's actual distance from listener.
     static const int   kMaxPings        = 4;
-    static const int   kPingMaxAge      = 90;     // frames; ~1.5s @60fps
-    static const int   kPingFlashFrames = 12;     // per-tap flash dur
-    struct Ping { float emitX, emitY; int age; };
+    static const int   kPingMaxAge      = 90;
+    static const int   kPingFlashFrames = 12;
+    struct Ping { int age; };
     Ping mPings[kMaxPings];
     int  mPingCount;
     int  mPingTimer;
 
-    // Per-tap flash from ping crossings.
     uint8_t mTapPingFlash[kMaxNetworkTaps];
 
-    // Project a 3D point through current rotation/tilt to a 2D pixel.
-    inline void project3D(float x, float y, float z, float scale,
-                          int *outPx, int *outPy, float *outDepth) const
+    // Compute listener-frame coords (right, up, forward) for a
+    // world reflector position with optional Z displacement.
+    // Returns actual distance via *outActualDist.
+    inline void worldToListener(float rx, float ry, float rz,
+                                float cosM, float sinM,
+                                float listenerX, float listenerY,
+                                float *outR, float *outU, float *outF,
+                                float *outActualDist) const
     {
+      const float vx = rx - listenerX;
+      const float vy = ry - listenerY;
+      const float vz = rz;
+      // Listener forward = -(cosM, sinM, 0); right = (-sinM, cosM, 0).
+      *outR = -vx * sinM + vy * cosM;
+      *outU = vz;
+      *outF = -vx * cosM - vy * sinM;
+      const float d2 = (*outR)*(*outR) + (*outU)*(*outU) + (*outF)*(*outF);
+      *outActualDist = sqrtf(d2);
+    }
+
+    // Project listener-frame 3D point through sphere normalization
+    // + view tumble + screen scale to a 2D pixel.
+    // sphereRad: render scale in pixels (spheres unit radius mapped here)
+    // Returns view-z depth via *outDepth (front-of-sphere = positive).
+    inline void projectSphere(float lr, float lu, float lf,
+                              float dist, float sphereRad,
+                              int *outPx, int *outPy, float *outDepth) const
+    {
+      // Normalize to unit sphere.
+      float sx, sy, sz;
+      if (dist > 0.001f)
+      {
+        const float invD = 1.0f / dist;
+        sx = lr * invD;
+        sy = lu * invD;
+        sz = lf * invD;
+      }
+      else
+      {
+        sx = sy = sz = 0.0f;
+      }
+      // View tumble around Y axis.
       const float cosA = cosf(mRotAngle);
       const float sinA = sinf(mRotAngle);
+      const float rx    =  sx * cosA + sz * sinA;
+      const float rzNew = -sx * sinA + sz * cosA;
+      const float ry    =  sy;
+      // X-axis tilt.
       const float costilt = 0.9553f;
       const float sintilt = 0.2955f;
-      const float rx    = x * cosA + z * sinA;
-      const float rzNew = -x * sinA + z * cosA;
-      const float ry    = y;
       const float fx = rx;
       const float fy = ry * costilt - rzNew * sintilt;
       const float depth = rzNew * costilt + ry * sintilt;
       const int w = mWidth < kMaxW ? mWidth : kMaxW;
       const int h = mHeight < kMaxH ? mHeight : kMaxH;
-      *outPx = (int)(fx * scale) + w / 2;
-      *outPy = (int)(fy * scale) + h / 2;
+      *outPx = (int)(fx * sphereRad) + w / 2;
+      *outPy = (int)(fy * sphereRad) + h / 2;
       *outDepth = depth;
     }
 
@@ -170,21 +210,23 @@ namespace stolmine
 
       mFrameCounter++;
 
-      // Disc render scale follows Size knob.
+      // Sphere render scale follows Size knob.
       const float sizeNorm = mpNetwork->getSizeNorm();
       const float kBaseScale = 26.0f;
-      const float geomScale = sizeNorm * kBaseScale;
+      const float sphereRad = sizeNorm * kBaseScale;
 
-      // Listener current position (3D).
+      // Listener world position (orbit at radius 1.3).
       const float listenerPhase = mpNetwork->getListenerPhase();
       const float kListenerR = 1.3f;
-      const float listenerX = cosf(2.0f * 3.14159265f * listenerPhase) * kListenerR;
-      const float listenerY = sinf(2.0f * 3.14159265f * listenerPhase) * kListenerR;
+      const float twoPi = 2.0f * 3.14159265f;
+      const float cosM = cosf(twoPi * listenerPhase);
+      const float sinM = sinf(twoPi * listenerPhase);
+      const float listenerX = cosM * kListenerR;
+      const float listenerY = sinM * kListenerR;
 
-      // Wet-level boost — RMS of last 16 ring samples gives a
-      // global "intensity" used to pulse NORMAL tap brightness.
-      float wetLvlSq = 0.0f;
+      // Wet-level pulse from output ring RMS.
       const int ringSize = mpNetwork->getOutputRingSize();
+      float wetLvlSq = 0.0f;
       for (int i = ringSize - 16; i < ringSize; i++)
       {
         const float s = mpNetwork->getOutputSample(i);
@@ -201,7 +243,7 @@ namespace stolmine
         if (mPixels[i] > 0) mPixels[i]--;
       }
 
-      // ---- 2. Stutter wrap → ghost spawn into persistence ----
+      // ---- 2. Stutter wrap → ghost spawn at sphere position ----
       const int activeCount = mpNetwork->getActiveTapCount();
       for (int t = 0; t < activeCount; t++)
       {
@@ -211,17 +253,21 @@ namespace stolmine
         {
           const float rx = mpNetwork->getReflectorX(t);
           const float ry = mpNetwork->getReflectorY(t);
+          const float rz = tapZ(t);
+          float lr, lu, lf, dist;
+          worldToListener(rx, ry, rz, cosM, sinM,
+                          listenerX, listenerY,
+                          &lr, &lu, &lf, &dist);
+          // Ghost offset: small angular jitter on sphere surface.
           uint32_t hg = (uint32_t)t * 2654435761u +
                         (uint32_t)curIter;
           hg = hg * 1103515245u + 12345u;
-          const float angle =
-            (float)((hg >> 16) & 0xFFFFu) * (6.2832f / 65535.0f);
-          const float ghostRadius = 0.18f;
-          const float gx = rx + ghostRadius * cosf(angle);
-          const float gy = ry + ghostRadius * sinf(angle);
+          const float jitter =
+            ((float)((hg >> 16) & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f) * 0.2f;
           int px, py;
           float pz;
-          project3D(gx, gy, 0.0f, geomScale, &px, &py, &pz);
+          projectSphere(lr + jitter, lu, lf, dist, sphereRad,
+                        &px, &py, &pz);
           if (px >= 0 && px < w && py >= 0 && py < h)
           {
             mPixels[py * w + px] = 12;
@@ -231,44 +277,44 @@ namespace stolmine
       }
 
       // ---- 3. Sonar pings ----
-      // Decay per-tap ping-flash counters.
+      // Decay flash counters.
       for (int t = 0; t < kMaxNetworkTaps; t++)
       {
         if (mTapPingFlash[t] > 0) mTapPingFlash[t]--;
       }
 
-      // Spawn new ping on cadence.
+      // Spawn cadence.
       mPingTimer--;
       if (mPingTimer <= 0)
       {
-        // ~24-frame period → ~2.5 pings/sec at 60fps.
         mPingTimer = 24;
         if (mPingCount < kMaxPings)
         {
-          mPings[mPingCount].emitX = listenerX;
-          mPings[mPingCount].emitY = listenerY;
           mPings[mPingCount].age = 0;
           mPingCount++;
         }
       }
 
-      // Update ping state: detect reflector crossings, age each
-      // ping, drop expired. (Render below, after fb clear.)
-      // Ping speed: covers full unit-disc diagonal over kPingMaxAge.
-      const float kPingSpeed3D = 2.6f / (float)kPingMaxAge;
+      // Ping speed in actual-distance space: covers 2.6 (max
+      // listener-to-reflector distance) over kPingMaxAge frames.
+      const float kPingSpeedDist = 2.6f / (float)kPingMaxAge;
+      // Update + age + reflector-cross detection.
       for (int p = 0; p < mPingCount; )
       {
         Ping *ping = &mPings[p];
-        const float r3D     = (float)ping->age       * kPingSpeed3D;
-        const float r3DPrev = (float)(ping->age - 1) * kPingSpeed3D;
+        const float r3D     = (float)ping->age       * kPingSpeedDist;
+        const float r3DPrev = (float)(ping->age - 1) * kPingSpeedDist;
 
         for (int t = 0; t < activeCount; t++)
         {
-          if (mpNetwork->getTapMode(t) == NETWORK_TAP_MUTE)
-            continue;
-          const float dx = mpNetwork->getReflectorX(t) - ping->emitX;
-          const float dy = mpNetwork->getReflectorY(t) - ping->emitY;
-          const float dist = sqrtf(dx * dx + dy * dy);
+          if (mpNetwork->getTapMode(t) == NETWORK_TAP_MUTE) continue;
+          const float rx = mpNetwork->getReflectorX(t);
+          const float ry = mpNetwork->getReflectorY(t);
+          const float rz = tapZ(t);
+          float lr, lu, lf, dist;
+          worldToListener(rx, ry, rz, cosM, sinM,
+                          listenerX, listenerY,
+                          &lr, &lu, &lf, &dist);
           if (dist > r3DPrev && dist <= r3D)
           {
             uint8_t flashLen = kPingFlashFrames;
@@ -294,11 +340,9 @@ namespace stolmine
       mRotAngle += 0.01f;
       if (mRotAngle > 6.2832f) mRotAngle -= 6.2832f;
 
-      // Clear framebuffer.
+      // ---- 5. Clear fb + render persistence ----
       fb.fill(BLACK, mWorldLeft, mWorldBottom,
               mWorldLeft + mWidth - 1, mWorldBottom + mHeight - 1);
-
-      // ---- 5. Render persistence (stutter ghosts) ----
       for (int y = 0; y < h; y++)
       {
         for (int x = 0; x < w; x++)
@@ -309,17 +353,19 @@ namespace stolmine
         }
       }
 
-      // ---- 6. Re-render ping rings (state already updated above) ----
+      // ---- 6. Render ping rings (centered on view = listener) ----
+      // Ping is rendered at screen-space radius proportional to its
+      // actual-distance radius. Scale: same as sphere render scale
+      // so the ring at distance=1.0 sits at the sphere's apparent
+      // radius. Ping reaches max ring at distance=2.6 ≈ 2.6×sphereRad.
+      const int viewCx = w / 2;
+      const int viewCy = h / 2;
       for (int p = 0; p < mPingCount; p++)
       {
         const Ping *ping = &mPings[p];
-        const float r3D = (float)ping->age * kPingSpeed3D;
-        int cx, cy;
-        float cz;
-        project3D(ping->emitX, ping->emitY, 0.0f,
-                  geomScale, &cx, &cy, &cz);
-        const float screenR = r3D * geomScale;
-        if (screenR < 0.5f) continue;
+        const float r3D = (float)ping->age * kPingSpeedDist;
+        const float screenR = r3D * sphereRad;
+        if (screenR < 0.5f || screenR > (float)(w + h)) continue;
         const int brightness = 7 - (7 * ping->age) / kPingMaxAge;
         if (brightness <= 0) continue;
         const int steps = (int)(6.2832f * screenR + 8.0f);
@@ -327,8 +373,8 @@ namespace stolmine
         for (int s = 0; s < steps; s++)
         {
           const float a = (float)s * invSteps * 6.2832f;
-          const int px = cx + (int)(screenR * cosf(a));
-          const int py = cy + (int)(screenR * sinf(a));
+          const int px = viewCx + (int)(screenR * cosf(a));
+          const int py = viewCy + (int)(screenR * sinf(a));
           if (px >= 0 && px < w && py >= 0 && py < h)
           {
             fb.pixel(brightness, mWorldLeft + px, mWorldBottom + py);
@@ -336,16 +382,27 @@ namespace stolmine
         }
       }
 
-      // ---- 7. Listener trajectory trace ----
+      // ---- 7. Listener trace as orbit-relative trail ----
+      // Past walker positions are rendered RELATIVE TO CURRENT
+      // listener (i.e., in listener frame). They show "where the
+      // field has been" recently, around the central listener.
       const int traceSize = mpNetwork->getListenerTraceSize();
       for (int i = 0; i < traceSize; i++)
       {
-        const float phase = mpNetwork->getListenerTracePhase(i);
-        const float tx = cosf(2.0f * 3.14159265f * phase) * kListenerR;
-        const float ty = sinf(2.0f * 3.14159265f * phase) * kListenerR;
+        // Sample old listener world pos.
+        const float oldPhase = mpNetwork->getListenerTracePhase(i);
+        const float oldX = cosf(twoPi * oldPhase) * kListenerR;
+        const float oldY = sinf(twoPi * oldPhase) * kListenerR;
+        // Treat the OLD listener as a "field point" relative to
+        // CURRENT listener. Transform through current listener frame.
+        float lr, lu, lf, dist;
+        worldToListener(oldX, oldY, 0.0f, cosM, sinM,
+                        listenerX, listenerY,
+                        &lr, &lu, &lf, &dist);
+        if (dist < 0.001f) continue;
         int px, py;
         float pz;
-        project3D(tx, ty, 0.0f, geomScale, &px, &py, &pz);
+        projectSphere(lr, lu, lf, dist, sphereRad, &px, &py, &pz);
         if (px < 0 || px >= w || py < 0 || py >= h) continue;
         int brightness = 3 + (8 * i) / traceSize;
         if (brightness > 11) brightness = 11;
@@ -359,9 +416,14 @@ namespace stolmine
         const float rx = mpNetwork->getReflectorX(t);
         const float ry = mpNetwork->getReflectorY(t);
         const float rz = tapZ(t);
+        float lr, lu, lf, dist;
+        worldToListener(rx, ry, rz, cosM, sinM,
+                        listenerX, listenerY,
+                        &lr, &lu, &lf, &dist);
+        if (dist < 0.001f) continue;
         int px, py;
         float pz;
-        project3D(rx, ry, rz, geomScale, &px, &py, &pz);
+        projectSphere(lr, lu, lf, dist, sphereRad, &px, &py, &pz);
         if (px < 0 || px >= w || py < 0 || py >= h) continue;
 
         const int mode = mpNetwork->getTapMode(t);
@@ -385,19 +447,24 @@ namespace stolmine
           default:                  brightness = 12; break;
         }
 
-        // Ricochet flash boost.
+        // Depth dim: back-of-sphere darker than front.
+        // pz in roughly [-1, 1]; front (pz>0) keeps brightness,
+        // back fades by up to 4.
+        if (pz < 0.0f)
+        {
+          const int dim = (int)((-pz) * 4.0f + 0.5f);
+          brightness -= dim;
+          if (brightness < 1) brightness = 1;
+        }
+
         const int rflash = mpNetwork->getRicochetFlash(t);
         if (rflash > 0 && flashMax > 0)
-        {
           brightness += (rflash * 5) / flashMax;
-        }
-        // Ping flash boost (when sonar ring crosses reflector).
         const int pflash = (int)mTapPingFlash[t];
         if (pflash > 0)
-        {
           brightness += (pflash * 6) / kPingFlashFrames;
-        }
         if (brightness > 15) brightness = 15;
+        if (brightness < 0)  brightness = 0;
 
         if (hollow)
         {
@@ -418,18 +485,14 @@ namespace stolmine
         }
       }
 
-      // ---- 9. Listener marker ----
-      int lpx, lpy;
-      float lpz;
-      project3D(listenerX, listenerY, 0.0f,
-                geomScale, &lpx, &lpy, &lpz);
-      if (lpx >= 1 && lpx < w - 1 && lpy >= 1 && lpy < h - 1)
+      // ---- 9. Listener marker (always at view center) ----
+      if (viewCx >= 1 && viewCx < w - 1 && viewCy >= 1 && viewCy < h - 1)
       {
-        fb.pixel(WHITE, mWorldLeft + lpx,     mWorldBottom + lpy);
-        fb.pixel(11,    mWorldLeft + lpx + 1, mWorldBottom + lpy);
-        fb.pixel(11,    mWorldLeft + lpx - 1, mWorldBottom + lpy);
-        fb.pixel(11,    mWorldLeft + lpx,     mWorldBottom + lpy + 1);
-        fb.pixel(11,    mWorldLeft + lpx,     mWorldBottom + lpy - 1);
+        fb.pixel(WHITE, mWorldLeft + viewCx,     mWorldBottom + viewCy);
+        fb.pixel(11,    mWorldLeft + viewCx + 1, mWorldBottom + viewCy);
+        fb.pixel(11,    mWorldLeft + viewCx - 1, mWorldBottom + viewCy);
+        fb.pixel(11,    mWorldLeft + viewCx,     mWorldBottom + viewCy + 1);
+        fb.pixel(11,    mWorldLeft + viewCx,     mWorldBottom + viewCy - 1);
       }
     }
 #endif
