@@ -311,11 +311,16 @@ namespace stolmine
 
       // Graphic-side accessors state.
       mLastActiveTaps = 0;
+      mLastSizeNorm = 0.5f;
       for (int i = 0; i < kMaxNetworkTaps; i++)
       {
         mTapRicochetFlash[i] = 0;
         mTapGeomReadIdx[i] = 0;
       }
+      for (int i = 0; i < kOutputRingSize; i++) mOutputRing[i] = 0.0f;
+      mOutputRingPos = 0;
+      for (int i = 0; i < kListenerTraceSize; i++) mListenerTrace[i] = 0.0f;
+      mListenerTraceHead = 0;
 
       // Allpass diffusion buffers (4-stage Schroeder chain)
       memset(mApBuf1, 0, sizeof(mApBuf1));
@@ -394,6 +399,21 @@ namespace stolmine
     }
     int getRicochetFlashMax() const { return (int)kRicochetFlashMax; }
     float getListenerPhase() const { return mWalkerPos; }
+    float getSizeNorm() const { return mLastSizeNorm; }
+    // idx in [0, 256); 0 = oldest valid sample, 255 = most recent.
+    float getOutputSample(int idx) const
+    {
+      if (idx < 0 || idx >= kOutputRingSize) return 0.0f;
+      return mOutputRing[(mOutputRingPos + idx) & (kOutputRingSize - 1)];
+    }
+    int getOutputRingSize() const { return kOutputRingSize; }
+    // idx in [0, 128); 0 = oldest, 127 = most recent.
+    float getListenerTracePhase(int idx) const
+    {
+      if (idx < 0 || idx >= kListenerTraceSize) return 0.0f;
+      return mListenerTrace[(mListenerTraceHead + idx) & (kListenerTraceSize - 1)];
+    }
+    int getListenerTraceSize() const { return kListenerTraceSize; }
     float getFbWeight(int t) const
     {
       return (t >= 0 && t < kMaxNetworkTaps) ? mFbWeight[t] : 0.0f;
@@ -455,6 +475,7 @@ namespace stolmine
                                                       // to 0 delay,
                                                       // direct fb path)
       if (sizeNorm > 1.0f) sizeNorm = 1.0f;
+      mLastSizeNorm = sizeNorm;
 
       float density = mDensity.value();
       if (!(density >= 0.0f)) density = 0.0f;
@@ -1909,7 +1930,17 @@ namespace stolmine
 
         outL[i] = outDcL;
         outR[i] = outDcR;
+
+        // Feed per-sample mono mix into the overview graphic's
+        // phase-space ring buffer.
+        mOutputRing[mOutputRingPos] = 0.5f * (outDcL + outDcR);
+        mOutputRingPos = (mOutputRingPos + 1) & (kOutputRingSize - 1);
       }
+
+      // Block-rate listener trace write (one phase per block).
+      mListenerTrace[mListenerTraceHead] = mWalkerPos;
+      mListenerTraceHead =
+        (mListenerTraceHead + 1) & (kListenerTraceSize - 1);
 
       // ---- Scatter mutable stutter state back to per-tap arrays ----
       // ptr, posInLoop, iter were mutated by the per-sample stutter
@@ -2117,6 +2148,24 @@ namespace stolmine
     // mTapGeomReadIdx) modulo maxDelay to recover the scrub offset
     // for SCRUB-mode Z displacement.
     int mTapGeomReadIdx[kMaxNetworkTaps];
+
+    // Size knob captured for graphic — controls disc render scale.
+    float mLastSizeNorm;
+
+    // Wet bus output ring buffer for the overview graphic's
+    // phase-space layer. Per-sample mono mix written into a 256-
+    // entry circular buffer; graphic reads triplets to plot 3D
+    // phase-space points (Rauschen pattern).
+    static const int kOutputRingSize = 256;
+    float mOutputRing[kOutputRingSize];
+    int   mOutputRingPos;
+
+    // Listener phase trace ring — 128 recent walker positions
+    // sampled at block-rate (~680ms history at 187 blocks/sec;
+    // covers the fastest walker cycle ~800ms).
+    static const int kListenerTraceSize = 128;
+    float mListenerTrace[kListenerTraceSize];
+    int   mListenerTraceHead;
 
     // Stutter NEON scratch (class members for naturally-aligned heap
     // allocation per feedback_neon_intrinsics_drumvoice — stack-local
