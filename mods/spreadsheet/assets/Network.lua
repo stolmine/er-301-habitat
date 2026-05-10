@@ -4,6 +4,7 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local NetworkOverviewControl = require "spreadsheet.NetworkOverviewControl"
 
 -- Network — non-traditional reverb / "macro spatial simulation".
 -- Phase 1: 32-tap stereo with virtual-reflector geometry, listener
@@ -163,7 +164,7 @@ function Network:onLoadViews(objects, branches)
       biasPrecision = 3,
       initialBias = 0.5
     },
-    glitch = GainBias {
+    glitch = NetworkOverviewControl {
       button = "gltch",
       description = "Glitch (Character macro)",
       branch = branches.glitch,
@@ -172,7 +173,8 @@ function Network:onLoadViews(objects, branches)
       biasMap = glitchMap,
       biasUnits = app.unitNone,
       biasPrecision = 3,
-      initialBias = 0.0
+      initialBias = 0.0,
+      op = objects.op
     },
     wet = GainBias {
       button = "wet",
@@ -186,7 +188,7 @@ function Network:onLoadViews(objects, branches)
       initialBias = 0.5
     }
   }, {
-    expanded = { "size", "density", "motion", "connectivity", "decay", "glitch", "wet" },
+    expanded = { "glitch", "size", "density", "motion", "connectivity", "decay", "wet" },
     collapsed = {}
   }
 end

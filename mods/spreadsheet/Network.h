@@ -309,6 +309,14 @@ namespace stolmine
         mTapLifeRemaining[i] = 0;
       }
 
+      // Graphic-side accessors state.
+      mLastActiveTaps = 0;
+      for (int i = 0; i < kMaxNetworkTaps; i++)
+      {
+        mTapRicochetFlash[i] = 0;
+        mTapGeomReadIdx[i] = 0;
+      }
+
       // Allpass diffusion buffers (4-stage Schroeder chain)
       memset(mApBuf1, 0, sizeof(mApBuf1));
       memset(mApBuf2, 0, sizeof(mApBuf2));
@@ -342,6 +350,65 @@ namespace stolmine
     float maximumDelayTime()
     {
       return (float)mMaxDelayInSamples / globalConfig.sampleRate;
+    }
+
+    // ---- Read-only accessors for the overview graphic ----
+    // SWIG-visible inline; no out-of-line virtuals concern.
+    int getActiveTapCount() const { return mLastActiveTaps; }
+    int getMaxDelayInSamples() const { return mMaxDelayInSamples; }
+    float getReflectorX(int t) const
+    {
+      return (t >= 0 && t < kMaxNetworkTaps) ? mReflectors[t].x : 0.0f;
+    }
+    float getReflectorY(int t) const
+    {
+      return (t >= 0 && t < kMaxNetworkTaps) ? mReflectors[t].y : 0.0f;
+    }
+    int getTapMode(int t) const
+    {
+      return (t >= 0 && t < kMaxNetworkTaps) ? (int)mTapEffectMode[t] : 0;
+    }
+    int getTapStutterIter(int t) const
+    {
+      return (t >= 0 && t < kMaxNetworkTaps) ? (int)mTapStutterIterations[t] : 0;
+    }
+    // Returns posInLoop / loopSamples in [0, 1), or 0 if not stuttering.
+    float getTapStutterPosNorm(int t) const
+    {
+      if (t < 0 || t >= kMaxNetworkTaps) return 0.0f;
+      const float ls = mTapStutterLoopSamples[t];
+      if (ls <= 0.0f) return 0.0f;
+      return mTapStutterPosInLoop[t] / ls;
+    }
+    float getTapCrushMask(int t) const
+    {
+      return (t >= 0 && t < kMaxNetworkTaps) ? mTapCrushMask[t] : 0.0f;
+    }
+    float getTapDecimFactor(int t) const
+    {
+      return (t >= 0 && t < kMaxNetworkTaps) ? mTapDecimFactorF[t] : 1.0f;
+    }
+    int getRicochetFlash(int t) const
+    {
+      return (t >= 0 && t < kMaxNetworkTaps) ? (int)mTapRicochetFlash[t] : 0;
+    }
+    int getRicochetFlashMax() const { return (int)kRicochetFlashMax; }
+    float getListenerPhase() const { return mWalkerPos; }
+    float getFbWeight(int t) const
+    {
+      return (t >= 0 && t < kMaxNetworkTaps) ? mFbWeight[t] : 0.0f;
+    }
+    // Returns scrub offset in samples (signed, centered on 0).
+    int getTapScrubOffset(int t) const
+    {
+      if (t < 0 || t >= kMaxNetworkTaps) return 0;
+      const int maxD = mMaxDelayInSamples;
+      if (maxD <= 0) return 0;
+      int delta = mTapNewReadIdx[t] - mTapGeomReadIdx[t];
+      // Wrap into signed range centered on 0.
+      if (delta > maxD / 2) delta -= maxD;
+      else if (delta < -maxD / 2) delta += maxD;
+      return delta;
     }
 
 #ifndef SWIGLUA
@@ -396,6 +463,13 @@ namespace stolmine
       int activeTaps = (int)(density * kMaxNetworkTaps + 0.5f);
       if (activeTaps < 1) activeTaps = 1;
       if (activeTaps > kMaxNetworkTaps) activeTaps = kMaxNetworkTaps;
+      mLastActiveTaps = activeTaps;
+
+      // Decay graphic ricochet flash counters (per-block decrement).
+      for (int t = 0; t < kMaxNetworkTaps; t++)
+      {
+        if (mTapRicochetFlash[t] > 0) mTapRicochetFlash[t]--;
+      }
 
       // Motion now controls modulation DEPTH on a smooth-random walker
       // that drives the listener position. Continuous walker motion
@@ -972,6 +1046,10 @@ namespace stolmine
         if (idx < 0) idx += maxDelay;
         if (idx >= maxDelay) idx -= maxDelay;
         mTapNewReadIdx[t] = idx;
+        // Snapshot geometry-derived idx before G5 scrub modifies it.
+        // Graphic uses (mTapNewReadIdx - mTapGeomReadIdx) to recover
+        // the SCRUB-mode offset for Z displacement encoding.
+        mTapGeomReadIdx[t] = idx;
       }
 
       // ---- G5 scrub: per-block randomized read-pointer offset ----
@@ -1078,6 +1156,8 @@ namespace stolmine
             // Skip G4 effects on STUTTER mode taps (no-op anyway,
             // wastes a slot).
             if (mTapEffectMode[t] == NETWORK_TAP_STUTTER) continue;
+            // Light up the graphic ricochet flash for this tap.
+            mTapRicochetFlash[t] = kRicochetFlashMax;
             h = h * 1103515245u + 12345u;
             const uint32_t effect = (h >> 16) % 3u;
             if (effect == 0u)
@@ -2018,6 +2098,25 @@ namespace stolmine
     // respawns ever; respawn period ranges from ~500ms at full
     // settings to several seconds at low).
     uint16_t mTapLifeRemaining[kMaxNetworkTaps];
+
+    // ---- Graphic-side accessors state ----
+    // mLastActiveTaps is captured at the end of process() so the
+    // overview graphic can iterate the right tap range without
+    // recomputing from density.
+    int mLastActiveTaps;
+
+    // mTapRicochetFlash[t] is set on G4 events (ricochet
+    // perturbation) and decremented per process() call. Graphic
+    // reads it as a per-tap brightness boost; lasts ~8 blocks
+    // (~43ms) before fully decaying. Range [0, kRicochetFlashMax].
+    static const uint8_t kRicochetFlashMax = 8;
+    uint8_t mTapRicochetFlash[kMaxNetworkTaps];
+
+    // mTapGeomReadIdx[t] is the geometry-derived read index BEFORE
+    // G5 scrub offset is applied. Graphic reads (mTapNewReadIdx -
+    // mTapGeomReadIdx) modulo maxDelay to recover the scrub offset
+    // for SCRUB-mode Z displacement.
+    int mTapGeomReadIdx[kMaxNetworkTaps];
 
     // Stutter NEON scratch (class members for naturally-aligned heap
     // allocation per feedback_neon_intrinsics_drumvoice — stack-local

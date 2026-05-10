@@ -41,6 +41,7 @@
 #include "JF.h"
 #include "Visadhara.h"
 #include "Network.h"
+#include "NetworkOverviewGraphic.h"
 #define SWIGLUA
 %}
 
@@ -82,3 +83,4 @@
 %include "JF.h"
 %include "Visadhara.h"
 %include "Network.h"
+%include "NetworkOverviewGraphic.h"
