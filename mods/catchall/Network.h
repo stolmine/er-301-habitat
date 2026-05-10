@@ -831,12 +831,10 @@ namespace stolmine
       // → no audible quantization).
       // Pass 1 (per-tap): hash, sub-mode pick, bitParam/decimParam.
       // Collect CRUSH-mode taps for batched powf.
-      // aligned(16) so the simd_pow batch's vld1q reads have safe
-      // alignment regardless of stack offset.
-      int crushTapList[kMaxNetworkTaps]     __attribute__((aligned(16)));
-      float crushBitParams[kMaxNetworkTaps] __attribute__((aligned(16)));
-      uint8_t crushSubSels[kMaxNetworkTaps] __attribute__((aligned(16)));
-      uint8_t crushFactors[kMaxNetworkTaps] __attribute__((aligned(16)));
+      int crushTapList[kMaxNetworkTaps];
+      float crushBitParams[kMaxNetworkTaps];
+      uint8_t crushSubSels[kMaxNetworkTaps];
+      uint8_t crushFactors[kMaxNetworkTaps];   // 1..32 fits in uint8
       int crushCount = 0;
       for (int i = 0; i < activeTaps; i++)
       {
@@ -876,8 +874,8 @@ namespace stolmine
 
       // Pass 2 (NEON 4-wide): batch bitLvl + invBitLvl via simd_pow.
       // m = 12 - bitParam × 9.5; bitLvl = 2^m.
-      float crushBitLvls[kMaxNetworkTaps]    __attribute__((aligned(16)));
-      float crushInvBitLvls[kMaxNetworkTaps] __attribute__((aligned(16)));
+      float crushBitLvls[kMaxNetworkTaps];
+      float crushInvBitLvls[kMaxNetworkTaps];
 #ifdef NETWORK_HAS_NEON
       {
         const float32x4_t baseVec  = vdupq_n_f32(2.0f);
@@ -1331,41 +1329,6 @@ namespace stolmine
       const float32x4_t alphaVec = vdupq_n_f32(smoothAlpha);
 #endif
 
-      // ---- Gather active stutter state into packed stack arrays ----
-      // Per-sample stutter NEON pass operates on these contiguous
-      // arrays for clean 4-wide loads. Scattered access via
-      // activeStutterTaps[s] is paid once per block (gather here +
-      // scatter mutable state below) instead of per-sample.
-      // Read-only fields (loopSamples, speed, anchor, gainL/R, fbW)
-      // don't change during stutter playback, so no scatter back.
-      // Mutable fields (ptr, posInLoop, iter) are scattered after
-      // the per-sample loop.
-      // aligned(16) per feedback_neon_intrinsics_drumvoice — without
-      // it, GCC emits vld1.32 [reg :64] alignment hints that trap on
-      // Cortex-A8 when the stack offset isn't 8-byte aligned.
-      float   stutPtr[kMaxActiveStutterTaps]         __attribute__((aligned(16)));
-      float   stutPosInLoop[kMaxActiveStutterTaps]   __attribute__((aligned(16)));
-      float   stutLoopSamples[kMaxActiveStutterTaps] __attribute__((aligned(16)));
-      float   stutSpeed[kMaxActiveStutterTaps]       __attribute__((aligned(16)));
-      int     stutAnchor[kMaxActiveStutterTaps]      __attribute__((aligned(16)));
-      float   stutGainL[kMaxActiveStutterTaps]       __attribute__((aligned(16)));
-      float   stutGainR[kMaxActiveStutterTaps]       __attribute__((aligned(16)));
-      float   stutFbW[kMaxActiveStutterTaps]         __attribute__((aligned(16)));
-      uint8_t stutIter[kMaxActiveStutterTaps]        __attribute__((aligned(16)));
-      for (int s = 0; s < activeStutterCount; s++)
-      {
-        const int t = activeStutterTaps[s];
-        stutPtr[s]         = mTapStutterReadPtr[t];
-        stutPosInLoop[s]   = mTapStutterPosInLoop[t];
-        stutLoopSamples[s] = mTapStutterLoopSamples[t];
-        stutSpeed[s]       = mTapStutterSpeed[t];
-        stutAnchor[s]      = mTapStutterAnchor[t];
-        stutGainL[s]       = mTapStutterGainL[t];
-        stutGainR[s]       = mTapStutterGainR[t];
-        stutFbW[s]         = mTapStutterFbW[t];
-        stutIter[s]        = mTapStutterIterations[t];
-      }
-
       // ---- Per-sample inner loop ----
       for (int i = 0; i < FRAMELENGTH; i++)
       {
@@ -1631,161 +1594,22 @@ namespace stolmine
         }
 #endif
 
-        // ---- Stutter playback pass (NEON 4-wide + scalar tail) ----
-        // Operates on packed stack arrays gathered at block start.
-        // Per 4-tap NEON iteration: wrap ptr, vcvt to int + frac,
-        // scalar gather buf samples, NEON linear interp, NEON FMA
-        // accumulate into wetL/R/fbSum vector accumulators.
-        // Per-lane wrap detection drives scalar re-anchor + iter
-        // decrement. Tail loop handles activeStutterCount % 4.
-#ifdef NETWORK_HAS_NEON
-        {
-          float32x4_t wetLAcc = vdupq_n_f32(0.0f);
-          float32x4_t wetRAcc = vdupq_n_f32(0.0f);
-          float32x4_t fbAcc   = vdupq_n_f32(0.0f);
-          const float32x4_t maxDV  = vdupq_n_f32((float)maxDelay);
-          const float32x4_t scaleV = vdupq_n_f32(scale);
-
-          int s = 0;
-          for (; s + 4 <= activeStutterCount; s += 4)
-          {
-            // Load + wrap ptr.
-            float32x4_t ptrV = vld1q_f32(&stutPtr[s]);
-            uint32x4_t hiPtr = vcgeq_f32(ptrV, maxDV);
-            ptrV = vbslq_f32(hiPtr,
-                             vsubq_f32(ptrV, maxDV), ptrV);
-
-            // iptr (truncation) and frac.
-            int32x4_t iptrV  = vcvtq_s32_f32(ptrV);
-            float32x4_t fracV = vsubq_f32(ptrV, vcvtq_f32_s32(iptrV));
-
-            // Scalar gather via lane extracts (avoids stack-store
-            // intermediate arrays that emit :128 alignment hints).
-            const int i0_0 = vgetq_lane_s32(iptrV, 0);
-            const int i0_1 = vgetq_lane_s32(iptrV, 1);
-            const int i0_2 = vgetq_lane_s32(iptrV, 2);
-            const int i0_3 = vgetq_lane_s32(iptrV, 3);
-            int i1_0 = i0_0 + 1; if (i1_0 >= maxDelay) i1_0 -= maxDelay;
-            int i1_1 = i0_1 + 1; if (i1_1 >= maxDelay) i1_1 -= maxDelay;
-            int i1_2 = i0_2 + 1; if (i1_2 >= maxDelay) i1_2 -= maxDelay;
-            int i1_3 = i0_3 + 1; if (i1_3 >= maxDelay) i1_3 -= maxDelay;
-            // Build 4-wide vectors via lane sets (no stack store).
-            float32x4_t aV = vdupq_n_f32(0.0f);
-            aV = vsetq_lane_f32((float)buf[i0_0], aV, 0);
-            aV = vsetq_lane_f32((float)buf[i0_1], aV, 1);
-            aV = vsetq_lane_f32((float)buf[i0_2], aV, 2);
-            aV = vsetq_lane_f32((float)buf[i0_3], aV, 3);
-            float32x4_t bV = vdupq_n_f32(0.0f);
-            bV = vsetq_lane_f32((float)buf[i1_0], bV, 0);
-            bV = vsetq_lane_f32((float)buf[i1_1], bV, 1);
-            bV = vsetq_lane_f32((float)buf[i1_2], bV, 2);
-            bV = vsetq_lane_f32((float)buf[i1_3], bV, 3);
-            aV = vmulq_f32(aV, scaleV);
-            bV = vmulq_f32(bV, scaleV);
-            // Linear interp: sample = a + (b - a) * frac.
-            float32x4_t sampleV = vmlaq_f32(aV,
-                                            vsubq_f32(bV, aV), fracV);
-
-            // Accumulate into vector wetL/R/fb.
-            wetLAcc = vmlaq_f32(wetLAcc, sampleV,
-                                vld1q_f32(&stutGainL[s]));
-            wetRAcc = vmlaq_f32(wetRAcc, sampleV,
-                                vld1q_f32(&stutGainR[s]));
-            fbAcc   = vmlaq_f32(fbAcc,   sampleV,
-                                vld1q_f32(&stutFbW[s]));
-
-            // Advance ptr and posInLoop.
-            const float32x4_t spdV = vld1q_f32(&stutSpeed[s]);
-            ptrV = vaddq_f32(ptrV, spdV);
-            vst1q_f32(&stutPtr[s], ptrV);
-
-            float32x4_t posV = vld1q_f32(&stutPosInLoop[s]);
-            posV = vaddq_f32(posV, spdV);
-
-            // Loop wrap (per-lane): on wrap, subtract loopSamples.
-            const float32x4_t loopV = vld1q_f32(&stutLoopSamples[s]);
-            uint32x4_t wrapMask = vcgeq_f32(posV, loopV);
-            posV = vbslq_f32(wrapMask,
-                             vsubq_f32(posV, loopV), posV);
-            vst1q_f32(&stutPosInLoop[s], posV);
-
-            // Per-lane wrap handling via vgetq_lane_u32 (no stack
-            // store): re-anchor ptr + decrement iter on lanes that
-            // wrapped. Scalar since iter is uint8.
-            const uint32_t w0 = vgetq_lane_u32(wrapMask, 0);
-            const uint32_t w1 = vgetq_lane_u32(wrapMask, 1);
-            const uint32_t w2 = vgetq_lane_u32(wrapMask, 2);
-            const uint32_t w3 = vgetq_lane_u32(wrapMask, 3);
-            const uint32_t wbits[4] = { w0, w1, w2, w3 };
-            for (int k = 0; k < 4; k++)
-            {
-              if (wbits[k])
-              {
-                const int idx = s + k;
-                float reanchored =
-                  (float)stutAnchor[idx] + stutPosInLoop[idx];
-                if (reanchored >= (float)maxDelay)
-                  reanchored -= (float)maxDelay;
-                stutPtr[idx] = reanchored;
-                if (stutIter[idx] > 0) stutIter[idx]--;
-              }
-            }
-          }
-
-          // Horizontal-sum NEON accumulators into scalar wet/fb.
-          {
-            float32x2_t loHi = vadd_f32(vget_low_f32(wetLAcc),
-                                        vget_high_f32(wetLAcc));
-            wetL += vget_lane_f32(vpadd_f32(loHi, loHi), 0);
-          }
-          {
-            float32x2_t loHi = vadd_f32(vget_low_f32(wetRAcc),
-                                        vget_high_f32(wetRAcc));
-            wetR += vget_lane_f32(vpadd_f32(loHi, loHi), 0);
-          }
-          {
-            float32x2_t loHi = vadd_f32(vget_low_f32(fbAcc),
-                                        vget_high_f32(fbAcc));
-            fbSum += vget_lane_f32(vpadd_f32(loHi, loHi), 0);
-          }
-
-          // Scalar tail.
-          for (; s < activeStutterCount; s++)
-          {
-            float ptr = stutPtr[s];
-            if (ptr >= (float)maxDelay) ptr -= (float)maxDelay;
-            int iptr  = (int)ptr;
-            int iptr2 = iptr + 1;
-            if (iptr2 >= maxDelay) iptr2 -= maxDelay;
-            const float frac = ptr - (float)iptr;
-            const float a = (float)buf[iptr]  * scale;
-            const float b = (float)buf[iptr2] * scale;
-            const float sample = a + (b - a) * frac;
-
-            wetL  += sample * stutGainL[s];
-            wetR  += sample * stutGainR[s];
-            fbSum += sample * stutFbW[s];
-
-            const float speed = stutSpeed[s];
-            stutPtr[s]       = ptr + speed;
-            stutPosInLoop[s] += speed;
-            if (stutPosInLoop[s] >= stutLoopSamples[s])
-            {
-              stutPosInLoop[s] -= stutLoopSamples[s];
-              float reanchored =
-                (float)stutAnchor[s] + stutPosInLoop[s];
-              if (reanchored >= (float)maxDelay)
-                reanchored -= (float)maxDelay;
-              stutPtr[s] = reanchored;
-              if (stutIter[s] > 0) stutIter[s]--;
-            }
-          }
-        }
-#else
-        // Scalar fallback (non-NEON build).
+        // ---- Scalar stutter playback pass (optimized inner) ----
+        // Iterates only the precomputed active-stutter list so we
+        // don't pay 64 conditional checks per sample. Wrap checks
+        // are single-subtraction (ptr advance ≤ 2/sample, can't
+        // overshoot maxDelay by more than that). frac uses int cast
+        // (ptr ≥ 0 always post-wrap, so equiv to floorf). Prefetch
+        // 16 samples ahead reduces L1 misses on the random buffer
+        // gather.
         for (int s = 0; s < activeStutterCount; s++)
         {
-          float ptr = stutPtr[s];
+          const int t = activeStutterTaps[s];
+          float ptr = mTapStutterReadPtr[t];
+          // Wrap ptr into [0, maxDelay) BEFORE deriving iptr/frac.
+          // Otherwise frac = ptr - (float)iptr (with iptr wrapped)
+          // produces a huge value, scaling sample to nonsense and
+          // clipping the wet bus.
           if (ptr >= (float)maxDelay) ptr -= (float)maxDelay;
           int iptr  = (int)ptr;
           int iptr2 = iptr + 1;
@@ -1795,25 +1619,28 @@ namespace stolmine
           const float b = (float)buf[iptr2] * scale;
           const float sample = a + (b - a) * frac;
 
-          wetL  += sample * stutGainL[s];
-          wetR  += sample * stutGainR[s];
-          fbSum += sample * stutFbW[s];
+          // Prefetch ~16 samples ahead at this tap's speed.
+          const float speed = mTapStutterSpeed[t];
+          int prefetchIdx = iptr + 16;
+          if (prefetchIdx >= maxDelay) prefetchIdx -= maxDelay;
+          __builtin_prefetch(&buf[prefetchIdx], 0, 1);
 
-          const float speed = stutSpeed[s];
-          stutPtr[s]       = ptr + speed;
-          stutPosInLoop[s] += speed;
-          if (stutPosInLoop[s] >= stutLoopSamples[s])
+          wetL  += sample * mTapStutterGainL[t];
+          wetR  += sample * mTapStutterGainR[t];
+          fbSum += sample * mTapStutterFbW[t];
+
+          mTapStutterReadPtr[t]   = ptr + speed;
+          mTapStutterPosInLoop[t] += speed;
+          if (mTapStutterPosInLoop[t] >= mTapStutterLoopSamples[t])
           {
-            stutPosInLoop[s] -= stutLoopSamples[s];
+            mTapStutterPosInLoop[t] -= mTapStutterLoopSamples[t];
             float reanchored =
-              (float)stutAnchor[s] + stutPosInLoop[s];
-            if (reanchored >= (float)maxDelay)
-              reanchored -= (float)maxDelay;
-            stutPtr[s] = reanchored;
-            if (stutIter[s] > 0) stutIter[s]--;
+              (float)mTapStutterAnchor[t] + mTapStutterPosInLoop[t];
+            if (reanchored >= (float)maxDelay) reanchored -= (float)maxDelay;
+            mTapStutterReadPtr[t] = reanchored;
+            if (mTapStutterIterations[t] > 0) mTapStutterIterations[t]--;
           }
         }
-#endif
 
         // Sparse feedback recycle (Phase 2): weighted sum of selected
         // tap outputs, normalized by 1/sqrt(k). Soft-clip via tanh,
@@ -1869,17 +1696,6 @@ namespace stolmine
         outR[i] = outDcR;
       }
 
-      // ---- Scatter mutable stutter state back to per-tap arrays ----
-      // ptr, posInLoop, iter were mutated by the per-sample stutter
-      // pass. Read-only fields (loopSamples, speed, anchor, gains,
-      // fbW) didn't change so no scatter for those.
-      for (int s = 0; s < activeStutterCount; s++)
-      {
-        const int t = activeStutterTaps[s];
-        mTapStutterReadPtr[t]    = stutPtr[s];
-        mTapStutterPosInLoop[t]  = stutPosInLoop[s];
-        mTapStutterIterations[t] = stutIter[s];
-      }
     }
 
     bool allocate(int Ns)
