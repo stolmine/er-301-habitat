@@ -125,8 +125,20 @@ namespace stolmine
       // when the orbit radius matched the field radius. Listener still
       // moves spatially through the field, just doesn't pierce it.
       const float kListenerRadius = 1.3f;
-      const float listenerX = network_trig::poly_cos(motion) * kListenerRadius;
-      const float listenerY = network_trig::poly_sin(motion) * kListenerRadius;
+      const float listenerCos = network_trig::poly_cos(motion);
+      const float listenerSin = network_trig::poly_sin(motion);
+      const float listenerX = listenerCos * kListenerRadius;
+      const float listenerY = listenerSin * kListenerRadius;
+      // Listener faces inward (toward origin). Right vector is
+      // forward rotated -90° (CW): forward = -(cos, sin),
+      // right = (-sin, cos). Pan is computed in this listener-
+      // relative frame so stereo placement tracks listener
+      // orientation as it orbits — without this, the "right ear"
+      // would stay locked to world +Y regardless of orbit position
+      // and produce systematically biased L/R distribution at
+      // most motion phases.
+      const float rightX = -listenerSin;
+      const float rightY =  listenerCos;
 
       const float invMaxDist = 1.0f / kMaxDist;
       const float maxDelayF = (float)(maxDelay - 1);
@@ -162,10 +174,13 @@ namespace stolmine
         // moves with the listener.
         const float gain = 0.5f * gainScale;
 
-        // Pan: dy/dist gives the y-component of the unit vector from
-        // listener to reflector — equivalent to sin(azimuth).
+        // Pan: dot product of listener-relative reflector direction
+        // with listener's right vector, normalized by distance.
+        // Equivalent to sin(angle off forward axis) in the
+        // listener's frame. Tracks listener orientation as the
+        // walker orbits, so L/R distribution stays balanced.
         const float invDist = network_trig::reciprocal(distClamped);
-        float pan = dy * invDist;
+        float pan = (dx * rightX + dy * rightY) * invDist;
         if (pan > 1.0f) pan = 1.0f;
         if (pan < -1.0f) pan = -1.0f;
 
