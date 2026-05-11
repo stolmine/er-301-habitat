@@ -3,15 +3,18 @@
 // Network overview viz — listener-centered sphere with per-tap
 // trails and sonar pings.
 //
-// Reflectors are mapped to a unit sphere by treating their 2D
-// disk position as longitude/latitude:
-//   longitude  = atan2(ry, rx)            // covers full [-π, π]
-//   latitude   = (disk_radius - 0.5) × π  // covers [-π/2, π/2]
-// This guarantees a phyllotaxis-style spread across the whole
-// sphere instead of the front-hemisphere clustering you'd get from
-// a naive listener-relative projection. Glitch Z displacement
-// scales the sphere radius locally per tap (lifts/pushes off
-// surface).
+// Tap positions on the sphere are decoupled from reflector field
+// geometry and computed directly from tap index via a Fibonacci-
+// sphere distribution with a golden-ratio low-discrepancy sequence
+// driving latitude:
+//   latitude_u = fmod(t × 1/φ + 0.5, 1)   in [0, 1)
+//   zHat       = 2 × latitude_u − 1       in [−1, +1]
+//   longitude  = t × golden_angle_radians
+// The low-discrepancy sequence on latitude (rather than t/N) gives
+// every prefix of taps a uniform spread across the sphere — density
+// sweeps reveal new taps at well-distributed latitudes instead of
+// filling a single band. Glitch Z displacement scales sphere radius
+// per tap (lifts/pushes radially off the surface).
 //
 // Listener motion drives an additional sphere rotation so as the
 // listener orbits the audio field, the sphere visually responds.
@@ -94,20 +97,24 @@ namespace stolmine
 
     uint8_t mTapPingFlash[kMaxNetworkTaps];
 
-    // Map reflector world-disk position to a 3D point on the
-    // unit sphere. Glitch Z lifts radially.
-    inline void diskToSphere(float rx, float ry, float zGlitch,
-                             float *sx, float *sy, float *sz) const
+    // Map tap index to a 3D point on the unit sphere via Fibonacci
+    // distribution with a golden-ratio low-discrepancy latitude
+    // sequence (see file header). zGlitch lifts the point radially
+    // off the sphere surface (per-mode displacement signature).
+    inline void tapToSphere(int t, float zGlitch,
+                            float *sx, float *sy, float *sz) const
     {
-      const float phi = atan2f(ry, rx);
-      const float r = sqrtf(rx * rx + ry * ry);
-      const float theta = (r - 0.5f) * 3.14159265f;
-      const float ct = cosf(theta);
-      const float st = sinf(theta);
+      const float kInvPhi = 0.6180339887f;        // 1/φ
+      const float kGoldenAngleRad = 2.39996323f;  // (1 - 1/φ) × 2π
+      const float u = ((float)t * kInvPhi + 0.5f);
+      const float uFrac = u - (float)((int)u);   // fmod to [0, 1)
+      const float zHat = 2.0f * uFrac - 1.0f;
+      const float r = sqrtf(1.0f - zHat * zHat);
+      const float phi = (float)t * kGoldenAngleRad;
       const float radial = 1.0f + zGlitch * 0.3f;
-      *sx = ct * cosf(phi) * radial;
-      *sy = st             * radial;
-      *sz = ct * sinf(phi) * radial;
+      *sx = r * cosf(phi) * radial;
+      *sy = zHat          * radial;
+      *sz = r * sinf(phi) * radial;
     }
 
     // Project a 3D sphere point through view rotation (mRotAngle
@@ -161,31 +168,6 @@ namespace stolmine
       }
     }
 
-    // Per-tap effective disc position with glitch-mode displacement.
-    // STUTTER taps orbit a small circle around their reflector pos
-    // in disc plane (instead of radial Z pulse) — the circular
-    // motion reads as continuous orbital movement on the sphere
-    // rather than the previous zig-zag.
-    inline void getEffectiveDiscPos(int t,
-                                    float *outX, float *outY, float *outZ) const
-    {
-      const float rx = mpNetwork->getReflectorX(t);
-      const float ry = mpNetwork->getReflectorY(t);
-      const int mode = mpNetwork->getTapMode(t);
-      *outX = rx;
-      *outY = ry;
-      *outZ = tapZ(t);
-      if (mode == NETWORK_TAP_STUTTER)
-      {
-        const float p = mpNetwork->getTapStutterPosNorm(t);
-        const float orbitR = 0.12f;
-        const float phase = p * 6.2832f;
-        *outX += cosf(phase) * orbitR;
-        *outY += sinf(phase) * orbitR;
-        *outZ = 0.0f;   // replace Z with disc-plane orbit
-      }
-    }
-
     inline float tapZ(int t) const
     {
       const int mode = mpNetwork->getTapMode(t);
@@ -195,8 +177,10 @@ namespace stolmine
         case NETWORK_TAP_MUTE:   return -1.0f;
         case NETWORK_TAP_STUTTER:
         {
-          // Z is overridden by orbit in getEffectiveDiscPos.
-          return 0.0f;
+          // Radial pulse synced to stutter loop position — tap
+          // breathes in/out of the sphere surface each iteration.
+          const float p = mpNetwork->getTapStutterPosNorm(t);
+          return 0.25f * sinf(2.0f * 3.14159265f * p);
         }
         case NETWORK_TAP_CRUSH:
         {
@@ -282,10 +266,8 @@ namespace stolmine
         const int lastIter = (int)mLastStutterIter[t];
         if (curIter > 0 && curIter < lastIter)
         {
-          float ex, ey, ez;
-          getEffectiveDiscPos(t, &ex, &ey, &ez);
           float sx, sy, sz;
-          diskToSphere(ex, ey, ez, &sx, &sy, &sz);
+          tapToSphere(t, tapZ(t), &sx, &sy, &sz);
           // Small sphere-tangent jitter.
           uint32_t hg = (uint32_t)t * 2654435761u +
                         (uint32_t)curIter;
@@ -369,10 +351,8 @@ namespace stolmine
       // sphere rotates.
       for (int t = 0; t < activeCount; t++)
       {
-        float ex, ey, ez;
-        getEffectiveDiscPos(t, &ex, &ey, &ez);
         float sx, sy, sz;
-        diskToSphere(ex, ey, ez, &sx, &sy, &sz);
+        tapToSphere(t, tapZ(t), &sx, &sy, &sz);
         int px, py;
         float pz;
         projectSphere(sx, sy, sz, sphereRot, sphereRad,
@@ -424,17 +404,19 @@ namespace stolmine
       }
 
       // ---- 8. Listener trace as relative-to-current trail ----
+      // Each past listener phase maps to an equatorial point at
+      // that longitude. The sphere counter-rotates with listener
+      // motion (sphereRot), so the most recent trace samples
+      // settle at a near-fixed screen position while older ones
+      // appear to fall back behind the listener marker.
       const int traceSize = mpNetwork->getListenerTraceSize();
       for (int i = 0; i < traceSize; i++)
       {
         const float oldPhase = mpNetwork->getListenerTracePhase(i);
-        // Past listener positions in world frame.
-        const float oldX = cosf(twoPi * oldPhase) * kListenerR;
-        const float oldY = sinf(twoPi * oldPhase) * kListenerR;
-        // Map old position to sphere coords (treat as a "ghost
-        // listener" in the field).
-        float sx, sy, sz;
-        diskToSphere(oldX, oldY, 0.0f, &sx, &sy, &sz);
+        const float phiTrace = twoPi * oldPhase;
+        const float sx = cosf(phiTrace);
+        const float sy = 0.0f;
+        const float sz = sinf(phiTrace);
         int px, py;
         float pz;
         projectSphere(sx, sy, sz, sphereRot, sphereRad,
@@ -459,10 +441,8 @@ namespace stolmine
         for (int t = 0; t < activeCount; t++)
         {
           if (mpNetwork->getFbWeight(t) == 0.0f) continue;
-          float ex, ey, ez;
-          getEffectiveDiscPos(t, &ex, &ey, &ez);
           float sx, sy, sz;
-          diskToSphere(ex, ey, ez, &sx, &sy, &sz);
+          tapToSphere(t, tapZ(t), &sx, &sy, &sz);
           int px, py;
           float pz;
           projectSphere(sx, sy, sz, sphereRot, sphereRad,
@@ -502,10 +482,8 @@ namespace stolmine
       const int flashMax = mpNetwork->getRicochetFlashMax();
       for (int t = 0; t < activeCount; t++)
       {
-        float ex, ey, ez;
-        getEffectiveDiscPos(t, &ex, &ey, &ez);
         float sx, sy, sz;
-        diskToSphere(ex, ey, ez, &sx, &sy, &sz);
+        tapToSphere(t, tapZ(t), &sx, &sy, &sz);
         int px, py;
         float pz;
         projectSphere(sx, sy, sz, sphereRot, sphereRad,
