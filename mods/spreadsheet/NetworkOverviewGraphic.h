@@ -81,6 +81,10 @@ namespace stolmine
       mPingPhase = 0.0f;
       mSphereRotAccumulator = 0.0f;
       mPingSpawnCount = 0;
+      // Seed motion-perturbation pattern with the object address so
+      // each unit insertion gets a distinct but stable wobble.
+      mPerturbSeed =
+        (uint32_t)((uintptr_t)this * 2654435761u) ^ 0xA17BCD5Eu;
       for (int i = 0; i < kMaxPings; i++)
       {
         mPings[i].age = 0;
@@ -183,10 +187,22 @@ namespace stolmine
     // instant.
     float mTapBrightSmoothed[kMaxNetworkTaps];
 
+    // Per-instance seed for the motion-driven tap perturbation.
+    // Initialized in the constructor from the object address so
+    // each unit insertion gets a different but stable wobble
+    // pattern. tapToSphere uses this + tap index to hash a
+    // constant per-tap (dx, dy, dz) offset; motion scales how
+    // much of that offset is applied.
+    uint32_t mPerturbSeed;
+
     // Map tap to a 3D point on the unit sphere (see file header).
     // Latitude: golden-ratio LDS on tap index (uniform spread at any
     // density). Longitude: actual reflector azimuth (illustrative).
     // zGlitch lifts the point radially off the sphere surface.
+    // motion linearly blends in a per-tap, per-instance deterministic
+    // (dx, dy, dz) offset that disturbs the Fibonacci distribution —
+    // at motion=0 the layout is pure Fibonacci; at motion=1 the
+    // sphere is fully wobbled along its session-seeded pattern.
     inline void tapToSphere(int t, float zGlitch,
                             float *sx, float *sy, float *sz) const
     {
@@ -202,6 +218,27 @@ namespace stolmine
       *sx = r * cosf(phi) * radial;
       *sy = zHat          * radial;
       *sz = r * sinf(phi) * radial;
+
+      // Motion-driven per-tap perturbation.
+      const float motionNorm = mpNetwork->getMotionNorm();
+      if (motionNorm > 0.0f)
+      {
+        uint32_t hp = mPerturbSeed ^ ((uint32_t)t * 2654435761u);
+        hp = hp * 1103515245u + 12345u;
+        const float ox =
+          ((float)((hp >> 16) & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f);
+        hp = hp * 1103515245u + 12345u;
+        const float oy =
+          ((float)((hp >> 16) & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f);
+        hp = hp * 1103515245u + 12345u;
+        const float oz =
+          ((float)((hp >> 16) & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f);
+        const float kPerturbMag = 0.6f;
+        const float scale = motionNorm * kPerturbMag;
+        *sx += ox * scale;
+        *sy += oy * scale;
+        *sz += oz * scale;
+      }
     }
 
     // Project a 3D sphere point through view rotation (mRotAngle
