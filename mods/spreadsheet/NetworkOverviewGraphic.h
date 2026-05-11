@@ -80,7 +80,14 @@ namespace stolmine
       mPingCount = 0;
       mPingPhase = 0.0f;
       mSphereRotAccumulator = 0.0f;
-      for (int i = 0; i < kMaxPings; i++) mPings[i].age = 0;
+      mPingSpawnCount = 0;
+      for (int i = 0; i < kMaxPings; i++)
+      {
+        mPings[i].age = 0;
+        mPings[i].axisX = 0.0f;
+        mPings[i].axisY = 1.0f;
+        mPings[i].axisZ = 0.0f;
+      }
     }
 
     virtual ~NetworkOverviewGraphic()
@@ -109,9 +116,15 @@ namespace stolmine
     static const int   kMaxPings        = 4;
     static const int   kPingMaxAge      = 90;
     static const int   kPingFlashFrames = 12;
-    struct Ping { int age; };
+    // Each ping carries an axis vector (normal to its ring plane).
+    // The ring is the great circle of the wavefront sphere in the
+    // plane perpendicular to this axis — so different pings appear
+    // at different "pitches" relative to the viz sphere, giving a
+    // planetary-rings feel as they emanate from center outward.
+    struct Ping { int age; float axisX, axisY, axisZ; };
     Ping mPings[kMaxPings];
     int  mPingCount;
+    int  mPingSpawnCount;
 
     // Sonar ping phase accumulator. Each frame the phase advances
     // by motion × kPingRatePerFrame. When it crosses 1.0, one ping
@@ -1035,19 +1048,32 @@ namespace stolmine
           mPingPhase -= 1.0f;
           if (mPingCount < kMaxPings)
           {
+            // Per-ping axis: Fibonacci-sphere position from spawn
+            // counter. Each successive ping gets a deterministic
+            // but well-spread orientation.
+            const float idF = (float)mPingSpawnCount;
+            const float kInvPhiP = 0.6180339887f;
+            const float uPing = (idF * kInvPhiP + 0.5f);
+            const float uFracP = uPing - (float)((int)uPing);
+            const float yA = 2.0f * uFracP - 1.0f;
+            const float rA = sqrtf(1.0f - yA * yA);
+            const float kGAP = 2.39996323f;
+            const float phiA = idF * kGAP;
             mPings[mPingCount].age = 0;
+            mPings[mPingCount].axisX = rA * cosf(phiA);
+            mPings[mPingCount].axisY = yA;
+            mPings[mPingCount].axisZ = rA * sinf(phiA);
             mPingCount++;
+            mPingSpawnCount++;
           }
         }
       }
 
-      // Ping radial expansion speed scaled by motion. Floor 0.1
-      // so rings still slowly expand at near-zero motion (rather
-      // than freezing in place); at motion=1 the previous full
-      // speed is restored.
-      const float motionScale = 0.1f + motionNorm * 0.9f;
-      const float kPingSpeedDist =
-        (2.6f / (float)kPingMaxAge) * motionScale;
+      // Ping radial expansion speed — motion-independent. Every
+      // spawned ping reaches max r3D (2.6) by age kPingMaxAge
+      // regardless of motion level. Motion now affects only
+      // spawn cadence; once a ping exists it always expands fully.
+      const float kPingSpeedDist = 2.6f / (float)kPingMaxAge;
       for (int p = 0; p < mPingCount; )
       {
         Ping *ping = &mPings[p];
@@ -1115,6 +1141,20 @@ namespace stolmine
 
         float sx, sy, sz;
         tapToSphere(t, mTapZSmoothed[t], &sx, &sy, &sz);
+        // REVERSE taps orbit opposite the sphere's rotation: apply
+        // a pre-rotation of -2 × (mRotAngle + sphereRot) so that
+        // projectSphere's +(mRotAngle + sphereRot) results in a
+        // NET rotation of -(mRotAngle + sphereRot). Trail deposits
+        // follow the reversed motion so trails belong to the tap.
+        if (mode == NETWORK_TAP_REVERSE)
+        {
+          const float ar = -2.0f * (mRotAngle + sphereRot);
+          const float cr = cosf(ar);
+          const float sr = sinf(ar);
+          const float nsx = sx * cr + sz * sr;
+          const float nsz = -sx * sr + sz * cr;
+          sx = nsx; sz = nsz;
+        }
         int px, py;
         float pz;
         projectSphere(sx, sy, sz, sphereRot, sphereRad,
@@ -1138,12 +1178,15 @@ namespace stolmine
         }
       }
 
-      // ---- 7. Render ping rings (centered on view) ----
-      // Bisection ruled out ring size as the cause of the
-      // dim+respawn-pull-in artifact. Full original .36 visibility
-      // — rings expand freely until off-screen (w+h cutoff).
-      const int viewCx = w / 2;
-      const int viewCy = h / 2;
+      // ---- 7. Render ping rings as TILTED 3D circles ----
+      // Each ping has its own axis vector (normal to ring plane).
+      // The ring is the great circle of the wavefront sphere in
+      // the plane perpendicular to that axis, projected through
+      // the same projectSphere pipeline as the tap dots — so each
+      // ring lies at a particular pitch in sphere-local 3D space
+      // and rotates with the sphere's passive tumble. Visually:
+      // planetary rings emanating from origin and expanding
+      // outward until off-screen.
       for (int p = 0; p < mPingCount; p++)
       {
         const Ping *ping = &mPings[p];
@@ -1152,13 +1195,42 @@ namespace stolmine
         if (screenR < 0.5f || screenR > (float)(w + h)) continue;
         const int brightness = 7 - (7 * ping->age) / kPingMaxAge;
         if (brightness <= 0) continue;
+
+        // Build orthonormal basis (u, v) perpendicular to the
+        // ping's axis. Pick a reference vector not parallel to
+        // axis so the cross product is well-conditioned.
+        const float axX = ping->axisX;
+        const float axY = ping->axisY;
+        const float axZ = ping->axisZ;
+        float refX, refY, refZ;
+        if (fabsf(axY) < 0.9f) { refX = 0.0f; refY = 1.0f; refZ = 0.0f; }
+        else                    { refX = 1.0f; refY = 0.0f; refZ = 0.0f; }
+        // u = normalize(cross(ref, axis))
+        float ux = refY * axZ - refZ * axY;
+        float uy = refZ * axX - refX * axZ;
+        float uz = refX * axY - refY * axX;
+        const float uLen = sqrtf(ux*ux + uy*uy + uz*uz);
+        if (uLen > 1e-5f) { ux /= uLen; uy /= uLen; uz /= uLen; }
+        // v = cross(axis, u)
+        const float vx = axY * uz - axZ * uy;
+        const float vy = axZ * ux - axX * uz;
+        const float vz = axX * uy - axY * ux;
+
         const int steps = (int)(6.2832f * screenR + 8.0f);
         const float invSteps = 1.0f / (float)steps;
         for (int s = 0; s < steps; s++)
         {
           const float a = (float)s * invSteps * 6.2832f;
-          const int px = viewCx + (int)(screenR * cosf(a));
-          const int py = viewCy + (int)(screenR * sinf(a));
+          const float ca = cosf(a);
+          const float sa = sinf(a);
+          // Point on ring in 3D sphere-local space (radius r3D).
+          const float p3x = r3D * (ux * ca + vx * sa);
+          const float p3y = r3D * (uy * ca + vy * sa);
+          const float p3z = r3D * (uz * ca + vz * sa);
+          int px, py;
+          float pz;
+          projectSphere(p3x, p3y, p3z, sphereRot, sphereRad,
+                        &px, &py, &pz);
           if (px >= 0 && px < w && py >= 0 && py < h)
           {
             fb.pixel(brightness, mWorldLeft + px, mWorldBottom + py);
@@ -1299,6 +1371,17 @@ namespace stolmine
       {
         float sx, sy, sz;
         tapToSphere(t, mTapZSmoothed[t], &sx, &sy, &sz);
+        // REVERSE taps counter-rotate (see trail-deposit comment).
+        const int modeForRot = mpNetwork->getTapMode(t);
+        if (modeForRot == NETWORK_TAP_REVERSE)
+        {
+          const float ar = -2.0f * (mRotAngle + sphereRot);
+          const float cr = cosf(ar);
+          const float sr = sinf(ar);
+          const float nsx = sx * cr + sz * sr;
+          const float nsz = -sx * sr + sz * cr;
+          sx = nsx; sz = nsz;
+        }
         int px, py;
         float pz;
         projectSphere(sx, sy, sz, sphereRot, sphereRad,
@@ -1402,6 +1485,8 @@ namespace stolmine
       }
 
       // ---- 10. Listener marker at view center ----
+      const int viewCx = w / 2;
+      const int viewCy = h / 2;
       if (viewCx >= 1 && viewCx < w - 1 && viewCy >= 1 && viewCy < h - 1)
       {
         fb.pixel(WHITE, mWorldLeft + viewCx,     mWorldBottom + viewCy);
