@@ -1371,12 +1371,22 @@ namespace stolmine
         {
           int n1 = -1, n2 = -1;
           long d1 = 1L << 30, d2 = 1L << 30;
+          // Limit connection line length so we don't draw long
+          // arms across the sphere from a front-hemisphere shell
+          // node to a back-hemisphere one (both can be eligible
+          // since the back-face skip was removed in .32, and
+          // sphere rotation can briefly make them screen-space
+          // neighbors). Cap at 0.7 × sphereRad → connections stay
+          // close to the sphere outline.
+          const long maxConnDist = (long)(sphereRad * 0.7f);
+          const long maxConnDistSq = maxConnDist * maxConnDist;
           for (int j = 0; j < shellCount; j++)
           {
             if (i == j) continue;
             const long dx = shellPx[i] - shellPx[j];
             const long dy = shellPy[i] - shellPy[j];
             const long d = dx * dx + dy * dy;
+            if (d > maxConnDistSq) continue;
             if (d < d1) { n2 = n1; d2 = d1; n1 = j; d1 = d; }
             else if (d < d2) { n2 = j; d2 = d; }
           }
