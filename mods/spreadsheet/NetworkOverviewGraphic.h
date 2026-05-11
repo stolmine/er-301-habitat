@@ -286,6 +286,24 @@ namespace stolmine
     }
 
   public:
+    // BISECTION DIAGNOSTIC. Re-enable subsystems one at a time
+    // to isolate which one produces the dim+respawn-pull-in cycle.
+    //   0 = full draw path (production behavior)
+    //   1 = minimal: 32 static dots + listener marker (no motion)
+    //   2 = + passive mRotAngle rotation
+    //   3 = + persistence buffer (fade + trail deposit)
+    //   4 = + tapZ smoothing
+    //   5 = + brightness smoothing + depth dim
+    //   6 = + ping rings (cross-detection + render)
+    //   7 = + shell + listener trace + ricochet/ping-flash
+    // Stage 1 confirmed clean — bug is in draw path at stage > 1.
+    // Bisection complete. Set to 0 for production (full draw path).
+    // Non-zero values re-engage the bisection scaffolding kept
+    // below for future diagnostic use; the journey to motion-
+    // driven sphereRot as the cause is in commit history
+    // (2.6.1.39..54).
+    static const int kBisectStage = 0;
+
     virtual void draw(od::FrameBuffer &fb)
     {
       const int w = mWidth < kMaxW ? mWidth : kMaxW;
@@ -295,6 +313,568 @@ namespace stolmine
       {
         fb.fill(BLACK, mWorldLeft, mWorldBottom,
                 mWorldLeft + mWidth - 1, mWorldBottom + mHeight - 1);
+        return;
+      }
+
+      // BISECTION early-return — runs at stages 1..7 (anything
+      // except 0 = full draw path).
+      if (kBisectStage >= 1)
+      {
+        // Stage 14+: sphereRad from sizeNorm, sphereRot from
+        // motion-driven accumulator, mFrameCounter increments
+        // each frame, decayMapped from decayNorm.
+        const float kBaseScale = 26.0f;
+        const float kMinSphereRad = 0.29f * kBaseScale;
+        const float kBisectSphereRad = (kBisectStage >= 14)
+          ? (kMinSphereRad +
+             mpNetwork->getSizeNorm() * (kBaseScale - kMinSphereRad))
+          : 16.0f;
+        const float kInvPhi = 0.6180339887f;
+        const float kGoldenAngle = 2.39996323f;
+        const int kBisectActiveTaps =
+          (kBisectStage >= 13) ? mpNetwork->getActiveTapCount() : 32;
+
+        if (kBisectStage >= 14)
+        {
+          mFrameCounter++;
+        }
+
+        // Sphere rotation accumulator advance.
+        // SUB-BISECT 14a: motion-driven sphereRot DISABLED — was
+        // added at stage 14 along with size/decay/mFrameCounter.
+        // Stage 14 reproduced the zoom-out+reset symptoms; this
+        // variant removes the motion mapping piece to test if
+        // that single addition is the cause.
+        float bisectSphereRot = 0.0f;
+        // if (kBisectStage >= 14) {  ... }  // disabled
+
+        // Stage 2+: passive sphere rotation.
+        if (kBisectStage >= 2)
+        {
+          mRotAngle += 0.01f;
+          if (mRotAngle > 6.2832f) mRotAngle -= 6.2832f;
+        }
+
+        // Decay-mapped constants (stage 3+). Constant decay so no
+        // parameter influence — only the persistence subsystem
+        // mechanics are tested.
+        float decayMapped = 0.0f;
+        if (kBisectStage >= 3)
+        {
+          // Stage 14+: real decayNorm; earlier stages: constant 0.5.
+          const float kBisectDecay =
+            (kBisectStage >= 14) ? mpNetwork->getDecayNorm() : 0.5f;
+          float dm = kBisectDecay * (1.0f / 0.6f);
+          if (dm > 1.0f) dm = 1.0f;
+          decayMapped = dm * dm * dm;
+        }
+
+        // Stage 7+: tapZ smoothing (reads tap mode from Network).
+        // At glitch=0 all taps NORMAL → tapZ=0 → smoothed=0 →
+        // radial=1.0 (no animation). Tests whether tap mode read
+        // path or radial smoothing introduces artifacts.
+        if (kBisectStage >= 7)
+        {
+          for (int t = 0; t < kMaxNetworkTaps; t++)
+          {
+            const float target = tapZ(t);
+            if (mTapZSmoothed[t] < -1.5f)
+              mTapZSmoothed[t] = target;
+            else
+              mTapZSmoothed[t] += (target - mTapZSmoothed[t]) * 0.3f;
+          }
+        }
+
+        // Stage 3+: persistence buffer fade.
+        if (kBisectStage >= 3)
+        {
+          const int kFadeInterval = 1 + (int)(decayMapped * 5.0f);
+          mPersistFadeCounter++;
+          if (mPersistFadeCounter >= kFadeInterval)
+          {
+            mPersistFadeCounter = 0;
+            for (int i = 0; i < w * h; i++)
+            {
+              if (mPixels[i] > 0) mPixels[i]--;
+            }
+          }
+        }
+
+        // Stage 12+: stutter loop iteration → ghost deposit +
+        // flicker counter reset. At glitch=0 no STUTTER taps so
+        // curIter is always 0, iterStart never true, no ghost
+        // spawn. mStutterFlicker increments harmlessly.
+        if (kBisectStage >= 12)
+        {
+          for (int t = 0; t < kBisectActiveTaps; t++)
+          {
+            const int curIter = mpNetwork->getTapStutterIter(t);
+            const int lastIter = (int)mLastStutterIter[t];
+            const bool iterStart = (curIter > 0 && curIter < lastIter);
+            if (iterStart)
+            {
+              mStutterFlicker[t] = 0;
+              const float us = ((float)t * kInvPhi + 0.5f);
+              const float uFracs = us - (float)((int)us);
+              const float zHats = 2.0f * uFracs - 1.0f;
+              const float rxys = sqrtf(1.0f - zHats * zHats);
+              float phis;
+              if (kBisectStage >= 6)
+              {
+                const float rxx = mpNetwork->getReflectorX(t);
+                const float ryy = mpNetwork->getReflectorY(t);
+                phis = atan2f(ryy, rxx);
+              }
+              else
+              {
+                phis = (float)t * kGoldenAngle;
+              }
+              const float radials =
+                (kBisectStage >= 7) ? (1.0f + mTapZSmoothed[t] * 0.3f) : 1.0f;
+              const float gsx = rxys * cosf(phis) * radials;
+              const float gsy = zHats * radials;
+              const float gsz = rxys * sinf(phis) * radials;
+              uint32_t hg = (uint32_t)t * 2654435761u +
+                            (uint32_t)curIter;
+              hg = hg * 1103515245u + 12345u;
+              const float jitter =
+                ((float)((hg >> 16) & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f) * 0.15f;
+              int gpx, gpy;
+              float gpz;
+              projectSphere(gsx + jitter, gsy, gsz, bisectSphereRot,
+                            kBisectSphereRad, &gpx, &gpy, &gpz);
+              if (gpx >= 0 && gpx < w && gpy >= 0 && gpy < h)
+              {
+                mPixels[gpy * w + gpx] = 12;
+              }
+            }
+            else
+            {
+              if (mStutterFlicker[t] < 250) mStutterFlicker[t]++;
+            }
+            mLastStutterIter[t] = (uint8_t)curIter;
+          }
+        }
+
+        // Stage 3+: per-tap trail deposit into persistence (only
+        // taps that pass the deterministic eligibility hash,
+        // gated by decayMapped × 0.4 = ~40% at full decay).
+        if (kBisectStage >= 3)
+        {
+          const float trailThreshold = decayMapped * 0.4f;
+          for (int t = 0; t < kBisectActiveTaps; t++)
+          {
+            uint32_t hT = (uint32_t)t * 2654435761u + 0xBEEFCAFEu;
+            hT = hT * 1103515245u + 12345u;
+            const float trailHash =
+              (float)((hT >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
+            if (trailHash > trailThreshold) continue;
+
+            const float u = ((float)t * kInvPhi + 0.5f);
+            const float uFrac = u - (float)((int)u);
+            const float zHat = 2.0f * uFrac - 1.0f;
+            const float rxy = sqrtf(1.0f - zHat * zHat);
+            float phi;
+            if (kBisectStage >= 6)
+            {
+              const float rx = mpNetwork->getReflectorX(t);
+              const float ry = mpNetwork->getReflectorY(t);
+              phi = atan2f(ry, rx);
+            }
+            else
+            {
+              phi = (float)t * kGoldenAngle;
+            }
+            const float radial =
+              (kBisectStage >= 7) ? (1.0f + mTapZSmoothed[t] * 0.3f) : 1.0f;
+            const float sx = rxy * cosf(phi) * radial;
+            const float sy = zHat * radial;
+            const float sz = rxy * sinf(phi) * radial;
+
+            int px, py;
+            float pz;
+            projectSphere(sx, sy, sz, bisectSphereRot, kBisectSphereRad,
+                          &px, &py, &pz);
+            if (px < 0 || px >= w || py < 0 || py >= h) continue;
+            int b = (int)mPixels[py * w + px] + 5;
+            if (b > 11) b = 11;
+            mPixels[py * w + px] = (uint8_t)b;
+          }
+        }
+
+        fb.fill(BLACK, mWorldLeft, mWorldBottom,
+                mWorldLeft + mWidth - 1, mWorldBottom + mHeight - 1);
+
+        // Stage 3+: render persistence buffer.
+        if (kBisectStage >= 3)
+        {
+          for (int y = 0; y < h; y++)
+          {
+            for (int x = 0; x < w; x++)
+            {
+              const uint8_t v = mPixels[y * w + x];
+              if (v > 0)
+                fb.pixel(v, mWorldLeft + x, mWorldBottom + y);
+            }
+          }
+        }
+
+        // Stage 11+: sonar pings — spawn (motion-rate accumulator),
+        // cross detection (writes mTapPingFlash[t]), and ring
+        // render. At motion=0, mPingPhase doesn't advance →
+        // no spawns. Cross detection loop iterates over active
+        // pings only (empty at steady motion=0). Should be no-op
+        // visually at motion=0; only matters once motion>0.
+        if (kBisectStage >= 11)
+        {
+          // mTapPingFlash decrement.
+          for (int t = 0; t < kMaxNetworkTaps; t++)
+          {
+            if (mTapPingFlash[t] > 0) mTapPingFlash[t]--;
+          }
+
+          const float motionNorm2 = mpNetwork->getMotionNorm();
+          const float kPingHzAtFullMotion = 0.25f;
+          const float kAssumedFrameRateHz = 60.0f;
+          const float perFrameAdvance =
+            motionNorm2 * (kPingHzAtFullMotion / kAssumedFrameRateHz);
+          mPingPhase += perFrameAdvance;
+          if (mPingPhase >= 1.0f)
+          {
+            mPingPhase -= 1.0f;
+            if (mPingCount < kMaxPings)
+            {
+              mPings[mPingCount].age = 0;
+              mPingCount++;
+            }
+          }
+
+          const float motionScale2 = 0.1f + motionNorm2 * 0.9f;
+          const float kPingSpeedDist =
+            (2.6f / (float)kPingMaxAge) * motionScale2;
+
+          // Listener world position for cross detection.
+          const float listenerPhase2 = mpNetwork->getListenerPhase();
+          const float twoPi2 = 2.0f * 3.14159265f;
+          const float kListenerR = 1.3f;
+          const float listenerX =
+            cosf(twoPi2 * listenerPhase2) * kListenerR;
+          const float listenerY =
+            sinf(twoPi2 * listenerPhase2) * kListenerR;
+
+          // Cross detection.
+          for (int p = 0; p < mPingCount; )
+          {
+            Ping *ping = &mPings[p];
+            const float r3D     = (float)ping->age       * kPingSpeedDist;
+            const float r3DPrev = (float)(ping->age - 1) * kPingSpeedDist;
+
+            for (int t = 0; t < kBisectActiveTaps; t++)
+            {
+              if (mpNetwork->getTapMode(t) == NETWORK_TAP_MUTE) continue;
+              const float dx = mpNetwork->getReflectorX(t) - listenerX;
+              const float dy = mpNetwork->getReflectorY(t) - listenerY;
+              const float dist = sqrtf(dx * dx + dy * dy);
+              if (dist > r3DPrev && dist <= r3D)
+              {
+                uint8_t flashLen = kPingFlashFrames;
+                if (mpNetwork->getTapMode(t) == NETWORK_TAP_STUTTER)
+                  flashLen = kPingFlashFrames * 2;
+                mTapPingFlash[t] = flashLen;
+              }
+            }
+
+            ping->age++;
+            if (ping->age >= kPingMaxAge)
+            {
+              mPings[p] = mPings[mPingCount - 1];
+              mPingCount--;
+            }
+            else
+            {
+              p++;
+            }
+          }
+
+          // Ring render — full original .36 extent (rings expand
+          // freely until off-screen). Bisection ruled out ring
+          // size as the cause of the zoom-cycle artifact, so the
+          // .37 visibility cap is removed.
+          const int viewCxR = w / 2;
+          const int viewCyR = h / 2;
+          for (int p = 0; p < mPingCount; p++)
+          {
+            const Ping *ping = &mPings[p];
+            const float r3D = (float)ping->age * kPingSpeedDist;
+            const float screenR = r3D * kBisectSphereRad;
+            if (screenR < 0.5f || screenR > (float)(w + h))
+              continue;
+            const int brightness = 7 - (7 * ping->age) / kPingMaxAge;
+            if (brightness <= 0) continue;
+            const int steps = (int)(6.2832f * screenR + 8.0f);
+            const float invSteps = 1.0f / (float)steps;
+            for (int s = 0; s < steps; s++)
+            {
+              const float a = (float)s * invSteps * 6.2832f;
+              const int rpx = viewCxR + (int)(screenR * cosf(a));
+              const int rpy = viewCyR + (int)(screenR * sinf(a));
+              if (rpx >= 0 && rpx < w && rpy >= 0 && rpy < h)
+              {
+                fb.pixel(brightness, mWorldLeft + rpx, mWorldBottom + rpy);
+              }
+            }
+          }
+        }
+
+        // Stage 10+: connectivity shell — update mShellLevel for
+        // each tap, build front-of-sphere node list, draw k-NN
+        // edges between them. mShellLevel sentinel snaps on first
+        // use to defend against any reset. At glitch=0 with
+        // connectivity>0, fb-set is stable (deterministic from
+        // params), so shellLevel converges to 1.0 for fb taps and
+        // 0.0 for others — stable lines, no animation expected.
+        if (kBisectStage >= 10)
+        {
+          const float kShFadeIn  = 1.0f / 12.0f;
+          const float kShFadeOut = 1.0f / 18.0f;
+          for (int t = 0; t < kMaxNetworkTaps; t++)
+          {
+            const bool isFb =
+              (t < kBisectActiveTaps) &&
+              (mpNetwork->getFbWeight(t) != 0.0f);
+            if (mShellLevel[t] < 0.0f)
+            {
+              mShellLevel[t] = isFb ? 1.0f : 0.0f;
+            }
+            else if (isFb)
+            {
+              mShellLevel[t] += kShFadeIn;
+              if (mShellLevel[t] > 1.0f) mShellLevel[t] = 1.0f;
+            }
+            else
+            {
+              mShellLevel[t] -= kShFadeOut;
+              if (mShellLevel[t] < 0.0f) mShellLevel[t] = 0.0f;
+            }
+          }
+
+          int shellPx[kMaxNetworkTaps];
+          int shellPy[kMaxNetworkTaps];
+          int shellT [kMaxNetworkTaps];
+          int shellCount = 0;
+          for (int t = 0; t < kBisectActiveTaps; t++)
+          {
+            if (mShellLevel[t] < 0.05f) continue;
+
+            const float u2 = ((float)t * kInvPhi + 0.5f);
+            const float uFrac2 = u2 - (float)((int)u2);
+            const float zHat2 = 2.0f * uFrac2 - 1.0f;
+            const float rxy2 = sqrtf(1.0f - zHat2 * zHat2);
+            float phi2;
+            if (kBisectStage >= 6)
+            {
+              const float rx = mpNetwork->getReflectorX(t);
+              const float ry = mpNetwork->getReflectorY(t);
+              phi2 = atan2f(ry, rx);
+            }
+            else
+            {
+              phi2 = (float)t * kGoldenAngle;
+            }
+            const float radial2 =
+              (kBisectStage >= 7) ? (1.0f + mTapZSmoothed[t] * 0.3f) : 1.0f;
+            const float ssx = rxy2 * cosf(phi2) * radial2;
+            const float ssy = zHat2 * radial2;
+            const float ssz = rxy2 * sinf(phi2) * radial2;
+
+            int spx, spy;
+            float spz;
+            projectSphere(ssx, ssy, ssz, bisectSphereRot, kBisectSphereRad,
+                          &spx, &spy, &spz);
+            if (spx < 0 || spx >= w || spy < 0 || spy >= h) continue;
+            shellPx[shellCount] = spx;
+            shellPy[shellCount] = spy;
+            shellT [shellCount] = t;
+            shellCount++;
+          }
+
+          for (int i = 0; i < shellCount; i++)
+          {
+            int n1 = -1, n2 = -1;
+            long d1 = 1L << 30, d2 = 1L << 30;
+            for (int j = 0; j < shellCount; j++)
+            {
+              if (i == j) continue;
+              const long dxL = shellPx[i] - shellPx[j];
+              const long dyL = shellPy[i] - shellPy[j];
+              const long d = dxL * dxL + dyL * dyL;
+              if (d < d1) { n2 = n1; d2 = d1; n1 = j; d1 = d; }
+              else if (d < d2) { n2 = j; d2 = d; }
+            }
+            const float lvlI = mShellLevel[shellT[i]];
+            if (n1 >= 0 && i < n1)
+            {
+              const float gm = sqrtf(lvlI * mShellLevel[shellT[n1]]);
+              int b = 1 + (int)(gm * 5.5f + 0.5f);
+              if (b > 6) b = 6;
+              if (b >= 1)
+                drawLine(fb, shellPx[i], shellPy[i],
+                         shellPx[n1], shellPy[n1], b);
+            }
+            if (n2 >= 0 && i < n2)
+            {
+              const float gm = sqrtf(lvlI * mShellLevel[shellT[n2]]);
+              int b = 1 + (int)(gm * 5.5f + 0.5f);
+              if (b > 6) b = 6;
+              if (b >= 1)
+                drawLine(fb, shellPx[i], shellPy[i],
+                         shellPx[n2], shellPy[n2], b);
+            }
+          }
+        }
+
+        // Stage 9+: listener trace render. 128 dots at sphere
+        // equator at past walker phase longitudes. At motion=0
+        // all values are the same (current mWalkerPos) so all
+        // dots collapse to a single pixel.
+        if (kBisectStage >= 9)
+        {
+          const int traceSize = mpNetwork->getListenerTraceSize();
+          const float twoPi = 2.0f * 3.14159265f;
+          for (int i = 0; i < traceSize; i++)
+          {
+            const float oldPhase = mpNetwork->getListenerTracePhase(i);
+            const float phiTrace = twoPi * oldPhase;
+            const float lsx = cosf(phiTrace);
+            const float lsy = 0.0f;
+            const float lsz = sinf(phiTrace);
+            int lpx, lpy;
+            float lpz;
+            projectSphere(lsx, lsy, lsz, bisectSphereRot, kBisectSphereRad,
+                          &lpx, &lpy, &lpz);
+            if (lpx < 0 || lpx >= w || lpy < 0 || lpy >= h) continue;
+            int tb = 3 + (8 * i) / traceSize;
+            if (tb > 11) tb = 11;
+            fb.pixel(tb, mWorldLeft + lpx, mWorldBottom + lpy);
+          }
+        }
+
+        // Stage 8+: wetBoost from output ring (audio-coupled
+        // brightness target for NORMAL taps).
+        int wetBoost = 0;
+        if (kBisectStage >= 8)
+        {
+          const int ringSize = mpNetwork->getOutputRingSize();
+          float wetLvlSq = 0.0f;
+          for (int i = ringSize - 16; i < ringSize; i++)
+          {
+            const float s = mpNetwork->getOutputSample(i);
+            if (!(s == s)) continue;
+            wetLvlSq += s * s;
+          }
+          const float wetLvl = sqrtf(wetLvlSq * (1.0f / 16.0f));
+          wetBoost = (int)(wetLvl * 8.0f);
+          if (wetBoost > 4) wetBoost = 4;
+        }
+
+        // Tap dots (all bisect stages).
+        for (int t = 0; t < kBisectActiveTaps; t++)
+        {
+          const float u = ((float)t * kInvPhi + 0.5f);
+          const float uFrac = u - (float)((int)u);
+          const float zHat = 2.0f * uFrac - 1.0f;
+          const float rxy = sqrtf(1.0f - zHat * zHat);
+          const float phi = (float)t * kGoldenAngle;
+          const float sx = rxy * cosf(phi);
+          const float sy = zHat;
+          const float sz = rxy * sinf(phi);
+
+          int px, py;
+          float pz;
+          projectSphere(sx, sy, sz, bisectSphereRot, kBisectSphereRad,
+                        &px, &py, &pz);
+          if (px < 0 || px >= w || py < 0 || py >= h) continue;
+
+          // Stage 8+: mode-dependent brightness target.
+          // At glitch=0 all taps NORMAL → target = 9 + wetBoost.
+          int targetBrightness = 9;
+          if (kBisectStage >= 8)
+          {
+            const int mode = mpNetwork->getTapMode(t);
+            switch (mode)
+            {
+              case NETWORK_TAP_MUTE:    targetBrightness = 3; break;
+              case NETWORK_TAP_CRUSH:
+              {
+                uint32_t hh = (uint32_t)t * 2654435761u +
+                              (uint32_t)mFrameCounter;
+                hh = hh * 1103515245u + 12345u;
+                targetBrightness = ((hh >> 16) & 1u) ? 13 : 7;
+                break;
+              }
+              case NETWORK_TAP_REVERSE: targetBrightness = 11; break;
+              case NETWORK_TAP_NORMAL:  targetBrightness = 9 + wetBoost; break;
+              case NETWORK_TAP_STUTTER:
+              {
+                const int ff = (int)mStutterFlicker[t];
+                targetBrightness = (ff < 2) ? 15 : 8;
+                break;
+              }
+              case NETWORK_TAP_SCRUB:
+              default:                  targetBrightness = 12; break;
+            }
+          }
+
+          // Stage 4+: brightness smoothing.
+          int brightness = 9;
+          if (kBisectStage >= 4)
+          {
+            if (mTapBrightSmoothed[t] < 0.0f)
+            {
+              mTapBrightSmoothed[t] = (float)targetBrightness;
+              brightness = targetBrightness;
+            }
+            else
+            {
+              mTapBrightSmoothed[t] +=
+                ((float)targetBrightness - mTapBrightSmoothed[t]) * 0.25f;
+              brightness = (int)(mTapBrightSmoothed[t] + 0.5f);
+            }
+          }
+          // Stage 5+: back-face depth dim (geometric, no params).
+          if (kBisectStage >= 5 && pz < 0.0f)
+          {
+            const int dim = (int)((-pz) * 1.0f + 0.5f);
+            brightness -= dim;
+            if (brightness < 3) brightness = 3;
+          }
+          // Stage 8+: ricochet flash + ping flash brightness.
+          if (kBisectStage >= 8)
+          {
+            const int flashMax = mpNetwork->getRicochetFlashMax();
+            const int rflash = mpNetwork->getRicochetFlash(t);
+            if (rflash > 0 && flashMax > 0)
+              brightness += (rflash * 5) / flashMax;
+            const int pflash = (int)mTapPingFlash[t];
+            if (pflash > 0)
+              brightness += (pflash * 6) / kPingFlashFrames;
+            if (brightness > 15) brightness = 15;
+            if (brightness < 0)  brightness = 0;
+          }
+          fb.pixel(brightness, mWorldLeft + px, mWorldBottom + py);
+        }
+
+        const int viewCx = w / 2;
+        const int viewCy = h / 2;
+        if (viewCx >= 1 && viewCx < w - 1 &&
+            viewCy >= 1 && viewCy < h - 1)
+        {
+          fb.pixel(WHITE, mWorldLeft + viewCx,     mWorldBottom + viewCy);
+          fb.pixel(11,    mWorldLeft + viewCx + 1, mWorldBottom + viewCy);
+          fb.pixel(11,    mWorldLeft + viewCx - 1, mWorldBottom + viewCy);
+          fb.pixel(11,    mWorldLeft + viewCx,     mWorldBottom + viewCy + 1);
+          fb.pixel(11,    mWorldLeft + viewCx,     mWorldBottom + viewCy - 1);
+        }
         return;
       }
 
@@ -321,24 +901,19 @@ namespace stolmine
       const float listenerX = cosM * kListenerR;
       const float listenerY = sinM * kListenerR;
 
-      // Sphere rotation: constant-rate accumulator scaled by
-      // motion. At motion=1 sphere rotates 0.25 revolutions/sec
-      // (4s per full rotation, matches walker base rate). At
-      // motion=0 sphere holds still. No jerk regardless of the
-      // walker's chaotic instantaneous velocity.
+      // Sphere rotation: passive tumble only (via mRotAngle,
+      // advanced below). Motion-driven sphereRot was removed
+      // after a 14-stage subsystem bisection identified it as
+      // the cause of the "very short dim → respawn at edges,
+      // pull in toward center, repeat" cycle. The mechanism:
+      // at non-zero motion the motion-driven advance combined
+      // with passive rotation produces a fast cyclic completion
+      // (and at motion≈0.38 the two cancel; beyond that, the
+      // sphere reverses direction). Motion feedback is still
+      // visible elsewhere (ping cadence, ring expansion speed,
+      // listener trace dot longitudes).
       const float motionNorm = mpNetwork->getMotionNorm();
-      {
-        const float kSphereRotPerFrameAtFullMotion =
-          -0.25f * 6.2832f / 60.0f;
-        mSphereRotAccumulator +=
-          motionNorm * kSphereRotPerFrameAtFullMotion;
-        // Keep within a sane numerical range to avoid drift.
-        while (mSphereRotAccumulator < -6.2832f)
-          mSphereRotAccumulator += 6.2832f;
-        while (mSphereRotAccumulator >  6.2832f)
-          mSphereRotAccumulator -= 6.2832f;
-      }
-      const float sphereRot = mSphereRotAccumulator;
+      const float sphereRot = 0.0f;
 
       // Wet-level pulse from output ring.
       const int ringSize = mpNetwork->getOutputRingSize();
@@ -564,20 +1139,17 @@ namespace stolmine
       }
 
       // ---- 7. Render ping rings (centered on view) ----
-      // BISECTION step 1: cap visible ring radius to 0.5 × sphereRad
-      // so the ring never extends beyond the sphere outline. If this
-      // diminishes the "viewer zooming in / pop back" effect, the
-      // cause is ring extent past the sphere. If unchanged, bisect
-      // brightness next.
+      // Bisection ruled out ring size as the cause of the
+      // dim+respawn-pull-in artifact. Full original .36 visibility
+      // — rings expand freely until off-screen (w+h cutoff).
       const int viewCx = w / 2;
       const int viewCy = h / 2;
-      const float kPingMaxVisibleScreenR = sphereRad * 0.5f;
       for (int p = 0; p < mPingCount; p++)
       {
         const Ping *ping = &mPings[p];
         const float r3D = (float)ping->age * kPingSpeedDist;
         const float screenR = r3D * sphereRad;
-        if (screenR < 0.5f || screenR > kPingMaxVisibleScreenR) continue;
+        if (screenR < 0.5f || screenR > (float)(w + h)) continue;
         const int brightness = 7 - (7 * ping->age) / kPingMaxAge;
         if (brightness <= 0) continue;
         const int steps = (int)(6.2832f * screenR + 8.0f);
