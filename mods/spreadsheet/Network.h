@@ -312,6 +312,8 @@ namespace stolmine
       // Graphic-side accessors state.
       mLastActiveTaps = 0;
       mLastSizeNorm = 0.5f;
+      mLastDecay = 0.5f;
+      mLastMotion = 0.0f;
       for (int i = 0; i < kMaxNetworkTaps; i++)
       {
         mTapRicochetFlash[i] = 0;
@@ -400,6 +402,8 @@ namespace stolmine
     int getRicochetFlashMax() const { return (int)kRicochetFlashMax; }
     float getListenerPhase() const { return mWalkerPos; }
     float getSizeNorm() const { return mLastSizeNorm; }
+    float getDecayNorm() const { return mLastDecay; }
+    float getMotionNorm() const { return mLastMotion; }
     // idx in [0, 256); 0 = oldest valid sample, 255 = most recent.
     float getOutputSample(int idx) const
     {
@@ -499,10 +503,12 @@ namespace stolmine
       float motionDepth = mMotion.value();
       if (!(motionDepth >= 0.0f)) motionDepth = 0.0f;
       if (motionDepth > 1.0f) motionDepth = 1.0f;
+      mLastMotion = motionDepth;
 
       float decay = mDecay.value();
       if (!(decay >= 0.0f)) decay = 0.0f;
       if (decay > 0.95f) decay = 0.95f;
+      mLastDecay = decay;
 
       float connectivity = mConnectivity.value();
       if (!(connectivity >= 0.0f)) connectivity = 0.0f;
@@ -2151,6 +2157,15 @@ namespace stolmine
 
     // Size knob captured for graphic — controls disc render scale.
     float mLastSizeNorm;
+
+    // Decay knob captured for graphic — scales comet tail length on
+    // the persistence buffer (longer trails at high decay).
+    float mLastDecay;
+
+    // Motion knob captured for graphic — scales sonar ping
+    // expansion speed; ping spawn cadence is walker-wrap-driven
+    // (one ping per revolution, period = 1 / (walkerHz * motion)).
+    float mLastMotion;
 
     // Wet bus output ring buffer for the overview graphic's
     // phase-space layer. Per-sample mono mix written into a 256-

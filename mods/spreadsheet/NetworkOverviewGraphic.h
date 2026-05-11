@@ -3,18 +3,21 @@
 // Network overview viz — listener-centered sphere with per-tap
 // trails and sonar pings.
 //
-// Tap positions on the sphere are decoupled from reflector field
-// geometry and computed directly from tap index via a Fibonacci-
-// sphere distribution with a golden-ratio low-discrepancy sequence
-// driving latitude:
+// Tap positions on the sphere combine an LDS latitude (for even
+// spread at any density) with an azimuth taken from the tap's
+// actual reflector position (for illustrative faithfulness):
 //   latitude_u = fmod(t × 1/φ + 0.5, 1)   in [0, 1)
 //   zHat       = 2 × latitude_u − 1       in [−1, +1]
-//   longitude  = t × golden_angle_radians
-// The low-discrepancy sequence on latitude (rather than t/N) gives
-// every prefix of taps a uniform spread across the sphere — density
-// sweeps reveal new taps at well-distributed latitudes instead of
-// filling a single band. Glitch Z displacement scales sphere radius
-// per tap (lifts/pushes radially off the surface).
+//   longitude  = atan2(reflector_y, reflector_x)
+// Latitude via the golden-ratio low-discrepancy sequence on t gives
+// every prefix of taps a uniform sphere coverage — density sweeps
+// reveal new taps at well-distributed latitudes instead of filling
+// a single band. Longitude from the reflector's actual disc azimuth
+// means seed regeneration moves taps around the sphere, and as the
+// sphere counter-rotates with listener motion the taps appear to
+// revolve around the listener marker tracking real azimuth. Glitch
+// Z displacement scales sphere radius per tap (lifts/pushes
+// radially off the surface).
 //
 // Listener motion drives an additional sphere rotation so as the
 // listener orbits the audio field, the sphere visually responds.
@@ -57,10 +60,16 @@ namespace stolmine
       memset(mPixels, 0, sizeof(mPixels));
       memset(mLastStutterIter, 0, sizeof(mLastStutterIter));
       memset(mTapPingFlash, 0, sizeof(mTapPingFlash));
+      for (int i = 0; i < kMaxNetworkTaps; i++) mShellLevel[i] = 0.0f;
+      for (int i = 0; i < kMaxNetworkTaps; i++) mTapZSmoothed[i] = 0.0f;
+      for (int i = 0; i < kMaxNetworkTaps; i++) mStutterFlicker[i] = 255;
+      for (int i = 0; i < kMaxNetworkTaps; i++) mTapBrightSmoothed[i] = 9.0f;
+      mPersistFadeCounter = 0;
       mRotAngle = 0.0f;
       mFrameCounter = 0;
       mPingCount = 0;
-      mPingTimer = 0;
+      mPingPhase = 0.0f;
+      mSphereRotAccumulator = 0.0f;
       for (int i = 0; i < kMaxPings; i++) mPings[i].age = 0;
     }
 
@@ -93,24 +102,79 @@ namespace stolmine
     struct Ping { int age; };
     Ping mPings[kMaxPings];
     int  mPingCount;
-    int  mPingTimer;
+
+    // Sonar ping phase accumulator. Each frame the phase advances
+    // by motion × kPingRatePerFrame. When it crosses 1.0, one ping
+    // is spawned. This is a CONSTANT-rate clock (rate ∝ motion)
+    // independent of the walker's smoothed-random instantaneous
+    // velocity, so the user perceives a steady cadence that
+    // simply runs slower at low motion and faster at high motion.
+    float mPingPhase;
+
+    // Sphere rotation accumulator (replaces the walker-phase-driven
+    // sphereRot). Advances at a constant rate scaled by motion, so
+    // the sphere counter-rotates smoothly with no jerk. Decoupled
+    // from the walker's smoothed-random velocity which oscillates,
+    // reverses, and pauses — that chaos is correct for audio
+    // modulation but wrong for visual rotation.
+    float mSphereRotAccumulator;
 
     uint8_t mTapPingFlash[kMaxNetworkTaps];
 
-    // Map tap index to a 3D point on the unit sphere via Fibonacci
-    // distribution with a golden-ratio low-discrepancy latitude
-    // sequence (see file header). zGlitch lifts the point radially
-    // off the sphere surface (per-mode displacement signature).
+    // Per-tap shell-membership fade (viz-side smoother).
+    // 0 = not in feedback set, 1 = fully in. Rises when audio
+    // fbWeight is nonzero, falls when zero. Asymmetric rates: in
+    // ~200ms (12 frames), out ~300ms (18 frames) at 60fps. Used
+    // both for line brightness and front-hemisphere shell
+    // membership so leaving/entering taps fade rather than pop.
+    float mShellLevel[kMaxNetworkTaps];
+
+    // Per-tap smoothed Z displacement. Raw tapZ() jumps when the
+    // walker wraps and the mode mutex reshuffles (NORMAL -> MUTE
+    // -> CRUSH ...), which previously caused dozens of taps to
+    // pop radially simultaneously. Smoothing ramps the radial
+    // transition over ~50ms so the cycle reshuffle reads as a
+    // soft morph rather than a hard reset.
+    float mTapZSmoothed[kMaxNetworkTaps];
+
+    // Counter for decay-scaled persistence-buffer fade. Higher
+    // decay -> longer interval between fade steps -> longer
+    // comet tails on tap dots.
+    int mPersistFadeCounter;
+
+    // Per-stutter-tap flicker counter — frames since the last
+    // stutter loop iteration started (i.e., curIter just
+    // decremented). On iter start the tap dot flashes bright,
+    // then settles to a dim base brightness, producing a
+    // flicker-with-ghost-trail look as the persistence buffer
+    // retains a fading dot at each iteration position.
+    uint8_t mStutterFlicker[kMaxNetworkTaps];
+
+    // Per-tap smoothed base brightness (mode-derived). At every
+    // walker wrap the mode mutex reshuffles all active taps
+    // simultaneously and the mode-based brightness target jumps
+    // (NORMAL=9, MUTE=3, etc.). Without smoothing this pops
+    // instantly and reads as "everything resets at once." With
+    // ~70ms smoothing the transitions read as a soft fade.
+    // STUTTER mode bypasses this so its 2-frame flash stays
+    // instant.
+    float mTapBrightSmoothed[kMaxNetworkTaps];
+
+    // Map tap to a 3D point on the unit sphere (see file header).
+    // Latitude: golden-ratio LDS on tap index (uniform spread at any
+    // density). Longitude: actual reflector azimuth (illustrative).
+    // zGlitch lifts the point radially off the sphere surface.
     inline void tapToSphere(int t, float zGlitch,
                             float *sx, float *sy, float *sz) const
     {
       const float kInvPhi = 0.6180339887f;        // 1/φ
-      const float kGoldenAngleRad = 2.39996323f;  // (1 - 1/φ) × 2π
       const float u = ((float)t * kInvPhi + 0.5f);
       const float uFrac = u - (float)((int)u);   // fmod to [0, 1)
       const float zHat = 2.0f * uFrac - 1.0f;
       const float r = sqrtf(1.0f - zHat * zHat);
-      const float phi = (float)t * kGoldenAngleRad;
+      const float rx = mpNetwork->getReflectorX(t);
+      const float ry = mpNetwork->getReflectorY(t);
+      const float phi = atan2f(ry, rx);
       const float radial = 1.0f + zGlitch * 0.3f;
       *sx = r * cosf(phi) * radial;
       *sy = zHat          * radial;
@@ -174,14 +238,17 @@ namespace stolmine
       switch (mode)
       {
         case NETWORK_TAP_NORMAL: return 0.0f;
-        case NETWORK_TAP_MUTE:   return -1.0f;
+        // MUTE and REVERSE use small radial offsets — mode is
+        // communicated by brightness (smoothed) more than position
+        // so the mode-mutex shuffle at walker wrap doesn't visibly
+        // collapse many taps toward sphere center simultaneously.
+        case NETWORK_TAP_MUTE:   return -0.3f;
         case NETWORK_TAP_STUTTER:
-        {
-          // Radial pulse synced to stutter loop position — tap
-          // breathes in/out of the sphere surface each iteration.
-          const float p = mpNetwork->getTapStutterPosNorm(t);
-          return 0.25f * sinf(2.0f * 3.14159265f * p);
-        }
+          // No radial movement — stutter taps stay on the sphere
+          // surface. Visual character comes from the brightness
+          // flicker (flash at each iteration start) plus the ghost
+          // trail in the persistence buffer.
+          return 0.0f;
         case NETWORK_TAP_CRUSH:
         {
           uint32_t h = (uint32_t)t * 2654435761u +
@@ -203,7 +270,7 @@ namespace stolmine
           if (norm < -1.0f) norm = -1.0f;
           return 0.4f * norm;
         }
-        case NETWORK_TAP_REVERSE: return -0.4f;
+        case NETWORK_TAP_REVERSE: return -0.1f;
       }
       return 0.0f;
     }
@@ -225,9 +292,17 @@ namespace stolmine
 
       const float sizeNorm = mpNetwork->getSizeNorm();
       const float kBaseScale = 26.0f;
-      const float sphereRad = sizeNorm * kBaseScale;
+      // Floor: size=0 maps to what size=0.29 used to look like, so
+      // the sphere never collapses to a microscopic dot at low size.
+      // Top end (size=1) unchanged.
+      const float kMinSphereRad = 0.29f * kBaseScale;
+      const float sphereRad =
+        kMinSphereRad + sizeNorm * (kBaseScale - kMinSphereRad);
 
-      // Listener world position + listener-motion sphere rotation.
+      // Listener world position (driven by walker phase — used only
+      // for sonar-ring time-of-flight cross detection where the
+      // walker's actual position matters; the listener trace also
+      // reads walker history for trace dot longitudes).
       const float listenerPhase = mpNetwork->getListenerPhase();
       const float kListenerR = 1.3f;
       const float twoPi = 2.0f * 3.14159265f;
@@ -235,9 +310,25 @@ namespace stolmine
       const float sinM = sinf(twoPi * listenerPhase);
       const float listenerX = cosM * kListenerR;
       const float listenerY = sinM * kListenerR;
-      // As listener orbits, sphere appears to rotate opposite
-      // direction (visual response to listener motion).
-      const float sphereRot = -twoPi * listenerPhase;
+
+      // Sphere rotation: constant-rate accumulator scaled by
+      // motion. At motion=1 sphere rotates 0.25 revolutions/sec
+      // (4s per full rotation, matches walker base rate). At
+      // motion=0 sphere holds still. No jerk regardless of the
+      // walker's chaotic instantaneous velocity.
+      const float motionNorm = mpNetwork->getMotionNorm();
+      {
+        const float kSphereRotPerFrameAtFullMotion =
+          -0.25f * 6.2832f / 60.0f;
+        mSphereRotAccumulator +=
+          motionNorm * kSphereRotPerFrameAtFullMotion;
+        // Keep within a sane numerical range to avoid drift.
+        while (mSphereRotAccumulator < -6.2832f)
+          mSphereRotAccumulator += 6.2832f;
+        while (mSphereRotAccumulator >  6.2832f)
+          mSphereRotAccumulator -= 6.2832f;
+      }
+      const float sphereRot = mSphereRotAccumulator;
 
       // Wet-level pulse from output ring.
       const int ringSize = mpNetwork->getOutputRingSize();
@@ -253,21 +344,60 @@ namespace stolmine
       if (wetBoost > 4) wetBoost = 4;
 
       // ---- 1. Fade persistence buffer ----
-      for (int i = 0; i < w * h; i++)
+      // Fade interval scales with decay via a cubic curve that
+      // saturates at decay = 0.6: little visual trail effect at
+      // low decay (where the audible feedback is also subtle),
+      // ramping up exponentially as decay approaches 0.6, then
+      // clamped at maximum trail length for any higher decay.
+      // Per-tap deposit cadence is unchanged so stationary taps
+      // still reach steady-state brightness fast.
+      const float decayNorm = mpNetwork->getDecayNorm();
+      float dm = decayNorm * (1.0f / 0.6f);
+      if (dm > 1.0f) dm = 1.0f;
+      const float decayMapped = dm * dm * dm;
+      const int kFadeInterval = 1 + (int)(decayMapped * 5.0f);
+      mPersistFadeCounter++;
+      if (mPersistFadeCounter >= kFadeInterval)
       {
-        if (mPixels[i] > 0) mPixels[i]--;
+        mPersistFadeCounter = 0;
+        for (int i = 0; i < w * h; i++)
+        {
+          if (mPixels[i] > 0) mPixels[i]--;
+        }
       }
 
-      // ---- 2. Stutter wrap → ghost spawn at sphere position ----
+      // ---- 1b. Smooth tapZ for radial scaling ----
+      // Per-tap viz-side LP toward raw tapZ() target. ~50ms time
+      // constant at 60fps (alpha = 0.3 → ~3 frames to converge).
+      // Mode reshuffles at walker wrap ramp visually instead of
+      // popping. STUTTER's stutter-loop sine pulse comes through
+      // with mild attenuation; full pulse character preserved.
+      for (int t = 0; t < kMaxNetworkTaps; t++)
+      {
+        const float target = tapZ(t);
+        mTapZSmoothed[t] += (target - mTapZSmoothed[t]) * 0.3f;
+      }
+
+      // ---- 2. Stutter iteration → ghost spawn + flicker reset ----
+      // On every stutter loop iteration start (curIter decremented):
+      //   - reset the per-tap flicker counter so the tap dot flashes
+      //     bright this frame and the next, then fades to the dim base.
+      //   - deposit a brightness-12 ghost into the persistence buffer
+      //     at the tap's current sphere position. As the sphere
+      //     rotates with listener motion, successive ghosts spread
+      //     into a dotted trail behind the tap. The trail fades at
+      //     the global persistence rate (decay-scaled above).
       const int activeCount = mpNetwork->getActiveTapCount();
       for (int t = 0; t < activeCount; t++)
       {
         const int curIter = mpNetwork->getTapStutterIter(t);
         const int lastIter = (int)mLastStutterIter[t];
-        if (curIter > 0 && curIter < lastIter)
+        const bool iterStart = (curIter > 0 && curIter < lastIter);
+        if (iterStart)
         {
+          mStutterFlicker[t] = 0;
           float sx, sy, sz;
-          tapToSphere(t, tapZ(t), &sx, &sy, &sz);
+          tapToSphere(t, mTapZSmoothed[t], &sx, &sy, &sz);
           // Small sphere-tangent jitter.
           uint32_t hg = (uint32_t)t * 2654435761u +
                         (uint32_t)curIter;
@@ -284,6 +414,10 @@ namespace stolmine
             mPixels[py * w + px] = 12;
           }
         }
+        else
+        {
+          if (mStutterFlicker[t] < 250) mStutterFlicker[t]++;
+        }
         mLastStutterIter[t] = (uint8_t)curIter;
       }
 
@@ -293,19 +427,37 @@ namespace stolmine
         if (mTapPingFlash[t] > 0) mTapPingFlash[t]--;
       }
 
-      mPingTimer--;
-      if (mPingTimer <= 0)
+      // Ping spawn: constant-rate clock with rate ∝ motion.
+      // At motion=1, one ping every 4s (matches the walker's
+      // base rate of 0.25Hz). At motion=0.1, one every 40s. At
+      // motion=0, the clock freezes — existing pings finish
+      // their lifecycle, no new ones spawn. Independent of the
+      // walker's smoothed-random instantaneous velocity so the
+      // cadence is perceptually steady at any fixed motion.
       {
-        // Slower cadence — ~48 frames between pings (1.25/sec).
-        mPingTimer = 48;
-        if (mPingCount < kMaxPings)
+        const float kPingHzAtFullMotion = 0.25f;
+        const float kAssumedFrameRateHz = 60.0f;
+        const float perFrameAdvance =
+          motionNorm * (kPingHzAtFullMotion / kAssumedFrameRateHz);
+        mPingPhase += perFrameAdvance;
+        if (mPingPhase >= 1.0f)
         {
-          mPings[mPingCount].age = 0;
-          mPingCount++;
+          mPingPhase -= 1.0f;
+          if (mPingCount < kMaxPings)
+          {
+            mPings[mPingCount].age = 0;
+            mPingCount++;
+          }
         }
       }
 
-      const float kPingSpeedDist = 2.6f / (float)kPingMaxAge;
+      // Ping radial expansion speed scaled by motion. Floor 0.1
+      // so rings still slowly expand at near-zero motion (rather
+      // than freezing in place); at motion=1 the previous full
+      // speed is restored.
+      const float motionScale = 0.1f + motionNorm * 0.9f;
+      const float kPingSpeedDist =
+        (2.6f / (float)kPingMaxAge) * motionScale;
       for (int p = 0; p < mPingCount; )
       {
         Ping *ping = &mPings[p];
@@ -346,20 +498,38 @@ namespace stolmine
       if (mRotAngle > 6.2832f) mRotAngle -= 6.2832f;
 
       // ---- 5. Per-tap trail deposit into persistence ----
-      // Each tap deposits a low-bright pixel each frame at its
-      // current sphere position, building a fading arc as the
-      // sphere rotates.
+      // Each frame, a SUBSET of taps deposits a low-bright pixel
+      // at its current sphere position, building a fading arc as
+      // the sphere rotates. Eligibility is gated by a per-tap
+      // hash so only ~40% of taps get tails at full decay (full
+      // decay = sphere too messy if every dot trails). At lower
+      // decay the fraction scales with decayMapped, so trails are
+      // rare at low decay and common (capped at 40%) at high.
+      // MUTE skipped (no signal to trail). STUTTER skipped — their
+      // designated flicker + ghost animation is the trail; layering
+      // a second trail on top obscures it.
+      const float kTrailMaxFraction = 0.4f;
+      const float trailThreshold = decayMapped * kTrailMaxFraction;
       for (int t = 0; t < activeCount; t++)
       {
+        const int mode = mpNetwork->getTapMode(t);
+        if (mode == NETWORK_TAP_MUTE)    continue;
+        if (mode == NETWORK_TAP_STUTTER) continue;
+        // Per-tap deterministic eligibility hash (stable across
+        // frames so trails belong to a consistent subset).
+        uint32_t hT = (uint32_t)t * 2654435761u + 0xBEEFCAFEu;
+        hT = hT * 1103515245u + 12345u;
+        const float trailHash =
+          (float)((hT >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
+        if (trailHash > trailThreshold) continue;
+
         float sx, sy, sz;
-        tapToSphere(t, tapZ(t), &sx, &sy, &sz);
+        tapToSphere(t, mTapZSmoothed[t], &sx, &sy, &sz);
         int px, py;
         float pz;
         projectSphere(sx, sy, sz, sphereRot, sphereRad,
                       &px, &py, &pz);
         if (px < 0 || px >= w || py < 0 || py >= h) continue;
-        // Skip MUTE — silent reflectors leave no trail.
-        if (mpNetwork->getTapMode(t) == NETWORK_TAP_MUTE) continue;
         int b = (int)mPixels[py * w + px] + 5;
         if (b > 11) b = 11;
         mPixels[py * w + px] = (uint8_t)b;
@@ -434,28 +604,60 @@ namespace stolmine
       // more selected taps → denser shell forming around listener.
       // Skip back-of-sphere nodes (pz < 0) so we only see the
       // front face of the shell.
+      //
+      // Shell membership and line brightness both ride on the
+      // per-tap mShellLevel fade, so taps joining/leaving the
+      // feedback set ramp in and out over ~200ms / ~300ms rather
+      // than popping.
       {
+        // Update viz-side fade levels for all taps. Asymmetric
+        // rates feel more deliberate than symmetric ones; out
+        // slightly slower so departures linger as ghost edges.
+        const float kFadeInRate  = 1.0f / 12.0f;
+        const float kFadeOutRate = 1.0f / 18.0f;
+        for (int t = 0; t < kMaxNetworkTaps; t++)
+        {
+          const bool isFb =
+            (t < activeCount) && (mpNetwork->getFbWeight(t) != 0.0f);
+          if (isFb)
+          {
+            mShellLevel[t] += kFadeInRate;
+            if (mShellLevel[t] > 1.0f) mShellLevel[t] = 1.0f;
+          }
+          else
+          {
+            mShellLevel[t] -= kFadeOutRate;
+            if (mShellLevel[t] < 0.0f) mShellLevel[t] = 0.0f;
+          }
+        }
+
         int shellPx[kMaxNetworkTaps];
         int shellPy[kMaxNetworkTaps];
+        int shellT [kMaxNetworkTaps];
         int shellCount = 0;
-        for (int t = 0; t < activeCount; t++)
+        for (int t = 0; t < kMaxNetworkTaps; t++)
         {
-          if (mpNetwork->getFbWeight(t) == 0.0f) continue;
+          if (mShellLevel[t] < 0.05f) continue;
           float sx, sy, sz;
-          tapToSphere(t, tapZ(t), &sx, &sy, &sz);
+          tapToSphere(t, mTapZSmoothed[t], &sx, &sy, &sz);
           int px, py;
           float pz;
           projectSphere(sx, sy, sz, sphereRot, sphereRad,
                         &px, &py, &pz);
           if (px < 0 || px >= w || py < 0 || py >= h) continue;
-          if (pz < 0.0f) continue;   // hide back-of-sphere edges
+          // No back-face skip — the viewer is OUTSIDE the sphere
+          // looking in, so connectivity edges on the far side
+          // should still be drawn (they'll just connect to whatever
+          // shell nodes are nearby in screen space).
           shellPx[shellCount] = px;
           shellPy[shellCount] = py;
+          shellT [shellCount] = t;
           shellCount++;
         }
-        // Connect each shell node to its 2 nearest neighbors. Lines
-        // are drawn dim (4) so they read as a structural shell
-        // without dominating tap dots (12-15).
+        // Connect each shell node to its 2 nearest neighbors. Edge
+        // brightness scales with the geometric mean of the two
+        // endpoints' fade levels — both taps fully faded-in →
+        // brightness 6, either fading → dimmer.
         for (int i = 0; i < shellCount; i++)
         {
           int n1 = -1, n2 = -1;
@@ -469,12 +671,25 @@ namespace stolmine
             if (d < d1) { n2 = n1; d2 = d1; n1 = j; d1 = d; }
             else if (d < d2) { n2 = j; d2 = d; }
           }
+          const float lvlI = mShellLevel[shellT[i]];
           if (n1 >= 0 && i < n1)
-            drawLine(fb, shellPx[i], shellPy[i],
-                     shellPx[n1], shellPy[n1], 4);
+          {
+            const float gm = sqrtf(lvlI * mShellLevel[shellT[n1]]);
+            int b = 1 + (int)(gm * 5.5f + 0.5f);
+            if (b > 6) b = 6;
+            if (b >= 1)
+              drawLine(fb, shellPx[i], shellPy[i],
+                       shellPx[n1], shellPy[n1], b);
+          }
           if (n2 >= 0 && i < n2)
-            drawLine(fb, shellPx[i], shellPy[i],
-                     shellPx[n2], shellPy[n2], 4);
+          {
+            const float gm = sqrtf(lvlI * mShellLevel[shellT[n2]]);
+            int b = 1 + (int)(gm * 5.5f + 0.5f);
+            if (b > 6) b = 6;
+            if (b >= 1)
+              drawLine(fb, shellPx[i], shellPy[i],
+                       shellPx[n2], shellPy[n2], b);
+          }
         }
       }
 
@@ -483,7 +698,7 @@ namespace stolmine
       for (int t = 0; t < activeCount; t++)
       {
         float sx, sy, sz;
-        tapToSphere(t, tapZ(t), &sx, &sy, &sz);
+        tapToSphere(t, mTapZSmoothed[t], &sx, &sy, &sz);
         int px, py;
         float pz;
         projectSphere(sx, sy, sz, sphereRot, sphereRad,
@@ -491,32 +706,67 @@ namespace stolmine
         if (px < 0 || px >= w || py < 0 || py >= h) continue;
 
         const int mode = mpNetwork->getTapMode(t);
-        int brightness;
+        int targetBrightness;
         bool hollow = false;
         switch (mode)
         {
-          case NETWORK_TAP_MUTE:    brightness = 3; break;
+          case NETWORK_TAP_MUTE:    targetBrightness = 3; break;
           case NETWORK_TAP_CRUSH:
           {
             uint32_t hh = (uint32_t)t * 2654435761u +
                           (uint32_t)mFrameCounter;
             hh = hh * 1103515245u + 12345u;
-            brightness = ((hh >> 16) & 1u) ? 13 : 7;
+            targetBrightness = ((hh >> 16) & 1u) ? 13 : 7;
             break;
           }
-          case NETWORK_TAP_REVERSE: brightness = 11; hollow = true; break;
-          case NETWORK_TAP_NORMAL:  brightness = 9 + wetBoost; break;
+          case NETWORK_TAP_REVERSE: targetBrightness = 11; hollow = true; break;
+          case NETWORK_TAP_NORMAL:  targetBrightness = 9 + wetBoost; break;
           case NETWORK_TAP_STUTTER:
+          {
+            // Flash bright (15) for 2 frames after each loop
+            // iteration start, then drop to dim base (8). Combined
+            // with the per-iteration ghost deposited into the
+            // persistence buffer, the tap reads as a flickering
+            // head trailed by a fading dotted line of past
+            // iteration positions.
+            const int ff = (int)mStutterFlicker[t];
+            targetBrightness = (ff < 2) ? 15 : 8;
+            break;
+          }
           case NETWORK_TAP_SCRUB:
-          default:                  brightness = 12; break;
+          default:                  targetBrightness = 12; break;
         }
 
-        // Depth dim for back-of-sphere taps.
+        // Smooth mode-derived brightness across walker-wrap mode
+        // reshuffles. STUTTER bypasses smoothing because its
+        // per-iteration flash must be instant; the smoothed value
+        // is snapped to the current STUTTER target so any
+        // subsequent transition OUT of STUTTER starts at the right
+        // value instead of a stale one.
+        int brightness;
+        if (mode == NETWORK_TAP_STUTTER)
+        {
+          mTapBrightSmoothed[t] = (float)targetBrightness;
+          brightness = targetBrightness;
+        }
+        else
+        {
+          mTapBrightSmoothed[t] +=
+            ((float)targetBrightness - mTapBrightSmoothed[t]) * 0.25f;
+          brightness = (int)(mTapBrightSmoothed[t] + 0.5f);
+        }
+
+        // Depth cue for back-of-sphere taps — gentle. The viewer
+        // is OUTSIDE the sphere looking in, so taps on the far side
+        // should always be visible (just slightly dimmer than the
+        // front face). Max dim of 1 brightness step at pz = −1,
+        // and brightness floors at 3 so MUTE taps stay readable on
+        // the back hemisphere instead of dropping to near-invisible.
         if (pz < 0.0f)
         {
-          const int dim = (int)((-pz) * 4.0f + 0.5f);
+          const int dim = (int)((-pz) * 1.0f + 0.5f);
           brightness -= dim;
-          if (brightness < 1) brightness = 1;
+          if (brightness < 3) brightness = 3;
         }
 
         const int rflash = mpNetwork->getRicochetFlash(t);
