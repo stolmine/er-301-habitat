@@ -378,3 +378,89 @@ Items 1-4 are roughly Phase 2.6+ scope (extending Phase 2). Items
 - `mods/catchall/Network.h` — current implementation.
 - `mods/catchall/network/geometry.h` — per-tap parameter generator
   (where many of the per-tap modifications would land).
+
+---
+
+## Addendum (2026-05-11): true plexus topologies
+
+The current audio architecture is a **star multitap**: one shared
+delay buffer, all taps read in parallel from different positions,
+single feedback sum back to the one write head. No tap-to-tap
+routing in the audio path. This matches `spatial-effect-hybrid.md`'s
+"hybrid" framing (visual metaphor is a plexus; audio is a
+multitap with selectable feedback), but it does not literally
+route audio through the tap network.
+
+If we ever want the audio to read as a true plexus — signal
+actually flowing through the tap graph rather than being summed
+across parallel readers — three architectural shapes are on the
+table. Parked here for a future session; not on the current
+roadmap.
+
+### Option 1: Serial cascade by distance
+
+Taps sorted by distance from listener. Signal enters the nearest
+tap, gets delayed by its slice, output feeds the next-nearest
+tap, ... up to a `size`-determined final tap (the endpoint of
+the path). Other taps are distributed at intermediate distances
+along the path in patterns (linear / log / phyllotactic / etc.).
+
+- Each tap becomes its own short delay line. Memory ~ same as
+  today if total path length is bounded at ~1s.
+- Inherently sequential — kills the NEON 4-wide tap-gather
+  optimization that brings Pecto-style multitap to ~6% CPU; we'd
+  be back to per-tap inline processing.
+- Glitch modes (MUTE/STUTTER/CRUSH/SCRUB/REVERSE) currently apply
+  post-sum on a single wet bus. They'd need to become per-tap
+  *node* effects, applied to the signal as it passes *through*
+  that tap — fundamentally changes the sound design.
+- Feedback is no longer a single bus; would need rethinking
+  (e.g., feedback per-edge, or a single tail of the cascade
+  feeding back to its head).
+- Effort: ~1–2 weeks for a clean rewrite + re-audition pass.
+
+### Option 2: Feedback Delay Network (FDN)
+
+N delay lines plus an N×N mixing matrix routes between them.
+True mesh; signal can take any path. Most flexible.
+
+- Matrix design is a real DSP problem on its own — sparse vs
+  unitary (Hadamard / Householder), how to define "neighborhood",
+  how to keep stable feedback under modulation.
+- Memory ~ proportional to N × per-line-length. With N=64 and
+  modest per-line lengths, feasible.
+- Mode/glitch effects again need to map to nodes / edges rather
+  than a post-sum bus.
+- Effort: significantly bigger than #1. Probably warrants a
+  proper design pass against existing FDN literature before
+  picking specifics.
+
+### Option 3: Hybrid junction taps
+
+Smallest change. Keep most taps as parallel readers (today's
+shared-buffer star). Designate a subset as "junction" taps that
+*also write* their modified output back into the buffer at
+their own positions, creating local feedback territories inside
+the shared buffer.
+
+- Doesn't deliver true 2D routing; signal still doesn't flow
+  through the tap network in any directed-graph sense. But it
+  *does* create per-junction recirculation that breaks the
+  pure-star symmetry and would shift the character toward
+  something less uniform.
+- Days of work, not weeks. Mostly per-junction writes during
+  Pass C, plus stability tuning so junctions don't run away.
+- Could be a stepping stone or a permanent middle ground.
+
+### Recommendation if revisiting
+
+- If "plexus character" is the actual goal, Option 1 with the
+  `size`-as-endpoint sketch is the right shape for the user's
+  framing.
+- Option 3 is the cheapest way to introduce some routed
+  character without throwing away the current architecture.
+- Option 2 is the most musically rich but the riskiest /
+  largest scope.
+- Whichever direction: write a design doc before code. The
+  current architecture is well-tuned and ships; replacing it
+  needs a clear sound-design target to aim at.
