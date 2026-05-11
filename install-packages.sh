@@ -6,12 +6,14 @@
 #   ./install-packages.sh --release    # install v1.3.2 release builds (vanilla compatible)
 #   ./install-packages.sh --third-party # install third-party release packages (Accents, tomf)
 
-HW_DEST=/mnt/ER-301/packages
-HW_SRC=/home/sure/repos/er-301-habitat/testing/am335x
-THIRD_PARTY=/home/sure/repos/er-301-habitat/testing/third-party
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-EMU_DEST=/home/sure/.od/front/ER-301/packages
-EMU_SRC=/home/sure/repos/er-301-habitat/testing/linux
+HW_DEST=/mnt/ER-301/packages
+HW_SRC="$SCRIPT_DIR/testing/am335x"
+THIRD_PARTY="$SCRIPT_DIR/testing/third-party"
+
+EMU_DEST="$HOME/.od/front/ER-301/packages"
+EMU_SRC="$SCRIPT_DIR/testing/linux"
 
 SUFFIX="-stolmine"
 

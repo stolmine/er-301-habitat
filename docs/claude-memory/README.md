@@ -16,28 +16,29 @@ Three memory types appear in the index:
 
 ## Rehydrating on a new dev box
 
-Claude reads auto-memory from
-`~/.claude/projects/-home-sure-repos-er-301-habitat/memory/`. To
-restore on a fresh machine:
+Claude reads auto-memory from `~/.claude/projects/<slug>/memory/`,
+where `<slug>` is the repo's absolute path with `/` replaced by `-`
+(e.g. `/home/bram/repos/er-301-habitat` -> `-home-bram-repos-er-301-habitat`).
+Run from the repo root; the snippet derives the slug from `pwd`,
+excludes this README, and copies every memory record plus `MEMORY.md`:
 
 ```sh
-mkdir -p ~/.claude/projects/-home-sure-repos-er-301-habitat/memory
-cp docs/claude-memory/*.md \
-   ~/.claude/projects/-home-sure-repos-er-301-habitat/memory/
+SLUG="$(pwd | tr / -)"
+DEST="$HOME/.claude/projects/$SLUG/memory"
+mkdir -p "$DEST"
+find docs/claude-memory -maxdepth 1 -name '*.md' ! -name README.md \
+  -exec cp {} "$DEST/" \;
 ```
-
-The project-dir slug is derived from the repo's absolute path; if the
-new box clones to a different path, the slug changes. Match the
-clone path (`~/repos/er-301-habitat`) or rename the slug to fit.
 
 ## Keeping the snapshot fresh
 
 This directory is a point-in-time copy, not a live mirror. Claude
 writes to `~/.claude/...`, not here. Re-sync before any planned dev-box
-swap:
+swap (same slug derivation as above):
 
 ```sh
-cp ~/.claude/projects/-home-sure-repos-er-301-habitat/memory/*.md \
-   docs/claude-memory/
+SLUG="$(pwd | tr / -)"
+SRC="$HOME/.claude/projects/$SLUG/memory"
+find "$SRC" -maxdepth 1 -name '*.md' -exec cp {} docs/claude-memory/ \;
 git add docs/claude-memory && git commit -m "Refresh claude-memory snapshot"
 ```

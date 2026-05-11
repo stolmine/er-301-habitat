@@ -4,6 +4,8 @@ description: ER-301 only re-extracts a package to the rear SD card's `/v0.7/libs
 type: feedback
 originSessionId: 0063d5be-4d30-4c1e-a7b3-e687f2cae19d
 ---
+**Headline rule (reaffirmed 2026-05-11):** the first three digits of `PKGVERSION` (MAJOR.MINOR.PATCH) are reserved for actual releases. Dev iteration moves the **4th digit only** — push it as high as needed during a build cycle (e.g. `2.6.1.99 → 2.6.1.100 → 2.6.1.250` is fine). Drop the 4th digit when the feature actually ships and the release-triggering digit advances.
+
 When shipping any change (especially Lua-only changes, since they don't trigger a C++ rebuild that would visibly change `lib*.so`), **bump the package's `PKGVERSION` in `mods/<pkg>/mod.mk`**. Otherwise the device keeps running the extracted copy of the previous build.
 
 **Observed 2026-04-21:** Built biome-2.1.0 with the new DensityControl that requires `spreadsheet.ShiftHelpers`. User reinstalled the .pkg but the rear SD still had the old extracted biome-2.1.0 so the new code never loaded. Both persistence (Decision 7) and shift+sub keyboard (Decision 5) tests appeared to fail until the version was bumped, forcing re-extraction. Moving Pecto to spreadsheet and bumping spreadsheet to 2.4.0 + biome to 2.2.0 resolved it.
