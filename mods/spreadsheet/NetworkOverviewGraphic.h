@@ -60,10 +60,20 @@ namespace stolmine
       memset(mPixels, 0, sizeof(mPixels));
       memset(mLastStutterIter, 0, sizeof(mLastStutterIter));
       memset(mTapPingFlash, 0, sizeof(mTapPingFlash));
-      for (int i = 0; i < kMaxNetworkTaps; i++) mShellLevel[i] = 0.0f;
-      for (int i = 0; i < kMaxNetworkTaps; i++) mTapZSmoothed[i] = 0.0f;
+      // Sentinel inits for smoothing state. The ER-301 framework
+      // appears to reconstruct NetworkOverviewGraphic periodically
+      // (evidence: at motion=0, glitch=0 only tap dots dim while
+      // the WHITE listener marker and ping rings stay full
+      // brightness — tap dots are the only thing reading from
+      // smoothed per-instance state). Out-of-range sentinels make
+      // the first use after each re-init snap to the current
+      // target instead of ramping from a stale init value, so the
+      // re-instantiation is invisible. Valid ranges: shellLevel
+      // [0,1], tapZ [-1,+1], brightness [0,15].
+      for (int i = 0; i < kMaxNetworkTaps; i++) mShellLevel[i] = -1.0f;
+      for (int i = 0; i < kMaxNetworkTaps; i++) mTapZSmoothed[i] = -2.0f;
       for (int i = 0; i < kMaxNetworkTaps; i++) mStutterFlicker[i] = 255;
-      for (int i = 0; i < kMaxNetworkTaps; i++) mTapBrightSmoothed[i] = 9.0f;
+      for (int i = 0; i < kMaxNetworkTaps; i++) mTapBrightSmoothed[i] = -1.0f;
       mPersistFadeCounter = 0;
       mRotAngle = 0.0f;
       mFrameCounter = 0;
@@ -372,10 +382,15 @@ namespace stolmine
       // Mode reshuffles at walker wrap ramp visually instead of
       // popping. STUTTER's stutter-loop sine pulse comes through
       // with mild attenuation; full pulse character preserved.
+      // First use after constructor: snap to target (defends
+      // against framework graphic re-instantiation).
       for (int t = 0; t < kMaxNetworkTaps; t++)
       {
         const float target = tapZ(t);
-        mTapZSmoothed[t] += (target - mTapZSmoothed[t]) * 0.3f;
+        if (mTapZSmoothed[t] < -1.5f)
+          mTapZSmoothed[t] = target;
+        else
+          mTapZSmoothed[t] += (target - mTapZSmoothed[t]) * 0.3f;
       }
 
       // ---- 2. Stutter iteration → ghost spawn + flicker reset ----
@@ -549,14 +564,20 @@ namespace stolmine
       }
 
       // ---- 7. Render ping rings (centered on view) ----
+      // BISECTION step 1: cap visible ring radius to 0.5 × sphereRad
+      // so the ring never extends beyond the sphere outline. If this
+      // diminishes the "viewer zooming in / pop back" effect, the
+      // cause is ring extent past the sphere. If unchanged, bisect
+      // brightness next.
       const int viewCx = w / 2;
       const int viewCy = h / 2;
+      const float kPingMaxVisibleScreenR = sphereRad * 0.5f;
       for (int p = 0; p < mPingCount; p++)
       {
         const Ping *ping = &mPings[p];
         const float r3D = (float)ping->age * kPingSpeedDist;
         const float screenR = r3D * sphereRad;
-        if (screenR < 0.5f || screenR > (float)(w + h)) continue;
+        if (screenR < 0.5f || screenR > kPingMaxVisibleScreenR) continue;
         const int brightness = 7 - (7 * ping->age) / kPingMaxAge;
         if (brightness <= 0) continue;
         const int steps = (int)(6.2832f * screenR + 8.0f);
@@ -619,7 +640,14 @@ namespace stolmine
         {
           const bool isFb =
             (t < activeCount) && (mpNetwork->getFbWeight(t) != 0.0f);
-          if (isFb)
+          // First use after constructor: snap to current state
+          // instead of fading in from 0 (defends against framework
+          // graphic re-instantiation).
+          if (mShellLevel[t] < 0.0f)
+          {
+            mShellLevel[t] = isFb ? 1.0f : 0.0f;
+          }
+          else if (isFb)
           {
             mShellLevel[t] += kFadeInRate;
             if (mShellLevel[t] > 1.0f) mShellLevel[t] = 1.0f;
@@ -743,8 +771,12 @@ namespace stolmine
         // is snapped to the current STUTTER target so any
         // subsequent transition OUT of STUTTER starts at the right
         // value instead of a stale one.
+        // First use after constructor: snap to target (defends
+        // against framework graphic re-instantiation, which would
+        // otherwise visibly dim all tap dots toward the 9.0 init
+        // value and ramp back up to 9 + wetBoost).
         int brightness;
-        if (mode == NETWORK_TAP_STUTTER)
+        if (mode == NETWORK_TAP_STUTTER || mTapBrightSmoothed[t] < 0.0f)
         {
           mTapBrightSmoothed[t] = (float)targetBrightness;
           brightness = targetBrightness;
