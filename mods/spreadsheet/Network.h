@@ -1456,7 +1456,189 @@ namespace stolmine
       const float32x4_t alphaVec = vdupq_n_f32(smoothAlpha);
 #endif
 
-      // ---- Per-sample inner loop ----
+      // ---- Phase A cascade path ----
+      // When kUseCascade is true (compile-time const), the serial
+      // cascade runs and we early-return from process(). The
+      // legacy star-multitap per-sample loop below is dead code
+      // in that build configuration. Set kUseCascade=false to
+      // rebuild with the original star-multitap engine for
+      // regression / A-B comparison. See
+      // planning/network-cascade-rebuild-plan.md.
+      static const bool kUseCascade = true;
+      if (kUseCascade)
+      {
+        // Overwrite mTapDelayTarget with cascade group-relative
+        // values. Discards per-tap LFO / S1 detune / S&H modifications
+        // applied above — Phase A audits a clean cascade structure.
+        network_geom::recomputeCascadeTaps(
+          kMaxNetworkTaps,
+          activeTaps,
+          kNetworkNumGroupsMax,
+          kNetworkGroupSize,
+          sizeNorm,
+          mGroupLen,
+          mTapGroupMap,
+          mTapIntraGroupOffset,
+          mTapDelayTarget);
+
+        // Compute initial mTapNewReadIdx (group-relative) for each
+        // active tap from its owning group's current write index
+        // minus the tap's delay. Per-sample loop advances both by
+        // 1 in lockstep so the relative offset (the delay) stays
+        // constant within a block.
+        for (int g = 0; g < kNetworkNumGroupsMax; g++)
+        {
+          const int gLen = mGroupLen[g];
+          if (gLen <= 0) continue;
+          const int tBase = g * kNetworkGroupSize;
+          for (int k = 0; k < kNetworkGroupSize; k++)
+          {
+            const int t = tBase + k;
+            int dly = (int)(mTapDelayTarget[t] + 0.5f);
+            if (dly < 0) dly = 0;
+            if (dly >= gLen) dly = gLen - 1;
+            int idx_g = mGroupWriteIndex[g] - dly;
+            while (idx_g < 0)     idx_g += gLen;
+            while (idx_g >= gLen) idx_g -= gLen;
+            mTapNewReadIdx[t] = idx_g;
+          }
+        }
+
+        // Number of active cascade groups.
+        int activeGroupsLocal =
+          (activeTaps + kNetworkGroupSize - 1) / kNetworkGroupSize;
+        if (activeGroupsLocal < 1) activeGroupsLocal = 1;
+        if (activeGroupsLocal > kNetworkNumGroupsMax)
+          activeGroupsLocal = kNetworkNumGroupsMax;
+        const int aG = activeGroupsLocal;
+
+        const float scale = 1.0f / 32767.0f;
+
+#ifdef NETWORK_HAS_NEON
+        const float32x4_t alphaVecCsc = vdupq_n_f32(smoothAlpha);
+#endif
+
+        // Per-sample cascade loop. Phase A scaffolding: feedback
+        // OFF, no per-tap LP/crush, no stutter playback. Just
+        // input → group 0 → group 1 → ... → wet bus.
+        for (int i = 0; i < FRAMELENGTH; i++)
+        {
+          // Input DC blocker
+          const float xRaw = in[i] * inputLevel;
+          const float x = xRaw - mDcInX1 + kNetworkDcR * mDcInY1;
+          mDcInX1 = xRaw;
+          mDcInY1 = x;
+
+          // Per-sample gain smoother (NEON 4-wide).
+#ifdef NETWORK_HAS_NEON
+          {
+            int t = 0;
+            for (; t + 4 <= kMaxNetworkTaps; t += 4)
+            {
+              float32x4_t tgt = vld1q_f32(&mTapGainL[t]);
+              float32x4_t sm  = vld1q_f32(&mTapGainLSmoothed[t]);
+              sm = vmlaq_f32(sm, vsubq_f32(tgt, sm), alphaVecCsc);
+              vst1q_f32(&mTapGainLSmoothed[t], sm);
+
+              tgt = vld1q_f32(&mTapGainR[t]);
+              sm  = vld1q_f32(&mTapGainRSmoothed[t]);
+              sm = vmlaq_f32(sm, vsubq_f32(tgt, sm), alphaVecCsc);
+              vst1q_f32(&mTapGainRSmoothed[t], sm);
+            }
+          }
+#else
+          for (int t = 0; t < kMaxNetworkTaps; t++)
+          {
+            mTapGainLSmoothed[t] +=
+              (mTapGainL[t] - mTapGainLSmoothed[t]) * smoothAlpha;
+            mTapGainRSmoothed[t] +=
+              (mTapGainR[t] - mTapGainRSmoothed[t]) * smoothAlpha;
+          }
+#endif
+
+          // Cascade per-group serial loop.
+          float g_prev_out = 0.0f;
+          float wetL = 0.0f;
+          float wetR = 0.0f;
+
+          for (int g = 0; g < aG; g++)
+          {
+            const int gOrig = mGroupOrigin[g];
+            const int gLen  = mGroupLen[g];
+            if (gLen <= 0) continue;
+
+            const float group_in = (g == 0) ? x : g_prev_out;
+
+            // Write tanh(group_in) to group's sub-window head.
+            bufWrite(buf,
+                     gOrig + mGroupWriteIndex[g],
+                     networkFastTanh(group_in));
+
+            // Per-tap reads (4 taps per group).
+            float groupMono = 0.0f;
+            float groupWetL = 0.0f;
+            float groupWetR = 0.0f;
+            const int tBase = g * kNetworkGroupSize;
+            const int kLim =
+              ((tBase + kNetworkGroupSize) <= activeTaps)
+                ? kNetworkGroupSize
+                : (activeTaps - tBase);
+            for (int k = 0; k < kLim; k++)
+            {
+              const int t = tBase + k;
+              // Advance read pointer (mod groupLen).
+              int idx = mTapNewReadIdx[t] + 1;
+              if (idx >= gLen) idx = 0;
+              mTapNewReadIdx[t] = idx;
+              const float s = (float)buf[gOrig + idx] * scale;
+              groupMono += s;
+              groupWetL += s * mTapGainLSmoothed[t];
+              groupWetR += s * mTapGainRSmoothed[t];
+            }
+
+            wetL += groupWetL;
+            wetR += groupWetR;
+
+            // Advance group write index.
+            int gw = mGroupWriteIndex[g] + 1;
+            if (gw >= gLen) gw = 0;
+            mGroupWriteIndex[g] = gw;
+
+            g_prev_out = groupMono;
+          }
+
+          // Mix.
+          const float mixedL = x * (1.0f - wet) + wetL * wet;
+          const float mixedR = x * (1.0f - wet) + wetR * wet;
+
+          // Output DC blockers.
+          const float outDcL =
+            mixedL - mDcOutLX1 + kNetworkDcR * mDcOutLY1;
+          mDcOutLX1 = mixedL;
+          mDcOutLY1 = outDcL;
+          const float outDcR =
+            mixedR - mDcOutRX1 + kNetworkDcR * mDcOutRY1;
+          mDcOutRX1 = mixedR;
+          mDcOutRY1 = outDcR;
+
+          outL[i] = outDcL;
+          outR[i] = outDcR;
+
+          // Viz output ring.
+          mOutputRing[mOutputRingPos] = 0.5f * (outDcL + outDcR);
+          mOutputRingPos =
+            (mOutputRingPos + 1) & (kOutputRingSize - 1);
+        }
+
+        // Block-rate listener trace write.
+        mListenerTrace[mListenerTraceHead] = mWalkerPos;
+        mListenerTraceHead =
+          (mListenerTraceHead + 1) & (kListenerTraceSize - 1);
+
+        return;
+      }
+
+      // ---- Per-sample inner loop (legacy star-multitap) ----
       for (int i = 0; i < FRAMELENGTH; i++)
       {
         // Input DC blocker: y[n] = x[n] - x[n-1] + R*y[n-1]. Removes
