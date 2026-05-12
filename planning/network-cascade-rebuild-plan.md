@@ -110,6 +110,16 @@ mixedR = x_in × (1-wet) + wetR × wet  → output DC blocker → outR[i]
 - **STUTTER**: scalar pass survives; its sample contributions accumulate into `groupMonoStutterAcc[mStutGroup[s]]` instead of one shared `wetL/wetR/fbSum`. Each group's serial-loop body adds its `groupMonoStutterAcc[g]` into its mono output → stutter content flows through the rest of the cascade and gets local-feedbacked just like normal tap energy.
 - **G7 respawn**: reflectors mutate; group assignments do **not** re-sort. A respawned reflector keeps its slot with new (x,y). Documented as intentional ("respawn breaks sorted order audibly").
 
+### Gain normalization scopes
+
+The legacy star multitap has two normalization scopes; the cascade needs a third the original plan missed:
+
+| Scope | Where | Math | Purpose |
+|---|---|---|---|
+| Per-tap wet bus energy | `network_geom::recomputeTaps` via `densityCompGain = 2.5 × N^-0.4` | density-compensating gain factor | Keeps wet bus RMS stable across density sweep without coupling density to amplitude. |
+| Feedback bus | Existing `fbWeightUnit = 1/sqrt(kRecycle)` | Statistical sqrt-norm | Keeps fb pool RMS stable for incoherent tap sum. |
+| **Inter-stage cascade (NEW)** | `g_prev_out = groupMono × (1/kNetworkGroupSize)` | `1/N` average instead of sum | **Prevents inter-stage gain runaway.** Without this, each group's bufWrite tanh-saturates the prior stage's amplified signal, producing square-wave harshness by group 5–10. The 1/N (not 1/√N) factor handles the coherent-worst-case (intra-group reads are clustered and partially correlated). Wet bus left un-normalized — matches legacy summation pattern at equivalent density. Discovered during Phase A audit (2.6.1.64 sounded harsh) and patched in 2.6.1.65. |
+
 ### NEON preservation map
 
 | Loop | Stays NEON? | Notes |

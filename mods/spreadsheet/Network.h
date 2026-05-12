@@ -1604,7 +1604,23 @@ namespace stolmine
             if (gw >= gLen) gw = 0;
             mGroupWriteIndex[g] = gw;
 
-            g_prev_out = groupMono;
+            // Cascade flow normalization: 1/kNetworkGroupSize
+            // makes groupMono the AVERAGE of the 4 tap reads
+            // rather than their sum. Prevents inter-stage gain
+            // runaway (without this, each group's bufWrite
+            // tanh-saturates the prior stage's amplified signal,
+            // producing square-wave harshness by group 5-10).
+            // Precedent: legacy code uses densityCompGain for wet
+            // bus tap energy and 1/sqrt(k) for feedback summing.
+            // The cascade adds a third normalization scope —
+            // inter-stage — that the original star multitap didn't
+            // need because there were no stages. Wet bus left
+            // un-normalized for Phase A (matches legacy summation
+            // pattern at equivalent density); revisit at Phase B
+            // when feedback enters and changes wet character.
+            const float kCascadeStageNorm =
+              1.0f / (float)kNetworkGroupSize;
+            g_prev_out = groupMono * kCascadeStageNorm;
           }
 
           // Mix.
