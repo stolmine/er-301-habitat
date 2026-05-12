@@ -156,6 +156,26 @@ Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" r
 
 State: `mGroupDcX1[16]`, `mGroupDcY1[16]`. Same one-pole topology and R coefficient (`kNetworkDcR`) as the existing input / output / global-pool DC blockers. Applied to `g_prev_out` immediately after the cascade-flow normalization, *before* `g_prev_out` is used as (a) next group's cascade input, (b) current group's `mGroupLocalFbState` write, or (c) pool contribution. One blocker per group catches DC for all three downstream consumers.
 
+### FDN spectral-radius math fix + T60 cap raised (added in Phase B)
+
+Phase B audition (2.6.1.75) reported "decay still only produces a small tail; at size=1 density=0.5 conn=0.67 decay=1, expecting densely reverberant, getting close-haloed echo." Holistic audit of the cascade found a math error in the FDN feedback path:
+
+**Why decay was still nearly dead.** Per the standard FDN equation `y[n+1] = D × W × y[n]` (Stanford CCRMA, Jot 1991), the spectral radius of `D × W` (`W` unitary Hadamard, `D = diag(decayCoef[g])`) equals `max(decayCoef[g])`. T60 falls out of `decayCoef[g] = 10^(-3 × D_g / (T60 × Fs))` and is controlled solely by that diagonal matrix.
+
+Our prior code had `kCrossFeedScale = connectivity × (1/√16)` and applied `M[g] × kCrossFeedScale × decayCoef[g]` as feedback. The `1/√16` is the mathematically required unitary normalization. But the `connectivity` factor was an extra scalar that multiplied the entire spectral radius → spectral radius became `connectivity × max(decayCoef)`. At conn=0.67 with decay=1 (target T60 = 5s, decayCoef ≈ 0.997 for short delays): actual spectral radius = 0.67 × 0.997 = 0.668 → actual T60 ≈ 13 ms regardless of the decay knob. The connectivity multiplier was destroying T60 control rather than gating signal flow.
+
+Fix landed in 2.6.1.76:
+
+- **`kCrossFeedScale = 0.25` (constant `1/√16`)**: removed `connectivity` from the Hadamard cross-feed gain. The factor is now purely the unitary matrix normalization. Spectral radius = `max(decayCoef[g])` as the FDN math requires.
+- **T60 mapping cap raised**: `T60 = 0.05 + decay² × 10` (was × 5). Caps at 10.05s at decay=1, matching legacy's 5-15s tail at full settings. Quadratic curve preserves fine resolution at the short end.
+- **`connectivity` preserved on `kLocalFbScale`** (`conn × (0.1 + 0.7 × decay)`) where it controls per-group ringing color/intensity rather than overall reverb tail length. The two knobs are now orthogonal: `decay` = T60, `connectivity` = per-group color depth.
+
+Other audit findings noted but deferred (not bottlenecks for this commit):
+1. Cascade flow `g_prev_out = groupMono × 0.25` loses ~6 dB per stage for decorrelated reads → group 15 sees -96 dB of cascade input. Local fb + Hadamard compensate.
+2. Tanh saturation on `bufWrite` shortens effective T60 vs designed; inherent stability mechanism.
+3. Per-group LP+HPF strips bass and highs from recirculating signal — reverb tails may sound thin; worth revisiting after T60 fix is confirmed.
+4. Group 0 receives full `x` while others receive attenuated cascade flow; Hadamard redistributes over time.
+
 ### Rank-based uniform tap distribution (added in Phase B)
 
 Phase B audition (2.6.1.74) reported "closer to reverb but still slapback / resonator-y; tap staggering across size should produce density naturally." Velvet-Noise FDN literature (DAFx 2020) and Schlecht's "FDN Echo Density and Mixing Time" gave the structural diagnosis:

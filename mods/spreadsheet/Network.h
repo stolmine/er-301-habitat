@@ -1535,7 +1535,7 @@ namespace stolmine
         // Hadamard-mixed feedback.
         {
           const float kT60Floor = 0.05f;
-          const float kT60Span  = 5.0f;
+          const float kT60Span  = 10.0f;
           const float T60 = kT60Floor + decay * decay * kT60Span;
           const float Fs = globalConfig.sampleRate;
           const float coefExpScale =
@@ -1621,22 +1621,20 @@ namespace stolmine
           const float kLocalFbScale =
             connectivity * (0.1f + 0.7f * decay);
 
-          // Hadamard FDN cross-feed scale. The 16×16 Hadamard matrix
-          // with entries ±1 has operator norm √16; dividing by √16=4
-          // gives a unitary matrix with operator norm 1. The actual
-          // T60 control comes from mGroupDecayCoef[g] (Jot per-line
-          // attenuation, computed block-rate above); kCrossFeedScale
-          // here is only the matrix normalization × connectivity
-          // (which gates "is the FDN cross-feed active at all").
-          // Per Stautner-Puckette / Jot, the Hadamard matrix is the
-          // canonical choice for maximum inter-channel mixing with N
-          // orthogonal modes; per Jot 1991, T60 control in an FDN
-          // must come from per-delay-line gains scaled to each line's
-          // length — uniform matrix gain gives wrong T60 because
-          // short and long delays go around the loop at different
-          // rates per second.
-          const float kHadamardNorm = 0.25f;  // 1/√16
-          const float kCrossFeedScale = connectivity * kHadamardNorm;
+          // Hadamard FDN cross-feed scale. Just the matrix
+          // normalization 1/√16; NO connectivity factor. Per the FDN
+          // math (Stanford CCRMA, Jot 1991): the spectral radius of
+          // D×W (where W is unitary Hadamard and D=diag(decayCoef))
+          // is max(decayCoef[g]). Any additional scalar (like
+          // connectivity) multiplied here directly scales spectral
+          // radius and *destroys T60 control* — at conn=0.67,
+          // T60 was clamped to ~13 ms regardless of the decay knob.
+          // T60 is now controlled solely by mGroupDecayCoef[g]
+          // (block-rate Jot per-line coefficient), as the math
+          // requires. connectivity is preserved on the local-fb path
+          // where it controls per-group ringing color rather than
+          // overall reverb tail length.
+          const float kCrossFeedScale = 0.25f;  // 1/√16 (unitary norm)
 
           // Local feedback LP coefficient (one-pole). Couples to
           // decay so short delays at high decay get more damping
