@@ -1518,10 +1518,7 @@ namespace stolmine
           }
         }
 
-        // FDN decay coefficient (per-sample, not per-round-trip).
-        //
-        // Map decay knob to target T60 in seconds:
-        //   T60 = 0.05 + decay² × 10  (50 ms at decay=0, 10.05 s at decay=1)
+        // FDN decay coefficient (Jot per-line with D_avg).
         //
         // Effective T60 from conn × decay (parameter design):
         //   T60_decay = 0.05 + decay² × 10  (decay sets max T60)
@@ -1529,14 +1526,38 @@ namespace stolmine
         //
         // Both knobs work in tandem to set tail length:
         //   conn=0, any decay: T60_eff ≈ 0 (dry, no feedback)
-        //   conn=1, decay=0:   T60_eff = 0.05s (slapback / no tail)
-        //   conn=1, decay=1:   T60_eff = 10.05s (max lush tail)
-        //   conn=0.5, decay=1: T60_eff = 5s (half-strength full-length)
+        //   conn=1, decay=0:   T60_eff ≈ 50 ms (slapback / no tail)
+        //   conn=1, decay=1:   T60_eff = 10.05 s (max lush tail)
+        //   conn=0.5, decay=1: T60_eff = 5 s   (half-strength full-length)
         //
-        // Per-sample coefficient that yields signal × 10^(-3/T60_eff)
-        // per second is independent of delay length (since the matrix
-        // is applied per sample to a state that evolves per sample):
-        //   decayCoefPerSample = exp(-3 × ln(10) / (T60_eff × Fs))
+        // Jot 1991 per-line coefficient using D_avg = average slot-3
+        // tap delay across active groups:
+        //   decayCoefPerSample = exp(-3 × ln(10) × D_avg / (T60_eff × Fs))
+        //
+        // Why D_avg, not 1: in our cascade the matrix is applied per
+        // sample, but signal traverses each delay line in D_g samples
+        // per round-trip. A per-sample × decayCoefPerSample produces
+        // per-round-trip × decayCoefPerSample^D_g (factor of D_g
+        // applications during one cycle). To match Jot's per-round-
+        // trip target gain 10^(-3 D_g/(T60×Fs)), the per-sample
+        // coefficient must be 10^(-3 D_g/(T60×Fs))^(1/D_g) =
+        // 10^(-3/(T60×Fs)) — but only for state that fully evolves
+        // per sample (dense, full-density). At low density (sparse
+        // state, single line firing every D_g samples), the matrix
+        // effectively applies once per round-trip, so the per-sample
+        // coefficient must directly be Jot's 10^(-3 D_g/(T60×Fs)).
+        // Without D_avg in the formula, low-density loops are
+        // essentially lossless (T60_actual ≈ T60_target × D_avg).
+        // With D_avg, sparse-state T60 matches the knob.
+
+        // Number of active cascade groups (needed below for D_avg loop).
+        int activeGroupsLocal =
+          (activeTaps + kNetworkGroupSize - 1) / kNetworkGroupSize;
+        if (activeGroupsLocal < 1) activeGroupsLocal = 1;
+        if (activeGroupsLocal > kNetworkNumGroupsMax)
+          activeGroupsLocal = kNetworkNumGroupsMax;
+        const int aG = activeGroupsLocal;
+
         {
           const float kT60Floor = 0.05f;
           const float kT60Span  = 10.0f;
@@ -1544,18 +1565,27 @@ namespace stolmine
           const float T60_eff =
             (connectivity > 1e-4f) ? (connectivity * T60_decay) : 0.001f;
           const float Fs = globalConfig.sampleRate;
-          float c = expf(-3.0f * 2.302585f / (T60_eff * Fs));
+
+          // D_avg from slot-3 tap delays of active groups.
+          float D_sum = 0.0f;
+          int D_count = 0;
+          for (int g = 0; g < aG; g++)
+          {
+            const int slot3_t = g * kNetworkGroupSize + 3;
+            if (slot3_t < activeTaps)
+            {
+              D_sum += mTapDelayTarget[slot3_t];
+              D_count++;
+            }
+          }
+          float D_avg = (D_count > 0) ? (D_sum / (float)D_count) : 1000.0f;
+          if (D_avg < 64.0f) D_avg = 64.0f;  // floor: avoid degenerate math
+
+          float c = expf(-3.0f * 2.302585f * D_avg / (T60_eff * Fs));
           if (c > 0.99999f) c = 0.99999f;  // stability margin
+          if (c < 0.0f)     c = 0.0f;
           mDecayCoefPerSample = c;
         }
-
-        // Number of active cascade groups.
-        int activeGroupsLocal =
-          (activeTaps + kNetworkGroupSize - 1) / kNetworkGroupSize;
-        if (activeGroupsLocal < 1) activeGroupsLocal = 1;
-        if (activeGroupsLocal > kNetworkNumGroupsMax)
-          activeGroupsLocal = kNetworkNumGroupsMax;
-        const int aG = activeGroupsLocal;
 
         const float scale = 1.0f / 32767.0f;
 
