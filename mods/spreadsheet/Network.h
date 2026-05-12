@@ -358,6 +358,8 @@ namespace stolmine
         mGroupDcX1[g]          = 0.0f;
         mGroupDcY1[g]          = 0.0f;
         mGroupFbLpState[g]     = 0.0f;
+        mGroupFbHpX1[g]        = 0.0f;
+        mGroupFbHpY1[g]        = 0.0f;
         mGroupPoolSign[g]      = 1.0f;
       }
       mDiffusedGlobalPool = 0.0f;
@@ -1568,11 +1570,20 @@ namespace stolmine
           float wetR = 0.0f;
           float fb_pool_in = 0.0f;
 
-          // Local feedback gain ceiling per Phase B plan: conn × 0.6.
-          // Keeps the per-group recirculation sub-unity even at
-          // conn=1, so the single tanh at group's bufWrite caps the
-          // loop without latching to DC.
-          const float kLocalFbScale = connectivity * 0.6f;
+          // Local feedback gain ceiling, decay-coupled: at decay=0
+          // local fb is 0.35×conn (short echoes, fast decay); at
+          // decay=1 it climbs to 0.75×conn (extended ringing tails).
+          // Stays sub-unity at all settings so the bufWrite tanh caps
+          // the loop without latching, and the per-group LP+HPF
+          // band-pass below keeps the band stable. Before this
+          // coupling the gain was hardcoded at conn × 0.6 so decay
+          // had no effect on short-time decay character — the only
+          // decay-responsive path was the global pool, which is
+          // heavily attenuated (sqrt(fbCount) + HPF + sign-
+          // decorrelation) and reads as a subtle wash. This coupling
+          // gives decay its primary perceptual axis.
+          const float kLocalFbScale =
+            connectivity * (0.35f + 0.4f * decay);
 
           // Local feedback LP coefficient (one-pole). Couples to
           // decay so short delays at high decay get more damping
@@ -1609,7 +1620,18 @@ namespace stolmine
             const float fbRaw = mGroupLocalFbState[g];
             mGroupFbLpState[g] +=
               (fbRaw - mGroupFbLpState[g]) * kFbLpAlpha;
-            const float fbDamped = mGroupFbLpState[g];
+            const float fbLp = mGroupFbLpState[g];
+
+            // HPF on the LP'd signal → band-pass on the local fb.
+            // Catches sub-150 Hz buildup that the LP otherwise
+            // accumulates at short loop lengths (low size → loop
+            // fundamental falls inside LP cutoff). R = 0.987 →
+            // ~100 Hz cutoff at 48 kHz, same shape as the pool HPF.
+            const float kFbHpR = 0.987f;
+            const float fbDamped =
+              fbLp - mGroupFbHpX1[g] + kFbHpR * mGroupFbHpY1[g];
+            mGroupFbHpX1[g] = fbLp;
+            mGroupFbHpY1[g] = fbDamped;
 
             const float group_in_cascade = (g == 0) ? x : g_prev_out;
             float group_in = group_in_cascade +
@@ -2436,28 +2458,25 @@ namespace stolmine
     bool allocate(int Ns)
     {
       deallocate();
-      const int nbytes = Ns * sizeof(int16_t);
+      // Cascade buffer sizing: each group gets a full Ns sub-window,
+      // not Ns/16. The earlier Ns/16 split capped any single tap's
+      // delay at sizeSq × 0.9 × Ns/16 ≈ 56 ms at size=1 — chorus
+      // range, not echo. With full per-group Ns, group 15 can reach
+      // sizeSq × 0.9 × Ns ≈ 0.9s at size=1, restoring legacy delay
+      // range while keeping the cascade's per-group write isolation.
+      // Memory cost: Ns × 16 × 2 bytes (≈1.5 MB at 1s @ 48kHz);
+      // well within the am335x 64 MB DDR budget.
+      const int totalSamples = Ns * kNetworkNumGroupsMax;
+      const int nbytes = totalSamples * sizeof(int16_t);
       mBuffer = new (std::nothrow) char[nbytes];
       if (mBuffer)
         memset(mBuffer, 0, nbytes);
 
-      // Phase A: partition the shared buffer into per-group
-      // sub-windows. Each group gets Ns / kNetworkNumGroupsMax
-      // samples (~3000 at Ns≈48000); the last group absorbs any
-      // remainder so origin+len of the last group == Ns exactly.
-      // Per-sample group writes wrap within their sub-window.
-      const int groupLenEach =
-        (kNetworkNumGroupsMax > 0) ? (Ns / kNetworkNumGroupsMax) : 0;
       for (int g = 0; g < kNetworkNumGroupsMax; g++)
       {
-        mGroupOrigin[g]     = g * groupLenEach;
-        mGroupLen[g]        = groupLenEach;
+        mGroupOrigin[g]     = g * Ns;
+        mGroupLen[g]        = Ns;
         mGroupWriteIndex[g] = 0;
-      }
-      if (kNetworkNumGroupsMax > 0)
-      {
-        mGroupLen[kNetworkNumGroupsMax - 1] =
-          Ns - mGroupOrigin[kNetworkNumGroupsMax - 1];
       }
       return mBuffer != 0;
     }
@@ -2744,6 +2763,18 @@ namespace stolmine
     // decay so high decay = more damping (longer sustain stays
     // stable), low decay = less damping (crisp echoes).
     float mGroupFbLpState[kNetworkNumGroupsMax];
+
+    // Per-group one-pole HPF state on the local feedback path. The
+    // existing per-group LP filter integrates DC and low-mid content
+    // at very short loop lengths (low size → 1-5 ms loops → LP cutoff
+    // sits inside loop bandwidth → effectively a DC accumulator).
+    // The per-group DC blocker at ~50 Hz doesn't catch 60-150 Hz
+    // buildup; the pool HPF added in 2.6.1.70 only helps pool-path.
+    // Apply HPF after the LP on the local fb signal so the loop is
+    // band-passed (LP rolls highs, HPF rolls lows → stable middle
+    // band). Coefficient kFbHpR ≈ 0.987 → ~100 Hz cutoff at 48 kHz.
+    float mGroupFbHpX1[kNetworkNumGroupsMax];
+    float mGroupFbHpY1[kNetworkNumGroupsMax];
 
     // Per-group sign for the global pool contribution. Hashed from
     // mCascadeSeed once per (seed change), so it's stable for a

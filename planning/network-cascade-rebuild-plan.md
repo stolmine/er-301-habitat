@@ -156,6 +156,20 @@ Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" r
 
 State: `mGroupDcX1[16]`, `mGroupDcY1[16]`. Same one-pole topology and R coefficient (`kNetworkDcR`) as the existing input / output / global-pool DC blockers. Applied to `g_prev_out` immediately after the cascade-flow normalization, *before* `g_prev_out` is used as (a) next group's cascade input, (b) current group's `mGroupLocalFbState` write, or (c) pool contribution. One blocker per group catches DC for all three downstream consumers.
 
+### Per-group full-Ns sub-windows + decay→local-fb coupling + local-fb HPF (added in Phase B)
+
+Phase B audition (2.6.1.70) reported "virtually no echo at all, mostly very subtle feedback until low size which produces rumble." Three coupled architectural choices were limiting the cascade:
+
+1. **Per-group sub-window too small.** The plan's "one shared int16 buffer with per-group sub-windows" sized each group at `Ns / 16` (~3000 samples at 1s buffer). That capped any tap's max delay at `sizeSq × groupBaseFrac × 0.9 × Ns/16` ≈ **56 ms at size=1, group 15** — chorus territory, not echo. Legacy maxed at `sizeNorm × Ns` ≈ 1s. The cascade had 18× shorter max delay than legacy, so `size` had no echo range and the listener heard a smeared continuous wash instead of cascade routing.
+2. **Local fb gain decoupled from decay.** `kLocalFbScale = connectivity × 0.6` was a fixed constant. Decay only fed (a) the pool path (heavily attenuated by sqrt(fbCount) × HPF × sign-decorrelation) and (b) the per-group LP cutoff (which *damps* the loop — works against perceived decay extension). Net: decay knob was nearly inert.
+3. **No HPF on local fb path.** At low size, per-group delays fall to 1-5 ms (loop fundamentals 200-1000 Hz) and the LP filter's cutoff (~1-5 kHz) sits inside the loop bandwidth, effectively integrating sub-150 Hz content. Per-group DC blocker at ~50 Hz doesn't catch this; pool HPF only fixes pool-path; local fb path leaked 60-150 Hz buildup → audible rumble at low size.
+
+Fix landed in 2.6.1.71:
+
+- **`allocate(Ns)`** now allocates `Ns × kNetworkNumGroupsMax × 2 bytes` (~1.5 MB at 1s @ 48 kHz; well within am335x 64 MB DDR budget). Each group gets `groupLen[g] = Ns`, `groupOrigin[g] = g × Ns`. Max per-tap delay now `sizeSq × groupBaseFrac × 0.9 × Ns` → up to ~0.9s at size=1, group 15. Legacy delay range restored, cascade routing now operates on echo timescales.
+- **`kLocalFbScale = connectivity × (0.35 + 0.4 × decay)`**. At decay=0 → 0.35×conn (short echoes); at decay=1 → 0.75×conn (extended ringing tails). Stays sub-unity at all settings; band-pass below keeps the loop stable. Decay now has its primary perceptual axis on short-time character.
+- **`mGroupFbHpX1[16]`, `mGroupFbHpY1[16]`** with `kFbHpR = 0.987` (~100 Hz cutoff). Applied after the LP on the local fb signal → per-group loops are now band-passed instead of low-passed. Catches the 60-150 Hz buildup that the LP otherwise accumulates at low size.
+
 ### Pool sign randomization + pool HPF (added in Phase B)
 
 Phase B audition (2.6.1.69) reported "beautiful cascading feedback but serious low-end buildup at low size settings." At low size, per-group fundamentals are *high* (~140 Hz @ size=0.35), so the buildup isn't from per-group resonance — it's from two specific cascade-vs-legacy gaps:
