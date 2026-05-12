@@ -367,6 +367,12 @@ namespace stolmine
         mTapIntraGroupOffset[t]  = 0.5f;
       }
       for (int s = 0; s < kStutScratchSlots; s++) mStutGroup[s] = 0;
+
+      // Compute initial cascade assignment from default reflectors.
+      // Reflectors are seeded above via regenerateField; the
+      // seed-dirty check in process() will re-run this on user
+      // seed changes.
+      recomputeCascadeAssignment();
     }
 
     virtual ~Network()
@@ -581,6 +587,9 @@ namespace stolmine
       {
         network_geom::regenerateField(mReflectors, kMaxNetworkTaps, seedU);
         mLastSeed = seedU;
+        // Phase A: recompute cascade tap-to-group assignment when
+        // reflectors change.
+        recomputeCascadeAssignment();
       }
 
       // ---- Walker advance (block-rate) ----
@@ -1992,6 +2001,64 @@ namespace stolmine
         mTapStutterReadPtr[t]    = mStutPtr[s];
         mTapStutterPosInLoop[t]  = mStutPosInLoop[s];
         mTapStutterIterations[t] = mStutIter[s];
+      }
+    }
+
+    // Phase A: sort reflectors by squared distance from orbit
+    // center (0,0), assign sorted ranks to group/slot, and hash
+    // per-(rank) intra-group offsets from mCascadeSeed. Called
+    // from the constructor and on every mSeed change. Cheap —
+    // 64-element insertion sort + 64 hash ops, off the audio
+    // hot path. Uses squared distance to avoid sqrtf (which on
+    // am335x from a package .so can miscompute per the trig-LUT
+    // memory rule; ordering is identical for sqrt and sqr).
+    void recomputeCascadeAssignment()
+    {
+      int sortedIdx[kMaxNetworkTaps];
+      float sortedDsq[kMaxNetworkTaps];
+      for (int i = 0; i < kMaxNetworkTaps; i++)
+      {
+        sortedIdx[i]  = i;
+        sortedDsq[i]  = mReflectors[i].x * mReflectors[i].x +
+                        mReflectors[i].y * mReflectors[i].y;
+      }
+      // Insertion sort ascending by squared distance. Stable.
+      for (int i = 1; i < kMaxNetworkTaps; i++)
+      {
+        const float kd = sortedDsq[i];
+        const int   ki = sortedIdx[i];
+        int j = i - 1;
+        while (j >= 0 && sortedDsq[j] > kd)
+        {
+          sortedDsq[j + 1] = sortedDsq[j];
+          sortedIdx[j + 1] = sortedIdx[j];
+          j--;
+        }
+        sortedDsq[j + 1] = kd;
+        sortedIdx[j + 1] = ki;
+      }
+      // Assign groups by sorted rank.
+      for (int rank = 0; rank < kMaxNetworkTaps; rank++)
+      {
+        const int origIdx = sortedIdx[rank];
+        const int g       = rank / kNetworkGroupSize;
+        const int slot    = rank % kNetworkGroupSize;
+        mTapGroupMap[origIdx]  = (uint8_t)g;
+        mTapGroupSlot[origIdx] = (uint8_t)slot;
+      }
+      // Per-tap intra-group offset, hashed from (g, slot) so the
+      // structure is stable per mCascadeSeed regardless of which
+      // reflector ends up at that rank.
+      for (int t = 0; t < kMaxNetworkTaps; t++)
+      {
+        const int g    = (int)mTapGroupMap[t];
+        const int slot = (int)mTapGroupSlot[t];
+        uint32_t h = mCascadeSeed ^
+          ((uint32_t)(g * kNetworkGroupSize + slot) * 2654435761u);
+        h = h * 1103515245u + 12345u;
+        const float u =
+          (float)((h >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
+        mTapIntraGroupOffset[t] = 0.1f + 0.8f * u;   // [0.1, 0.9]
       }
     }
 
