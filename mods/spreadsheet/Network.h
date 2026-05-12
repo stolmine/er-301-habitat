@@ -362,8 +362,8 @@ namespace stolmine
         mGroupFbHpY1[g]        = 0.0f;
         mGroupPoolSign[g]      = 1.0f;
         mHadamardScratch[g]    = 0.0f;
-        mGroupDecayCoef[g]     = 0.0f;
       }
+      mDecayCoefPerSample = 0.0f;
       mDiffusedGlobalPool = 0.0f;
       mPoolHpX1 = 0.0f;
       mPoolHpY1 = 0.0f;
@@ -1495,16 +1495,12 @@ namespace stolmine
         // active tap from its owning group's current write index
         // minus the tap's delay. Per-sample loop advances both by
         // 1 in lockstep so the relative offset (the delay) stays
-        // constant within a block. Also accumulate average delay
-        // per group for the Jot attenuation coefficient.
-        float groupAvgDelay[kNetworkNumGroupsMax];
-        for (int g = 0; g < kNetworkNumGroupsMax; g++) groupAvgDelay[g] = 0.0f;
+        // constant within a block.
         for (int g = 0; g < kNetworkNumGroupsMax; g++)
         {
           const int gLen = mGroupLen[g];
           if (gLen <= 0) continue;
           const int tBase = g * kNetworkGroupSize;
-          float dlySum = 0.0f;
           for (int k = 0; k < kNetworkGroupSize; k++)
           {
             const int t = tBase + k;
@@ -1515,41 +1511,35 @@ namespace stolmine
             while (idx_g < 0)     idx_g += gLen;
             while (idx_g >= gLen) idx_g -= gLen;
             mTapNewReadIdx[t] = idx_g;
-            dlySum += (float)dly;
           }
-          groupAvgDelay[g] = dlySum * (1.0f / (float)kNetworkGroupSize);
         }
 
-        // Jot per-group attenuation. Map decay knob to T60 in
-        // seconds: T60 = 0.05 + decay² × 5 → 50 ms at decay=0
-        // (essentially no reverb tail beyond the cascade itself),
-        // 5.05 s at decay=1. Quadratic curve gives finer control
-        // at the short end where most musical use lives.
+        // FDN decay coefficient (per-sample, not per-round-trip).
         //
-        // Per-group coefficient: 10^(-3 × D_g / (T60 × Fs)). For a
-        // delay line of D_g samples, this is the per-round-trip
-        // gain that produces a -60 dB decay in T60 seconds. Floor
-        // at 0 to avoid denormals; clamp to <1 for stability.
-        // Coefficients computed block-rate (cheap) and applied
-        // per-sample as a single multiply on each group's
-        // Hadamard-mixed feedback.
+        // Map decay knob to target T60 in seconds:
+        //   T60 = 0.05 + decay² × 10  (50 ms at decay=0, 10.05 s at decay=1)
+        //
+        // The matrix D × W is applied EVERY SAMPLE in our cascade
+        // loop (the Hadamard FWHT runs per-sample on mGroupLocalFbState).
+        // Jot 1991's per-round-trip coef (10^(-3 × D_g / (T60 × Fs)))
+        // is calibrated for per-round-trip application; applying it
+        // per-sample would collapse T60 by a factor of D_g
+        // (~1000× too fast for short-delay groups). The correct
+        // per-sample coefficient that yields signal × 10^(-3/T60)
+        // per second is independent of delay-line length:
+        //   decayCoefPerSample = 10^(-3 / (T60 × Fs))
+        // = exp(-3 × ln(10) / (T60 × Fs))
+        //
+        // Uniform across all 16 groups; per-line modal density still
+        // comes from the varied delay lengths themselves.
         {
           const float kT60Floor = 0.05f;
           const float kT60Span  = 10.0f;
           const float T60 = kT60Floor + decay * decay * kT60Span;
           const float Fs = globalConfig.sampleRate;
-          const float coefExpScale =
-            -3.0f * 2.302585f / (T60 * Fs);   // -3 × ln(10) / (T60 × Fs)
-          for (int g = 0; g < kNetworkNumGroupsMax; g++)
-          {
-            const float D_g = groupAvgDelay[g];
-            // expf is fine block-rate. clamp to (0, 0.999) — 0.999 cap
-            // keeps spectral radius < 1 even at decay=1 / very short
-            // delays so the FDN never goes lossless.
-            float c = (D_g > 0.0f) ? expf(coefExpScale * D_g) : 0.0f;
-            if (c > 0.999f) c = 0.999f;
-            mGroupDecayCoef[g] = c;
-          }
+          float c = expf(-3.0f * 2.302585f / (T60 * Fs));
+          if (c > 0.99999f) c = 0.99999f;  // stability margin
+          mDecayCoefPerSample = c;
         }
 
         // Number of active cascade groups.
@@ -1621,20 +1611,21 @@ namespace stolmine
           const float kLocalFbScale =
             connectivity * (0.1f + 0.7f * decay);
 
-          // Hadamard FDN cross-feed scale. Just the matrix
-          // normalization 1/√16; NO connectivity factor. Per the FDN
-          // math (Stanford CCRMA, Jot 1991): the spectral radius of
-          // D×W (where W is unitary Hadamard and D=diag(decayCoef))
-          // is max(decayCoef[g]). Any additional scalar (like
-          // connectivity) multiplied here directly scales spectral
-          // radius and *destroys T60 control* — at conn=0.67,
-          // T60 was clamped to ~13 ms regardless of the decay knob.
-          // T60 is now controlled solely by mGroupDecayCoef[g]
-          // (block-rate Jot per-line coefficient), as the math
-          // requires. connectivity is preserved on the local-fb path
-          // where it controls per-group ringing color rather than
-          // overall reverb tail length.
-          const float kCrossFeedScale = 0.25f;  // 1/√16 (unitary norm)
+          // FDN feedback gain folded into one scalar:
+          //   kFdnGain = (1/√16) × decayCoefPerSample
+          //            = unitary matrix normalization × per-sample decay
+          //
+          // T60 control comes from mDecayCoefPerSample (block-rate).
+          // Matrix normalization 1/√16 keeps the Hadamard unitary
+          // (spectral radius of D × W = decayCoefPerSample with
+          // unitary W and D = decayCoefPerSample × I).
+          //
+          // connectivity is intentionally NOT in this gain — it
+          // would directly scale the spectral radius and collapse
+          // T60. connectivity stays on the local-fb path where it
+          // controls per-group ringing color independent of overall
+          // reverb tail length.
+          const float kFdnGain = 0.25f * mDecayCoefPerSample;
 
           // Local feedback LP coefficient (one-pole). Couples to
           // decay so short delays at high decay get more damping
@@ -1709,7 +1700,7 @@ namespace stolmine
             const float group_in_cascade = (g == 0) ? x : g_prev_out;
             float group_in = group_in_cascade +
               fbDamped * kLocalFbScale +
-              mHadamardScratch[g] * kCrossFeedScale * mGroupDecayCoef[g];
+              mHadamardScratch[g] * kFdnGain;
 
             // Write tanh(group_in) to group's sub-window head.
             bufWrite(buf,
@@ -2785,19 +2776,19 @@ namespace stolmine
     // stable), low decay = less damping (crisp echoes).
     float mGroupFbLpState[kNetworkNumGroupsMax];
 
-    // Per-group Jot attenuation coefficient. Computed block-rate
-    // from each group's average tap delay and the user's target T60
-    // (mapped from the decay knob): coef = 10^(-3 × D_g / (T60 × Fs)).
-    // Each delay line's coefficient is sized so all groups decay at
-    // the SAME T60 regardless of their delay length — the canonical
-    // Jot 1991 design. Without this, scaling the matrix gain alone
-    // gives short-delay groups infinite tails while long-delay
-    // groups die instantly (or vice versa) — which was why the
-    // user's "decay" knob felt nearly dead even with full-rank
-    // Hadamard cross-feed in place: the cross-feed was structurally
-    // correct, but T60 cannot be controlled by uniform matrix gain
-    // in an FDN with mixed delay lengths.
-    float mGroupDecayCoef[kNetworkNumGroupsMax];
+    // Per-sample FDN decay coefficient. Computed block-rate from
+    // the user's target T60 (mapped from the decay knob):
+    //   coef = 10^(-3 / (T60 × Fs))
+    // Note: this is the PER-SAMPLE attenuation, NOT Jot 1991's
+    // per-round-trip formula. Our Hadamard matrix is applied every
+    // sample (FWHT in the per-sample loop) rather than once per
+    // delay-line round-trip — so the per-round-trip Jot formula
+    // would collapse T60 by a factor of D_g if applied here.
+    // The per-sample form yields signal × 10^(-3/T60) per second
+    // regardless of delay-line length, giving uniform T60 across
+    // all groups (the Jot goal) with a single scalar instead of
+    // per-line coefficients.
+    float mDecayCoefPerSample;
 
     // Hadamard FDN cross-feed scratch. Holds the per-sample
     // FWHT result M[16] = H_16 × G[16], where G is the vector of

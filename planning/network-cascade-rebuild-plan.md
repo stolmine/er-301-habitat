@@ -156,6 +156,35 @@ Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" r
 
 State: `mGroupDcX1[16]`, `mGroupDcY1[16]`. Same one-pole topology and R coefficient (`kNetworkDcR`) as the existing input / output / global-pool DC blockers. Applied to `g_prev_out` immediately after the cascade-flow normalization, *before* `g_prev_out` is used as (a) next group's cascade input, (b) current group's `mGroupLocalFbState` write, or (c) pool contribution. One blocker per group catches DC for all three downstream consumers.
 
+### Per-sample decay coefficient (added in Phase B)
+
+Phase B audition (2.6.1.76) reported "closer, more reverberant but still feels capped — perhaps a fraction of a second of audible decay where 10s is designed." Holistic re-audit found a deeper bug: Jot's formula is calibrated for per-round-trip application, but our Hadamard FWHT runs every sample.
+
+**Why the legacy parallel multitap setup worked so well at decay control:** legacy applied `decay × sign / sqrt(kRecycle)` per tap, then summed all 64 contributions, tanh'd, DC'd, allpass'd, and added back to a SINGLE shared write head. The feedback path's signal cycles around the entire system at the rate of an individual tap delay — one application of `decay` per round-trip-equivalent. Decay maps directly to T60 because the per-round-trip-application matches Jot's formula's assumption.
+
+**Why the cascade FDN's decay felt capped:** the standard FDN textbook equation `y[n+D_i] = D × W × y[n]` applies the matrix once per delay-line round-trip (every `D_i` samples). Jot's coefficient `decayCoef[g] = 10^(-3 × D_g / (T60 × Fs))` is calibrated for this. But in our cascade, the Hadamard FWHT is applied **every sample** (it runs inside the per-sample loop on `mGroupLocalFbState`). Applying Jot's per-round-trip coef per-sample collapses T60 by a factor of `D_g`:
+
+- Target T60 = 10s, D_g = 1000 samples (~21 ms): Jot's per-round-trip coef = 0.9857
+- Applied per sample × 48,000 times/sec → per-second factor = `0.9857^48000` ≈ zero
+- Actual T60 ≈ 4 ms instead of designed 10s — explaining the user's "fraction of a second" tail
+
+**The correct per-sample formula** (independent of `D_g`):
+
+```
+decayCoefPerSample = 10^(-3 / (T60 × Fs))
+                   = exp(-3 × ln(10) / (T60 × Fs))
+```
+
+Derivation: we want signal × `10^(-3/T60)` per second. Per sample (Fs of them): `decayCoefPerSample^Fs = 10^(-3/T60)`, so `decayCoefPerSample = 10^(-3/(T60 × Fs))`. At T60=10s, Fs=48000: ≈ 0.99998560. Over 10s × 48000 = 480000 samples: 0.99998560^480000 = -60 dB. ✓
+
+Fix landed in 2.6.1.77:
+
+- **`mDecayCoefPerSample`** (scalar, block-rate computed): replaces the per-group `mGroupDecayCoef[16]` array. Single scalar suffices because per-sample application yields uniform per-second decay across all delay lines regardless of `D_g` — same end result as Jot's per-round-trip per-line scaling.
+- **Folded into `kFdnGain = (1/√16) × mDecayCoefPerSample`**: pre-multiplied at the top of the per-sample loop. Per-group injection is `group_in += mHadamardScratch[g] × kFdnGain`.
+- **Removed `groupAvgDelay[16]` accumulation** and the per-group `expf()` loop — no longer needed.
+
+Modal density still comes from the varied delay lengths themselves; only the decay rate is now uniform per sample.
+
 ### FDN spectral-radius math fix + T60 cap raised (added in Phase B)
 
 Phase B audition (2.6.1.75) reported "decay still only produces a small tail; at size=1 density=0.5 conn=0.67 decay=1, expecting densely reverberant, getting close-haloed echo." Holistic audit of the cascade found a math error in the FDN feedback path:
