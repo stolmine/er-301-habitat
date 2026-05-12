@@ -156,6 +156,23 @@ Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" r
 
 State: `mGroupDcX1[16]`, `mGroupDcY1[16]`. Same one-pole topology and R coefficient (`kNetworkDcR`) as the existing input / output / global-pool DC blockers. Applied to `g_prev_out` immediately after the cascade-flow normalization, *before* `g_prev_out` is used as (a) next group's cascade input, (b) current group's `mGroupLocalFbState` write, or (c) pool contribution. One blocker per group catches DC for all three downstream consumers.
 
+### Jot per-group T60 attenuation + linear size mapping (added in Phase B)
+
+Phase B audition (2.6.1.73) reported "sounds like FDN now (good), but decay produces negligible effect compared to OG, and delay times feel short off the taps." Both diagnoses required deeper FDN literature:
+
+**Why decay was still nearly dead even with Hadamard cross-feed.** Per Jot 1991 (canonical FDN paper, summarized in Stanford CCRMA's PASP and the 2024 differentiable FDN paper): T60 in an FDN is controlled by **per-delay-line attenuation filters**, not by scaling the matrix gain. Each delay line gets `g_g = 10^(-3 × D_g / (T60 × Fs))` so all delay lines decay at the same rate per frequency, regardless of their length. Uniform matrix gain (what we had as `decay × conn × 1/√16`) gives short-delay groups (~2-5ms) and long-delay groups (~500-900ms) the same per-round-trip gain — but they go around the loop at vastly different rates per second, so the actual T60 is wildly different across groups. The structurally-correct Hadamard cross-feed was in place, but the decay knob was scaling the wrong parameter.
+
+**Why delay times felt short off the taps.** The original cascade plan specified `delayTarget = sizeNorm² × groupBaseFrac × intraOffset × groupLen` (quadratic size mapping), chosen for "perceptual resolution at the short end." But the squaring squishes moderate sizes severely — at size=0.5, sizeSq=0.25, giving 1/4 the OG linear delay range. Legacy uses linear `sizeNorm × distNorm × maxDelay`. Switching to linear restores OG-like delay range at moderate sizes where most musical use lives.
+
+Fix landed in 2.6.1.74:
+
+- **`mGroupDecayCoef[16]`** — block-rate computed per-group attenuation coefficient. Average tap delay `D_g` accumulated alongside `mTapNewReadIdx` setup. T60 from `decay`: `T60 = 0.05 + decay² × 5` seconds (50 ms at decay=0, 5.05 s at decay=1). Coefficient `expf(-3 × ln(10) × D_g / (T60 × Fs))`. Floored at 0, capped at 0.999 to prevent unconditional losslessness.
+- **`kCrossFeedScale = connectivity × (1/√16)`** — Hadamard normalization × cross-feed enable. T60 control is now ALL in `mGroupDecayCoef[g]`. Matrix gain is just "is FDN cross-feed on at all."
+- **Per-sample injection**: `group_in += mHadamardScratch[g] × kCrossFeedScale × mGroupDecayCoef[g]`. Each group's feedback now decays at the user's chosen T60 regardless of its delay length.
+- **`geometry.h::recomputeCascadeTaps`** switched from `sizeSq` to `sizeNorm`. Per-tap delay range now matches OG at every size setting.
+
+Result: decay knob now directly controls reverb tail length (T60), as in legacy. Delay times at moderate size match OG's linear scaling.
+
 ### Hadamard 16×16 FDN cross-feed (added in Phase B, replaces pool path)
 
 Phase B audition (2.6.1.72) reported "still sounds like a resonator more than a reverb, much more space at lower densities than higher." Research against the established FDN reverb literature (CCRMA / Stanford, DAFx FDN Toolbox, Signalsmith, Valhalla DSP writings) identified the architectural cause:

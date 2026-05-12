@@ -210,10 +210,13 @@ namespace stolmine
     //   numActiveGroups = ceil(activeTaps / groupSize)
     //   for each tap t with mapped group g, intra-group offset o:
     //     groupBaseFrac = (g + 1) / numActiveGroups   in (0, 1]
-    //     delayTarget[t] = sizeNorm² × groupBaseFrac × o × groupLen[g]
+    //     delayTarget[t] = sizeNorm × groupBaseFrac × o × groupLen[g]
     //
-    // Quadratic on size: feels musically right; perceptual
-    // resolution at the short end of the knob.
+    // Linear on size: matches the legacy star-multitap delay range so
+    // moderate size settings (0.3-0.6) produce echo-range delays
+    // rather than chorus-range. The prior sizeSq mapping was a
+    // designer choice for "perceptual resolution at the short end"
+    // but cost OG-like delay range at moderate sizes.
     //
     // See planning/network-cascade-rebuild-plan.md.
     static inline void recomputeCascadeTaps(
@@ -232,7 +235,6 @@ namespace stolmine
       if (activeGroups < 1) activeGroups = 1;
       if (activeGroups > numGroupsMax) activeGroups = numGroupsMax;
 
-      const float sizeSq = sizeNorm * sizeNorm;
       const float invActiveGroups = 1.0f / (float)activeGroups;
 
       const int n = activeTaps < kMaxTaps ? activeTaps : kMaxTaps;
@@ -246,7 +248,7 @@ namespace stolmine
         }
         const float groupBaseFrac = (float)(g + 1) * invActiveGroups;
         const float intraOffset   = tapIntraGroupOffset[t];
-        float d = sizeSq * groupBaseFrac * intraOffset * (float)groupLen[g];
+        float d = sizeNorm * groupBaseFrac * intraOffset * (float)groupLen[g];
         // Safety clamp — keep within group's sub-window so Pass A
         // wrap math (modulo groupLen[g]) never sees negative or
         // out-of-window values.
