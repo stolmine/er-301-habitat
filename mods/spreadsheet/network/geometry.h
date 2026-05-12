@@ -206,17 +206,23 @@ namespace stolmine
     // recomputeTaps; this function ONLY writes delayTarget, as
     // a per-tap group-RELATIVE offset in [0, groupLen[g]).
     //
-    // Mapping:
-    //   numActiveGroups = ceil(activeTaps / groupSize)
-    //   for each tap t with mapped group g, intra-group offset o:
-    //     groupBaseFrac = (g + 1) / numActiveGroups   in (0, 1]
-    //     delayTarget[t] = sizeNorm × groupBaseFrac × o × groupLen[g]
+    // Rank-based uniform tap distribution (Velvet-Noise FDN style):
+    //   rank[t] = g * groupSize + slot
+    //   tapDelayFrac[t] = (rank + 0.5 + jitter) / activeTaps
+    //   delayTarget[t] = sizeNorm × tapDelayFrac × maxDelayFrac × groupLen[g]
     //
-    // Linear on size: matches the legacy star-multitap delay range so
-    // moderate size settings (0.3-0.6) produce echo-range delays
-    // rather than chorus-range. The prior sizeSq mapping was a
-    // designer choice for "perceptual resolution at the short end"
-    // but cost OG-like delay range at moderate sizes.
+    // where tapIntraGroupOffset is reused to carry tapDelayFrac
+    // directly (populated by recomputeCascadeAssignment).
+    //
+    // Rationale: prior `sizeNorm × ((g+1)/aG) × intraOffset[0.1,0.9]`
+    // formula gave 16 cluster centers with massive overlap between
+    // adjacent groups — effectively ~16 distinct echo bands, not 64.
+    // Resulted in slapback/resonator character at high density.
+    // Rank-based uniform gives 64 distinct delays evenly spread
+    // across the full buffer with no inter-group overlap, naturally
+    // increasing density as size grows. Each group still has 4
+    // consecutive ranks (sorted-by-distance), preserving cascade
+    // routing semantics.
     //
     // See planning/network-cascade-rebuild-plan.md.
     static inline void recomputeCascadeTaps(
@@ -235,7 +241,9 @@ namespace stolmine
       if (activeGroups < 1) activeGroups = 1;
       if (activeGroups > numGroupsMax) activeGroups = numGroupsMax;
 
-      const float invActiveGroups = 1.0f / (float)activeGroups;
+      // Cap delay at 90% of the per-group sub-window so the
+      // bufWrite + read offset never wraps onto fresh writes.
+      const float kMaxDelayFrac = 0.9f;
 
       const int n = activeTaps < kMaxTaps ? activeTaps : kMaxTaps;
       for (int t = 0; t < n; t++)
@@ -246,12 +254,12 @@ namespace stolmine
           delayTarget[t] = 0.0f;
           continue;
         }
-        const float groupBaseFrac = (float)(g + 1) * invActiveGroups;
-        const float intraOffset   = tapIntraGroupOffset[t];
-        float d = sizeNorm * groupBaseFrac * intraOffset * (float)groupLen[g];
-        // Safety clamp — keep within group's sub-window so Pass A
-        // wrap math (modulo groupLen[g]) never sees negative or
-        // out-of-window values.
+        // tapIntraGroupOffset now carries tapDelayFrac in [0, 1],
+        // populated by recomputeCascadeAssignment using rank-based
+        // uniform distribution across activeTaps.
+        const float tapDelayFrac = tapIntraGroupOffset[t];
+        float d = sizeNorm * tapDelayFrac * kMaxDelayFrac *
+                  (float)groupLen[g];
         const float maxD = (float)(groupLen[g] - 1);
         if (d < 0.0f) d = 0.0f;
         if (d > maxD) d = maxD;

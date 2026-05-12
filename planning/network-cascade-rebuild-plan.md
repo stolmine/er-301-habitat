@@ -156,6 +156,24 @@ Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" r
 
 State: `mGroupDcX1[16]`, `mGroupDcY1[16]`. Same one-pole topology and R coefficient (`kNetworkDcR`) as the existing input / output / global-pool DC blockers. Applied to `g_prev_out` immediately after the cascade-flow normalization, *before* `g_prev_out` is used as (a) next group's cascade input, (b) current group's `mGroupLocalFbState` write, or (c) pool contribution. One blocker per group catches DC for all three downstream consumers.
 
+### Rank-based uniform tap distribution (added in Phase B)
+
+Phase B audition (2.6.1.74) reported "closer to reverb but still slapback / resonator-y; tap staggering across size should produce density naturally." Velvet-Noise FDN literature (DAFx 2020) and Schlecht's "FDN Echo Density and Mixing Time" gave the structural diagnosis:
+
+**Echo density = N delay lines × M taps per line, but only when delays are well-distributed.** Our prior `delayTarget = sizeNorm × ((g+1)/aG) × intraOffset × Ns` with `intraOffset ∈ [0.1, 0.9]` gave:
+- Group 0: delays in `[0.006, 0.056] × Ns × sizeNorm`
+- Group 7: delays in `[0.05, 0.45] × Ns × sizeNorm`
+- Group 15: delays in `[0.1, 0.9] × Ns × sizeNorm`
+
+Adjacent groups' ranges overlapped massively — group 15's range alone covered every other group's range. We had 64 tap reads but effectively ~16 distinct echo-time clusters because most taps clumped into similar bands. Combined with Jot per-group attenuation (correct for T60 but it means short-delay groups dominate early density), the system produced slapback-like character at high density.
+
+Fix landed in 2.6.1.75:
+
+- **`recomputeCascadeAssignment` populates `mTapIntraGroupOffset[t]` with rank-based delay fractions.** `rank[t] = g × kNetworkGroupSize + slot` (already determined by distance sort). `frac = (rank + 0.5 + jitter) / N` where `jitter ±0.4/N` is a small mCascadeSeed-derived perturbation. Result: 64 unique delay fractions in `[0, 1]` covering the full range with no inter-group overlap. Each group's 4 taps occupy a contiguous 1/16 slice.
+- **`geometry.h::recomputeCascadeTaps` reads the rank-fraction directly**: `delayTarget = sizeNorm × tapDelayFrac × 0.9 × groupLen[g]`. The `((g+1)/aG)` factor is GONE — group structure for cascade routing is preserved via the sorted `tapGroupMap`, but the delay range no longer compresses based on group index.
+
+User's "tap staggering across size should produce density naturally" maps directly: at small size, all 64 delays compress proportionally (tight slapback cluster); at large size, they spread uniformly across nearly the whole buffer (dense reverb). Group 0 still hosts the 4 shortest delays (closest reflectors), group 15 the 4 longest (farthest reflectors) — cascade routing intact.
+
 ### Jot per-group T60 attenuation + linear size mapping (added in Phase B)
 
 Phase B audition (2.6.1.73) reported "sounds like FDN now (good), but decay produces negligible effect compared to OG, and delay times feel short off the taps." Both diagnoses required deeper FDN literature:

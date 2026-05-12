@@ -2439,19 +2439,30 @@ namespace stolmine
         mTapGroupMap[origIdx]  = (uint8_t)g;
         mTapGroupSlot[origIdx] = (uint8_t)slot;
       }
-      // Per-tap intra-group offset, hashed from (g, slot) so the
-      // structure is stable per mCascadeSeed regardless of which
-      // reflector ends up at that rank.
+      // Per-tap delay fraction in [0, 1], rank-based with small
+      // jitter for natural staggering. rank[t] = g × kNetworkGroupSize
+      // + slot, so each group's 4 taps cover a contiguous 1/16 slice
+      // of the full delay range with no inter-group overlap. Jitter
+      // ±0.4/N (~±0.6% of full range) hashed from mCascadeSeed gives
+      // per-instance variation without disturbing rank ordering.
+      // Reuses mTapIntraGroupOffset to avoid adding a parallel state
+      // array — geometry.h reads this value directly as tapDelayFrac.
+      const int N = kMaxNetworkTaps;
+      const float invN = 1.0f / (float)N;
       for (int t = 0; t < kMaxNetworkTaps; t++)
       {
         const int g    = (int)mTapGroupMap[t];
         const int slot = (int)mTapGroupSlot[t];
+        const int rank = g * kNetworkGroupSize + slot;
         uint32_t h = mCascadeSeed ^
-          ((uint32_t)(g * kNetworkGroupSize + slot) * 2654435761u);
+          ((uint32_t)(rank + 0x5A0) * 2654435761u);
         h = h * 1103515245u + 12345u;
-        const float u =
+        const float u01 =
           (float)((h >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
-        mTapIntraGroupOffset[t] = 0.1f + 0.8f * u;   // [0.1, 0.9]
+        const float jitter = (u01 - 0.5f) * 0.8f * invN;
+        const float frac = ((float)rank + 0.5f) * invN + jitter;
+        mTapIntraGroupOffset[t] =
+          (frac < 0.0f) ? 0.0f : (frac > 1.0f ? 1.0f : frac);
       }
       // Per-group pool sign. Mirrors the legacy fbWeight sign-flip
       // mechanism: each group contributes to the global pool with a
