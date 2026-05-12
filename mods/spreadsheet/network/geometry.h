@@ -199,5 +199,63 @@ namespace stolmine
         gainR[i] = 0.0f;
       }
     }
+
+    // Phase A scaffolding for serial cascade rebuild.
+    // Replaces the delay-target portion of recomputeTaps when the
+    // cascade engine is active. Pan/gain still come from
+    // recomputeTaps; this function ONLY writes delayTarget, as
+    // a per-tap group-RELATIVE offset in [0, groupLen[g]).
+    //
+    // Mapping:
+    //   numActiveGroups = ceil(activeTaps / groupSize)
+    //   for each tap t with mapped group g, intra-group offset o:
+    //     groupBaseFrac = (g + 1) / numActiveGroups   in (0, 1]
+    //     delayTarget[t] = sizeNorm² × groupBaseFrac × o × groupLen[g]
+    //
+    // Quadratic on size: feels musically right; perceptual
+    // resolution at the short end of the knob.
+    //
+    // See planning/network-cascade-rebuild-plan.md.
+    static inline void recomputeCascadeTaps(
+      int kMaxTaps,
+      int activeTaps,
+      int numGroupsMax,
+      int groupSize,
+      float sizeNorm,
+      const int *groupLen,
+      const unsigned char *tapGroupMap,
+      const float *tapIntraGroupOffset,
+      float *delayTarget)
+    {
+      int activeGroups =
+        (activeTaps + groupSize - 1) / groupSize;
+      if (activeGroups < 1) activeGroups = 1;
+      if (activeGroups > numGroupsMax) activeGroups = numGroupsMax;
+
+      const float sizeSq = sizeNorm * sizeNorm;
+      const float invActiveGroups = 1.0f / (float)activeGroups;
+
+      const int n = activeTaps < kMaxTaps ? activeTaps : kMaxTaps;
+      for (int t = 0; t < n; t++)
+      {
+        const int g = (int)tapGroupMap[t];
+        if (g >= activeGroups)
+        {
+          delayTarget[t] = 0.0f;
+          continue;
+        }
+        const float groupBaseFrac = (float)(g + 1) * invActiveGroups;
+        const float intraOffset   = tapIntraGroupOffset[t];
+        float d = sizeSq * groupBaseFrac * intraOffset * (float)groupLen[g];
+        // Safety clamp — keep within group's sub-window so Pass A
+        // wrap math (modulo groupLen[g]) never sees negative or
+        // out-of-window values.
+        const float maxD = (float)(groupLen[g] - 1);
+        if (d < 0.0f) d = 0.0f;
+        if (d > maxD) d = maxD;
+        delayTarget[t] = d;
+      }
+      for (int i = n; i < kMaxTaps; i++) delayTarget[i] = 0.0f;
+    }
   }
 }
