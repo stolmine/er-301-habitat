@@ -358,8 +358,11 @@ namespace stolmine
         mGroupDcX1[g]          = 0.0f;
         mGroupDcY1[g]          = 0.0f;
         mGroupFbLpState[g]     = 0.0f;
+        mGroupPoolSign[g]      = 1.0f;
       }
       mDiffusedGlobalPool = 0.0f;
+      mPoolHpX1 = 0.0f;
+      mPoolHpY1 = 0.0f;
       // mTapGroupMap / mTapGroupSlot / mTapIntraGroupOffset
       // populated by recomputeCascadeAssignment() — defer to first
       // process() call (depends on mReflectors being seeded).
@@ -1688,10 +1691,13 @@ namespace stolmine
             mGroupLocalFbState[g] = g_prev_out;
 
             // Tail-third contributes to the global pool (also
-            // DC-blocked since it's the same g_prev_out).
+            // DC-blocked since it's the same g_prev_out). Per-group
+            // ±1 sign mirrors the legacy fbWeight sign-flip so the
+            // LP-biased low end of each group's local fb doesn't
+            // sum coherently across tail groups.
             if (g >= fbStartGroup)
             {
-              fb_pool_in += g_prev_out;
+              fb_pool_in += g_prev_out * mGroupPoolSign[g];
             }
           }
 
@@ -1729,12 +1735,28 @@ namespace stolmine
 
             // Soften blend (use connectivity as soften factor,
             // matching the legacy `soften = connectivity` mapping).
-            mDiffusedGlobalPool =
+            const float poolBlend =
               fb_pool_dc + connectivity * (diffused - fb_pool_dc);
+
+            // Pool HPF: catches the allpass chain's modal
+            // resonances (lengths 167/263/419/677 samples @ 48 kHz
+            // → modes at ~71/115/183/286 Hz) before they accumulate
+            // across pool recirculations. The mDcFbX1/Y1 blocker
+            // upstream is at ~50 Hz (kNetworkDcR = 0.9935) and
+            // doesn't catch this. R = 0.987 → ~100 Hz cutoff,
+            // tuned to sit just below the lowest allpass mode.
+            const float kPoolHpR = 0.987f;
+            const float hp =
+              poolBlend - mPoolHpX1 + kPoolHpR * mPoolHpY1;
+            mPoolHpX1 = poolBlend;
+            mPoolHpY1 = hp;
+            mDiffusedGlobalPool = hp;
           }
           else
           {
             mDiffusedGlobalPool = 0.0f;
+            mPoolHpX1 = 0.0f;
+            mPoolHpY1 = 0.0f;
           }
 
           // Wet bus compensation. The cascade signal flow itself
@@ -2397,6 +2419,18 @@ namespace stolmine
           (float)((h >> 16) & 0xFFFFu) * (1.0f / 65535.0f);
         mTapIntraGroupOffset[t] = 0.1f + 0.8f * u;   // [0.1, 0.9]
       }
+      // Per-group pool sign. Mirrors the legacy fbWeight sign-flip
+      // mechanism: each group contributes to the global pool with a
+      // hash-derived ±1 multiplier so coherent components (especially
+      // the LP-biased low end of each group's local fb) don't sum
+      // constructively across groups. Stable per mCascadeSeed.
+      for (int g = 0; g < kNetworkNumGroupsMax; g++)
+      {
+        uint32_t hs = mCascadeSeed ^
+          ((uint32_t)(g + 0xA00) * 2654435761u);
+        hs = hs * 1103515245u + 12345u;
+        mGroupPoolSign[g] = ((hs >> 16) & 1u) ? 1.0f : -1.0f;
+      }
     }
 
     bool allocate(int Ns)
@@ -2710,6 +2744,27 @@ namespace stolmine
     // decay so high decay = more damping (longer sustain stays
     // stable), low decay = less damping (crisp echoes).
     float mGroupFbLpState[kNetworkNumGroupsMax];
+
+    // Per-group sign for the global pool contribution. Hashed from
+    // mCascadeSeed once per (seed change), so it's stable for a
+    // given instance. Mirrors the legacy fbWeight sign-flip
+    // mechanism that prevented coherent feedback-bus buildup;
+    // without it, the cascade pool sums tail-third group outputs
+    // with all-same-sign, and low-frequency components add
+    // constructively across groups → audible low-end accumulation
+    // at sustained high-conn settings.
+    float mGroupPoolSign[kNetworkNumGroupsMax];
+
+    // High-pass on the diffused global pool result before it
+    // injects into group 0's input. The 4-stage Schroeder allpass
+    // chain (lengths 167/263/419/677 samples @ 48kHz) has modal
+    // resonances at 71/115/183/286 Hz — the "low end." The pool's
+    // DC blocker (kNetworkDcR ≈ 50 Hz cutoff) doesn't catch these.
+    // A second HPF at ~100 Hz applied AFTER diffusion catches the
+    // allpass modal buildup that otherwise accumulates over many
+    // pool recirculations. R = 0.987 → ~100 Hz cutoff at 48 kHz.
+    float mPoolHpX1;
+    float mPoolHpY1;
 
     // Global feedback pool, propagated one sample late (computed
     // this sample after the cascade, injected into group 0 next

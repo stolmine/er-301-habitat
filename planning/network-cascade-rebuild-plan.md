@@ -156,6 +156,18 @@ Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" r
 
 State: `mGroupDcX1[16]`, `mGroupDcY1[16]`. Same one-pole topology and R coefficient (`kNetworkDcR`) as the existing input / output / global-pool DC blockers. Applied to `g_prev_out` immediately after the cascade-flow normalization, *before* `g_prev_out` is used as (a) next group's cascade input, (b) current group's `mGroupLocalFbState` write, or (c) pool contribution. One blocker per group catches DC for all three downstream consumers.
 
+### Pool sign randomization + pool HPF (added in Phase B)
+
+Phase B audition (2.6.1.69) reported "beautiful cascading feedback but serious low-end buildup at low size settings." At low size, per-group fundamentals are *high* (~140 Hz @ size=0.35), so the buildup isn't from per-group resonance — it's from two specific cascade-vs-legacy gaps:
+
+1. **No sign randomization in the pool sum.** Legacy star multitap multiplied each tap's pool contribution by a hash-derived ±1 (`mFbWeight[t]`) so coherent frequency components didn't accumulate constructively across taps. The cascade rebuild summed tail-third group outputs into `fb_pool_in` with all-same-sign — the per-group LP filter biases each group's local fb toward low-mid content, and same-sign summing across tail groups makes that bias accumulate.
+2. **Allpass chain has its own low-end modes.** The 4-stage Schroeder allpass (lengths 167/263/419/677 samples @ 48 kHz) has fundamental modes at 71/115/183/286 Hz. Any input excites these modes; with sustained pool recirculation, they ring. The pool's `mDcFb` blocker is at ~50 Hz (`kNetworkDcR = 0.9935`) — below the allpass modal band — so it doesn't catch this. Legacy didn't need a higher-cutoff HPF because the feedback bus didn't recirculate enough times to ring the allpass modes audibly; the cascade's many-pass topology does.
+
+Fix landed in 2.6.1.70 as two complementary mitigations:
+
+- **`mGroupPoolSign[16]`**: per-group ±1 multiplier for the pool contribution, hashed from `mCascadeSeed` at construction / seed change. Populated alongside `mTapIntraGroupOffset` in `recomputeCascadeAssignment()`. Stable per instance.
+- **`mPoolHpX1`, `mPoolHpY1`**: second one-pole HPF applied to the pool output *after* the soften blend, *before* storing to `mDiffusedGlobalPool`. Coefficient `kPoolHpR = 0.987` → ~100 Hz cutoff, sitting just below the lowest allpass mode (71 Hz) so it catches the modal buildup without thinning useful low-mid content.
+
 ## Phases
 
 ### Phase A — Scaffolding (1–2 days)
