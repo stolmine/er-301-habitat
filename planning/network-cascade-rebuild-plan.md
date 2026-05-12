@@ -144,6 +144,12 @@ Reference-only (read, don't edit):
 - `mods/spreadsheet/Pecto.cpp` — NEON 3-pass template, lines 576–707.
 - `planning/spatial-effect-hybrid.md` — Original brief.
 
+### Per-group LP damping on local feedback (added in Phase B)
+
+Phase B audition (2.6.1.68) revealed a second stability issue separate from DC drift: at moderate settings (density 0.5, size 0.35, conn 0.75+), audible mid-range rumble accumulated. Mechanism: short per-group delays at low size (~7ms @ size=0.35, ~140 Hz fundamental) behave as undamped Karplus-Strong loops when fed back unfiltered. The legacy star multitap had L3 per-tap LP for this damping; the cascade rebuild deferred L3 to Phase C, leaving local fb loops undamped.
+
+Fix landed in 2.6.1.69: per-group one-pole LP filter on the local fb signal *before* injection into `group_in`. Same one-pole topology as the DC blocker, just LP. State: `mGroupFbLpState[16]`. Coefficient `kFbLpAlpha = 0.5 − 0.35 × decay` — light damping at low decay (crisp echoes preserved), heavier at high decay (long sustain stays stable). Matches the legacy L3 design intent of decay-coupled damping.
+
 ### Per-group DC blocker (added in Phase B)
 
 Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" risk — the per-group local recirculation accumulates DC from asymmetric tanh saturation, then amplifies through subsequent samples. Mitigation landed in 2.6.1.68 as a per-group one-pole DC blocker.

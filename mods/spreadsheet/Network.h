@@ -357,6 +357,7 @@ namespace stolmine
         mGroupStutterWetR[g]    = 0.0f;
         mGroupDcX1[g]          = 0.0f;
         mGroupDcY1[g]          = 0.0f;
+        mGroupFbLpState[g]     = 0.0f;
       }
       mDiffusedGlobalPool = 0.0f;
       // mTapGroupMap / mTapGroupSlot / mTapIntraGroupOffset
@@ -1569,6 +1570,16 @@ namespace stolmine
           // conn=1, so the single tanh at group's bufWrite caps the
           // loop without latching to DC.
           const float kLocalFbScale = connectivity * 0.6f;
+
+          // Local feedback LP coefficient (one-pole). Couples to
+          // decay so short delays at high decay get more damping
+          // (preventing Karplus-Strong-style resonant runaway in
+          // tight per-group loops). Cutoff range: ~5 kHz @ decay=0
+          // (alpha=0.5, light damping) → ~1 kHz @ decay=1
+          // (alpha=0.15, heavy damping). The damping is what
+          // makes per-group loops decay naturally instead of
+          // self-oscillating at the delay-length fundamental.
+          const float kFbLpAlpha = 0.5f - 0.35f * decay;
           // Tail-third of active groups feeds the global pool.
           // fbStartGroup = aG - max(1, aG/3). numFbGroups for the
           // 1/sqrt(k) normalization below.
@@ -1584,9 +1595,22 @@ namespace stolmine
             // Group input = cascade-flow + local feedback (and
             // diffused global pool for group 0 only). All three
             // sum before the bufWrite tanh.
+            //
+            // Local feedback path passes through a one-pole LP
+            // filter (kFbLpAlpha, decay-coupled) BEFORE injection.
+            // This is what makes the per-group loop a damped
+            // resonator rather than an undamped Karplus-Strong
+            // string. Without it, short per-group delays
+            // (e.g., size=0.35 → ~140 Hz fundamental) self-
+            // oscillate at high conn, producing audible rumble.
+            const float fbRaw = mGroupLocalFbState[g];
+            mGroupFbLpState[g] +=
+              (fbRaw - mGroupFbLpState[g]) * kFbLpAlpha;
+            const float fbDamped = mGroupFbLpState[g];
+
             const float group_in_cascade = (g == 0) ? x : g_prev_out;
             float group_in = group_in_cascade +
-              mGroupLocalFbState[g] * kLocalFbScale;
+              fbDamped * kLocalFbScale;
             if (g == 0) group_in += mDiffusedGlobalPool;
 
             // Write tanh(group_in) to group's sub-window head.
@@ -2676,6 +2700,16 @@ namespace stolmine
     // blockers — idiomatic.
     float mGroupDcX1[kNetworkNumGroupsMax];
     float mGroupDcY1[kNetworkNumGroupsMax];
+
+    // Per-group one-pole LP filter on the local feedback signal.
+    // Damps high-frequency content per recirculation so short
+    // per-group delays (e.g., size=0.35 → ~140 Hz fundamental)
+    // don't behave as undamped Karplus-Strong strings and build
+    // up resonant peaks. Same mechanism as Schroeder/Moorer reverb
+    // damping and the legacy L3 per-tap LP. Cutoff couples to
+    // decay so high decay = more damping (longer sustain stays
+    // stable), low decay = less damping (crisp echoes).
+    float mGroupFbLpState[kNetworkNumGroupsMax];
 
     // Global feedback pool, propagated one sample late (computed
     // this sample after the cascade, injected into group 0 next
