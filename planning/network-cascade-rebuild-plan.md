@@ -144,6 +144,12 @@ Reference-only (read, don't edit):
 - `mods/spreadsheet/Pecto.cpp` — NEON 3-pass template, lines 576–707.
 - `planning/spatial-effect-hybrid.md` — Original brief.
 
+### Per-group DC blocker (added in Phase B)
+
+Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" risk — the per-group local recirculation accumulates DC from asymmetric tanh saturation, then amplifies through subsequent samples. Mitigation landed in 2.6.1.68 as a per-group one-pole DC blocker.
+
+State: `mGroupDcX1[16]`, `mGroupDcY1[16]`. Same one-pole topology and R coefficient (`kNetworkDcR`) as the existing input / output / global-pool DC blockers. Applied to `g_prev_out` immediately after the cascade-flow normalization, *before* `g_prev_out` is used as (a) next group's cascade input, (b) current group's `mGroupLocalFbState` write, or (c) pool contribution. One blocker per group catches DC for all three downstream consumers.
+
 ## Phases
 
 ### Phase A — Scaffolding (1–2 days)

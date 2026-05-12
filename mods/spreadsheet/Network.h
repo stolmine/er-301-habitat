@@ -355,6 +355,8 @@ namespace stolmine
         mGroupMonoStutterAcc[g] = 0.0f;
         mGroupStutterWetL[g]    = 0.0f;
         mGroupStutterWetR[g]    = 0.0f;
+        mGroupDcX1[g]          = 0.0f;
+        mGroupDcY1[g]          = 0.0f;
       }
       mDiffusedGlobalPool = 0.0f;
       // mTapGroupMap / mTapGroupSlot / mTapIntraGroupOffset
@@ -1640,12 +1642,29 @@ namespace stolmine
               1.0f / (float)kNetworkGroupSize;
             g_prev_out = groupMono * kCascadeStageNorm;
 
+            // Per-group one-pole DC blocker. Catches DC drift
+            // from asymmetric tanh saturation in the local
+            // recirculation before it amplifies through subsequent
+            // samples. Applied here so all three downstream
+            // consumers (next group's cascade input, local fb
+            // state, pool contribution) see the cleaned signal.
+            {
+              const float dcX = mGroupDcX1[g];
+              const float dcY = mGroupDcY1[g];
+              const float dcOut =
+                g_prev_out - dcX + kNetworkDcR * dcY;
+              mGroupDcX1[g] = g_prev_out;
+              mGroupDcY1[g] = dcOut;
+              g_prev_out = dcOut;
+            }
+
             // Local feedback state for NEXT sample. Stored as the
-            // already-normalized cascade output so the × 0.6 ×
+            // DC-blocked, normalized cascade output so the × 0.6 ×
             // conn ceiling has predictable scale.
             mGroupLocalFbState[g] = g_prev_out;
 
-            // Tail-third contributes to the global pool.
+            // Tail-third contributes to the global pool (also
+            // DC-blocked since it's the same g_prev_out).
             if (g >= fbStartGroup)
             {
               fb_pool_in += g_prev_out;
@@ -2644,6 +2663,19 @@ namespace stolmine
     // group_mono_out). Fed back into the group's input multiplied
     // by conn × 0.6 ceiling.
     float mGroupLocalFbState[kNetworkNumGroupsMax];
+
+    // Per-group one-pole DC blocker state. Applied to g_prev_out
+    // after the cascade-flow normalization, before the value is
+    // used as (a) next group's cascade input, (b) this group's
+    // local feedback state, or (c) the global pool contribution.
+    // One blocker per group catches DC accumulation from asymmetric
+    // tanh saturation in the per-group recirculation; without it
+    // sustained high-conn high-decay patches latch into a DC-
+    // saturated state. Same R coefficient (kNetworkDcR) and same
+    // one-pole topology as the existing input / output / fb DC
+    // blockers — idiomatic.
+    float mGroupDcX1[kNetworkNumGroupsMax];
+    float mGroupDcY1[kNetworkNumGroupsMax];
 
     // Global feedback pool, propagated one sample late (computed
     // this sample after the cascade, injected into group 0 next
