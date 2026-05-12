@@ -156,6 +156,25 @@ Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" r
 
 State: `mGroupDcX1[16]`, `mGroupDcY1[16]`. Same one-pole topology and R coefficient (`kNetworkDcR`) as the existing input / output / global-pool DC blockers. Applied to `g_prev_out` immediately after the cascade-flow normalization, *before* `g_prev_out` is used as (a) next group's cascade input, (b) current group's `mGroupLocalFbState` write, or (c) pool contribution. One blocker per group catches DC for all three downstream consumers.
 
+### Hadamard 16×16 FDN cross-feed (added in Phase B, replaces pool path)
+
+Phase B audition (2.6.1.72) reported "still sounds like a resonator more than a reverb, much more space at lower densities than higher." Research against the established FDN reverb literature (CCRMA / Stanford, DAFx FDN Toolbox, Signalsmith, Valhalla DSP writings) identified the architectural cause:
+
+**The structural problem: rank-1 cross-feed.** The defining property of a proper FDN reverb is a **full-rank cross-feed matrix** between delay lines — Hadamard or Stautner-Puckette matrices are the canonical choice because they give "the maximum amount of inter-channel mixing" (CCRMA). Every delay line's output feeds back into every delay line's input with orthogonal (sign-varied) weights, producing N mutually orthogonal modes.
+
+Our prior cascade had **rank-1 cross-feed**: one scalar (`mDiffusedGlobalPool`) was computed from the tail-third sum and injected into all 16 groups uniformly. The effective cross-feed matrix was constant across rows i → rank-1 → exactly one dominant feedback mode → all 16 groups collapse into one coupled resonator. This matched all three audition symptoms:
+- "Resonator more than reverb": rank-1 is mathematically a resonator (one dominant eigenvalue).
+- "More space at lower densities": at low density, fewer groups active, the rank-1 coupling degenerates into a sparse multitap with distinct echoes. At high density, all 16 modes collapse into the rank-1 coupling.
+- "Smear above density 0.1": 64 simultaneous tap reads × rank-1 cross-feed = harmonic mode collapse → wash.
+
+Fix landed in 2.6.1.73:
+
+- **Replaced pool path entirely with Hadamard FDN cross-feed.** Per sample, before the per-group loop: collect previous-sample per-group outputs `G[16] = mGroupLocalFbState[0..15]` into `mHadamardScratch[16]`, apply 16-point Fast Walsh-Hadamard Transform (FWHT) via butterflies (4 stages × 8 add/sub = 64 ops total, no multiplies). Result `M[g]` is each group's cross-feed contribution from all 15 other groups with orthogonal ±1 weighting.
+- **Per-group injection**: `group_in += mHadamardScratch[g] * kCrossFeedScale` where `kCrossFeedScale = connectivity × decay × (1/√16)`. The 1/√16 = 0.25 normalizes the Hadamard matrix to unitary (operator norm 1), so decay × connectivity is the actual spectral radius of the feedback loop. Decay=conn=1 = marginally stable infinite tail (clamped by bufWrite tanh + per-group LP+HPF). Decay=0 = no cross-feed → cascade reads as 16 independent damped delay lines.
+- **Pool source/diffusion/HPF removed** from the per-sample cascade path. Hadamard alone provides decorrelation/mixing (FDN literature: proper mixing matrix doesn't need additional allpass diffusion). State members `mDcFbX1/Y1`, `mGroupPoolSign`, `mPoolHpX1/Y1`, `mDiffusedGlobalPool`, `mApBuf{1..4}` retained as declared (still used by the legacy non-cascade path) but unused in cascade.
+
+CPU cost of Hadamard cross-feed: 64 add/sub + 16 multiplies per sample = ~80 ops × 48 kHz = 3.8 M ops/sec. Trivial on Cortex-A8 (~1% CPU). The pool path it replaced was 4-stage allpass + DC + HPF + tanh = significantly more expensive; net CPU is lower.
+
 ### Multi-group pool injection + widened decay→local-fb range (added in Phase B)
 
 Phase B audition (2.6.1.71) reported "still smears at any non-low density, decay is still dead, OG produced much more ring-out." Diagnosis required tracing the legacy feedback path:

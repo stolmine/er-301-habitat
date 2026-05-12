@@ -361,6 +361,7 @@ namespace stolmine
         mGroupFbHpX1[g]        = 0.0f;
         mGroupFbHpY1[g]        = 0.0f;
         mGroupPoolSign[g]      = 1.0f;
+        mHadamardScratch[g]    = 0.0f;
       }
       mDiffusedGlobalPool = 0.0f;
       mPoolHpX1 = 0.0f;
@@ -1568,7 +1569,6 @@ namespace stolmine
           float g_prev_out = 0.0f;
           float wetL = 0.0f;
           float wetR = 0.0f;
-          float fb_pool_in = 0.0f;
 
           // Local feedback gain, decay-coupled with full perceptual
           // range: at decay=0 → 0.1×conn (minimal per-group ring,
@@ -1582,15 +1582,21 @@ namespace stolmine
           const float kLocalFbScale =
             connectivity * (0.1f + 0.7f * decay);
 
-          // Pool per-group attenuation. The pool now injects into
-          // EVERY group's write head (not just group 0) so the
-          // decay-controlled recirculation reaches all 64 taps the
-          // way legacy's single-write-head fb did. Per-group
-          // attenuation by 1/sqrt(aG) keeps total injected energy
-          // equivalent to legacy's single-write injection: 16 × (P/√16)²
-          // = P². See planning/network-cascade-rebuild-plan.md.
-          const float poolPerGroupScale =
-            (aG > 0) ? (1.0f / sqrtf((float)aG)) : 1.0f;
+          // Hadamard FDN cross-feed scale. The 16×16 Hadamard matrix
+          // with entries ±1 has operator norm √16; dividing by √16=4
+          // gives a unitary matrix with operator norm 1. The decay×conn
+          // gain on this unitary feedback path gives the FDN its
+          // spectral radius — at decay=conn=1 the system is marginally
+          // stable (infinite ring time in linear approximation; finite
+          // tail via bufWrite tanh + per-group filters). Per Stautner-
+          // Puckette / Jot, the Hadamard matrix is the canonical
+          // choice for maximum inter-channel mixing with N orthogonal
+          // modes. This replaces the prior rank-1 pool injection,
+          // which collapsed all cross-feed into one dominant mode →
+          // resonator character. See planning/network-cascade-rebuild-plan.md.
+          const float kHadamardNorm = 0.25f;  // 1/√16
+          const float kCrossFeedScale =
+            connectivity * decay * kHadamardNorm;
 
           // Local feedback LP coefficient (one-pole). Couples to
           // decay so short delays at high decay get more damping
@@ -1601,11 +1607,33 @@ namespace stolmine
           // makes per-group loops decay naturally instead of
           // self-oscillating at the delay-length fundamental.
           const float kFbLpAlpha = 0.5f - 0.35f * decay;
-          // Tail-third of active groups feeds the global pool.
-          // fbStartGroup = aG - max(1, aG/3). numFbGroups for the
-          // 1/sqrt(k) normalization below.
-          const int fbCount = (aG / 3 > 0) ? (aG / 3) : 1;
-          const int fbStartGroup = aG - fbCount;
+
+          // ---- Hadamard FDN cross-feed computation ----
+          // Compute M = H_16 × G where G is the previous-sample
+          // per-group output vector (mGroupLocalFbState). Uses
+          // Fast Walsh-Hadamard Transform (FWHT) butterflies — 4
+          // stages × 8 add/sub butterflies = 64 ops, no multiplies.
+          // Result M[g] is each group's cross-feed contribution from
+          // all 15 other groups with orthogonal ±1 weighting.
+          //
+          // Decay=0 → kCrossFeedScale=0 → no cross-feed → cascade
+          // behaves as 16 independent damped delay lines.
+          // Decay=1 → marginal stability → infinite-tail reverb.
+          for (int g = 0; g < kNetworkNumGroupsMax; g++)
+            mHadamardScratch[g] = mGroupLocalFbState[g];
+          for (int len = 1; len < kNetworkNumGroupsMax; len <<= 1)
+          {
+            for (int s = 0; s < kNetworkNumGroupsMax; s += (len << 1))
+            {
+              for (int j = s; j < s + len; j++)
+              {
+                const float a = mHadamardScratch[j];
+                const float b = mHadamardScratch[j + len];
+                mHadamardScratch[j]       = a + b;
+                mHadamardScratch[j + len] = a - b;
+              }
+            }
+          }
 
           for (int g = 0; g < aG; g++)
           {
@@ -1643,7 +1671,7 @@ namespace stolmine
             const float group_in_cascade = (g == 0) ? x : g_prev_out;
             float group_in = group_in_cascade +
               fbDamped * kLocalFbScale +
-              mDiffusedGlobalPool;
+              mHadamardScratch[g] * kCrossFeedScale;
 
             // Write tanh(group_in) to group's sub-window head.
             bufWrite(buf,
@@ -1715,82 +1743,15 @@ namespace stolmine
             }
 
             // Local feedback state for NEXT sample. Stored as the
-            // DC-blocked, normalized cascade output so the × 0.6 ×
-            // conn ceiling has predictable scale.
+            // DC-blocked, normalized cascade output. Also forms the
+            // input vector for next sample's Hadamard cross-feed.
             mGroupLocalFbState[g] = g_prev_out;
-
-            // Tail-third contributes to the global pool (also
-            // DC-blocked since it's the same g_prev_out). Per-group
-            // ±1 sign mirrors the legacy fbWeight sign-flip so the
-            // LP-biased low end of each group's local fb doesn't
-            // sum coherently across tail groups.
-            if (g >= fbStartGroup)
-            {
-              fb_pool_in += g_prev_out * mGroupPoolSign[g];
-            }
           }
-
-          // Global feedback pool. Tail-third of active groups
-          // contributed mono outputs into fb_pool_in during the
-          // cascade loop above. Pool path mirrors the legacy
-          // star-multitap feedback pipeline verbatim: 1/sqrt(k)
-          // normalization × conn × decay → networkFastTanh →
-          // one-pole DC blocker → 4-stage Schroeder allpass chain
-          // (reused buffers/coefficients from the existing
-          // pipeline). The diffused result is held in
-          // mDiffusedGlobalPool for next sample's group 0 input.
-          // Inject-into-group-0-only is the natural injection
-          // point for "recycle back to head" cascade semantics.
-          if (fbCount > 0)
-          {
-            const float poolGain =
-              connectivity * decay /
-              sqrtf((float)fbCount);
-            const float fb_pool_tanh =
-              networkFastTanh(fb_pool_in * poolGain);
-            const float fb_pool_dc =
-              fb_pool_tanh - mDcFbX1 + kNetworkDcR * mDcFbY1;
-            mDcFbX1 = fb_pool_tanh;
-            mDcFbY1 = fb_pool_dc;
-
-            float diffused = networkAllpassStep(
-              fb_pool_dc, mApBuf1, kNetworkAp1Len, mApIdx1, 0.55f);
-            diffused = networkAllpassStep(
-              diffused, mApBuf2, kNetworkAp2Len, mApIdx2, 0.65f);
-            diffused = networkAllpassStep(
-              diffused, mApBuf3, kNetworkAp3Len, mApIdx3, 0.70f);
-            diffused = networkAllpassStep(
-              diffused, mApBuf4, kNetworkAp4Len, mApIdx4, 0.75f);
-
-            // Soften blend (use connectivity as soften factor,
-            // matching the legacy `soften = connectivity` mapping).
-            const float poolBlend =
-              fb_pool_dc + connectivity * (diffused - fb_pool_dc);
-
-            // Pool HPF: catches the allpass chain's modal
-            // resonances (lengths 167/263/419/677 samples @ 48 kHz
-            // → modes at ~71/115/183/286 Hz) before they accumulate
-            // across pool recirculations. The mDcFbX1/Y1 blocker
-            // upstream is at ~50 Hz (kNetworkDcR = 0.9935) and
-            // doesn't catch this. R = 0.987 → ~100 Hz cutoff,
-            // tuned to sit just below the lowest allpass mode.
-            const float kPoolHpR = 0.987f;
-            const float hp =
-              poolBlend - mPoolHpX1 + kPoolHpR * mPoolHpY1;
-            mPoolHpX1 = poolBlend;
-            mPoolHpY1 = hp;
-            // Pre-attenuated for multi-group injection: every group's
-            // write head adds mDiffusedGlobalPool, so the value
-            // stored here is already pool / sqrt(aG) to match
-            // legacy's single-injection energy budget.
-            mDiffusedGlobalPool = hp * poolPerGroupScale;
-          }
-          else
-          {
-            mDiffusedGlobalPool = 0.0f;
-            mPoolHpX1 = 0.0f;
-            mPoolHpY1 = 0.0f;
-          }
+          // Pool path removed: replaced by the Hadamard FDN cross-feed
+          // computed at the top of the sample. Hadamard provides
+          // full-rank mode mixing where the pool was rank-1.
+          // mDcFbX1/Y1, mGroupPoolSign, mPoolHpX1/Y1, mDiffusedGlobalPool,
+          // mApBuf{1..4} retained as declared but unused in this path.
 
           // Wet bus compensation. The cascade signal flow itself
           // is correctly normalized (1/N per stage prevents
@@ -2774,6 +2735,18 @@ namespace stolmine
     // decay so high decay = more damping (longer sustain stays
     // stable), low decay = less damping (crisp echoes).
     float mGroupFbLpState[kNetworkNumGroupsMax];
+
+    // Hadamard FDN cross-feed scratch. Holds the per-sample
+    // FWHT result M[16] = H_16 × G[16], where G is the vector of
+    // per-group previous outputs (mGroupLocalFbState). Each group's
+    // input receives M[g] as the cross-feed contribution from ALL
+    // other groups with orthogonal sign weighting — this is the
+    // full-rank cross-feed matrix that converts the cascade from a
+    // resonator (rank-1 pool injection) into a proper Feedback Delay
+    // Network reverb. Class member (not stack-local) per
+    // feedback_neon_intrinsics_drumvoice — stack-local NEON-adjacent
+    // arrays risk GCC :64 alignment hints on Cortex-A8.
+    float mHadamardScratch[kNetworkNumGroupsMax];
 
     // Per-group one-pole HPF state on the local feedback path. The
     // existing per-group LP filter integrates DC and low-mid content
