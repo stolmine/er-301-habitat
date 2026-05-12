@@ -1560,6 +1560,18 @@ namespace stolmine
           float g_prev_out = 0.0f;
           float wetL = 0.0f;
           float wetR = 0.0f;
+          float fb_pool_in = 0.0f;
+
+          // Local feedback gain ceiling per Phase B plan: conn × 0.6.
+          // Keeps the per-group recirculation sub-unity even at
+          // conn=1, so the single tanh at group's bufWrite caps the
+          // loop without latching to DC.
+          const float kLocalFbScale = connectivity * 0.6f;
+          // Tail-third of active groups feeds the global pool.
+          // fbStartGroup = aG - max(1, aG/3). numFbGroups for the
+          // 1/sqrt(k) normalization below.
+          const int fbCount = (aG / 3 > 0) ? (aG / 3) : 1;
+          const int fbStartGroup = aG - fbCount;
 
           for (int g = 0; g < aG; g++)
           {
@@ -1567,7 +1579,13 @@ namespace stolmine
             const int gLen  = mGroupLen[g];
             if (gLen <= 0) continue;
 
-            const float group_in = (g == 0) ? x : g_prev_out;
+            // Group input = cascade-flow + local feedback (and
+            // diffused global pool for group 0 only). All three
+            // sum before the bufWrite tanh.
+            const float group_in_cascade = (g == 0) ? x : g_prev_out;
+            float group_in = group_in_cascade +
+              mGroupLocalFbState[g] * kLocalFbScale;
+            if (g == 0) group_in += mDiffusedGlobalPool;
 
             // Write tanh(group_in) to group's sub-window head.
             bufWrite(buf,
@@ -1621,6 +1639,59 @@ namespace stolmine
             const float kCascadeStageNorm =
               1.0f / (float)kNetworkGroupSize;
             g_prev_out = groupMono * kCascadeStageNorm;
+
+            // Local feedback state for NEXT sample. Stored as the
+            // already-normalized cascade output so the × 0.6 ×
+            // conn ceiling has predictable scale.
+            mGroupLocalFbState[g] = g_prev_out;
+
+            // Tail-third contributes to the global pool.
+            if (g >= fbStartGroup)
+            {
+              fb_pool_in += g_prev_out;
+            }
+          }
+
+          // Global feedback pool. Tail-third of active groups
+          // contributed mono outputs into fb_pool_in during the
+          // cascade loop above. Pool path mirrors the legacy
+          // star-multitap feedback pipeline verbatim: 1/sqrt(k)
+          // normalization × conn × decay → networkFastTanh →
+          // one-pole DC blocker → 4-stage Schroeder allpass chain
+          // (reused buffers/coefficients from the existing
+          // pipeline). The diffused result is held in
+          // mDiffusedGlobalPool for next sample's group 0 input.
+          // Inject-into-group-0-only is the natural injection
+          // point for "recycle back to head" cascade semantics.
+          if (fbCount > 0)
+          {
+            const float poolGain =
+              connectivity * decay /
+              sqrtf((float)fbCount);
+            const float fb_pool_tanh =
+              networkFastTanh(fb_pool_in * poolGain);
+            const float fb_pool_dc =
+              fb_pool_tanh - mDcFbX1 + kNetworkDcR * mDcFbY1;
+            mDcFbX1 = fb_pool_tanh;
+            mDcFbY1 = fb_pool_dc;
+
+            float diffused = networkAllpassStep(
+              fb_pool_dc, mApBuf1, kNetworkAp1Len, mApIdx1, 0.55f);
+            diffused = networkAllpassStep(
+              diffused, mApBuf2, kNetworkAp2Len, mApIdx2, 0.65f);
+            diffused = networkAllpassStep(
+              diffused, mApBuf3, kNetworkAp3Len, mApIdx3, 0.70f);
+            diffused = networkAllpassStep(
+              diffused, mApBuf4, kNetworkAp4Len, mApIdx4, 0.75f);
+
+            // Soften blend (use connectivity as soften factor,
+            // matching the legacy `soften = connectivity` mapping).
+            mDiffusedGlobalPool =
+              fb_pool_dc + connectivity * (diffused - fb_pool_dc);
+          }
+          else
+          {
+            mDiffusedGlobalPool = 0.0f;
           }
 
           // Wet bus compensation. The cascade signal flow itself
