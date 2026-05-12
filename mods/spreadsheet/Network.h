@@ -362,6 +362,9 @@ namespace stolmine
         mGroupFbHpY1[g]        = 0.0f;
         mGroupPoolSign[g]      = 1.0f;
         mHadamardScratch[g]    = 0.0f;
+        mGroupFdnState[g]      = 0.0f;
+        mGroupFdnDcX1[g]       = 0.0f;
+        mGroupFdnDcY1[g]       = 0.0f;
       }
       mDecayCoefPerSample = 0.0f;
       mDiffusedGlobalPool = 0.0f;
@@ -1599,17 +1602,28 @@ namespace stolmine
           float wetL = 0.0f;
           float wetR = 0.0f;
 
-          // Local feedback gain, decay-coupled with full perceptual
-          // range: at decay=0 → 0.1×conn (minimal per-group ring,
-          // cascade reads as discrete echo chain); at decay=1 →
-          // 0.8×conn (strong per-group ringing tails). Stays
-          // sub-unity so bufWrite tanh + per-group LP+HPF band-pass
-          // keep the loop stable. Wider range than the prior
-          // 0.35-0.75 (which felt like "always somewhat ringing")
-          // gives decay a clear on/off perceptual axis on the
-          // short-time character.
+          // Local feedback gain shares a feedback budget with the
+          // FDN cross-feed so the combined (local fb + FDN) loop
+          // gain stays ≤ 1 at all frequencies — preventing runaway
+          // in the linear region of tanh. (Tanh still saturates at
+          // |x| > 1 but a linearly unstable loop produces hot
+          // sustained saturated output that sounds like runaway
+          // even if amplitude is bounded.)
+          //
+          // FDN per-line peak loop gain is decayCoefPerSample (with
+          // single-tap FDN state, unitary Hadamard, no extra
+          // multiplier). Budget for local fb:
+          //   kLocalFbScale ≤ 1 − decayCoefPerSample
+          //
+          // At decay=0 (decayCoefPerSample ≈ 0.13): local fb up to
+          // ~0.87 × conn — strong per-group slapback character.
+          // At decay=1 (decayCoefPerSample ≈ 1): local fb → 0;
+          // FDN dominates, long sustained tails.
+          //
+          // Smooth handoff via decay: short-time color → long-time
+          // reverb. connectivity scales overall feedback amount.
           const float kLocalFbScale =
-            connectivity * (0.1f + 0.7f * decay);
+            connectivity * (1.0f - mDecayCoefPerSample);
 
           // FDN feedback gain folded into one scalar:
           //   kFdnGain = (1/√16) × decayCoefPerSample
@@ -1639,26 +1653,15 @@ namespace stolmine
 
           // ---- Hadamard FDN cross-feed computation ----
           // Compute M = H_16 × G where G is the previous-sample
-          // per-group output vector. The state mGroupLocalFbState[g]
-          // is the DC-blocked cascade output, which is groupMono/4
-          // (the × 0.25 cascade-flow normalization that keeps signal
-          // at unity through inter-group chain). For the FDN feedback
-          // path we need the UN-normalized state — otherwise the /4
-          // cascade norm gets applied per FDN round-trip, collapsing
-          // spectral radius from decayCoefPerSample to
-          // decayCoefPerSample × 0.25 → T60 cut by factor of 4.
-          //
-          // Multiplying by 4 here undoes the cascade /4 for the FDN
-          // path while preserving the /4 for the cascade flow path
-          // (which still reads mGroupLocalFbState directly). With
-          // this compensation, the FDN loop gain is exactly
-          // decayCoefPerSample as the matrix requires for proper
-          // T60 control. Compare yrn1's FDN where each line's delay
-          // output is fed directly to the Hadamard butterflies with
-          // no per-line attenuation other than the user-controlled
-          // feedback gain.
+          // per-group single-tap state (mGroupFdnState). Single-tap
+          // state has |H_g(jω)| = 1 at all frequencies — no comb
+          // peaks — so the FDN loop gain is uniform across frequency.
+          // (Using mGroupLocalFbState, which is mean of 4 multi-tap
+          // reads, would have |H| up to 4 at constructive frequencies,
+          // making the linear-region loop gain > 1 at peaks and
+          // producing hot tanh-saturated runaway-sounding output.)
           for (int g = 0; g < kNetworkNumGroupsMax; g++)
-            mHadamardScratch[g] = mGroupLocalFbState[g] * 4.0f;
+            mHadamardScratch[g] = mGroupFdnState[g];
           for (int len = 1; len < kNetworkNumGroupsMax; len <<= 1)
           {
             for (int s = 0; s < kNetworkNumGroupsMax; s += (len << 1))
@@ -1720,6 +1723,7 @@ namespace stolmine
             float groupMono = 0.0f;
             float groupWetL = 0.0f;
             float groupWetR = 0.0f;
+            float fdnTapRead = 0.0f;  // single-tap FDN state (last/longest)
             const int tBase = g * kNetworkGroupSize;
             const int kLim =
               ((tBase + kNetworkGroupSize) <= activeTaps)
@@ -1736,6 +1740,7 @@ namespace stolmine
               groupMono += s;
               groupWetL += s * mTapGainLSmoothed[t];
               groupWetR += s * mTapGainRSmoothed[t];
+              if (k == kLim - 1) fdnTapRead = s;
             }
 
             wetL += groupWetL;
@@ -1780,10 +1785,26 @@ namespace stolmine
               g_prev_out = dcOut;
             }
 
-            // Local feedback state for NEXT sample. Stored as the
-            // DC-blocked, normalized cascade output. Also forms the
-            // input vector for next sample's Hadamard cross-feed.
+            // Local feedback state for NEXT sample. DC-blocked,
+            // /4-normalized cascade output. Used by local-fb path
+            // (color/short-time character).
             mGroupLocalFbState[g] = g_prev_out;
+
+            // FDN feedback state for NEXT sample. Single-tap
+            // (longest-delay tap of this group), DC-blocked. This is
+            // the input to the Hadamard cross-feed. Single-tap form
+            // gives |H_g(jω)| = 1 at all frequencies, so the FDN
+            // loop gain stays at decayCoefPerSample uniformly across
+            // frequency — no comb-peak runaway.
+            {
+              const float dcX = mGroupFdnDcX1[g];
+              const float dcY = mGroupFdnDcY1[g];
+              const float dcOut =
+                fdnTapRead - dcX + kNetworkDcR * dcY;
+              mGroupFdnDcX1[g] = fdnTapRead;
+              mGroupFdnDcY1[g] = dcOut;
+              mGroupFdnState[g] = dcOut;
+            }
           }
           // Pool path removed: replaced by the Hadamard FDN cross-feed
           // computed at the top of the sample. Hadamard provides
@@ -2784,6 +2805,25 @@ namespace stolmine
     // decay so high decay = more damping (longer sustain stays
     // stable), low decay = less damping (crisp echoes).
     float mGroupFbLpState[kNetworkNumGroupsMax];
+
+    // Per-group FDN feedback state. Single-tap (slot 3, the longest
+    // delay tap of each group) DC-blocked read. Used as input to the
+    // Hadamard FWHT for FDN cross-feed.
+    //
+    // Why single-tap, not mean-of-4: multi-tap output has |H_g(jω)|
+    // varying from 0 to 4 across frequencies (comb peaks at
+    // constructive tap-delay combinations). Using multi-tap as FDN
+    // state creates peak-frequency loop gains > 1 (unstable) while
+    // average frequencies are under-driven. Single-tap state has
+    // |H_g(jω)| = 1 at all frequencies — clean unitary FDN matrix
+    // behavior. The 4 tap reads still drive the wet bus and local
+    // fb path (where comb-peak coloration is musically desirable),
+    // but the FDN feedback uses just one per group. yrn1's working
+    // FDN reverb uses the same structure: one delay-line output per
+    // FDN line for the matrix feedback.
+    float mGroupFdnState[kNetworkNumGroupsMax];
+    float mGroupFdnDcX1[kNetworkNumGroupsMax];
+    float mGroupFdnDcY1[kNetworkNumGroupsMax];
 
     // Per-sample FDN decay coefficient. Computed block-rate from
     // the user's target T60 (mapped from the decay knob):

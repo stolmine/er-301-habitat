@@ -156,6 +156,34 @@ Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" r
 
 State: `mGroupDcX1[16]`, `mGroupDcY1[16]`. Same one-pole topology and R coefficient (`kNetworkDcR`) as the existing input / output / global-pool DC blockers. Applied to `g_prev_out` immediately after the cascade-flow normalization, *before* `g_prev_out` is used as (a) next group's cascade input, (b) current group's `mGroupLocalFbState` write, or (c) pool contribution. One blocker per group catches DC for all three downstream consumers.
 
+### Single-tap FDN state + feedback-budget local fb (added in Phase B)
+
+Phase B audition (2.6.1.78) reported "runaway with even one tap group engaged." The previous fix (`× 4` Hadamard multiplier to undo cascade /4 norm) over-compensated at constructive comb-peak frequencies of the multi-tap output, producing peak-frequency loop gain > 1 → linear instability bounded only by hard tanh saturation → hot saturated runaway-sounding output.
+
+**Why multi-tap FDN state is unstable:**
+- `mGroupLocalFbState[g] = groupMono / 4 = mean of 4 tap reads`
+- Multi-tap output transfer function: `|H_g(jω)|² = 4 + 2 Σ_{i≠j} cos((D_g_i − D_g_j) × ω)`
+- |H_g(jω)|_max = 4 at constructive frequencies (all tap delay differences land on integer multiples of 2π)
+- |H_g(jω)|_min = 0 at destructive frequencies
+- Mean of 4 reads: `|H̄_g| = |H_g| / 4` ranges 0 to 1
+- With `× 4` compensation, peak-frequency FDN loop gain ≈ 1.0
+- Plus local fb at 0.8 × state: combined ≈ 1.8 at peak → unstable
+
+**Structural fix: single-tap FDN state.** Per yrn1's working FDN reverb (and Tom Erbe's reverb topology paper, Jot 1991), the FDN feedback path uses one delay-line output per line — `|H_g(jω)| = 1` at all frequencies. Multi-tap is fine for wet bus and local-fb path where comb-peak coloration is musically desirable, but the FDN feedback needs a clean single-tap signal.
+
+**Feedback budget for stability:** total loop gain ≤ 1 at all frequencies in the linear region of tanh. With single-tap FDN at gain `decayCoefPerSample`, local fb gets budget `1 − decayCoefPerSample`:
+- At decay=0 (decayCoefPerSample ≈ 0.13): local fb up to ~0.87 × conn → strong slapback character
+- At decay=1 (decayCoefPerSample ≈ 1): local fb → 0, FDN dominates → long sustained tails
+- Smooth handoff via decay knob
+
+Fix landed in 2.6.1.79:
+
+- **`mGroupFdnState[16]`, `mGroupFdnDcX1/Y1[16]`**: new per-group state holding the longest-tap (slot 3) read, DC-blocked. Captured in the per-group tap loop alongside `groupMono`. No cascade /4 norm applied.
+- **Hadamard input = `mGroupFdnState[g]`** (replaces `mGroupLocalFbState[g]`); no `× 4` multiplier.
+- **`kLocalFbScale = connectivity × (1 − decayCoefPerSample)`**: feedback budget formula. At decay=0 gives strong per-group color; at decay=1 fades to 0 so FDN owns the tail.
+
+Tanh saturation on `bufWrite` remains the ultimate safety net for extreme settings, but the linear-region loop gain is now provably ≤ 1 at every frequency for any decay × connectivity combination. Density still naturally varies T60 (single-group active = ~4× shorter T60; full density = target T60 from decay knob).
+
 ### FDN state un-normalization for proper loop gain (added in Phase B)
 
 Phase B audition (2.6.1.77) reported "raw tap size seems to be producing long enough echoes, but they don't persist back into the system." User pointed to yrn1's FDN reverb (https://github.com/yrn1/er-301-custom-units, `src/mods/fdelay/assets/FDN.lua`, based on Tom Erbe's reverb topology paper) as a working reference.
