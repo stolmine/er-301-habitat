@@ -1559,11 +1559,22 @@ namespace stolmine
         const int aG = activeGroupsLocal;
 
         {
+          // T60_decay (max-T60 from decay knob) × conn (master fb
+          // amount) × size² (room-size mapping). The size² is what
+          // breaks the otherwise size-invariant per-sample math:
+          // D_avg scales linearly with sizeNorm, T60_eff scales as
+          // sizeNorm², so the ratio in decayCoefPerSample's exponent
+          // scales as 1/sizeNorm — giving more per-sample decay at
+          // small size, eliminating the low-size feedback spikes
+          // that arose when fast-cycling short loops had per-round-
+          // trip gain close to unity. Physically intuitive: smaller
+          // room → shorter T60 → less time for transients to build.
           const float kT60Floor = 0.05f;
           const float kT60Span  = 10.0f;
           const float T60_decay = kT60Floor + decay * decay * kT60Span;
-          const float T60_eff =
-            (connectivity > 1e-4f) ? (connectivity * T60_decay) : 0.001f;
+          float T60_eff =
+            connectivity * T60_decay * sizeNorm * sizeNorm;
+          if (T60_eff < 0.001f) T60_eff = 0.001f;
           const float Fs = globalConfig.sampleRate;
 
           // D_avg from slot-3 tap delays of active groups.
