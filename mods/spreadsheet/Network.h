@@ -365,6 +365,7 @@ namespace stolmine
         mGroupFdnState[g]      = 0.0f;
         mGroupFdnDcX1[g]       = 0.0f;
         mGroupFdnDcY1[g]       = 0.0f;
+        mGroupFdnLpState[g]    = 0.0f;
       }
       mDecayCoefPerSample = 0.0f;
       mDiffusedGlobalPool = 0.0f;
@@ -1791,11 +1792,20 @@ namespace stolmine
             mGroupLocalFbState[g] = g_prev_out;
 
             // FDN feedback state for NEXT sample. Single-tap
-            // (longest-delay tap of this group), DC-blocked. This is
-            // the input to the Hadamard cross-feed. Single-tap form
-            // gives |H_g(jω)| = 1 at all frequencies, so the FDN
-            // loop gain stays at decayCoefPerSample uniformly across
-            // frequency — no comb-peak runaway.
+            // (longest-delay tap of this group), DC-blocked, then
+            // LP-filtered (Jot 1991 frequency-dependent damping).
+            // Single-tap form gives |H_g(jω)| = 1 at all frequencies
+            // so the FDN loop gain is uniform across frequency in
+            // the matrix sense; the LP then introduces per-line
+            // damping so HF content decays faster than mids in the
+            // FDN tail — preventing the icy/metallic accumulation
+            // that pure unitary feedback produces.
+            //
+            // LP coefficient (kFbLpAlpha, decay-coupled): shared
+            // with the local-fb path. At decay=0: alpha≈0.5 (cutoff
+            // ~5 kHz, crisp echoes). At decay=1: alpha≈0.15 (cutoff
+            // ~1 kHz, dark sustained reverb matching physical room
+            // air-absorption behavior).
             {
               const float dcX = mGroupFdnDcX1[g];
               const float dcY = mGroupFdnDcY1[g];
@@ -1803,7 +1813,9 @@ namespace stolmine
                 fdnTapRead - dcX + kNetworkDcR * dcY;
               mGroupFdnDcX1[g] = fdnTapRead;
               mGroupFdnDcY1[g] = dcOut;
-              mGroupFdnState[g] = dcOut;
+              mGroupFdnLpState[g] +=
+                (dcOut - mGroupFdnLpState[g]) * kFbLpAlpha;
+              mGroupFdnState[g] = mGroupFdnLpState[g];
             }
           }
           // Pool path removed: replaced by the Hadamard FDN cross-feed
@@ -2805,6 +2817,17 @@ namespace stolmine
     // decay so high decay = more damping (longer sustain stays
     // stable), low decay = less damping (crisp echoes).
     float mGroupFbLpState[kNetworkNumGroupsMax];
+
+    // Per-group one-pole LP state on the FDN feedback path. Implements
+    // Jot 1991-style frequency-dependent damping inside the FDN loop —
+    // without this, all frequencies decay at the same T60 (set by
+    // mDecayCoefPerSample), so the unitary FDN accumulates HF content
+    // over many round-trips (icy / metallic late tail). The LP is
+    // applied after DC block, before storing mGroupFdnState. Cutoff
+    // is decay-coupled (Schroeder pattern): at low decay the loop
+    // passes highs (crisp short echoes); at high decay the loop is
+    // darker (lush long tails matching physical room acoustics).
+    float mGroupFdnLpState[kNetworkNumGroupsMax];
 
     // Per-group FDN feedback state. Single-tap (slot 3, the longest
     // delay tap of each group) DC-blocked read. Used as input to the
