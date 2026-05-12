@@ -156,6 +156,37 @@ Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" r
 
 State: `mGroupDcX1[16]`, `mGroupDcY1[16]`. Same one-pole topology and R coefficient (`kNetworkDcR`) as the existing input / output / global-pool DC blockers. Applied to `g_prev_out` immediately after the cascade-flow normalization, *before* `g_prev_out` is used as (a) next group's cascade input, (b) current group's `mGroupLocalFbState` write, or (c) pool contribution. One blocker per group catches DC for all three downstream consumers.
 
+### FDN state un-normalization for proper loop gain (added in Phase B)
+
+Phase B audition (2.6.1.77) reported "raw tap size seems to be producing long enough echoes, but they don't persist back into the system." User pointed to yrn1's FDN reverb (https://github.com/yrn1/er-301-custom-units, `src/mods/fdelay/assets/FDN.lua`, based on Tom Erbe's reverb topology paper) as a working reference.
+
+**Structural clue from yrn1's FDN signal flow:**
+- 4 DopplerDelay lines, each with one output
+- Hadamard butterflies (un-normalized 4-point H, operator norm √4 = 2): `dif21 = (delay1 - delay2) - (delay3 - delay4)`, etc.
+- Per-line feedback gain = `0.5 × feedbackAdapter`
+- Per-round-trip loop gain = `matrix_norm × per-line gain = 2 × 0.5 × feedbackAdapter = feedbackAdapter` directly
+- At `feedbackAdapter = 0.95` → marginally stable, multi-second T60 — works as a nasty verb
+
+**The bug in our cascade FDN feedback path:**
+- `mGroupLocalFbState[g] = g_prev_out = groupMono × 0.25` (the cascade /4 normalization that keeps inter-stage signal at unity through the 16-group chain)
+- Hadamard `H/√16` (unitary) × `decayCoefPerSample` per-sample decay
+- The /4 cascade norm gets applied **inside** the FDN feedback path, on every round-trip
+- Per-round-trip loop gain = `decayCoefPerSample × (1/√16) × √16 × (1/4) = decayCoefPerSample × 1/4`
+- At `decayCoefPerSample → 1` (T60 target = 10s): spectral radius collapses from 1 → 0.25 → per-round-trip gain 0.25 → T60 actually ~hundreds of ms
+
+The /4 is **correct for inter-stage cascade flow** (so dry signal propagates at unity through the 16-group cascade) but **wrong for FDN state** (where the recirculating loop needs un-normalized state for the per-round-trip gain to match the FDN spectral-radius math).
+
+Fix landed in 2.6.1.78:
+
+```c
+// Load FDN state with cascade-norm compensation:
+for (g) mHadamardScratch[g] = mGroupLocalFbState[g] * 4.0f;
+```
+
+The `× 4.0f` undoes the /4 cascade norm specifically for the FDN feedback path, while preserving it for the cascade flow path (which still reads `mGroupLocalFbState` directly via `g_prev_out`). With this compensation, the FDN per-round-trip loop gain is exactly `decayCoefPerSample` — matching the textbook FDN spectral-radius equation and yrn1's working topology.
+
+Minimal change (one line), mathematically grounded.
+
 ### Per-sample decay coefficient (added in Phase B)
 
 Phase B audition (2.6.1.76) reported "closer, more reverberant but still feels capped — perhaps a fraction of a second of audible decay where 10s is designed." Holistic re-audit found a deeper bug: Jot's formula is calibrated for per-round-trip application, but our Hadamard FWHT runs every sample.

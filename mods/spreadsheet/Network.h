@@ -1639,17 +1639,26 @@ namespace stolmine
 
           // ---- Hadamard FDN cross-feed computation ----
           // Compute M = H_16 × G where G is the previous-sample
-          // per-group output vector (mGroupLocalFbState). Uses
-          // Fast Walsh-Hadamard Transform (FWHT) butterflies — 4
-          // stages × 8 add/sub butterflies = 64 ops, no multiplies.
-          // Result M[g] is each group's cross-feed contribution from
-          // all 15 other groups with orthogonal ±1 weighting.
+          // per-group output vector. The state mGroupLocalFbState[g]
+          // is the DC-blocked cascade output, which is groupMono/4
+          // (the × 0.25 cascade-flow normalization that keeps signal
+          // at unity through inter-group chain). For the FDN feedback
+          // path we need the UN-normalized state — otherwise the /4
+          // cascade norm gets applied per FDN round-trip, collapsing
+          // spectral radius from decayCoefPerSample to
+          // decayCoefPerSample × 0.25 → T60 cut by factor of 4.
           //
-          // Decay=0 → kCrossFeedScale=0 → no cross-feed → cascade
-          // behaves as 16 independent damped delay lines.
-          // Decay=1 → marginal stability → infinite-tail reverb.
+          // Multiplying by 4 here undoes the cascade /4 for the FDN
+          // path while preserving the /4 for the cascade flow path
+          // (which still reads mGroupLocalFbState directly). With
+          // this compensation, the FDN loop gain is exactly
+          // decayCoefPerSample as the matrix requires for proper
+          // T60 control. Compare yrn1's FDN where each line's delay
+          // output is fed directly to the Hadamard butterflies with
+          // no per-line attenuation other than the user-controlled
+          // feedback gain.
           for (int g = 0; g < kNetworkNumGroupsMax; g++)
-            mHadamardScratch[g] = mGroupLocalFbState[g];
+            mHadamardScratch[g] = mGroupLocalFbState[g] * 4.0f;
           for (int len = 1; len < kNetworkNumGroupsMax; len <<= 1)
           {
             for (int s = 0; s < kNetworkNumGroupsMax; s += (len << 1))
