@@ -1559,43 +1559,42 @@ namespace stolmine
         const int aG = activeGroupsLocal;
 
         {
-          // T60_decay (max-T60 from decay knob) × conn (master fb
-          // amount) × size² (room-size mapping). The size² is what
-          // breaks the otherwise size-invariant per-sample math:
-          // D_avg scales linearly with sizeNorm, T60_eff scales as
-          // sizeNorm², so the ratio in decayCoefPerSample's exponent
-          // scales as 1/sizeNorm — giving more per-sample decay at
-          // small size, eliminating the low-size feedback spikes
-          // that arose when fast-cycling short loops had per-round-
-          // trip gain close to unity. Physically intuitive: smaller
-          // room → shorter T60 → less time for transients to build.
+          // T60_eff = conn × T60_decay (linear, no size mapping).
+          // Decay knob sets the max T60; conn scales it; size is
+          // size-invariant because per-sample formula combined with
+          // fixed kFdnGain (below) makes the math symmetric.
           const float kT60Floor = 0.05f;
           const float kT60Span  = 10.0f;
           const float T60_decay = kT60Floor + decay * decay * kT60Span;
-          float T60_eff =
-            connectivity * T60_decay * sizeNorm * sizeNorm;
+          float T60_eff = connectivity * T60_decay;
           if (T60_eff < 0.001f) T60_eff = 0.001f;
           const float Fs = globalConfig.sampleRate;
 
-          // D_avg from slot-3 tap delays of active groups.
-          float D_sum = 0.0f;
-          int D_count = 0;
-          for (int g = 0; g < aG; g++)
-          {
-            const int slot3_t = g * kNetworkGroupSize + 3;
-            if (slot3_t < activeTaps)
-            {
-              D_sum += mTapDelayTarget[slot3_t];
-              D_count++;
-            }
-          }
-          float D_avg = (D_count > 0) ? (D_sum / (float)D_count) : 1000.0f;
-          if (D_avg < 64.0f) D_avg = 64.0f;  // floor: avoid degenerate math
-
-          float c = expf(-3.0f * 2.302585f * D_avg / (T60_eff * Fs));
+          // Per-sample decay coefficient. With FIXED kFdnGain = 0.25
+          // (max-density unitary normalization) and per-group loop
+          // iterating only the active groups, the state at full
+          // density is dense (16 lines all firing at different
+          // delays) — so per-sample multiplication × decayCoefPerSample
+          // gives T60 = T60_eff seconds.
+          //   per-second × decayCoefPerSample^Fs = 10^(-3/T60)
+          //   decayCoefPerSample = 10^(-3/(T60 × Fs))
+          // At lower density (sparse state with fewer active sources),
+          // the un-normalized matrix output magnitude is √N × source
+          // (N = active sources), so the EFFECTIVE per-line feedback
+          // gain = 0.25 × √N × decayCoef — sub-unity at N < 16, full
+          // unitary at N = 16. Lushness scales correctly with density.
+          float c = expf(-3.0f * 2.302585f / (T60_eff * Fs));
           if (c > 0.99999f) c = 0.99999f;  // stability margin
           if (c < 0.0f)     c = 0.0f;
           mDecayCoefPerSample = c;
+        }
+
+        // Zero FDN state for inactive groups so stale values from
+        // when they were active don't keep feeding the FWHT.
+        for (int g = aG; g < kNetworkNumGroupsMax; g++)
+        {
+          mGroupFdnState[g]   = 0.0f;
+          mGroupFdnLpState[g] = 0.0f;
         }
 
         const float scale = 1.0f / 32767.0f;
@@ -1661,45 +1660,34 @@ namespace stolmine
           const float kFbLpAlpha =
             0.5f - 0.4f * connectivity * decay;
 
-          // Dynamic FWHT size: aGm = floor power of 2 ≤ aG. The
-          // sub-Hadamard matrix is unitary on the aGm-element subspace
-          // so no energy leaks into inactive groups — T60 is
-          // density-independent within the power-of-2 quantization
-          // (density steps: 1, 2, 4, 8, 16 active groups).
-          int aGm = 1;
-          while ((aGm << 1) <= aG && (aGm << 1) <= kNetworkNumGroupsMax)
-            aGm <<= 1;
-          const float invSqrtAGm =
-            (aGm == 16) ? 0.25f :
-            (aGm == 8)  ? 0.353553391f :   // 1/√8
-            (aGm == 4)  ? 0.5f :
-            (aGm == 2)  ? 0.707106781f :   // 1/√2
-                          1.0f;
-
-          // FDN feedback gain: aGm-dim unitary normalization × per-
-          // sample decay coef. The 1/√aGm makes the sub-Hadamard
-          // matrix unitary on the active aGm-dim subspace; total
-          // injected energy = aGm × (state/√aGm)² = state² (energy
-          // preserved regardless of how many active groups).
+          // FDN feedback gain: FIXED at 1/√16 = 0.25 (max-density
+          // unitary normalization), NOT scaled by 1/√aGm. This is
+          // the load-bearing architectural choice: per-line FDN gain
+          // is now constant, but the matrix's RMS amplification on
+          // the un-normalized 16-FWHT scales as √N where N is the
+          // active source count. So at low density (N=1), FWHT
+          // output magnitude × 0.25 = sub-unity feedback → discrete
+          // echoes, controlled. At high density (N=16), output ×
+          // 0.25 = unitary → full lushness. Density UP gives more
+          // feedback (correct user mental model); density DOWN
+          // tames it naturally.
           //
-          // mDecayCoefPerSample already includes conn × decay coupling
-          // (via T60_eff = conn × T60_decay), so the FDN loop gain
-          // is exactly the user's combined feedback × tail-length
-          // setting. No extra conn multiplier here.
-          const float kFdnGain = invSqrtAGm * mDecayCoefPerSample;
+          // Per-group iteration below stays on aG (active groups
+          // only), so CPU scales with density as before.
+          const float kFdnGain = 0.25f * mDecayCoefPerSample;
 
-          // ---- Hadamard FDN cross-feed (aGm-dim sub-FWHT) ----
-          // Single-tap state (mGroupFdnState) has |H_g(jω)| = 1 at
-          // all frequencies — no comb peaks — so the FDN loop gain
-          // is uniform across frequency. FWHT operates on the first
-          // aGm elements only; remaining elements stay at their
-          // previous values but are unused for FDN injection (only
-          // active groups < aGm receive cross-feed).
+          // ---- Hadamard FDN cross-feed (full 16-dim FWHT) ----
+          // FWHT runs on all 16 elements every sample regardless of
+          // active group count. Cost is fixed at 64 add/sub butterfly
+          // ops (cheap). Single-tap state (mGroupFdnState) has
+          // |H_g(jω)| = 1 at all frequencies — no comb peaks.
+          // Inactive groups' state was zeroed at block-rate above,
+          // so they contribute zero to the FWHT input.
           for (int g = 0; g < kNetworkNumGroupsMax; g++)
             mHadamardScratch[g] = mGroupFdnState[g];
-          for (int len = 1; len < aGm; len <<= 1)
+          for (int len = 1; len < kNetworkNumGroupsMax; len <<= 1)
           {
-            for (int s = 0; s < aGm; s += (len << 1))
+            for (int s = 0; s < kNetworkNumGroupsMax; s += (len << 1))
             {
               for (int j = s; j < s + len; j++)
               {
