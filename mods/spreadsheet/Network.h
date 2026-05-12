@@ -1570,20 +1570,27 @@ namespace stolmine
           float wetR = 0.0f;
           float fb_pool_in = 0.0f;
 
-          // Local feedback gain ceiling, decay-coupled: at decay=0
-          // local fb is 0.35×conn (short echoes, fast decay); at
-          // decay=1 it climbs to 0.75×conn (extended ringing tails).
-          // Stays sub-unity at all settings so the bufWrite tanh caps
-          // the loop without latching, and the per-group LP+HPF
-          // band-pass below keeps the band stable. Before this
-          // coupling the gain was hardcoded at conn × 0.6 so decay
-          // had no effect on short-time decay character — the only
-          // decay-responsive path was the global pool, which is
-          // heavily attenuated (sqrt(fbCount) + HPF + sign-
-          // decorrelation) and reads as a subtle wash. This coupling
-          // gives decay its primary perceptual axis.
+          // Local feedback gain, decay-coupled with full perceptual
+          // range: at decay=0 → 0.1×conn (minimal per-group ring,
+          // cascade reads as discrete echo chain); at decay=1 →
+          // 0.8×conn (strong per-group ringing tails). Stays
+          // sub-unity so bufWrite tanh + per-group LP+HPF band-pass
+          // keep the loop stable. Wider range than the prior
+          // 0.35-0.75 (which felt like "always somewhat ringing")
+          // gives decay a clear on/off perceptual axis on the
+          // short-time character.
           const float kLocalFbScale =
-            connectivity * (0.35f + 0.4f * decay);
+            connectivity * (0.1f + 0.7f * decay);
+
+          // Pool per-group attenuation. The pool now injects into
+          // EVERY group's write head (not just group 0) so the
+          // decay-controlled recirculation reaches all 64 taps the
+          // way legacy's single-write-head fb did. Per-group
+          // attenuation by 1/sqrt(aG) keeps total injected energy
+          // equivalent to legacy's single-write injection: 16 × (P/√16)²
+          // = P². See planning/network-cascade-rebuild-plan.md.
+          const float poolPerGroupScale =
+            (aG > 0) ? (1.0f / sqrtf((float)aG)) : 1.0f;
 
           // Local feedback LP coefficient (one-pole). Couples to
           // decay so short delays at high decay get more damping
@@ -1635,8 +1642,8 @@ namespace stolmine
 
             const float group_in_cascade = (g == 0) ? x : g_prev_out;
             float group_in = group_in_cascade +
-              fbDamped * kLocalFbScale;
-            if (g == 0) group_in += mDiffusedGlobalPool;
+              fbDamped * kLocalFbScale +
+              mDiffusedGlobalPool;
 
             // Write tanh(group_in) to group's sub-window head.
             bufWrite(buf,
@@ -1772,7 +1779,11 @@ namespace stolmine
               poolBlend - mPoolHpX1 + kPoolHpR * mPoolHpY1;
             mPoolHpX1 = poolBlend;
             mPoolHpY1 = hp;
-            mDiffusedGlobalPool = hp;
+            // Pre-attenuated for multi-group injection: every group's
+            // write head adds mDiffusedGlobalPool, so the value
+            // stored here is already pool / sqrt(aG) to match
+            // legacy's single-injection energy budget.
+            mDiffusedGlobalPool = hp * poolPerGroupScale;
           }
           else
           {

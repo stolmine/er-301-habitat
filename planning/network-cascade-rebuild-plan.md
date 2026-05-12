@@ -156,6 +156,31 @@ Phase B audition (2.6.1.67) confirmed the plan's "rumble accrues at high conn" r
 
 State: `mGroupDcX1[16]`, `mGroupDcY1[16]`. Same one-pole topology and R coefficient (`kNetworkDcR`) as the existing input / output / global-pool DC blockers. Applied to `g_prev_out` immediately after the cascade-flow normalization, *before* `g_prev_out` is used as (a) next group's cascade input, (b) current group's `mGroupLocalFbState` write, or (c) pool contribution. One blocker per group catches DC for all three downstream consumers.
 
+### Multi-group pool injection + widened decay→local-fb range (added in Phase B)
+
+Phase B audition (2.6.1.71) reported "still smears at any non-low density, decay is still dead, OG produced much more ring-out." Diagnosis required tracing the legacy feedback path:
+
+**How legacy decay actually worked** (Network.h:1066-1094, 1974-2343):
+1. `fbWeightUnit = decay / sqrt(kRecycle)` — decay scales per-tap fb weight directly.
+2. `mFbWeight[t] = sign × fbWeightUnit` for `kRecycle = conn × activeTaps` selected taps.
+3. Per sample: `fbSum = Σ tap[t] × fbWeightSmoothed[t]` summed across all 64 taps.
+4. `fbTanh → DC block → 4-stage allpass → fb`.
+5. `bufWrite(buf, writeIdx, tanh(x + fb))` — **fb added to the SINGLE write head that ALL 64 taps read from**.
+
+The critical pattern: legacy decay controls feedback into the *one* write head, and **every tap re-echoes it** after its delay. That's what produces the tails — every tap participates in the long ring.
+
+**Why cascade decay was dead:** the pool (decay-controlled path) injected ONLY into group 0's write head (`if (g == 0) group_in += mDiffusedGlobalPool`). Only group 0's 4 taps saw the recirculated tail — 1/16th of the system. Groups 1-15 only saw cascade-flow propagation (attenuated × 0.25/stage) + their own local fb. Decay's main lever reached almost none of the network. Decay also coupled to the per-group LP cutoff, but stronger damping = darker tail, not longer.
+
+**Why "smear at density > 0.1":** with 64 simultaneous tap reads driving 16 group writes and only group 0 receiving fb, no coherent ring-back from the long delays could form. A pluck → 64 simultaneous spatial reads → diffuse wash with no recirculation reinforcement. Legacy at the same density rang because the feedback bus re-injected into all 64 reads, building constructive recirculation at the delay set.
+
+Fix landed in 2.6.1.72:
+
+- **`mDiffusedGlobalPool` injects into every group's write head**, not just group 0. Pool now drives the full cascade like legacy's global fb drove all taps. The pool's source (tail-third with per-group sign decorrelation, added in 2.6.1.70) is preserved.
+- **Per-group pool attenuation `1/sqrt(aG)`**: pool is pre-attenuated when stored so each group's injection is `pool/sqrt(aG)`. Total injected energy = aG × (pool/√aG)² = pool², matching legacy's single-write injection energy budget. Pre-attenuating at the storage site saves the per-group multiply in the inner loop.
+- **Widened `kLocalFbScale` range** from `0.35 + 0.4×decay` (0.35-0.75, "always somewhat ringing") to `0.1 + 0.7×decay` (0.1-0.8, near-off → strong ring). Decay now has clean on/off perceptual range on the short-time character.
+
+The plan's original "inject pool to group 0 only" choice was a stability hedge documented as "avoids correlation/runaway." With sign decorrelation on the pool source (2.6.1.70) and the pool HPF in place, multi-group injection is safe.
+
 ### Per-group full-Ns sub-windows + decay→local-fb coupling + local-fb HPF (added in Phase B)
 
 Phase B audition (2.6.1.70) reported "virtually no echo at all, mostly very subtle feedback until low size which produces rumble." Three coupled architectural choices were limiting the cascade:
