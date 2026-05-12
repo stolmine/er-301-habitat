@@ -43,6 +43,15 @@ namespace stolmine
 
   static const int kMaxNetworkTaps = 64;
 
+  // Serial cascade group constants (Phase A scaffolding for the
+  // cascade rebuild — see planning/network-cascade-rebuild-plan.md).
+  // Taps live in groups of 4 (NEON-native); signal flows through
+  // groups in distance order. State members below this class are
+  // staged but not yet wired into the per-sample loop.
+  static const int kNetworkGroupSize     = 4;
+  static const int kNetworkNumGroupsMax  =
+    kMaxNetworkTaps / kNetworkGroupSize;   // 16
+
   // Per-tap glitch effect mode (mutex). Each tap has at most one
   // glitch effect per cycle. Effects still stack across taps via
   // the shared feedback bus, so high-glitch settings still produce
@@ -333,6 +342,31 @@ namespace stolmine
       mApIdx2 = 0;
       mApIdx3 = 0;
       mApIdx4 = 0;
+
+      // ---- Phase A cascade scaffolding init ----
+      mCascadeSeed =
+        (uint32_t)((uintptr_t)this * 2654435761u) ^ 0xCA5CADE1u;
+      for (int g = 0; g < kNetworkNumGroupsMax; g++)
+      {
+        mGroupOrigin[g]        = 0;
+        mGroupLen[g]           = 0;
+        mGroupWriteIndex[g]    = 0;
+        mGroupLocalFbState[g]  = 0.0f;
+        mGroupMonoStutterAcc[g] = 0.0f;
+        mGroupStutterWetL[g]    = 0.0f;
+        mGroupStutterWetR[g]    = 0.0f;
+      }
+      mDiffusedGlobalPool = 0.0f;
+      // mTapGroupMap / mTapGroupSlot / mTapIntraGroupOffset
+      // populated by recomputeCascadeAssignment() — defer to first
+      // process() call (depends on mReflectors being seeded).
+      for (int t = 0; t < kMaxNetworkTaps; t++)
+      {
+        mTapGroupMap[t]          = 0;
+        mTapGroupSlot[t]         = 0;
+        mTapIntraGroupOffset[t]  = 0.5f;
+      }
+      for (int s = 0; s < kStutScratchSlots; s++) mStutGroup[s] = 0;
     }
 
     virtual ~Network()
@@ -2207,6 +2241,59 @@ namespace stolmine
     float mApBuf3[kNetworkAp3Len];
     float mApBuf4[kNetworkAp4Len];
     int mApIdx1, mApIdx2, mApIdx3, mApIdx4;
+
+    // ---- Phase A scaffolding for serial cascade rebuild ----
+    // See planning/network-cascade-rebuild-plan.md. State is
+    // allocated and initialized but NOT yet read by the per-sample
+    // loop; the existing star-multitap audio path still produces
+    // sound until Phase A step 5 lands the new loop body.
+
+    // Per-instance cascade seed (per-tap intra-group offsets are
+    // hashed from this). Static after construction; motion does
+    // not modulate it (would Doppler).
+    uint32_t mCascadeSeed;
+
+    // Per-group sub-window in the shared mBuffer ring. Origin and
+    // length are set in allocate(); writeIndex advances per-sample
+    // within [0, mGroupLen[g]).
+    int mGroupOrigin    [kNetworkNumGroupsMax];
+    int mGroupLen       [kNetworkNumGroupsMax];
+    int mGroupWriteIndex[kNetworkNumGroupsMax];
+
+    // Local feedback state per group (one float: previous sample's
+    // group_mono_out). Fed back into the group's input multiplied
+    // by conn × 0.6 ceiling.
+    float mGroupLocalFbState[kNetworkNumGroupsMax];
+
+    // Global feedback pool, propagated one sample late (computed
+    // this sample after the cascade, injected into group 0 next
+    // sample). Stores the post-Schroeder, post-soften value.
+    float mDiffusedGlobalPool;
+
+    // Per-tap → group mapping. Sorted by reflector distance at
+    // construction and on seed change. mTapGroupMap[t] = which
+    // group tap t belongs to (0..NumGroupsMax-1); mTapGroupSlot[t]
+    // = which of the 4 lanes within that group.
+    uint8_t mTapGroupMap [kMaxNetworkTaps];
+    uint8_t mTapGroupSlot[kMaxNetworkTaps];
+
+    // Per-tap intra-group offset fraction in [0.1, 0.9]. Hashed
+    // from mCascadeSeed at construction / seed change. Multiplied
+    // by mGroupLen[g] to derive the tap's delay position within
+    // its group's sub-window.
+    float mTapIntraGroupOffset[kMaxNetworkTaps];
+
+    // Per-group stutter accumulators (the scalar stutter pass will
+    // route each active stutter tap's contribution into its
+    // group's accumulator via mStutGroup[s] — see Phase C).
+    float mGroupMonoStutterAcc[kNetworkNumGroupsMax];
+    float mGroupStutterWetL   [kNetworkNumGroupsMax];
+    float mGroupStutterWetR   [kNetworkNumGroupsMax];
+
+    // Stutter tap's owning group (Phase C will populate this at
+    // stutter trigger time). Same length as the other stutter
+    // scratch arrays.
+    uint8_t mStutGroup[kStutScratchSlots];
 
     // Delay buffer.
     char *mBuffer = 0;
