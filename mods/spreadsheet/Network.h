@@ -1523,25 +1523,28 @@ namespace stolmine
         // Map decay knob to target T60 in seconds:
         //   T60 = 0.05 + decay² × 10  (50 ms at decay=0, 10.05 s at decay=1)
         //
-        // The matrix D × W is applied EVERY SAMPLE in our cascade
-        // loop (the Hadamard FWHT runs per-sample on mGroupLocalFbState).
-        // Jot 1991's per-round-trip coef (10^(-3 × D_g / (T60 × Fs)))
-        // is calibrated for per-round-trip application; applying it
-        // per-sample would collapse T60 by a factor of D_g
-        // (~1000× too fast for short-delay groups). The correct
-        // per-sample coefficient that yields signal × 10^(-3/T60)
-        // per second is independent of delay-line length:
-        //   decayCoefPerSample = 10^(-3 / (T60 × Fs))
-        // = exp(-3 × ln(10) / (T60 × Fs))
+        // Effective T60 from conn × decay (parameter design):
+        //   T60_decay = 0.05 + decay² × 10  (decay sets max T60)
+        //   T60_eff   = conn × T60_decay    (conn is master fb amount)
         //
-        // Uniform across all 16 groups; per-line modal density still
-        // comes from the varied delay lengths themselves.
+        // Both knobs work in tandem to set tail length:
+        //   conn=0, any decay: T60_eff ≈ 0 (dry, no feedback)
+        //   conn=1, decay=0:   T60_eff = 0.05s (slapback / no tail)
+        //   conn=1, decay=1:   T60_eff = 10.05s (max lush tail)
+        //   conn=0.5, decay=1: T60_eff = 5s (half-strength full-length)
+        //
+        // Per-sample coefficient that yields signal × 10^(-3/T60_eff)
+        // per second is independent of delay length (since the matrix
+        // is applied per sample to a state that evolves per sample):
+        //   decayCoefPerSample = exp(-3 × ln(10) / (T60_eff × Fs))
         {
           const float kT60Floor = 0.05f;
           const float kT60Span  = 10.0f;
-          const float T60 = kT60Floor + decay * decay * kT60Span;
+          const float T60_decay = kT60Floor + decay * decay * kT60Span;
+          const float T60_eff =
+            (connectivity > 1e-4f) ? (connectivity * T60_decay) : 0.001f;
           const float Fs = globalConfig.sampleRate;
-          float c = expf(-3.0f * 2.302585f / (T60 * Fs));
+          float c = expf(-3.0f * 2.302585f / (T60_eff * Fs));
           if (c > 0.99999f) c = 0.99999f;  // stability margin
           mDecayCoefPerSample = c;
         }
@@ -1603,69 +1606,59 @@ namespace stolmine
           float wetL = 0.0f;
           float wetR = 0.0f;
 
-          // Local feedback gain shares a feedback budget with the
-          // FDN cross-feed so the combined (local fb + FDN) loop
-          // gain stays ≤ 1 at all frequencies — preventing runaway
-          // in the linear region of tanh. (Tanh still saturates at
-          // |x| > 1 but a linearly unstable loop produces hot
-          // sustained saturated output that sounds like runaway
-          // even if amplitude is bounded.)
-          //
-          // FDN per-line peak loop gain is decayCoefPerSample (with
-          // single-tap FDN state, unitary Hadamard, no extra
-          // multiplier). Budget for local fb:
-          //   kLocalFbScale ≤ 1 − decayCoefPerSample
-          //
-          // At decay=0 (decayCoefPerSample ≈ 0.13): local fb up to
-          // ~0.87 × conn — strong per-group slapback character.
-          // At decay=1 (decayCoefPerSample ≈ 1): local fb → 0;
-          // FDN dominates, long sustained tails.
-          //
-          // Smooth handoff via decay: short-time color → long-time
-          // reverb. connectivity scales overall feedback amount.
-          const float kLocalFbScale =
-            connectivity * (1.0f - mDecayCoefPerSample);
+          // Local feedback removed: the FDN owns all feedback in the
+          // new parameter design. conn no longer competes with the
+          // local-fb budget — it's now the master FDN feedback
+          // amount (folded into mDecayCoefPerSample via T60_eff).
+          // Local-fb state allocations remain for code simplicity
+          // but contribute 0.0f to group_in.
+          const float kLocalFbScale = 0.0f;
 
-          // FDN feedback gain folded into one scalar:
-          //   kFdnGain = (1/√16) × decayCoefPerSample
-          //            = unitary matrix normalization × per-sample decay
-          //
-          // T60 control comes from mDecayCoefPerSample (block-rate).
-          // Matrix normalization 1/√16 keeps the Hadamard unitary
-          // (spectral radius of D × W = decayCoefPerSample with
-          // unitary W and D = decayCoefPerSample × I).
-          //
-          // connectivity is intentionally NOT in this gain — it
-          // would directly scale the spectral radius and collapse
-          // T60. connectivity stays on the local-fb path where it
-          // controls per-group ringing color independent of overall
-          // reverb tail length.
-          const float kFdnGain = 0.25f * mDecayCoefPerSample;
+          // LP cutoff coupled to effective T60 (conn × decay): brighter
+          // at short tails, darker at long. Prevents HF accumulation
+          // proportional to how long the feedback path sustains.
+          const float kFbLpAlpha =
+            0.5f - 0.4f * connectivity * decay;
 
-          // Local feedback LP coefficient (one-pole). Couples to
-          // decay so short delays at high decay get more damping
-          // (preventing Karplus-Strong-style resonant runaway in
-          // tight per-group loops). Cutoff range: ~5 kHz @ decay=0
-          // (alpha=0.5, light damping) → ~1 kHz @ decay=1
-          // (alpha=0.15, heavy damping). The damping is what
-          // makes per-group loops decay naturally instead of
-          // self-oscillating at the delay-length fundamental.
-          const float kFbLpAlpha = 0.5f - 0.35f * decay;
+          // Dynamic FWHT size: aGm = floor power of 2 ≤ aG. The
+          // sub-Hadamard matrix is unitary on the aGm-element subspace
+          // so no energy leaks into inactive groups — T60 is
+          // density-independent within the power-of-2 quantization
+          // (density steps: 1, 2, 4, 8, 16 active groups).
+          int aGm = 1;
+          while ((aGm << 1) <= aG && (aGm << 1) <= kNetworkNumGroupsMax)
+            aGm <<= 1;
+          const float invSqrtAGm =
+            (aGm == 16) ? 0.25f :
+            (aGm == 8)  ? 0.353553391f :   // 1/√8
+            (aGm == 4)  ? 0.5f :
+            (aGm == 2)  ? 0.707106781f :   // 1/√2
+                          1.0f;
 
-          // ---- Hadamard FDN cross-feed computation ----
-          // Compute M = H_16 × G where G is the previous-sample
-          // per-group single-tap state (mGroupFdnState). Single-tap
-          // state has |H_g(jω)| = 1 at all frequencies — no comb
-          // peaks — so the FDN loop gain is uniform across frequency.
-          // (Using mGroupLocalFbState, which is mean of 4 multi-tap
-          // reads, would have |H| up to 4 at constructive frequencies,
-          // making the linear-region loop gain > 1 at peaks and
-          // producing hot tanh-saturated runaway-sounding output.)
+          // FDN feedback gain: aGm-dim unitary normalization × per-
+          // sample decay coef. The 1/√aGm makes the sub-Hadamard
+          // matrix unitary on the active aGm-dim subspace; total
+          // injected energy = aGm × (state/√aGm)² = state² (energy
+          // preserved regardless of how many active groups).
+          //
+          // mDecayCoefPerSample already includes conn × decay coupling
+          // (via T60_eff = conn × T60_decay), so the FDN loop gain
+          // is exactly the user's combined feedback × tail-length
+          // setting. No extra conn multiplier here.
+          const float kFdnGain = invSqrtAGm * mDecayCoefPerSample;
+
+          // ---- Hadamard FDN cross-feed (aGm-dim sub-FWHT) ----
+          // Single-tap state (mGroupFdnState) has |H_g(jω)| = 1 at
+          // all frequencies — no comb peaks — so the FDN loop gain
+          // is uniform across frequency. FWHT operates on the first
+          // aGm elements only; remaining elements stay at their
+          // previous values but are unused for FDN injection (only
+          // active groups < aGm receive cross-feed).
           for (int g = 0; g < kNetworkNumGroupsMax; g++)
             mHadamardScratch[g] = mGroupFdnState[g];
-          for (int len = 1; len < kNetworkNumGroupsMax; len <<= 1)
+          for (int len = 1; len < aGm; len <<= 1)
           {
-            for (int s = 0; s < kNetworkNumGroupsMax; s += (len << 1))
+            for (int s = 0; s < aGm; s += (len << 1))
             {
               for (int j = s; j < s + len; j++)
               {
