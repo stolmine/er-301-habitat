@@ -1623,6 +1623,31 @@ namespace stolmine
             g_prev_out = groupMono * kCascadeStageNorm;
           }
 
+          // Wet bus compensation. The cascade signal flow itself
+          // is correctly normalized (1/N per stage prevents
+          // gain runaway), but EACH stage's bufWrite applies
+          // tanh, which geometrically attenuates the signal that
+          // sits in the buffers — tanh(1.0)≈0.76, tanh(0.76)≈0.64,
+          // etc. After ~16 stages of cascade-cumulative tanh, the
+          // buffer contents are at ~0.5x of the input level on
+          // average across groups. Wet bus reads sample those
+          // attenuated buffer regions, so the summed wet output
+          // lands at ~0.5x of input at full wet. This compensation
+          // restores ~unity wet output at full wet, decoupled
+          // from cascade-flow stability. Empirically calibrated
+          // from 2.6.1.65 audition (user reported 0.5x wet at
+          // density=1 / aG=16). Coupled to active group count so
+          // shorter cascades (fewer stages of attenuation) get
+          // proportionally less boost.
+          //
+          // Compensation = 1.0 + (aG/16) — at aG=1, no boost
+          // (single stage, minimal cumulative atten); at aG=16,
+          // 2x boost matches measured 0.5x undervolume.
+          const float kCascadeWetComp =
+            1.0f + (float)aG * (1.0f / 16.0f);
+          wetL *= kCascadeWetComp;
+          wetR *= kCascadeWetComp;
+
           // Mix.
           const float mixedL = x * (1.0f - wet) + wetL * wet;
           const float mixedR = x * (1.0f - wet) + wetR * wet;
