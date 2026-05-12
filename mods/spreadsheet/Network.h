@@ -2002,6 +2002,25 @@ namespace stolmine
       mBuffer = new (std::nothrow) char[nbytes];
       if (mBuffer)
         memset(mBuffer, 0, nbytes);
+
+      // Phase A: partition the shared buffer into per-group
+      // sub-windows. Each group gets Ns / kNetworkNumGroupsMax
+      // samples (~3000 at Ns≈48000); the last group absorbs any
+      // remainder so origin+len of the last group == Ns exactly.
+      // Per-sample group writes wrap within their sub-window.
+      const int groupLenEach =
+        (kNetworkNumGroupsMax > 0) ? (Ns / kNetworkNumGroupsMax) : 0;
+      for (int g = 0; g < kNetworkNumGroupsMax; g++)
+      {
+        mGroupOrigin[g]     = g * groupLenEach;
+        mGroupLen[g]        = groupLenEach;
+        mGroupWriteIndex[g] = 0;
+      }
+      if (kNetworkNumGroupsMax > 0)
+      {
+        mGroupLen[kNetworkNumGroupsMax - 1] =
+          Ns - mGroupOrigin[kNetworkNumGroupsMax - 1];
+      }
       return mBuffer != 0;
     }
 
