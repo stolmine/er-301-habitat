@@ -577,6 +577,47 @@ spot check.
 
 Version: spreadsheet 2.6.2.7 → 2.6.2.8.
 
+### PMM 2-pair NEON + 8-voice trigger reset fix
+
+Followed the voice-bus NEON pass. Hardware audition confirmed
+~30% CPU drop on the voice loop NEON work; user wants to push NEON
+further wherever we can. Audit also surfaced a correctness bug from
+2.6.2.8: trigger-handler loops still iterate `n < 6` while 8 voices
+are active. Voices 6 and 7 sit at env=0 across triggers in
+instant-attack mode (the default), so the audition was hearing a
+6-voice bus, not 8.
+
+Scope:
+
+- Fix trigger handler 6→8 loops on phase[] and env[] resets.
+- Reorganize PMM state in Internal struct from `Voice pmm1/pmm2`
+  to NEON-friendly `float pmmPhase[3][4]` + `float pmmLastOut[3][4]`
+  (op outer, pair-lane inner, lanes 2/3 padded).
+- Block-rate pack PMM incs/mod-fb coefficients into Internal arrays
+  so per-sample NEON loads don't need scalar-to-lane moves.
+- Write `visadhara_pmm::tick2()` — NEON 2-lane-across-pairs op-step
+  pattern, sequential within-chain (op2 reads op1's just-written
+  lastOut, op3 reads op2's). Reuses `sample_w_4` morph helper.
+  `always_inline` to keep register pressure consistent.
+- New `wrap01_4` NEON helper handles negative phase wrap via
+  truncating cast + negative-adjust (no `vrndmq` on Cortex-A8).
+
+PMM ticks every half-sample regardless of Mode (smooth-crossfade
+architecture gates output via metalAmt, doesn't skip the compute).
+So PMM NEON savings apply to all patches, not just Metal mode.
+
+Expected: PMM op count roughly halves. ~5-10 percentage points of
+total inner-loop CPU recovered on top of the 30% in hand.
+
+Out of scope:
+- Folder NEON (iterative, no within-sample parallelism).
+- Global envelope pack (saves ~3 muls per half-sample; trivial).
+- Scalar morph helper force-inlining (linux-only path; not a target).
+- Within-chain PMM parallelism (op2 reads op1's current output;
+  sequential dependence).
+
+Version: spreadsheet 2.6.2.8 → 2.6.2.9.
+
 ### Pitch envelope dilution (deferred to next commit)
 
 User also flagged the Liquid mode pitch sweep feels diluted. Three
