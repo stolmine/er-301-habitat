@@ -374,6 +374,108 @@ control-surface work that's been accumulating.
 clone, refined pitch envelope, and a control surface that's dense
 but coherent.
 
+## BIA-parity polish pass (post-Phase 5, pre-Phase 6)
+
+Started 2026-05-12 in response to audition: unit "hits in every mode"
+but the additive bus is a touch sterile compared to BIA. Three small
+DSP touches between Phase 5 (feature-complete vs manual) and Phase 6
+(sonic identity beyond clone) to close the analog-feel gap. All edits
+in `mods/spreadsheet/Visadhara.h` (header-only per
+`feedback_no_out_of_line_virtuals`); commit 3 also touches
+`assets/Visadhara.lua` and `visadhara/voice.h`. Separate commits per
+touch so each can be A/B'd or reverted independently.
+
+### Commit 1 — asymmetric per-voice detune
+
+Six fixed multipliers (~±3 cents asymmetric spread) in
+`visadhara/voice.h` as `static const float kVoiceDetune[6]`. Applied
+at the block-rate freqMult assignment in `Visadhara.h`:
+
+```cpp
+s.freqMult[i] = visadhara::spread_mult(i, spreadPos)
+              * visadhara::kVoiceDetune[i];
+```
+
+Asymmetric (not symmetric) so beat patterns stay irregular under
+chord-style spread sweeps. Detune compounds with `pitchSweep` in
+Liquid mode naturally. Zero per-sample cost (already-multiplied into
+freqMult). No user control (per ask).
+
+Version: spreadsheet 2.6.2.2 → 2.6.2.3.
+
+### Commit 2 — dedicated post-fold final envelope
+
+Replaces `s.env[0]` proxy with a dedicated `finalEnv` AR mirroring
+the master attack/decay shape. Per BIA designer note:
+*"re-apply the overall envelope to the signal after the folder which
+gave back a lot of the dynamics that are lost when folding."*
+
+Internal struct gains `float finalEnv = 0.0f`. Trigger handler sets
+it to 1.0f (instant attack) or 0.0f (slow attack — rides
+`s.slowAttack`). Per-sample update mirrors per-voice pattern with
+decayScale=1. End-of-loop post-fold env multiply uses `s.finalEnv`
+instead of `s.env[0]`. Decay coefficient and slow-attack ramp are
+shared with voices (no new `expf` calls). Cost: ~3 muls + 1 add per
+sample.
+
+Version: spreadsheet 2.6.2.3 → 2.6.2.4.
+
+### Commit 3 — per-hit micro-variation (menu-toggleable)
+
+Sub-percent jitter on per-voice freq, decay coeff, and fold drive per
+trigger. Breaks digital exactness without changing the unit's
+character envelope.
+
+New `od::Option mDrift{"Drift", 1}` (1=on / 2=off, per
+`feedback_option_vs_parameter`), `enableSerialization()` in C++ ctor.
+Internal struct gains `uint32_t rng`, `float jitterFreq[6]`,
+`jitterDecay`, `jitterFold` (init 1.0).
+
+Block-rate setup reads option, derives `driftAmt = (val == 1) ? 1.0f : 0.0f`.
+At rising edge, LCG step from `noise.h` rolls 8 jitter scalars:
+
+- per-voice freq jitter: ±0.3% × driftAmt
+- decay coeff jitter: ±5% × driftAmt
+- fold drive jitter: ±5% × driftAmt
+
+`driftAmt = 0` collapses every jitter to 1.0 (no-op multiply). Same
+codegen path on / off, branchless.
+
+Per-sample usage: three multiplicative applications in the inner
+loop (voice freq, voice decay coeff, fold drive). Cost: ~8 muls/sample.
+
+Lua adds `driftHeader` + `drift` `OptionControl` to the config menu
+("on" / "off"). Description strings stay bare per
+`feedback_no_parenthetical_descriptions`.
+
+SWIG dep gap risk per `feedback_swig_header_dep`: adding mDrift
+changes Visadhara's sizeof. Force-clean wrapper before build:
+`rm testing/{linux,am335x}/mods/spreadsheet/spreadsheet_swig.{cpp,o}`.
+
+Version: spreadsheet 2.6.2.4 → 2.6.2.5.
+
+### Risk summary
+
+All three touches:
+- Inside the existing per-sample loop (already
+  `optimize("no-tree-vectorize")`).
+- Use Internal struct fields (heap-allocated, per
+  `feedback_neon_intrinsics_drumvoice`).
+- No new branches in the loop (per
+  `feedback_runtime_branched_dsp_dispatch`).
+- No new stack-locals, no NEON intrinsics.
+
+So the NEON `:64` hint surface and runtime-branched DSP traps from
+the Ngoma bisect history do not apply.
+
+### Follow-ups not in this pass
+
+- Noise oscillator wire-up (still unused — `noise.h` exists; the
+  micro-variation commit reuses its LCG helpers, not the sample-and-
+  hold path).
+- Folder drive curve shape (linear 1×..6× currently). Phase 6
+  sonic-identity territory.
+
 ## Open design questions (parked for in-flight decisions)
 
 1. ~~**Mode placement**~~ — RESOLVED 2026-05-02. Mode is its own
