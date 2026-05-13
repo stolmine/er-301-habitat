@@ -42,35 +42,41 @@ namespace stolmine
     static const float kPrimeSeries[8]    = {1.0f, 2.0f, 3.0f, 5.0f,
                                               7.0f, 11.0f, 13.0f, 17.0f};
 
-    // Per-voice phase offset at trigger reset. Decoherent — voices
-    // start at evenly-distributed phases across [0, 1) rather than
-    // all at 0. Two-fold purpose:
-    //   1. Eliminates the coherent quarter-cycle peak that happens
-    //      when all voices start at sin(0)=0 and accelerate together
-    //      toward their first peak. At Harmonic=0 (all voices at
-    //      fundamental) the coherent peak was ~8× a single voice,
-    //      driving the folder hard and creating the "splatty"
-    //      character users hear at sine/tri morph positions.
-    //      Decoherent reset caps the peak at ~√8 ≈ 2.83 (RMS sum
-    //      of uncorrelated phases), about a 3× reduction.
-    //   2. Anti-symmetric distribution (i+0.5)/8 ensures the
-    //      voice-sum AT t=0 is exactly zero — no audible step /
-    //      click when triggered. The voices then oscillate
-    //      independently; with detune they slowly drift through
-    //      phase relationships, giving organic-feeling sustain.
+    // Per-voice phase offset at trigger reset. Quasi-random
+    // (golden-ratio derived) so voices NEVER fall into a coherent
+    // alignment or a perfect-cancellation pattern.
     //
-    // Saw and square morph shapes already have built-in
-    // discontinuities so their coherence is less problematic, but
-    // the decoherent reset applies uniformly to all morph positions.
+    // Previous attempt at (i+0.5)/8 evenly-spaced offsets was a
+    // mathematical own-goal: those are the DFT sampling phases for
+    // the fundamental, and the 8th roots of unity sum to ZERO. So
+    // 8 voices at the same fundamental frequency cancel completely
+    // for ALL t — total silence in the kick body at Harmonic=0.
+    //
+    // Golden-ratio offsets i * φ mod 1 (φ = (√5-1)/2 ≈ 0.6180) are
+    // the most-irrational distribution: no integer multiple of φ
+    // lands on a rational fraction, so voices can never align in
+    // an evenly-spaced cancelling configuration via drift either.
+    //
+    // Properties:
+    //   - Voice 0 at phase 0 — clean zero-crossing start for the
+    //     Liquid bend gesture (the anchor character).
+    //   - Voices 1-7 at golden-ratio phases — decoherent body.
+    //   - Expected sum amplitude ~√8 ≈ 2.83 (RMS sum of N
+    //     uncorrelated phases), about 3× less than the prior
+    //     coherent peak of 8 BUT far from zero. Eliminates the
+    //     splatty/aliased folder over-saturation at Harmonic=0
+    //     while keeping the kick body audible.
+    //   - Sum at t=0 is small but non-zero (~−0.16 for the 7
+    //     non-anchor voices); inaudible as a click.
     static const float kPhaseOffset[8] = {
-        0.0625f,   // voice 0 — (0 + 0.5) / 8
-        0.1875f,   // voice 1
-        0.3125f,   // voice 2
-        0.4375f,   // voice 3
-        0.5625f,   // voice 4
-        0.6875f,   // voice 5
-        0.8125f,   // voice 6
-        0.9375f    // voice 7
+        0.0000f,   // voice 0 — anchor (0 · φ)
+        0.6180f,   // voice 1 — 1 · φ mod 1
+        0.2361f,   // voice 2 — 2 · φ mod 1
+        0.8541f,   // voice 3 — 3 · φ mod 1
+        0.4721f,   // voice 4
+        0.0902f,   // voice 5
+        0.7082f,   // voice 6
+        0.3262f    // voice 7
     };
 
     // Per-voice fixed detune. Asymmetric ~3-cent spread emulates BIA's

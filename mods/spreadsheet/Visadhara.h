@@ -405,15 +405,17 @@ namespace stolmine
         if (risingEdge)
         {
           // Phase reset to DECOHERENT offsets (kPhaseOffset in
-          // voice.h). All 8 voices starting at phase=0 produced a
-          // coherent quarter-cycle peak ~8× any single voice — at
-          // sine/tri morph + Harmonic=0 (all voices at fundamental)
-          // this drove the folder so hard it produced a "splatty"
-          // digital signature. Evenly-distributed phase offsets
-          // (i+0.5)/8 spread the voices across the cycle: their
-          // sum-at-t=0 is exactly 0 (anti-symmetric pairs cancel,
-          // so no click), but no aligned peak develops afterward.
-          // RMS-sum peak ~√8 ≈ 2.83 instead of coherent 8.
+          // voice.h, golden-ratio derived). The previous all-zero
+          // reset produced coherent quarter-cycle peaks ~8× any
+          // single voice at Harmonic=0, driving the folder so hard
+          // it generated splatty/aliased mush at sine/tri morph.
+          // An earlier evenly-spaced attempt (i+0.5)/8 was worse:
+          // those are the DFT sampling phases, so 8 voices at the
+          // same fundamental sum to identically zero for all t —
+          // complete silence. Golden-ratio offsets are
+          // most-irrational and never align into either coherent
+          // peaks OR cancelling patterns: peak amplitude ~√8 ≈
+          // 2.83, audible without splat.
           for (int n = 0; n < 8; n++) s.phase[n] = visadhara::kPhaseOffset[n];
 
           if (attackSlow)
