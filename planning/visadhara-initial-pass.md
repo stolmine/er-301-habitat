@@ -525,6 +525,58 @@ shapes.
 
 Version: spreadsheet 2.6.2.6 → 2.6.2.7.
 
+### NEON voice bus + 8-voice extension (post-OS, this commit)
+
+Followed the 2× oversampling pass. Audition: OS audibly fixes the
+folder-breakup; CPU roughly doubles. User asked whether NEON can
+recover the cost, and whether to fill the masked-off lanes while
+NEON is in the air.
+
+Two oversamples can NOT be packed into parallel NEON lanes — they're
+state-dependent sample-to-sample (phase / env / pitchEnv / finalEnv
+all integrate forward). NEON opportunity is the per-oversample voice
+bus, currently scalar 6-iter and the dominant ~100 ops chunk of
+inner-loop cost.
+
+Phase 1 design intent was 4-lane × 2 NEON with 6 active + 2 masked.
+Arrays already sized `float[8]` as heap class members
+(`feedback_neon_intrinsics_drumvoice` compliant). What shipped was
+scalar; this commit lands the NEON pass that was originally specified.
+
+8-voice extension is genuinely free in the 4×2 NEON layout (same
+quad ops either way, just with the previously-masked lanes now
+contributing). User invited this in their request. Two more
+harmonics (7th + 8th in harmonic mode; primes 13 + 17 in prime mode).
+
+Scope:
+- `visadhara/voice.h`: extend `kHarmonicSeries`/`kPrimeSeries`/
+  `kVoiceDetune` to 8 entries; `harmonic_voice_params` voice-fraction
+  divisor 3 → 5 (covers voices 2-7 across the same activation range).
+- `visadhara/morph.h`: add NEON 4-lane `sample_w_4(float32x4_t phase,
+  const Weights &w)`. Branchless via `vbslq_f32` masks for piecewise
+  tri/sq. Inlined to avoid live-across-call register spills per
+  `feedback_neon_hint_surfaces`. Scalar fallback for linux path.
+- `jf/neon_shim.h`: extend with `vmlaq_f32`, `vabsq_f32`, `vrecpeq_f32`
+  for linux build.
+- `Visadhara.h`: per-half-sample voice loop replaces scalar 6-iter
+  with 2× NEON 4-lane passes (8 lanes total). Drop `freqMult[6/7]=0`
+  masking. `voiceGain` 0.5 → 0.375 to compensate for 8-voice peak.
+- Internal struct: NO new fields (storage already correct).
+
+Out of scope (deferred):
+- PMM-pair NEON (Metal mode chains, sequential within-chain limits
+  parallelism to 2 lanes; smaller win, separate commit if needed).
+- Pitch envelope rework (depth asymmetry + 50 ms → 150 ms).
+
+CPU target: drop from 2× baseline (2.6.2.7 cost) to ~1.4-1.5×
+baseline. ~25-30 percentage points recovered of the OS penalty.
+
+Verification: objdump pre-flight on am335x to confirm zero new `:64`
+NEON hints in Visadhara symbols. Emu A/B vs 2.6.2.7. Hardware CPU
+spot check.
+
+Version: spreadsheet 2.6.2.7 → 2.6.2.8.
+
 ### Pitch envelope dilution (deferred to next commit)
 
 User also flagged the Liquid mode pitch sweep feels diluted. Three
