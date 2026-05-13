@@ -44,6 +44,15 @@ namespace stolmine
       float slowAttack = 0.0f;
       float slowAttackInc = 0.0f;
 
+      // Post-fold final envelope. Mirrors the per-voice AR shape with
+      // decayScale=1 (independent of harmonic-position decay scaling).
+      // Per BIA designer note: re-applying a master envelope after the
+      // folder restores the dynamics that folding compresses. Tracked
+      // separately from the voice envelopes so future tuning (separate
+      // decay coeff, different attack shape) can target the post-fold
+      // amplitude without affecting the per-voice bus.
+      float finalEnv = 0.0f;
+
       // Liquid mode (Phase 3): per-trigger pitch envelope. Decays
       // exponentially over ~30ms after each rising edge. Multiplies
       // every voice's phase-increment by (1 + liquidSweepAmt * pitchEnv)
@@ -299,12 +308,15 @@ namespace stolmine
             s.slowAttackInc = (slowAttackTimeSamples > 0.0f)
                                 ? (1.0f / slowAttackTimeSamples)
                                 : 1.0f;
+            // Final env rides the slowAttack ramp alongside voices.
+            s.finalEnv = 0.0f;
           }
           else
           {
             for (int n = 0; n < 6; n++) s.env[n] = 1.0f;
             s.slowAttack = 1.0f;
             s.slowAttackInc = 0.0f;
+            s.finalEnv = 1.0f;
           }
 
           // Liquid mode pitch envelope: kick to 1.0 on rising edge.
@@ -355,6 +367,14 @@ namespace stolmine
           sample += shaped * s.env[n] * s.ampScale[n];
         }
 
+        // Master post-fold envelope: same AR shape as the voices but
+        // decayScale=1, decoupled from the per-voice harmonic-position
+        // decay scaling. Per BIA designer note: re-applied to the post-
+        // fold signal to restore dynamics that folding compresses.
+        const float finalDecayPath = s.finalEnv * decayCoeff;
+        const float finalSlowPath  = s.slowAttack;
+        s.finalEnv = finalSlowPath * useSlowMask + finalDecayPath * useDecayMask;
+
         // Metal PMM tick — always run so smooth mode crossfade works
         // without per-sample dispatch (heavy work outside conditionals).
         // Morph sweeps each operator's waveshape (sine→tri→saw→sq)
@@ -395,10 +415,10 @@ namespace stolmine
         // fold=0, unity at fold=1).
         const float compensated = foldedSig * postFoldGain;
 
-        // Re-apply global envelope (voice-0 envelope as Phase 2 proxy
-        // per the BIA designer note about restoring post-fold dynamics).
-        const float finalEnv = s.env[0];
-        const float postEnv = compensated * finalEnv;
+        // Re-apply global envelope per the BIA designer note about
+        // restoring post-fold dynamics. Uses the dedicated finalEnv
+        // tracked separately from the per-voice envelope bus.
+        const float postEnv = compensated * s.finalEnv;
 
         // Master soft saturator: catches residual peaks at extreme
         // settings (Metal + max fold + cross-injection) without
