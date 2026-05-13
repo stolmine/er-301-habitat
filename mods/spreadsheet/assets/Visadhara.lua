@@ -254,9 +254,7 @@ local menu = {
   "octaveHeader",
   "octave",
   "modeSnapHeader",
-  "modeSnap",
-  "driftHeader",
-  "drift"
+  "modeSnap"
 }
 
 function Visadhara:onShowMenu(objects, branches)
@@ -280,16 +278,6 @@ function Visadhara:onShowMenu(objects, branches)
     description = "Mode crossfade",
     option = objects.op:getOption("ModeSnap"),
     choices = { "smooth", "snap" }
-  }
-
-  controls.driftHeader = MenuHeader {
-    description = "Drift:"
-  }
-
-  controls.drift = OptionControl {
-    description = "Drift",
-    option = objects.op:getOption("Drift"),
-    choices = { "on", "off" }
   }
 
   return controls, menu

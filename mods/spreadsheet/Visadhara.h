@@ -23,7 +23,6 @@
 #include "visadhara/morph.h"
 #include "visadhara/folder.h"
 #include "visadhara/pmm.h"
-#include "visadhara/noise.h"
 
 namespace stolmine
 {
@@ -68,15 +67,6 @@ namespace stolmine
       visadhara_pmm::Voice pmm1;
       visadhara_pmm::Voice pmm2;
 
-      // Per-hit micro-variation (Drift): LCG-rolled scalars set at
-      // each rising edge. Branchless on/off through the driftAmt mask
-      // — when Drift is off, every jitter scalar collapses to exactly
-      // 1.0 and the per-sample multiplies become no-ops.
-      uint32_t rng = 0xDEADBEEFu;
-      float jitterFreq[6] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
-      float jitterDecay = 1.0f;
-      float jitterFold  = 1.0f;
-
       Internal()
       {
         memset(phase, 0, sizeof(phase));
@@ -108,10 +98,8 @@ namespace stolmine
       addParameter(mMode);
       addOption(mModeSnap);
       addOption(mOctave);
-      addOption(mDrift);
       mModeSnap.enableSerialization();
       mOctave.enableSerialization();
-      mDrift.enableSerialization();
       mpInternal = new Internal();
     }
 
@@ -137,7 +125,6 @@ namespace stolmine
     od::Parameter mMode{"Mode", 0.0f};
     od::Option    mModeSnap{"ModeSnap", 1};
     od::Option    mOctave{"Octave", 2};
-    od::Option    mDrift{"Drift", 1};   // 1 = on (per-hit jitter), 2 = off
 
     __attribute__((optimize("no-tree-vectorize")))
     virtual void process()
@@ -292,13 +279,6 @@ namespace stolmine
       const float useSlowMask  = (s.slowAttackInc > 0.0f) ? 1.0f : 0.0f;
       const float useDecayMask = 1.0f - useSlowMask;
 
-      // Drift: per-hit micro-variation on/off. driftAmt scales every
-      // jitter random into the multiplicative path; driftAmt=0 collapses
-      // each scalar to exactly 1.0 (no-op multiply). Branchless on/off,
-      // identical codegen path regardless of toggle.
-      const int driftVal = mDrift.value();          // 1 = on, 2 = off
-      const float driftAmt = (driftVal == 1) ? 1.0f : 0.0f;
-
       // Voice-bus perceptual gain. 6 voices sum unchecked into the bus
       // for the additive "large" character; 1/2 brings the realistic
       // 2-3 voice RMS into a useful pre-drive range while preserving
@@ -349,23 +329,6 @@ namespace stolmine
           // doesn't hang carryover from the previous trigger.
           visadhara_pmm::reset(s.pmm1);
           visadhara_pmm::reset(s.pmm2);
-
-          // Drift: roll new jitter scalars from the LCG. driftAmt gates
-          // the magnitude so toggle-off yields exactly-1.0 multipliers
-          // and the per-sample path is a no-op.
-          //   per-voice freq: ±0.3% (subtle pitch chatter)
-          //   decay coeff:    ±5%   (hit-to-hit decay length variation)
-          //   fold drive:     ±5%   (subtle aggression variation)
-          for (int n = 0; n < 6; n++)
-          {
-            s.rng = visadhara_noise::lcg_step(s.rng);
-            const float r = visadhara_noise::lcg_sample(s.rng);   // [-1, +1]
-            s.jitterFreq[n] = 1.0f + r * 0.003f * driftAmt;
-          }
-          s.rng = visadhara_noise::lcg_step(s.rng);
-          s.jitterDecay = 1.0f + visadhara_noise::lcg_sample(s.rng) * 0.05f * driftAmt;
-          s.rng = visadhara_noise::lcg_step(s.rng);
-          s.jitterFold  = 1.0f + visadhara_noise::lcg_sample(s.rng) * 0.05f * driftAmt;
         }
 
         // Pitch envelope decay (per-sample, always running so smooth
@@ -391,11 +354,11 @@ namespace stolmine
         float sample = 0.0f;
         for (int n = 0; n < 6; n++)
         {
-          const float voiceFreq = baseFreq * s.freqMult[n] * s.jitterFreq[n] * pitchSweep;
+          const float voiceFreq = baseFreq * s.freqMult[n] * pitchSweep;
           s.phase[n] += voiceFreq * invSr;
           if (s.phase[n] >= 1.0f) s.phase[n] -= floorf(s.phase[n]);
 
-          const float voiceCoeff = decayCoeff * s.decayScale[n] * s.jitterDecay;
+          const float voiceCoeff = decayCoeff * s.decayScale[n];
           const float decayPath = s.env[n] * voiceCoeff;
           const float slowPath = s.slowAttack;
           s.env[n] = slowPath * useSlowMask + decayPath * useDecayMask;
@@ -441,7 +404,7 @@ namespace stolmine
 
         // Mix: mode bus + cross-mode injection, then drive into folder.
         const float bussed = modeBus + injectionSignal * injectMix;
-        const float preFold = bussed * foldDrive * s.jitterFold;
+        const float preFold = bussed * foldDrive;
 
         const float folded = visadhara_folder::fold(preFold, foldThreshold);
         const float pulse = visadhara_folder::pulse_mix(folded, foldPos, foldThreshold);
