@@ -133,9 +133,8 @@ namespace stolmine
       addParameter(mPitch);
       addParameter(mMode);
       addOption(mModeSnap);
-      addOption(mOctave);
+      addParameter(mOctave);
       mModeSnap.enableSerialization();
-      mOctave.enableSerialization();
       mpInternal = new Internal();
     }
 
@@ -160,7 +159,12 @@ namespace stolmine
 
     od::Parameter mMode{"Mode", 0.0f};
     od::Option    mModeSnap{"ModeSnap", 1};
-    od::Option    mOctave{"Octave", 2};
+    // Octave became a Parameter (was od::Option) so it can be CV-modulated
+    // and round-tripped via ParameterAdapter Bias. Integer values 1/2/3
+    // map to Bass / Alto / Tenor; the Lua sub-readout uses DialMap integer
+    // snap + addThresholdLabel for text display. Rounded via clamp+cast
+    // at the use site.
+    od::Parameter mOctave{"Octave", 2.0f};
 
     __attribute__((optimize("no-tree-vectorize")))
     virtual void process()
@@ -188,7 +192,12 @@ namespace stolmine
       const float level       = mLevel.value();
       const float basePitch   = mPitch.value();
 
-      const int octIdx = mOctave.value();
+      // Round + clamp the Parameter value to integer 1..3 (Bass / Alto /
+      // Tenor). CV modulation can push outside the nominal range; clamp
+      // saturates to the nearest valid octave rather than wrapping.
+      int octIdx = (int)(mOctave.value() + 0.5f);
+      if (octIdx < 1) octIdx = 1;
+      if (octIdx > 3) octIdx = 3;
       const float octShift = (octIdx == 1) ? -2.0f
                            : (octIdx == 3) ? +2.0f
                            : 0.0f;

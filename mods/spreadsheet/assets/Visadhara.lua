@@ -2,12 +2,13 @@ local app = app
 local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
-local Pitch = require "Unit.ViewControl.Pitch"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
 local OptionControl = require "Unit.MenuControl.OptionControl"
 local MenuHeader = require "Unit.MenuControl.Header"
 local Encoder = require "Encoder"
+local VisadharaPitchControl = require "spreadsheet.VisadharaPitchControl"
+local ThresholdFader = require "spreadsheet.ThresholdFader"
 
 -- Visadhara — clean-room percussion macro voice based on the public BIA
 -- technical manual. Phase 1: Skin mode skeleton — 6-voice NEON additive
@@ -38,6 +39,23 @@ local modeMap = (function()
   return m
 end)()
 
+-- Octave: 3 discrete values (1=Bass, 2=Alto, 3=Tenor). Integer
+-- stepping via the DialMap; text labels via addThresholdLabel on
+-- the readout/fader. Same threshold table used by
+-- VisadharaPitchControl's sub-readout and the expanded-view
+-- ThresholdFader so the two displays stay consistent.
+local octaveMap = (function()
+  local m = app.LinearDialMap(1, 3)
+  m:setSteps(1, 1, 1, 1)
+  m:setRounding(1)
+  return m
+end)()
+local octaveLabels = {
+  {1.0, "Bass"},
+  {1.5, "Alto"},
+  {2.5, "Tenor"}
+}
+
 local Visadhara = Class {}
 Visadhara:include(Unit)
 
@@ -60,6 +78,14 @@ function Visadhara:onLoadGraph(channelCount)
   connect(voctGain, "Out", op, "V/Oct")
   connect(tune, "Out", tuneRange, "In")
   self:addMonoBranch("tune", tune, "In", tuneRange, "Out")
+
+  -- Octave selector (Bass / Alto / Tenor) — moved from config menu
+  -- to V/Oct shift sub + expanded-view ply. CV-able via the
+  -- ParameterAdapter (was an od::Option, now an od::Parameter).
+  local octave = self:addObject("octave", app.ParameterAdapter())
+  octave:hardSet("Bias", 2.0)   -- Alto default (0-octave shift)
+  tie(op, "Octave", octave, "Out")
+  self:addMonoBranch("octave", octave, "In", octave, "Out")
 
   -- Base pitch at V/Oct=0. Hidden internal default (110 Hz). User
   -- adjusts pitch via V/Oct ply; base shift exposed as a config menu
@@ -130,7 +156,10 @@ end
 
 local views = {
   expanded = { "trig", "tune", "mode", "spread", "harmonic", "morph", "fold", "attack", "decay", "level" },
-  collapsed = {}
+  collapsed = {},
+  -- V/Oct ply expansion shows the octave selector alongside the tune
+  -- fader (ThresholdFader with Bass / Alto / Tenor labels).
+  tune = { "tune", "octave" }
 }
 
 function Visadhara:onLoadViews(objects, branches)
@@ -143,12 +172,26 @@ function Visadhara:onLoadViews(objects, branches)
     comparator = objects.trig
   }
 
-  controls.tune = Pitch {
+  controls.tune = VisadharaPitchControl {
     button = "V/Oct",
     description = "V/Oct",
     branch = branches.tune,
     offset = objects.tune,
-    range = objects.tuneRange
+    range = objects.tuneRange,
+    octaveParam = objects.octave:getParameter("Bias")
+  }
+
+  controls.octave = ThresholdFader {
+    button = "oct",
+    description = "Octave",
+    branch = branches.octave,
+    gainbias = objects.octave,
+    range = objects.octave,
+    biasMap = octaveMap,
+    biasUnits = app.unitNone,
+    biasPrecision = 0,
+    initialBias = 2.0,
+    thresholdLabels = octaveLabels
   }
 
   controls.mode = GainBias {
@@ -250,25 +293,15 @@ function Visadhara:onLoadViews(objects, branches)
   return controls, views
 end
 
+-- Octave moved out of the config menu to the V/Oct shift sub +
+-- expanded-view ply (with Bass / Alto / Tenor threshold labels).
 local menu = {
-  "octaveHeader",
-  "octave",
   "modeSnapHeader",
   "modeSnap"
 }
 
 function Visadhara:onShowMenu(objects, branches)
   local controls = {}
-
-  controls.octaveHeader = MenuHeader {
-    description = "Octave:"
-  }
-
-  controls.octave = OptionControl {
-    description = "Octave",
-    option = objects.op:getOption("Octave"),
-    choices = { "Bass (-2)", "Alto (0)", "Treble (+2)" }
-  }
 
   controls.modeSnapHeader = MenuHeader {
     description = "Mode crossfade:"
