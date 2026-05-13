@@ -618,6 +618,60 @@ Out of scope:
 
 Version: spreadsheet 2.6.2.8 → 2.6.2.9.
 
+### Visadhara Corona viz — phased build (2026-05-13)
+
+After Phase 1+2 of UI refinement (V/Oct octave sub, Mode ply with
+spread/harm/morph paramMode subs), Phase 3 lands the signature
+viz on Mode's main fader area. Concept: "Visadhara Corona" — a
+2D circular polar oscilloscope with layered decoration.
+
+Three layered elements + a trigger flash:
+
+  1. Polar waveform (constant): 64-point polar polyline reading
+     a decimated audio-output ring buffer. Line width via Harmonic.
+     Trail/phosphor via Decay. Attack character emerges from
+     wave shape; pitch/octave from angular density. Always
+     animating.
+  2. Concentric rings (Spread): 0-5 faint outline rings,
+     decorating but not competing with the wave.
+  3. Background plate (Mode + Fold): regenerates on each trigger.
+     Brightness inverse-related to Fold (Fold = continuous, gives
+     a contrast-crossing point with the wave). Mode shifts hue /
+     texture across Skin / Liquid / Metal.
+  4. Trigger flash: ~50 ms brightness pulse on rising edge.
+
+Sub-phasing for incremental commits:
+  - 3a (this commit): stub graphic + audio buffer plumbing. Polar
+    waveform only — no rings, no background, no trail. Verifies
+    data flow C++ → graphic + polar rendering math + LUT.
+  - 3b: background plate with Fold-driven brightness, Mode-driven
+    character.
+  - 3c: concentric rings from Spread.
+  - 3d: trail/decay accumulation + Harmonic line width.
+  - 3e: trigger flash.
+
+Each phase = one commit, individually auditable.
+
+Implementation notes:
+  - Graphic header-only (VisadharaCoronaGraphic.h) per
+    feedback_no_out_of_line_virtuals.
+  - 64-entry kCoronaCos / kCoronaSin LUT at file scope; pre-
+    computed values, no runtime sinf/cosf in package code per
+    feedback_package_trig_lut. (FilterResponseGraphic precedent.)
+  - C++ Internal struct gains vizBuf[64], vizWriteIdx,
+    vizSampleCounter. process() captures one sample per
+    kVizSampleInterval (256 → ~187 Hz update rate; 64 samples =
+    ~340 ms of recent audio).
+  - Visadhara::getVizSample(int age) inline method inside
+    #ifndef SWIGLUA gates Internal access; called from
+    VisadharaCoronaGraphic::draw via mpVisadhara pointer.
+  - VisadharaCoronaGraphic constructor + follow() pattern mirrors
+    HelicaseOrbitalGraphic exactly.
+  - SWIG dep gap: Visadhara class layout changes (added Internal
+    fields). Force-clean wrapper before build.
+
+Version: spreadsheet 2.6.2.18 → 2.6.2.19 for Phase 3a.
+
 ### UI refinement to 7 plies + Mode-viz (2026-05-13)
 
 Sound design wraps up at 2.6.2.15. Next: clean up the ply surface
