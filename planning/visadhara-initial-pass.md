@@ -618,6 +618,66 @@ Out of scope:
 
 Version: spreadsheet 2.6.2.8 → 2.6.2.9.
 
+### Harmonic redesign: voice distribution + correlated detune (2026-05-13)
+
+Audition feedback at 2.6.2.11: tighter than 2.6.2.10 but still not
+all the way to "punchy." User's structural proposal: **all 8 voices
+always play; Harmonic controls voice DISTRIBUTION (sub-cluster ↔
+harmonic-series) AND correlated detune amount (full ↔ near-zero).**
+
+Punch is sacrificed as Harmonic rises — natural consequence of
+voices spreading away from the fundamental. At Harmonic=0, all
+8 voices stack at 1× with full detune for a fat chorused sub
+(maximum kick weight). At Harmonic=1, voices spread to harmonic
+series with detune collapsed for clean integer-ratio relationships.
+
+New control semantics:
+
+  Harmonic = 0:
+    - All 8 voices at 1× ratio (fundamental cluster)
+    - Full per-voice detune (kVoiceDetune values)
+    - All voices bend in lockstep (effective sweep weight = 1.0)
+    - Single unified tau (25 ms) — coherent bend gesture
+  Harmonic = 1:
+    - Voices at full harmonic / prime series (kHarmonicSeries /
+      kPrimeSeries blended via spreadPos)
+    - Detune → 0 (clean integer ratios)
+    - Asymmetric per-voice sweep weights (kSweepWeight: voice 0
+      bend at 1.0, upper voices tapered to 0)
+    - Per-voice tau (kSweepTauMs: 25/15/10/6/4/0/0/0)
+  Intermediate: linear interpolation across all four axes.
+
+Implementation:
+
+  Visadhara.h block-rate freqMult loop replaces remap_harmonic +
+  spread_mult + kVoiceDetune chain with linear-interp formulas:
+
+    effectiveRatio  = 1 + harmonicPos × (spread_mult(i) - 1)
+    effectiveDetune = 1 + (kVoiceDetune[i] - 1) × (1 - harmonicPos)
+    freqMult[i]     = baseFreq × effectiveRatio × effectiveDetune × invSrOs
+
+  Block-rate pitchSweepGainLanes / pitchEnvCoeffLanes similarly
+  interpolate weight (1 → kSweepWeight[i]) and tau (25 ms →
+  kSweepTauMs[i]) across harmonicPos.
+
+  harmonic_voice_params is no longer called: ampScale[i] = 1,
+  decayScale[i] = 1 for all voices unconditionally. Function
+  retained in voice.h for documentation / legacy paths but unused.
+
+  remap_harmonic call dropped from the freqMult loop — the new
+  semantics use raw harmonicPos linearly. PMM Metal mode keeps
+  its existing harmonicPosUser dependence (unchanged).
+
+Cost: same NEON inner loop, only block-rate setup changes (a few
+extra multiplies and one lerp per voice). Negligible.
+
+Risk: voiceGain currently 0.375 — at Harmonic=0 all 8 voices
+coherent at fundamental yields larger peak than the spread-out case
+it was calibrated for. May need to reduce to 0.25 if the bus is
+too hot driving the folder; audition will tell.
+
+Version: spreadsheet 2.6.2.11 → 2.6.2.12.
+
 ### Pitch envelope rework (per-voice asymmetric sweep) — this commit
 
 Followed the NEON wins. Structural diagnosis of why the Liquid-mode
