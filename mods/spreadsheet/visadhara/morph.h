@@ -181,6 +181,7 @@ namespace stolmine
     // (tri, sq). Bhaskara sine uses reciprocal-estimate divide; ~10-bit
     // precision on hardware is well below the polynomial's ~1.5% error.
 
+    __attribute__((always_inline))
     static inline float32x4_t poly_sin_4(float32x4_t phase)
     {
       // t = 2*phase - 1, then sin(πt) via Bhaskara.
@@ -204,6 +205,7 @@ namespace stolmine
       return vbslq_f32(negMask, magNeg, mag);
     }
 
+    __attribute__((always_inline))
     static inline float32x4_t tri_4(float32x4_t phase)
     {
       // Piecewise:
@@ -225,6 +227,7 @@ namespace stolmine
       return vbslq_f32(m1, v1, vbslq_f32(m2, v2, v3));
     }
 
+    __attribute__((always_inline))
     static inline float32x4_t saw_4(float32x4_t phase)
     {
       // 2*phase - 1
@@ -233,6 +236,7 @@ namespace stolmine
       return vsubq_f32(vmulq_f32(phase, two), one);
     }
 
+    __attribute__((always_inline))
     static inline float32x4_t sq_4(float32x4_t phase)
     {
       const float32x4_t half = vdupq_n_f32(0.5f);

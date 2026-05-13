@@ -65,13 +65,20 @@ namespace stolmine
       // when liquidAmt > 0.
       float pitchEnv = 0.0f;
 
-      // Metal mode (Phase 4): two parallel 3-op PMM voice chains.
-      // Output is sum of pair1.tick() + pair2.tick(). Always ticked
-      // every sample so smooth crossfade through Metal territory works
-      // without per-sample dispatch (per
-      // feedback_runtime_branched_dsp_dispatch).
-      visadhara_pmm::Voice pmm1;
-      visadhara_pmm::Voice pmm2;
+      // Metal mode PMM state, NEON-friendly layout (replaces former
+      // visadhara_pmm::Voice pmm1/pmm2 scalar structs). Op index outer,
+      // pair-lane inner. Lanes 0/1 carry pair A/B; lanes 2/3 are
+      // padding (sized [4] not [2] for natural NEON 16-byte contiguity
+      // and to satisfy vld1q_f32). Coefficients (incs + fb/mod) are
+      // packed by the block-rate setup so the per-sample tick2() just
+      // loads them — no scalar-to-lane moves in the hot path.
+      //
+      // Always ticked every sample so smooth Mode crossfade works
+      // without per-sample dispatch (feedback_runtime_branched_dsp_dispatch).
+      float pmmPhase[3][4];
+      float pmmLastOut[3][4];
+      float pmmIncPacked[3][4];
+      float pmmFbModPacked[3][4];
 
       Internal()
       {
@@ -84,8 +91,10 @@ namespace stolmine
         // the bake-in per-sample freq increment (baseFreq * ratio *
         // detune * invSrOs).
         memset(freqMult, 0, sizeof(freqMult));
-        visadhara_pmm::reset(pmm1);
-        visadhara_pmm::reset(pmm2);
+        memset(pmmPhase, 0, sizeof(pmmPhase));
+        memset(pmmLastOut, 0, sizeof(pmmLastOut));
+        memset(pmmIncPacked, 0, sizeof(pmmIncPacked));
+        memset(pmmFbModPacked, 0, sizeof(pmmFbModPacked));
       }
     };
 #endif
@@ -282,6 +291,17 @@ namespace stolmine
       const float pmm2_mod12 = 0.60f * pair2Boost;
       const float pmm2_mod23 = 0.80f * pair2Boost;
 
+      // Pack PMM coefficients into NEON-friendly layout for tick2().
+      // Lanes 0,1 = pair A,B; lanes 2,3 stay zero (initial from ctor).
+      // Done once per block; per-half-sample tick2() just vld1q_f32s
+      // these arrays — no scalar-to-lane moves on the hot path.
+      s.pmmIncPacked[0][0] = pmm1_inc1;  s.pmmIncPacked[0][1] = pmm2_inc1;
+      s.pmmIncPacked[1][0] = pmm1_inc2;  s.pmmIncPacked[1][1] = pmm2_inc2;
+      s.pmmIncPacked[2][0] = pmm1_inc3;  s.pmmIncPacked[2][1] = pmm2_inc3;
+      s.pmmFbModPacked[0][0] = pmm1_fb;     s.pmmFbModPacked[0][1] = pmm2_fb;
+      s.pmmFbModPacked[1][0] = pmm1_mod12;  s.pmmFbModPacked[1][1] = pmm2_mod12;
+      s.pmmFbModPacked[2][0] = pmm1_mod23;  s.pmmFbModPacked[2][1] = pmm2_mod23;
+
       // Metal bus perceptual gain: PMM produces a denser waveform with
       // higher peak-to-RMS ratio than the Skin additive bus, so it
       // measures perceptually louder at the same nominal peak. Scale
@@ -320,16 +340,16 @@ namespace stolmine
 
         if (risingEdge)
         {
-          // Phase reset: snap all 6 voices to phase=0 so they start
+          // Phase reset: snap all 8 voices to phase=0 so they start
           // coherent. For sine/triangle morph positions this is a
           // clean zero crossing (output=0 at phase=0). For saw/square
           // there's still a residual step discontinuity; mitigation
           // for those corners is queued for Phase 5 polish.
-          for (int n = 0; n < 6; n++) s.phase[n] = 0.0f;
+          for (int n = 0; n < 8; n++) s.phase[n] = 0.0f;
 
           if (attackSlow)
           {
-            for (int n = 0; n < 6; n++) s.env[n] = 0.0f;
+            for (int n = 0; n < 8; n++) s.env[n] = 0.0f;
             s.slowAttack = 0.0f;
             s.slowAttackInc = (slowAttackTimeSamples > 0.0f)
                                 ? (1.0f / slowAttackTimeSamples)
@@ -339,7 +359,7 @@ namespace stolmine
           }
           else
           {
-            for (int n = 0; n < 6; n++) s.env[n] = 1.0f;
+            for (int n = 0; n < 8; n++) s.env[n] = 1.0f;
             s.slowAttack = 1.0f;
             s.slowAttackInc = 0.0f;
             s.finalEnv = 1.0f;
@@ -351,10 +371,10 @@ namespace stolmine
           s.pitchEnv = 1.0f;
 
           // Metal mode PMM phase reset — same coherent-attack discipline
-          // as Skin/Liquid voices. lastOut values reset too so feedback
+          // as Skin/Liquid voices. Zero phase + lastOut so feedback
           // doesn't hang carryover from the previous trigger.
-          visadhara_pmm::reset(s.pmm1);
-          visadhara_pmm::reset(s.pmm2);
+          memset(s.pmmPhase, 0, sizeof(s.pmmPhase));
+          memset(s.pmmLastOut, 0, sizeof(s.pmmLastOut));
         }
 
         // 2× oversampling shell: the full per-half-sample DSP body runs
@@ -509,15 +529,18 @@ namespace stolmine
         const float finalSlowPath  = s.slowAttack;
         s.finalEnv = finalSlowPath * useSlowMask + finalDecayPath * useDecayMask;
 
-        // Metal PMM tick — always run so smooth mode crossfade works
-        // without per-sample dispatch (heavy work outside conditionals).
-        // Morph sweeps each operator's waveshape (sine→tri→saw→sq)
-        // through the FM chain — saw-FM and square-FM produce
-        // dramatically different timbres than sine-FM.
-        const float pmmA = visadhara_pmm::tick(s.pmm1, pmm1_inc1, pmm1_inc2, pmm1_inc3,
-                                                pmm1_fb, pmm1_mod12, pmm1_mod23, morphW);
-        const float pmmB = visadhara_pmm::tick(s.pmm2, pmm2_inc1, pmm2_inc2, pmm2_inc3,
-                                                pmm2_fb, pmm2_mod12, pmm2_mod23, morphW);
+        // Metal PMM tick — NEON 2-lane-across-pairs. Always run so
+        // smooth mode crossfade works without per-sample dispatch
+        // (heavy work outside conditionals). Morph sweeps each
+        // operator's waveshape (sine→tri→saw→sq) through the FM chain
+        // — saw-FM and square-FM produce dramatically different
+        // timbres than sine-FM.
+        float pmmA, pmmB;
+        visadhara_pmm::tick2(s.pmmPhase, s.pmmLastOut,
+                              s.pmmIncPacked, s.pmmFbModPacked,
+                              morphW.w_sin, morphW.w_tri,
+                              morphW.w_saw, morphW.w_sq,
+                              pmmA, pmmB);
         const float metalBus = (pmmA + pmmB) * kMetalBusGain;
 
         // Mode-blended source. Skin/Liquid additive bus uses voiceGain
