@@ -618,24 +618,70 @@ Out of scope:
 
 Version: spreadsheet 2.6.2.8 → 2.6.2.9.
 
-### Pitch envelope dilution (deferred to next commit)
+### Pitch envelope rework (per-voice asymmetric sweep) — this commit
 
-User also flagged the Liquid mode pitch sweep feels diluted. Three
-contributing factors identified for a follow-up commit:
+Followed the NEON wins. Structural diagnosis of why the Liquid-mode
+pitch bend feels diluted rather than punchy:
 
-1. 50 ms exponential decay — most of the bend is in the first 20 ms,
-   too fast to register perceptually. Target ~150 ms.
-2. Symmetric depth across voices — all 6 sweep +1 oct together, so
-   the bend reads as one fat voice rather than a cascading layered
-   event. Target asymmetric per-voice depth (voice 0 +2 oct → voice 5
-   +0.3 oct or zero), giving low-end-heavy bend with each voice
-   arriving at target at perceptibly different times.
-3. Cross-mode injection during sweep — un-swept Metal bus mixing into
-   Skin/Liquid in negative-Attack region thins the sweep. Probably
-   orthogonal but worth noting.
+1. **No figure/ground.** All 8 voices ride a single scalar
+   `pitchSweep` factor — the entire harmonic series shifts as a
+   rigid block. Ear hears "the whole spectrum bent" not "the
+   fundamental bent." Punch requires ONE element carrying the
+   gesture while the rest stay as stable timbral support.
+2. **Upper-voice frequency wash.** Voice 7 sweeping 880→1760 Hz
+   creates a brighter / more-audible motion than voice 0's
+   110→220 Hz bend. The ear locks onto the brighter motion, which
+   reads as a synth-pad whoosh rather than a kick thump.
+3. **Exponential frontloads to 20 ms.** `expf(-1/(0.050*sr))` puts
+   most of the bend energy in the first 20 ms — the perceptual
+   gesture is over before the listener registers "there was a
+   bend." Reads as a tonal artifact at the very start, not a
+   gesture.
 
-Out of scope for the oversampling commit; tracked here so the
-follow-up has a starting point.
+Compounding effect: any one in isolation might still produce punch.
+Combined, the bend is short, spread across all voices, dominated
+by the harmonics' wash. Result: diffuse.
+
+The fix is structural, not parameter-tweaking. Per-voice
+asymmetric sweep depth + per-voice time constants, implemented as:
+
+- `visadhara/voice.h`: `kSweepWeight[8] = {1.0, 0.55, 0.25, 0.10,
+  0.05, 0, 0, 0}` — voice 0 carries the gesture; upper voices
+  silent contributors. `kSweepTauMs[8] = {200, 140, 80, 40, 25,
+  0, 0, 0}` — slow settle on the fundamental; quick on the
+  inflection partials.
+- `Visadhara.h` Internal: replace scalar `pitchEnv` with
+  `pitchEnvLanes[8]`. Add `pitchEnvCoeffLanes[8]` and
+  `pitchSweepGainLanes[8]` (block-rate precomputed).
+- Block-rate setup: derive per-voice decay coefficients from
+  `kSweepTauMs` and per-voice gains from `liquidAmt × kSweepWeight
+  × kPitchSweepPeak`. Coefficient=0 collapses to no decay (env
+  stays at 1) but gain=0 for those voices anyway → no audible
+  sweep contribution.
+- Trigger handler: NEON vst1q to set pitchEnvLanes[0..7] = 1.0
+  on rising edge.
+- Per-half-sample NEON, per voice-loop pass: load lanes' pitchEnv,
+  multiply by coeff (per-voice decay), compute
+  `sweepLanes = 1 + gain × pitchEnv`, then advance phase as
+  `p += freqMult × sweepLanes` (replaces the prior global scalar
+  `pitchSweep`).
+
+Cost: ~4 extra NEON ops per pass × 2 passes × 2× OS = 16 extra
+NEON ops/output sample. Negligible.
+
+Out of scope:
+- Bend onset delay (3-5 ms attack-then-decay shape on pitchEnv).
+  Park; revisit if depth+tau split doesn't fully nail "punchy."
+- Shape alternatives (linear / S-curve / double-exp). Same gate.
+- Cross-mode injection thinning (negative-Attack region) — touched
+  on only when user pushes Attack into negative; orthogonal to
+  the main complaint.
+
+Risk: Internal struct grows by 96 bytes (24 floats × 4); force-clean
+SWIG. New NEON loads in inner loop may pressure registers; lint check
+required.
+
+Version: spreadsheet 2.6.2.9 → 2.6.2.10.
 
 ## Open design questions (parked for in-flight decisions)
 
