@@ -152,7 +152,7 @@ namespace stolmine
 
       for (int i = 0; i < 6; i++)
       {
-        s.freqMult[i] = visadhara::spread_mult(i, spreadPos);
+        s.freqMult[i] = visadhara::spread_mult(i, spreadPos) * visadhara::kVoiceDetune[i];
         visadhara::harmonic_voice_params(i, harmonicPos, s.ampScale[i], s.decayScale[i]);
       }
       s.freqMult[6] = 0.0f;

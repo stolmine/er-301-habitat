@@ -35,6 +35,20 @@ namespace stolmine
     static const float kHarmonicSeries[6] = {1.0f, 2.0f, 3.0f,  4.0f,  5.0f,  6.0f};
     static const float kPrimeSeries[6]    = {1.0f, 2.0f, 3.0f,  5.0f,  7.0f, 11.0f};
 
+    // Per-voice fixed detune. Asymmetric ~3-cent spread emulates BIA's
+    // analog oscillator drift; non-symmetric so beat patterns between
+    // adjacent voices stay irregular across chord-style spread sweeps.
+    // Applied once at block-rate freqMult assignment, compounds naturally
+    // with Liquid mode pitchSweep.
+    static const float kVoiceDetune[6] = {
+        0.99885f,   // voice 0  −2.0 cents
+        1.00115f,   // voice 1  +2.0 cents
+        0.99942f,   // voice 2  −1.0 cents
+        1.00173f,   // voice 3  +3.0 cents
+        0.99827f,   // voice 4  −3.0 cents
+        1.00058f    // voice 5  +1.0 cents
+    };
+
     static inline float spread_mult(int voiceIdx, float spreadPos)
     {
       // Linear interp between harmonic and prime series.
