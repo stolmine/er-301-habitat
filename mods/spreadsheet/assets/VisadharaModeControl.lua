@@ -1,4 +1,5 @@
 local app = app
+local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
@@ -31,6 +32,20 @@ VisadharaModeControl:include(GainBias)
 
 function VisadharaModeControl:init(args)
   GainBias.init(self, args)
+
+  -- Phase 3a Corona viz on the main fader area. Replaces the stock
+  -- GainBias fader. The graphic reads decimated audio output from
+  -- the Visadhara op via getVizSample (mpVisadhara pointer set via
+  -- follow). Encoder + cursor still target the Mode bias parameter
+  -- (setMainCursorController on the graphic routes interaction).
+  if args.visadhara then
+    local corona = libspreadsheet.VisadharaCoronaGraphic(0, 0, ply, 64)
+    corona:follow(args.visadhara)
+    local container = app.Graphic(0, 0, ply, 64)
+    container:addChild(corona)
+    self:setMainCursorController(corona)
+    self:setControlGraphic(container)
+  end
 
   self.paramMode = true
   self.shiftHeld = false

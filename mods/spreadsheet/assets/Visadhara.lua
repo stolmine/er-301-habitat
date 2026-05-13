@@ -222,7 +222,10 @@ function Visadhara:onLoadViews(objects, branches)
     -- underlying value.
     spreadParam   = objects.spread:getParameter("Bias"),
     harmonicParam = objects.harmonic:getParameter("Bias"),
-    morphParam    = objects.morph:getParameter("Bias")
+    morphParam    = objects.morph:getParameter("Bias"),
+    -- Visadhara op reference for the Corona graphic to follow (reads
+    -- decimated audio output via getVizSample for the polar plot).
+    visadhara     = objects.op
   }
 
   controls.spread = GainBias {
