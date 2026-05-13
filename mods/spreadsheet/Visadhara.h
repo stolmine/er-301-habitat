@@ -267,11 +267,14 @@ namespace stolmine
         liquidAmt = (c < 1.0f) ? c : ((c < 2.0f) ? (2.0f - c) : 0.0f);
         metalAmt  = (c > 1.0f) ? (c - 1.0f) : 0.0f;
       }
-      // Liquid pitch-sweep peak: +1 octave (factor 2 - 1 = 1.0) at
-      // full weight (voice 0). Per-voice scaling via kSweepWeight in
-      // voice.h yields a focused fundamental bend with stable upper
-      // voices.
-      const float kPitchSweepPeak = 1.0f;
+      // Liquid pitch-sweep peak: +2 octaves at full weight (voice 0).
+      // Combined with the tight per-voice time constants in voice.h
+      // (kSweepTauMs ~25 ms on voice 0), this gives a clicky
+      // percussive bend that settles fast and deep — punchy transient
+      // gesture, not a sustained slide. Classic kick-drum pitch
+      // sweeps in literature range 2-3 octaves; we sit at the lower
+      // end to keep the bend musical against the harmonic series.
+      const float kPitchSweepPeak = 2.0f;
       const float skinLiquidPresence = skinAmt + liquidAmt;
 
       // Per-voice pitch-envelope coefficients and gains. Block-rate
