@@ -171,10 +171,16 @@ namespace stolmine
       s.decayScale[6] = 0.0f;
       s.decayScale[7] = 0.0f;
 
-      const float decayTimeSamples = decayPos * decayPos * 96000.0f + 480.0f;
+      // Time constants integrate per-half-sample at 2× internal rate
+      // (see per-sample loop below — DSP runs in a 2× k-iteration shell
+      // with a 2-tap MA decimator at output, per Ngoma / Helicase
+      // precedent). All sample-count denominators double; per-step phase
+      // increments halve via invSrOs.
+      const float decayTimeSamples = (decayPos * decayPos * 96000.0f + 480.0f) * 2.0f;
       const float decayCoeff = expf(-1.0f / decayTimeSamples);
 
-      const float invSr = 1.0f / globalConfig.sampleRate;
+      const float invSr   = 1.0f / globalConfig.sampleRate;
+      const float invSrOs = invSr * 0.5f;     // per-half-sample at 2× rate
 
       // Block-rate morph crossfade weights. Equal-power (sqrt) curves
       // for level-flat sweep across the four shape anchors. Computed
@@ -222,8 +228,9 @@ namespace stolmine
       // demos / reference recordings.
       const float kPitchSweepPeak = 1.0f;
       const float liquidSweepAmt = liquidAmt * kPitchSweepPeak;
-      // Pitch-envelope decay time constant: 50ms.
-      const float pitchEnvCoeff = expf(-1.0f / (0.050f * globalConfig.sampleRate));
+      // Pitch-envelope decay time constant: 50 ms. Sample count doubles
+      // at 2× internal rate to preserve wall-clock duration.
+      const float pitchEnvCoeff = expf(-1.0f / (0.050f * globalConfig.sampleRate * 2.0f));
       const float skinLiquidPresence = skinAmt + liquidAmt;
 
       // ---- Phase 4 block-rate setup: Metal mode PMM ----
@@ -243,17 +250,17 @@ namespace stolmine
       const float pmm2_r2 = 2.0f + (2.3f - 2.0f) * h;       // 2.0 → 2.3
       const float pmm2_r3 = 4.0f + (3.5f - 4.0f) * h;       // 4.0 → 3.5
 
-      const float pmm1_inc1 = baseFreq * pmm1_r1 * invSr;
-      const float pmm1_inc2 = baseFreq * pmm1_r2 * invSr;
-      const float pmm1_inc3 = baseFreq * pmm1_r3 * invSr;
+      const float pmm1_inc1 = baseFreq * pmm1_r1 * invSrOs;
+      const float pmm1_inc2 = baseFreq * pmm1_r2 * invSrOs;
+      const float pmm1_inc3 = baseFreq * pmm1_r3 * invSrOs;
       const float pmm1_fb    = 0.30f;
       const float pmm1_mod12 = 0.60f;
       const float pmm1_mod23 = 0.80f;
 
       const float pair2Boost = 1.0f + spreadPos * 1.5f;
-      const float pmm2_inc1 = baseFreq * pmm2_r1 * invSr;
-      const float pmm2_inc2 = baseFreq * pmm2_r2 * invSr;
-      const float pmm2_inc3 = baseFreq * pmm2_r3 * invSr;
+      const float pmm2_inc1 = baseFreq * pmm2_r1 * invSrOs;
+      const float pmm2_inc2 = baseFreq * pmm2_r2 * invSrOs;
+      const float pmm2_inc3 = baseFreq * pmm2_r3 * invSrOs;
       const float pmm2_fb    = 0.30f * pair2Boost;
       const float pmm2_mod12 = 0.60f * pair2Boost;
       const float pmm2_mod23 = 0.80f * pair2Boost;
@@ -272,8 +279,10 @@ namespace stolmine
       //                       into Metal), amount proportional to
       //                       |attackPos|. See injection block below.
       const bool attackSlow  = (attackPos > +0.05f);
+      // 2× sample count so the ramp's wall-clock fill time matches the
+      // single-rate value when stepped per-half-sample.
       const float slowAttackTimeSamples =
-        attackSlow ? (attackPos * 0.2f * globalConfig.sampleRate) : 0.0f;
+        attackSlow ? (attackPos * 0.2f * globalConfig.sampleRate * 2.0f) : 0.0f;
       const float injectMix = (attackPos < 0.0f) ? -attackPos : 0.0f;
 
       const float useSlowMask  = (s.slowAttackInc > 0.0f) ? 1.0f : 0.0f;
@@ -331,7 +340,17 @@ namespace stolmine
           visadhara_pmm::reset(s.pmm2);
         }
 
-        // Pitch envelope decay (per-sample, always running so smooth
+        // 2× oversampling shell: the full per-half-sample DSP body runs
+        // twice per output sample, generating osSamp[0] and osSamp[1].
+        // 2-tap MA decimator at the bottom averages them into outBuf[i].
+        // Matches Ngoma / Helicase precedent. The folder + voice morph
+        // generate substantial HF content; oversampling pushes the
+        // resulting harmonics' alias mirror out of audible band.
+        float osSamp[2];
+        for (int k = 0; k < 2; k++)
+        {
+
+        // Pitch envelope decay (per-half-sample, always running so smooth
         // crossfade works without per-block dispatch).
         s.pitchEnv *= pitchEnvCoeff;
 
@@ -355,7 +374,7 @@ namespace stolmine
         for (int n = 0; n < 6; n++)
         {
           const float voiceFreq = baseFreq * s.freqMult[n] * pitchSweep;
-          s.phase[n] += voiceFreq * invSr;
+          s.phase[n] += voiceFreq * invSrOs;
           if (s.phase[n] >= 1.0f) s.phase[n] -= floorf(s.phase[n]);
 
           const float voiceCoeff = decayCoeff * s.decayScale[n];
@@ -423,7 +442,14 @@ namespace stolmine
         // Master soft saturator: catches residual peaks at extreme
         // settings (Metal + max fold + cross-injection) without
         // introducing dynamics artifacts. Output bounded ±1.
-        outBuf[i] = visadhara_folder::master_sat(postEnv * level);
+        osSamp[k] = visadhara_folder::master_sat(postEnv * level);
+        }   // end 2× k-loop
+
+        // 2-tap MA decimator. Matches Ngoma's pattern from
+        // project_ngoma_codex; sufficient for percussion content. A
+        // higher-order halfband FIR is a future refinement only if
+        // residual aliasing is audible after 2×.
+        outBuf[i] = 0.5f * (osSamp[0] + osSamp[1]);
       }
     }
 #endif
