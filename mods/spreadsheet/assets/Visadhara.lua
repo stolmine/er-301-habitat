@@ -44,9 +44,13 @@ end)()
 -- the readout/fader. Same threshold table used by
 -- VisadharaPitchControl's sub-readout and the expanded-view
 -- ThresholdFader so the two displays stay consistent.
+--
+-- Step sizes match VisadharaPitchControl.lua: coarse = 1 (single
+-- integer per click), fine = 0.1 (10 clicks per integer, precise
+-- selection via shift+encoder).
 local octaveMap = (function()
   local m = app.LinearDialMap(1, 3)
-  m:setSteps(1, 1, 1, 1)
+  m:setSteps(1, 0.1, 0.01, 0.01)
   m:setRounding(1)
   return m
 end)()

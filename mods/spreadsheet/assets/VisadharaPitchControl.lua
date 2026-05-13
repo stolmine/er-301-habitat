@@ -35,10 +35,16 @@ function VisadharaPitchControl:init(args)
 
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  -- Integer-snap DialMap: encoder steps cycle 1 → 2 → 3.
+  -- Integer-snap DialMap. Coarse encoder step = 1 (one integer per
+  -- click — flips Bass↔Alto↔Tenor). Fine step (shift+encoder) =
+  -- 0.1 so user can dial precisely between threshold boundaries
+  -- without accidentally skipping past the target value via
+  -- encoder acceleration. setRounding(1) keeps the readout's
+  -- displayed text snapped to nearest integer; underlying
+  -- parameter can hover between for CV-modulation purposes.
   local octaveMap = (function()
     local m = app.LinearDialMap(1, 3)
-    m:setSteps(1, 1, 1, 1)
+    m:setSteps(1, 0.1, 0.01, 0.01)
     m:setRounding(1)
     return m
   end)()
