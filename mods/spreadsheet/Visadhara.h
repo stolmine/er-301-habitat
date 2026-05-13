@@ -172,12 +172,14 @@ namespace stolmine
       float *vOctBuf = mVOct.buffer();
 
       // ---- Block-rate parameter reads ----
-      // Raw user harmonic position (0..1) is used for Metal ratio
-      // blending. The Skin path uses a remapped version that expands
-      // the timbrally-interesting top-third of the voice-activation
-      // curve to the top two-thirds of the control (voice.h).
+      // Raw user harmonic position (0..1). Used directly across all
+      // voice-distribution / detune / sweep-weight lerps below — the
+      // new Harmonic semantics (post-2.6.2.12) are linear from
+      // fundamental-cluster to harmonic-series with correlated
+      // detune collapse, so no remap compression is wanted. PMM
+      // Metal mode keeps its own use of harmonicPosUser unchanged.
       const float harmonicPosUser = mHarmonic.value();
-      const float harmonicPos = visadhara::remap_harmonic(harmonicPosUser);
+      const float harmonicPos = harmonicPosUser;
       const float spreadPos   = mSpread.value();
       const float morphPos    = mMorph.value();
       const float foldPos     = mFold.value();
@@ -206,25 +208,40 @@ namespace stolmine
       const float invSr   = 1.0f / globalConfig.sampleRate;
       const float invSrOs = invSr * 0.5f;     // per-half-sample at 2× rate
 
-      // 8 voices active (was 6 + 2 masked). NEON 4-lane × 2 processes
-      // all 8 lanes either way — masking saved no work. The extra two
-      // voices contribute 7th/8th harmonics in harmonic mode and primes
-      // 13/17 in prime mode.
+      // 8 voices active. NEON 4-lane × 2 processes all 8 lanes.
+      //
+      // Voice-distribution semantics (2.6.2.12 redesign):
+      //   harmonicPos = 0: all 8 voices land on 1× (fundamental
+      //                    cluster) with FULL detune across them
+      //                    — fat chorused sub, maximum kick weight.
+      //   harmonicPos = 1: voices land on harmonic / prime series
+      //                    (via spread_mult), detune COLLAPSED to
+      //                    zero — clean integer ratios, harmonically
+      //                    pure timbre.
+      //   intermediate:    linear lerp on both axes.
+      //
+      // All voices always at amp=1 / decayScale=1 — Harmonic doesn't
+      // gate voice activation, just distribution + detune amount.
+      // Punch naturally falls as Harmonic rises (voices spreading
+      // away from fundamental → smaller coherent peak at the sub).
       //
       // freqMult is baked at block-rate to hold the full per-sample
-      // freq INCREMENT (baseFreq × ratio × detune × invSrOs), not a
-      // pure ratio. This lets the per-sample voice loop advance phase
-      // via a single vmla (p += freqMult * pitchSweep) instead of
-      // computing baseFreq × fm × pitchSweep × invSrOs from broadcasts
-      // — eliminates 3 block-rate broadcast quads from the inner loop
-      // hot path, cutting NEON register pressure below the spill
-      // threshold (feedback_neon_hint_surfaces).
+      // freq INCREMENT (baseFreq × ratio × detune × invSrOs).
       const float baseFreqInvSrOs = baseFreq * invSrOs;
+      const float detuneAmt = 1.0f - harmonicPos;
       for (int i = 0; i < 8; i++)
       {
-        const float ratio = visadhara::spread_mult(i, spreadPos) * visadhara::kVoiceDetune[i];
-        s.freqMult[i] = baseFreqInvSrOs * ratio;
-        visadhara::harmonic_voice_params(i, harmonicPos, s.ampScale[i], s.decayScale[i]);
+        // Effective ratio: lerp from 1.0 (cluster) to spread-driven
+        // harmonic / prime series.
+        const float seriesRatio = visadhara::spread_mult(i, spreadPos);
+        const float effectiveRatio = 1.0f + harmonicPos * (seriesRatio - 1.0f);
+        // Effective detune: full kVoiceDetune at H=0, collapses to 1.0
+        // (no detune) at H=1.
+        const float effectiveDetune =
+          1.0f + (visadhara::kVoiceDetune[i] - 1.0f) * detuneAmt;
+        s.freqMult[i]   = baseFreqInvSrOs * effectiveRatio * effectiveDetune;
+        s.ampScale[i]   = 1.0f;
+        s.decayScale[i] = 1.0f;
       }
 
       // Block-rate morph crossfade weights. Equal-power (sqrt) curves
@@ -279,26 +296,31 @@ namespace stolmine
 
       // Per-voice pitch-envelope coefficients and gains. Block-rate
       // precompute into Internal arrays so the per-sample NEON loop
-      // just vld1q_f32s them — no scalar-to-lane moves in the hot
-      // path (see feedback_neon_voice_bus_template Layer 9).
+      // just vld1q_f32s them (feedback_neon_voice_bus_template Layer 9).
       //
-      // pitchEnvCoeffLanes[i]: per-voice decay multiplier per
-      //                        half-sample. Voices with weight=0
-      //                        get coeff=0 (env collapses to 0 next
-      //                        sample, but their gain=0 anyway so
-      //                        their sweep contribution is always 0).
-      // pitchSweepGainLanes[i]: liquidAmt × kSweepWeight × peak.
-      //                        Zero for upper voices → no sweep
-      //                        contribution regardless of pitchEnv.
+      // Voice-distribution-aware (2.6.2.12): at harmonicPos = 0 all
+      // voices bend in lockstep at the fundamental (weight = 1.0
+      // and unified tau), since they're all clustered at 1×. At
+      // harmonicPos = 1 the asymmetric kSweepWeight + kSweepTauMs
+      // arrays apply (voice 0 carries the gesture, upper voices
+      // tapered). Linear lerp between.
+      //
+      //   effectiveWeight = lerp(1.0, kSweepWeight[i], harmonicPos)
+      //   effectiveTau    = lerp(kUnifiedTauMs, kSweepTauMs[i], harmonicPos)
+      const float kUnifiedTauMs = 25.0f;   // tau at H=0 (fundamental cluster)
       const float sr2 = globalConfig.sampleRate * 2.0f;
       for (int i = 0; i < 8; i++)
       {
-        const float tauMs = visadhara::kSweepTauMs[i];
-        s.pitchEnvCoeffLanes[i] = (tauMs > 0.0f)
-          ? expf(-1.0f / (tauMs * 0.001f * sr2))
-          : 0.0f;
+        const float effectiveWeight =
+          1.0f + harmonicPos * (visadhara::kSweepWeight[i] - 1.0f);
         s.pitchSweepGainLanes[i] =
-          liquidAmt * visadhara::kSweepWeight[i] * kPitchSweepPeak;
+          liquidAmt * effectiveWeight * kPitchSweepPeak;
+
+        const float effectiveTauMs =
+          kUnifiedTauMs + harmonicPos * (visadhara::kSweepTauMs[i] - kUnifiedTauMs);
+        s.pitchEnvCoeffLanes[i] = (effectiveTauMs > 0.0f)
+          ? expf(-1.0f / (effectiveTauMs * 0.001f * sr2))
+          : 0.0f;
       }
 
       // ---- Phase 4 block-rate setup: Metal mode PMM ----
