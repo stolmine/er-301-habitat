@@ -8,6 +8,7 @@ local OptionControl = require "Unit.MenuControl.OptionControl"
 local MenuHeader = require "Unit.MenuControl.Header"
 local Encoder = require "Encoder"
 local VisadharaPitchControl = require "spreadsheet.VisadharaPitchControl"
+local VisadharaModeControl = require "spreadsheet.VisadharaModeControl"
 local ThresholdFader = require "spreadsheet.ThresholdFader"
 
 -- Visadhara — clean-room percussion macro voice based on the public BIA
@@ -159,11 +160,18 @@ function Visadhara:onLoadGraph(channelCount)
 end
 
 local views = {
-  expanded = { "trig", "tune", "mode", "spread", "harmonic", "morph", "fold", "attack", "decay", "level" },
+  -- Main view: 7 plies. spread / harmonic / morph live on the Mode
+  -- ply's paramMode shift sub (VisadharaModeControl); the underlying
+  -- ply faders are surfaced via Mode-ply expansion.
+  expanded = { "trig", "tune", "mode", "fold", "attack", "decay", "level" },
   collapsed = {},
   -- V/Oct ply expansion shows the octave selector alongside the tune
   -- fader (ThresholdFader with Bass / Alto / Tenor labels).
-  tune = { "tune", "octave" }
+  tune = { "tune", "octave" },
+  -- Mode ply expansion exposes spread/harmonic/morph as full faders
+  -- alongside the Mode crossfade. Same params as the paramMode sub
+  -- readouts (same ParameterAdapter behind both displays).
+  mode = { "mode", "spread", "harmonic", "morph" }
 }
 
 function Visadhara:onLoadViews(objects, branches)
@@ -198,7 +206,7 @@ function Visadhara:onLoadViews(objects, branches)
     thresholdLabels = octaveLabels
   }
 
-  controls.mode = GainBias {
+  controls.mode = VisadharaModeControl {
     button = "mode",
     description = "Mode",
     branch = branches.mode,
@@ -207,7 +215,14 @@ function Visadhara:onLoadViews(objects, branches)
     biasMap = modeMap,
     biasUnits = app.unitNone,
     biasPrecision = 2,
-    initialBias = 0.0
+    initialBias = 0.0,
+    -- spread / harmonic / morph as paramMode sub readouts. Same
+    -- ParameterAdapter Bias used by the ply-expansion faders (see
+    -- views.mode), so editing in either display moves the same
+    -- underlying value.
+    spreadParam   = objects.spread:getParameter("Bias"),
+    harmonicParam = objects.harmonic:getParameter("Bias"),
+    morphParam    = objects.morph:getParameter("Bias")
   }
 
   controls.spread = GainBias {
