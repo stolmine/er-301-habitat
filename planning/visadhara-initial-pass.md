@@ -618,6 +618,63 @@ Out of scope:
 
 Version: spreadsheet 2.6.2.8 → 2.6.2.9.
 
+### UI refinement to 7 plies + Mode-viz (2026-05-13)
+
+Sound design wraps up at 2.6.2.15. Next: clean up the ply surface
+and add the signature graphic that every other spreadsheet voice
+has.
+
+Current state: 10 plies on the main view (trig, V/Oct, mode, spread,
+harmonic, morph, fold, attack, decay, level) + 2 menu items (octave
+BAT switch, mode crossfade snap). No custom viz; every ply uses
+stock fader.
+
+Target: **7 plies + viz** (Attack stays top-level — too timbrally
+important to bury on a sub):
+
+  1. trig
+  2. V/Oct (+ octave on shift sub: Bass/Alto/Tenor)
+  3. Mode (viz on main fader area; shift subs for spread/harm/morph)
+  4. fold
+  5. attack
+  6. decay
+  7. level
+
+Octave moves out of menu (only ModeSnap remains there). 3 controls
+(spread, harmonic, morph) become subs of Mode.
+
+Implementation pattern: **`app.Readout:addThresholdLabel(threshold,
+"text")`** — SDK-built feature on the Readout widget. Used in
+Rauschen's `CutoffControl` (morph sub-readout flips between
+"off"/"LP"/"L>B"/"BP"/"B>H"/"HP"/"H>N"/"ntch" as parameter crosses
+thresholds). Same trick works on the V/Oct octave sub and on the
+expanded-view fader. No new helper needed — pattern is built in.
+
+For the V/Oct octave sub, octave converts from `od::Option`
+(discrete 1/2/3) to `od::Parameter` (continuous, CV-able, snapped
+via DialMap stepping at the readout). Bonus CV input capability;
+required for ParameterAdapter / threshold-label compatibility.
+
+#### Phasing
+
+  Phase 1 (this commit): V/Oct + octave shift-sub.
+    - C++: mOctave Option → Parameter
+    - New VisadharaPitchControl.lua (modeled on Ngoma's
+      DrumVoicePitchControl + Rauschen's addThresholdLabel)
+    - Threshold labels: Bass / Alto / Tenor
+    - Expanded view of V/Oct ply also shows octave (ThresholdFader)
+    - Octave drops from config menu
+
+  Phase 2 (later): Mode ply with viz + 3 shift subs (spread, harm,
+    morph). Drops spread/harmonic/morph from main view. 10 → 7
+    plies.
+
+  Phase 3 (later): Custom viz graphic for Mode ply. Candidates
+    (voice cluster bloom, mode triangle, phase circle) parked for
+    audition selection.
+
+  Version: 2.6.2.15 → 2.6.2.16 for Phase 1.
+
 ### Harmonic redesign: voice distribution + correlated detune (2026-05-13)
 
 Audition feedback at 2.6.2.11: tighter than 2.6.2.10 but still not
