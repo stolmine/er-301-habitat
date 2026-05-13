@@ -58,6 +58,39 @@ namespace stolmine
         0.99913f    // voice 7  −1.5 cents
     };
 
+    // Liquid-mode per-voice pitch-sweep depth. Voice 0 (fundamental)
+    // carries the bend as a clear gesture; upper voices contribute
+    // timbral support without participating in the sweep. Punch is
+    // a perceptual figure/ground effect: ONE element bending against
+    // a stable harmonic context, NOT every voice shifting in lockstep
+    // (which reads as "the whole spectrum bent" → diffuse).
+    //
+    // Weight 0 collapses a voice's sweep to multiplier=1.0 (no bend);
+    // its kSweepTauMs is therefore moot but kept 0 for documentation.
+    static const float kSweepWeight[8] = {
+        1.00f,   // voice 0 — full bend depth (× kPitchSweepPeak octave)
+        0.55f,   // voice 1 — half-companion
+        0.25f,   // voice 2 — subtle inflection
+        0.10f,   // voice 3 — barely audible
+        0.05f,   // voice 4
+        0.00f,   // voice 5 — silent on the gesture
+        0.00f,   // voice 6
+        0.00f    // voice 7
+    };
+
+    // Per-voice pitch-envelope time constants (ms). Slower settle on
+    // the fundamental for an audible musical gesture; quicker on
+    // inflection partials so they sound like attack character rather
+    // than a sustained ride. Voices with weight=0 ignore their tau.
+    static const float kSweepTauMs[8] = {
+        200.0f,  // voice 0 — slow settle, audible bend over ~600 ms total
+        140.0f,  // voice 1
+        80.0f,   // voice 2
+        40.0f,   // voice 3
+        25.0f,   // voice 4
+        0.0f, 0.0f, 0.0f
+    };
+
     static inline float spread_mult(int voiceIdx, float spreadPos)
     {
       // Linear interp between harmonic and prime series.

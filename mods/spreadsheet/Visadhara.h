@@ -59,11 +59,26 @@ namespace stolmine
       // amplitude without affecting the per-voice bus.
       float finalEnv = 0.0f;
 
-      // Liquid mode (Phase 3): per-trigger pitch envelope. Decays
-      // exponentially over ~30ms after each rising edge. Multiplies
-      // every voice's phase-increment by (1 + liquidSweepAmt * pitchEnv)
-      // when liquidAmt > 0.
-      float pitchEnv = 0.0f;
+      // Liquid mode: per-VOICE pitch envelope. Replaced the prior
+      // global scalar `pitchEnv` so each voice can bend with its own
+      // depth (kSweepWeight) and time constant (kSweepTauMs) — see
+      // visadhara/voice.h. Per-voice asymmetric sweep gives the
+      // fundamental a clear bend gesture while upper voices stay
+      // timbrally stable: punch from figure/ground contrast rather
+      // than lockstep harmonic-block shift.
+      //
+      // pitchEnvLanes[i]:        per-voice envelope state, 1.0 on
+      //                          trigger, decays toward 0
+      // pitchEnvCoeffLanes[i]:   per-voice decay multiplier, block-
+      //                          rate from kSweepTauMs (0 if no bend)
+      // pitchSweepGainLanes[i]:  block-rate liquidAmt *
+      //                          kSweepWeight[i] * kPitchSweepPeak
+      // Per-sample: pitchEnvLanes *= pitchEnvCoeffLanes (NEON), then
+      // sweepLanes = 1 + pitchSweepGainLanes * pitchEnvLanes,
+      // then phase += freqMult * sweepLanes (per voice).
+      float pitchEnvLanes[8];
+      float pitchEnvCoeffLanes[8];
+      float pitchSweepGainLanes[8];
 
       // Metal mode PMM state, NEON-friendly layout (replaces former
       // visadhara_pmm::Voice pmm1/pmm2 scalar structs). Op index outer,
@@ -95,6 +110,10 @@ namespace stolmine
         memset(pmmLastOut, 0, sizeof(pmmLastOut));
         memset(pmmIncPacked, 0, sizeof(pmmIncPacked));
         memset(pmmFbModPacked, 0, sizeof(pmmFbModPacked));
+        memset(pitchEnvLanes, 0, sizeof(pitchEnvLanes));
+        // Coeffs and gains are block-rate computed before first use.
+        memset(pitchEnvCoeffLanes, 0, sizeof(pitchEnvCoeffLanes));
+        memset(pitchSweepGainLanes, 0, sizeof(pitchSweepGainLanes));
       }
     };
 #endif
@@ -248,16 +267,36 @@ namespace stolmine
         liquidAmt = (c < 1.0f) ? c : ((c < 2.0f) ? (2.0f - c) : 0.0f);
         metalAmt  = (c > 1.0f) ? (c - 1.0f) : 0.0f;
       }
-      // Liquid pitch-sweep peak: +1 octave (factor 2 - 1 = 1.0). Times
-      // the mode-blend amount. BIA hardware has a fixed pitch sweep
-      // character; this matches the audible bend depth in the manual's
-      // demos / reference recordings.
+      // Liquid pitch-sweep peak: +1 octave (factor 2 - 1 = 1.0) at
+      // full weight (voice 0). Per-voice scaling via kSweepWeight in
+      // voice.h yields a focused fundamental bend with stable upper
+      // voices.
       const float kPitchSweepPeak = 1.0f;
-      const float liquidSweepAmt = liquidAmt * kPitchSweepPeak;
-      // Pitch-envelope decay time constant: 50 ms. Sample count doubles
-      // at 2× internal rate to preserve wall-clock duration.
-      const float pitchEnvCoeff = expf(-1.0f / (0.050f * globalConfig.sampleRate * 2.0f));
       const float skinLiquidPresence = skinAmt + liquidAmt;
+
+      // Per-voice pitch-envelope coefficients and gains. Block-rate
+      // precompute into Internal arrays so the per-sample NEON loop
+      // just vld1q_f32s them — no scalar-to-lane moves in the hot
+      // path (see feedback_neon_voice_bus_template Layer 9).
+      //
+      // pitchEnvCoeffLanes[i]: per-voice decay multiplier per
+      //                        half-sample. Voices with weight=0
+      //                        get coeff=0 (env collapses to 0 next
+      //                        sample, but their gain=0 anyway so
+      //                        their sweep contribution is always 0).
+      // pitchSweepGainLanes[i]: liquidAmt × kSweepWeight × peak.
+      //                        Zero for upper voices → no sweep
+      //                        contribution regardless of pitchEnv.
+      const float sr2 = globalConfig.sampleRate * 2.0f;
+      for (int i = 0; i < 8; i++)
+      {
+        const float tauMs = visadhara::kSweepTauMs[i];
+        s.pitchEnvCoeffLanes[i] = (tauMs > 0.0f)
+          ? expf(-1.0f / (tauMs * 0.001f * sr2))
+          : 0.0f;
+        s.pitchSweepGainLanes[i] =
+          liquidAmt * visadhara::kSweepWeight[i] * kPitchSweepPeak;
+      }
 
       // ---- Phase 4 block-rate setup: Metal mode PMM ----
       // Two 3-op PMM pairs. Each pair's operator ratios are
@@ -365,10 +404,12 @@ namespace stolmine
             s.finalEnv = 1.0f;
           }
 
-          // Liquid mode pitch envelope: kick to 1.0 on rising edge.
-          // Modulates freq by (1 + liquidSweepAmt * pitchEnv) per voice
-          // until envelope decays back to 0.
-          s.pitchEnv = 1.0f;
+          // Liquid mode pitch envelope: kick all 8 lanes to 1.0 on
+          // rising edge. Each lane decays at its own per-voice rate
+          // (pitchEnvCoeffLanes) toward 0; per-voice gain
+          // (pitchSweepGainLanes) controls how much that lane's
+          // pitchEnv translates into actual frequency bend.
+          for (int n = 0; n < 8; n++) s.pitchEnvLanes[n] = 1.0f;
 
           // Metal mode PMM phase reset — same coherent-attack discipline
           // as Skin/Liquid voices. Zero phase + lastOut so feedback
@@ -387,10 +428,6 @@ namespace stolmine
         for (int k = 0; k < 2; k++)
         {
 
-        // Pitch envelope decay (per-half-sample, always running so smooth
-        // crossfade works without per-block dispatch).
-        s.pitchEnv *= pitchEnvCoeff;
-
         // Slow-attack ramp: always advance, clamp at 1, reset Inc on hit
         // (single one-shot store; not differential heavy work). Once Inc
         // is 0 the next block flips useSlowMask to 0 and the env
@@ -402,10 +439,11 @@ namespace stolmine
           s.slowAttackInc = 0.0f;
         }
 
-        // Liquid pitch-sweep multiplier. Block-rate liquidSweepAmt × the
-        // per-sample pitchEnv. Branchless: skinAmt path naturally gives
-        // multiplier=1 (no sweep) since liquidSweepAmt=0 there.
-        const float pitchSweep = 1.0f + liquidSweepAmt * s.pitchEnv;
+        // Per-voice Liquid pitch-sweep is computed in each voice-loop
+        // NEON pass (sweepLanes = 1 + gain × pitchEnv, where both
+        // gain and pitchEnv are per-voice). pitchEnv lanes decay
+        // there too. No scalar pitchSweep value at this scope —
+        // each pass loads its own 4-lane vector.
 
         // ---- 8-voice bus, NEON 4-lane × 2 passes ----
         // Phase advance + wrap + env update + morph eval + accumulate,
@@ -437,10 +475,16 @@ namespace stolmine
           // the pass scope (not hoisted across the morph call). With
           // freqMult baked at block-rate to hold the full per-sample
           // freq increment, the phase advance collapses to a single
-          // vmla and we no longer need baseFreqV / invSrOsV broadcasts
-          // here — register pressure drops below the spill threshold.
+          // vmla.
+          //
+          // Per-voice pitch sweep (Liquid mode):
+          //   pe_lanes *= coeff_lanes              (per-voice decay)
+          //   sweepLanes = 1 + gain_lanes * pe_lanes
+          //   p += fm * sweepLanes
+          // Each lane bends at its own depth (kSweepWeight) and tau
+          // (kSweepTauMs) — fundamental carries the gesture, upper
+          // voices stay timbrally stable.
           {
-            const float32x4_t pitchSweepV   = vdupq_n_f32(pitchSweep);
             const float32x4_t decayCoeffV   = vdupq_n_f32(decayCoeff);
             const float32x4_t oneV          = vdupq_n_f32(1.0f);
             const float32x4_t zeroV         = vdupq_n_f32(0.0f);
@@ -454,10 +498,17 @@ namespace stolmine
             float32x4_t as = vld1q_f32(&s.ampScale[0]);
             float32x4_t e  = vld1q_f32(&s.env[0]);
 
-            // Phase advance: p += freqMult * pitchSweep (single vmla;
-            // freqMult already has baseFreq * ratio * detune * invSrOs
-            // baked in at block-rate).
-            p = vmlaq_f32(p, fm, pitchSweepV);
+            // Per-voice pitch envelope decay + sweep computation.
+            float32x4_t pe = vmulq_f32(vld1q_f32(&s.pitchEnvLanes[0]),
+                                        vld1q_f32(&s.pitchEnvCoeffLanes[0]));
+            vst1q_f32(&s.pitchEnvLanes[0], pe);
+            float32x4_t sweepLanes = vmlaq_f32(
+              oneV,
+              vld1q_f32(&s.pitchSweepGainLanes[0]),
+              pe);
+
+            // Phase advance: p += freqMult * sweepLanes
+            p = vmlaq_f32(p, fm, sweepLanes);
             uint32x4_t wmask = vcgeq_f32(p, oneV);
             float32x4_t wrap = vbslq_f32(wmask, oneV, zeroV);
             p = vsubq_f32(p, wrap);
@@ -480,7 +531,6 @@ namespace stolmine
           // Pass 2: lanes 4-7 — same body, rebroadcast block-rate
           // scalars locally so they die at scope close.
           {
-            const float32x4_t pitchSweepV   = vdupq_n_f32(pitchSweep);
             const float32x4_t decayCoeffV   = vdupq_n_f32(decayCoeff);
             const float32x4_t oneV          = vdupq_n_f32(1.0f);
             const float32x4_t zeroV         = vdupq_n_f32(0.0f);
@@ -494,7 +544,15 @@ namespace stolmine
             float32x4_t as = vld1q_f32(&s.ampScale[4]);
             float32x4_t e  = vld1q_f32(&s.env[4]);
 
-            p = vmlaq_f32(p, fm, pitchSweepV);
+            float32x4_t pe = vmulq_f32(vld1q_f32(&s.pitchEnvLanes[4]),
+                                        vld1q_f32(&s.pitchEnvCoeffLanes[4]));
+            vst1q_f32(&s.pitchEnvLanes[4], pe);
+            float32x4_t sweepLanes = vmlaq_f32(
+              oneV,
+              vld1q_f32(&s.pitchSweepGainLanes[4]),
+              pe);
+
+            p = vmlaq_f32(p, fm, sweepLanes);
             uint32x4_t wmask = vcgeq_f32(p, oneV);
             float32x4_t wrap = vbslq_f32(wmask, oneV, zeroV);
             p = vsubq_f32(p, wrap);
