@@ -67,6 +67,38 @@ static inline float32x4_t vmulq_f32(float32x4_t a, float32x4_t b) {
   return r;
 }
 
+// Fused multiply-add: acc + a*b, lane-wise.
+static inline float32x4_t vmlaq_f32(float32x4_t acc, float32x4_t a, float32x4_t b) {
+  float32x4_t r = { {
+    acc.v[0] + a.v[0]*b.v[0],
+    acc.v[1] + a.v[1]*b.v[1],
+    acc.v[2] + a.v[2]*b.v[2],
+    acc.v[3] + a.v[3]*b.v[3]
+  } };
+  return r;
+}
+
+// Absolute value, lane-wise.
+static inline float32x4_t vabsq_f32(float32x4_t a) {
+  float32x4_t r = { {
+    a.v[0] < 0.0f ? -a.v[0] : a.v[0],
+    a.v[1] < 0.0f ? -a.v[1] : a.v[1],
+    a.v[2] < 0.0f ? -a.v[2] : a.v[2],
+    a.v[3] < 0.0f ? -a.v[3] : a.v[3]
+  } };
+  return r;
+}
+
+// Reciprocal estimate, lane-wise. On hardware this is the NEON estimate
+// instruction (~10-bit precision); on scalar fallback we use full 1/x
+// since precision is essentially free on x86.
+static inline float32x4_t vrecpeq_f32(float32x4_t a) {
+  float32x4_t r = { {
+    1.0f / a.v[0], 1.0f / a.v[1], 1.0f / a.v[2], 1.0f / a.v[3]
+  } };
+  return r;
+}
+
 static inline float32x4_t vnegq_f32(float32x4_t a) {
   float32x4_t r = { { -a.v[0], -a.v[1], -a.v[2], -a.v[3] } };
   return r;

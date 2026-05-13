@@ -19,6 +19,12 @@
 #include <string.h>
 #include <stdint.h>
 
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#else
+#include "jf/neon_shim.h"
+#endif
+
 #include "visadhara/voice.h"
 #include "visadhara/morph.h"
 #include "visadhara/folder.h"
@@ -73,9 +79,11 @@ namespace stolmine
         memset(env, 0, sizeof(env));
         memset(ampScale, 0, sizeof(ampScale));
         memset(decayScale, 0, sizeof(decayScale));
-        for (int i = 0; i < 6; i++) freqMult[i] = visadhara::kHarmonicSeries[i];
-        freqMult[6] = 0.0f;
-        freqMult[7] = 0.0f;
+        // 8 voices now active. memset to zero is safe — the first
+        // block-rate freqMult assignment in process() overwrites with
+        // the bake-in per-sample freq increment (baseFreq * ratio *
+        // detune * invSrOs).
+        memset(freqMult, 0, sizeof(freqMult));
         visadhara_pmm::reset(pmm1);
         visadhara_pmm::reset(pmm2);
       }
@@ -159,18 +167,6 @@ namespace stolmine
       const float pitchInOct = voctV + octShift;
       const float baseFreq = basePitch * powf(2.0f, pitchInOct);
 
-      for (int i = 0; i < 6; i++)
-      {
-        s.freqMult[i] = visadhara::spread_mult(i, spreadPos) * visadhara::kVoiceDetune[i];
-        visadhara::harmonic_voice_params(i, harmonicPos, s.ampScale[i], s.decayScale[i]);
-      }
-      s.freqMult[6] = 0.0f;
-      s.freqMult[7] = 0.0f;
-      s.ampScale[6] = 0.0f;
-      s.ampScale[7] = 0.0f;
-      s.decayScale[6] = 0.0f;
-      s.decayScale[7] = 0.0f;
-
       // Time constants integrate per-half-sample at 2× internal rate
       // (see per-sample loop below — DSP runs in a 2× k-iteration shell
       // with a 2-tap MA decimator at output, per Ngoma / Helicase
@@ -181,6 +177,27 @@ namespace stolmine
 
       const float invSr   = 1.0f / globalConfig.sampleRate;
       const float invSrOs = invSr * 0.5f;     // per-half-sample at 2× rate
+
+      // 8 voices active (was 6 + 2 masked). NEON 4-lane × 2 processes
+      // all 8 lanes either way — masking saved no work. The extra two
+      // voices contribute 7th/8th harmonics in harmonic mode and primes
+      // 13/17 in prime mode.
+      //
+      // freqMult is baked at block-rate to hold the full per-sample
+      // freq INCREMENT (baseFreq × ratio × detune × invSrOs), not a
+      // pure ratio. This lets the per-sample voice loop advance phase
+      // via a single vmla (p += freqMult * pitchSweep) instead of
+      // computing baseFreq × fm × pitchSweep × invSrOs from broadcasts
+      // — eliminates 3 block-rate broadcast quads from the inner loop
+      // hot path, cutting NEON register pressure below the spill
+      // threshold (feedback_neon_hint_surfaces).
+      const float baseFreqInvSrOs = baseFreq * invSrOs;
+      for (int i = 0; i < 8; i++)
+      {
+        const float ratio = visadhara::spread_mult(i, spreadPos) * visadhara::kVoiceDetune[i];
+        s.freqMult[i] = baseFreqInvSrOs * ratio;
+        visadhara::harmonic_voice_params(i, harmonicPos, s.ampScale[i], s.decayScale[i]);
+      }
 
       // Block-rate morph crossfade weights. Equal-power (sqrt) curves
       // for level-flat sweep across the four shape anchors. Computed
@@ -288,11 +305,11 @@ namespace stolmine
       const float useSlowMask  = (s.slowAttackInc > 0.0f) ? 1.0f : 0.0f;
       const float useDecayMask = 1.0f - useSlowMask;
 
-      // Voice-bus perceptual gain. 6 voices sum unchecked into the bus
-      // for the additive "large" character; 1/2 brings the realistic
-      // 2-3 voice RMS into a useful pre-drive range while preserving
-      // the additive headroom for full-harmonic configurations.
-      const float voiceGain = 0.5f;
+      // Voice-bus perceptual gain. 8 voices sum unchecked into the bus
+      // for the additive "large" character. 0.375 (= 0.5 * 6/8) brings
+      // the 8-voice sum into the same pre-drive range the 6-voice scalar
+      // version targeted at voiceGain=0.5. Tunable by audition.
+      const float voiceGain = 0.375f;
 
       // ---- Per-sample inner loop ----
       for (int i = 0; i < frames; i++)
@@ -370,20 +387,118 @@ namespace stolmine
         // multiplier=1 (no sweep) since liquidSweepAmt=0 there.
         const float pitchSweep = 1.0f + liquidSweepAmt * s.pitchEnv;
 
-        float sample = 0.0f;
-        for (int n = 0; n < 6; n++)
+        // ---- 8-voice bus, NEON 4-lane × 2 passes ----
+        // Phase advance + wrap + env update + morph eval + accumulate,
+        // all in parallel across 4 voices per pass. Two passes cover
+        // all 8 lanes. Horizontal sum at the end produces the scalar
+        // `sample` value the rest of the per-half-sample chain expects.
+        //
+        // NEON discipline (per feedback_neon_intrinsics_drumvoice +
+        // feedback_neon_hint_surfaces):
+        //   - All loaded arrays (phase, freqMult, decayScale, ampScale,
+        //     env) are heap-allocated class members on Internal. No
+        //     stack-locals, no alignas.
+        //   - sample_w_4 is inlined; weights broadcast inside it so
+        //     block-rate scalars don't have to remain live across calls.
+        //   - Two passes are structurally identical; no runtime branch
+        //     across them.
+        float sample;
         {
-          const float voiceFreq = baseFreq * s.freqMult[n] * pitchSweep;
-          s.phase[n] += voiceFreq * invSrOs;
-          if (s.phase[n] >= 1.0f) s.phase[n] -= floorf(s.phase[n]);
+          // sampleAcc is the only quad that survives across both passes
+          // (accumulator) and across the sample_w_4 call within each
+          // pass. Single quad spill at most — well below the trap
+          // threshold. All other broadcasts are pass-local so they die
+          // at scope close before sample_w_4 is invoked, per
+          // feedback_neon_hint_surfaces "rebroadcast inside each pass
+          // body" guidance.
+          float32x4_t sampleAcc = vdupq_n_f32(0.0f);
 
-          const float voiceCoeff = decayCoeff * s.decayScale[n];
-          const float decayPath = s.env[n] * voiceCoeff;
-          const float slowPath = s.slowAttack;
-          s.env[n] = slowPath * useSlowMask + decayPath * useDecayMask;
+          // Pass 1: lanes 0-3. Block-rate scalars named locally inside
+          // the pass scope (not hoisted across the morph call). With
+          // freqMult baked at block-rate to hold the full per-sample
+          // freq increment, the phase advance collapses to a single
+          // vmla and we no longer need baseFreqV / invSrOsV broadcasts
+          // here — register pressure drops below the spill threshold.
+          {
+            const float32x4_t pitchSweepV   = vdupq_n_f32(pitchSweep);
+            const float32x4_t decayCoeffV   = vdupq_n_f32(decayCoeff);
+            const float32x4_t oneV          = vdupq_n_f32(1.0f);
+            const float32x4_t zeroV         = vdupq_n_f32(0.0f);
+            const float32x4_t slowAttackV   = vdupq_n_f32(s.slowAttack);
+            const float32x4_t useSlowMaskV  = vdupq_n_f32(useSlowMask);
+            const float32x4_t useDecayMaskV = vdupq_n_f32(useDecayMask);
 
-          const float shaped = visadhara_morph::sample_w(s.phase[n], morphW);
-          sample += shaped * s.env[n] * s.ampScale[n];
+            float32x4_t p  = vld1q_f32(&s.phase[0]);
+            float32x4_t fm = vld1q_f32(&s.freqMult[0]);
+            float32x4_t ds = vld1q_f32(&s.decayScale[0]);
+            float32x4_t as = vld1q_f32(&s.ampScale[0]);
+            float32x4_t e  = vld1q_f32(&s.env[0]);
+
+            // Phase advance: p += freqMult * pitchSweep (single vmla;
+            // freqMult already has baseFreq * ratio * detune * invSrOs
+            // baked in at block-rate).
+            p = vmlaq_f32(p, fm, pitchSweepV);
+            uint32x4_t wmask = vcgeq_f32(p, oneV);
+            float32x4_t wrap = vbslq_f32(wmask, oneV, zeroV);
+            p = vsubq_f32(p, wrap);
+            vst1q_f32(&s.phase[0], p);
+
+            float32x4_t voiceCoeff = vmulq_f32(decayCoeffV, ds);
+            float32x4_t decayPath  = vmulq_f32(e, voiceCoeff);
+            e = vaddq_f32(vmulq_f32(slowAttackV, useSlowMaskV),
+                          vmulq_f32(decayPath, useDecayMaskV));
+            vst1q_f32(&s.env[0], e);
+
+            // Pre-multiply e*as so neither has to survive the morph
+            // call. Across-call live quads then reduce to {p (arg),
+            // eAs, sampleAcc} — within Cortex-A8 callee-saved budget.
+            float32x4_t eAs = vmulq_f32(e, as);
+            float32x4_t shaped = visadhara_morph::sample_w_4(p, morphW);
+            sampleAcc = vmlaq_f32(sampleAcc, shaped, eAs);
+          }
+
+          // Pass 2: lanes 4-7 — same body, rebroadcast block-rate
+          // scalars locally so they die at scope close.
+          {
+            const float32x4_t pitchSweepV   = vdupq_n_f32(pitchSweep);
+            const float32x4_t decayCoeffV   = vdupq_n_f32(decayCoeff);
+            const float32x4_t oneV          = vdupq_n_f32(1.0f);
+            const float32x4_t zeroV         = vdupq_n_f32(0.0f);
+            const float32x4_t slowAttackV   = vdupq_n_f32(s.slowAttack);
+            const float32x4_t useSlowMaskV  = vdupq_n_f32(useSlowMask);
+            const float32x4_t useDecayMaskV = vdupq_n_f32(useDecayMask);
+
+            float32x4_t p  = vld1q_f32(&s.phase[4]);
+            float32x4_t fm = vld1q_f32(&s.freqMult[4]);
+            float32x4_t ds = vld1q_f32(&s.decayScale[4]);
+            float32x4_t as = vld1q_f32(&s.ampScale[4]);
+            float32x4_t e  = vld1q_f32(&s.env[4]);
+
+            p = vmlaq_f32(p, fm, pitchSweepV);
+            uint32x4_t wmask = vcgeq_f32(p, oneV);
+            float32x4_t wrap = vbslq_f32(wmask, oneV, zeroV);
+            p = vsubq_f32(p, wrap);
+            vst1q_f32(&s.phase[4], p);
+
+            float32x4_t voiceCoeff = vmulq_f32(decayCoeffV, ds);
+            float32x4_t decayPath  = vmulq_f32(e, voiceCoeff);
+            e = vaddq_f32(vmulq_f32(slowAttackV, useSlowMaskV),
+                          vmulq_f32(decayPath, useDecayMaskV));
+            vst1q_f32(&s.env[4], e);
+
+            float32x4_t eAs = vmulq_f32(e, as);
+            float32x4_t shaped = visadhara_morph::sample_w_4(p, morphW);
+            sampleAcc = vmlaq_f32(sampleAcc, shaped, eAs);
+          }
+
+          // Horizontal sum: 4 lanes -> scalar via the standard pairwise
+          // cascade. vpadd_f32 sums adjacent lanes; two cascaded passes
+          // collapse a 4-lane vector to a scalar (lane 0 of the final
+          // 2-lane vector). Same pattern Pecto + JF use.
+          float32x2_t pairSum = vpadd_f32(vget_low_f32(sampleAcc),
+                                           vget_high_f32(sampleAcc));
+          float32x2_t total   = vpadd_f32(pairSum, pairSum);
+          sample = vget_lane_f32(total, 0);
         }
 
         // Master post-fold envelope: same AR shape as the voices but

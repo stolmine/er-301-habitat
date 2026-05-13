@@ -28,25 +28,34 @@ namespace stolmine
 {
   namespace visadhara
   {
-    // Spread anchors. CCW (0) = harmonic series 1..6. CW (1) = prime series.
+    // Spread anchors. CCW (0) = harmonic series 1..8. CW (1) = prime series.
     // Per the manual: "the spread knob and CV control the frequency spacing
     // of the oscillators. This allows the overtone series to vary from a
     // purely harmonic to very inharmonic."
-    static const float kHarmonicSeries[6] = {1.0f, 2.0f, 3.0f,  4.0f,  5.0f,  6.0f};
-    static const float kPrimeSeries[6]    = {1.0f, 2.0f, 3.0f,  5.0f,  7.0f, 11.0f};
+    //
+    // 8 voices vs the BIA's 6: NEON 4×2 layout processes 8 lanes whether
+    // they're active or masked, so activating voices 6 & 7 costs zero
+    // additional ops and adds 7th/8th harmonics (and primes 13/17 on the
+    // inharmonic end) to the bus.
+    static const float kHarmonicSeries[8] = {1.0f, 2.0f, 3.0f, 4.0f,
+                                              5.0f, 6.0f, 7.0f, 8.0f};
+    static const float kPrimeSeries[8]    = {1.0f, 2.0f, 3.0f, 5.0f,
+                                              7.0f, 11.0f, 13.0f, 17.0f};
 
     // Per-voice fixed detune. Asymmetric ~3-cent spread emulates BIA's
     // analog oscillator drift; non-symmetric so beat patterns between
     // adjacent voices stay irregular across chord-style spread sweeps.
     // Applied once at block-rate freqMult assignment, compounds naturally
     // with Liquid mode pitchSweep.
-    static const float kVoiceDetune[6] = {
+    static const float kVoiceDetune[8] = {
         0.99885f,   // voice 0  −2.0 cents
         1.00115f,   // voice 1  +2.0 cents
         0.99942f,   // voice 2  −1.0 cents
         1.00173f,   // voice 3  +3.0 cents
         0.99827f,   // voice 4  −3.0 cents
-        1.00058f    // voice 5  +1.0 cents
+        1.00058f,   // voice 5  +1.0 cents
+        1.00144f,   // voice 6  +2.5 cents
+        0.99913f    // voice 7  −1.5 cents
     };
 
     static inline float spread_mult(int voiceIdx, float spreadPos)
@@ -96,14 +105,14 @@ namespace stolmine
     //    harmonics."
     //
     // We split harmonicPos [0..1] into segments:
-    //   [0.000, 0.250):  voice 0 amp=1; voice 1 fades 0→1; voices 2..5 silent
-    //   [0.250, 0.625):  voice 0+1 active; voices 2..5 decay scalars rise 0→1
+    //   [0.000, 0.250):  voice 0 amp=1; voice 1 fades 0→1; voices 2..7 silent
+    //   [0.250, 0.625):  voice 0+1 active; voices 2..7 decay scalars rise 0→1
     //                    (decay extends so they last longer per trigger)
-    //   [0.625, 1.000]:  voice 0+1 active; voices 2..5 decay = 1; their
+    //   [0.625, 1.000]:  voice 0+1 active; voices 2..7 decay = 1; their
     //                    amplitudes fade in 0→1
     //
     // Returns per-voice (ampScalar, decayScalar). Voice 0 (fundamental) is
-    // always active. Voice 1 onsets in the first segment. Voices 2..5 onset
+    // always active. Voice 1 onsets in the first segment. Voices 2..7 onset
     // in segments 2 and 3. The decayScalar multiplies the global decay
     // coefficient — decayScalar=0 means "no envelope, voice silent
     // immediately" and decayScalar=1 means "use full global decay".
@@ -128,14 +137,16 @@ namespace stolmine
         return;
       }
 
-      // Voices 2..5: decay scaling in [0.25, 0.625), amplitude scaling
+      // Voices 2..7: decay scaling in [0.25, 0.625), amplitude scaling
       // in [0.625, 1.0]. Each voice has a slightly different onset point
-      // so the "extension" is progressive, not all-at-once.
-      const float voiceFrac = (float)(voiceIdx - 2) / 3.0f;     // 0, 0.33, 0.67, 1
-      // Decay segment: voice 2 onset at 0.25, voice 5 onset at 0.5
+      // so the "extension" is progressive, not all-at-once. Divisor 5
+      // covers the 6 voices in this segment (voiceIdx 2..7 → voiceFrac
+      // 0, 0.2, 0.4, 0.6, 0.8, 1.0).
+      const float voiceFrac = (float)(voiceIdx - 2) / 5.0f;
+      // Decay segment: voice 2 onset at 0.25, voice 7 onset at ~0.31.
       const float decayOnset = 0.25f + 0.0625f * voiceFrac;
       const float decayPeak  = 0.625f;
-      // Amp segment: voice 2 onset at 0.625, voice 5 onset at 0.85
+      // Amp segment: voice 2 onset at 0.625, voice 7 onset at ~0.69.
       const float ampOnset = 0.625f + 0.0625f * voiceFrac;
       const float ampPeak  = 1.0f;
 
