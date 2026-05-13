@@ -476,6 +476,74 @@ the Ngoma bisect history do not apply.
 - Folder drive curve shape (linear 1×..6× currently). Phase 6
   sonic-identity territory.
 
+## 2× oversampling pass (post-BIA-parity)
+
+Started 2026-05-12. Audition feedback: detune + post-fold env were
+wins, but Visadhara still reads as "sum of its parts" not a refined
+whole. User identified two specific symptoms: the folder "breaks up
+before we can hit the same kind of folding depth that BIA gets," and
+the pitch envelope feels "highly diluted."
+
+Root-cause analysis (folder side): Visadhara runs the entire DSP at
+the framework's 48 kHz output rate with **no oversampling**. The
+signal chain generates massive HF content — raw saw/square in the
+morph, threshold-reflection folder (each fold a fresh discontinuity),
+top-quarter pulse-train injection, PMM in Metal. At 48 kHz Nyquist
+the HF content aliases back into audible band as inharmonic mush.
+What presents as "breaking up before deep fold depth" is aliasing
+overwhelming musical fold-stage character. Analog BIA has no Nyquist
+and no such ceiling.
+
+Precedents in codebase: Helicase (RELEASE-2.3.0) added 2× oversampling
+on its hi-fi inner loop with a 2-tap halfband decimator for click
+suppression on discontinuity shapes. Ngoma uses the same 2-tap MA
+decimator pattern per `project_ngoma_codex`. Visadhara is the natural
+next adopter — its bus generates more HF content than either.
+
+Scope: wrap the entire Visadhara per-sample inner loop in a 2×
+k-iteration shell, decimate at output via 2-tap MA. Always-on (no
+lo-fi/hi-fi toggle — CPU budget per audition is acceptable). All
+time-integrating coefficients (decayCoeff, pitchEnvCoeff, slowAttackInc)
+recomputed for 2× rate. Voice and PMM phase increments use `invSrOs =
+invSr * 0.5f`. Trigger detection stays at output rate (gate edges are
+output-sample-aligned).
+
+What does NOT change:
+- Block-rate setup (freqMult, harmonic params, morph weights, mode
+  dispatch, jitter rolls) stays at output block rate.
+- Internal struct layout — no new fields.
+- Lua surface — no new controls.
+- SWIG wrapper — no force-clean needed (no class shape change).
+- NEON / register pressure — purely scalar change, no new intrinsics,
+  no new stack-locals.
+
+Risk: CPU roughly doubles. Pre-2× estimated ~10–15% per instance;
+post-2× expected 20–30%. Helicase hi-fi precedent shows this is
+acceptable on Cortex-A8. Profile after; if it overshoots 35% per
+instance, fall back to polyBLEP-only mitigation on the discontinuity
+shapes.
+
+Version: spreadsheet 2.6.2.6 → 2.6.2.7.
+
+### Pitch envelope dilution (deferred to next commit)
+
+User also flagged the Liquid mode pitch sweep feels diluted. Three
+contributing factors identified for a follow-up commit:
+
+1. 50 ms exponential decay — most of the bend is in the first 20 ms,
+   too fast to register perceptually. Target ~150 ms.
+2. Symmetric depth across voices — all 6 sweep +1 oct together, so
+   the bend reads as one fat voice rather than a cascading layered
+   event. Target asymmetric per-voice depth (voice 0 +2 oct → voice 5
+   +0.3 oct or zero), giving low-end-heavy bend with each voice
+   arriving at target at perceptibly different times.
+3. Cross-mode injection during sweep — un-swept Metal bus mixing into
+   Skin/Liquid in negative-Attack region thins the sweep. Probably
+   orthogonal but worth noting.
+
+Out of scope for the oversampling commit; tracked here so the
+follow-up has a starting point.
+
 ## Open design questions (parked for in-flight decisions)
 
 1. ~~**Mode placement**~~ — RESOLVED 2026-05-02. Mode is its own
