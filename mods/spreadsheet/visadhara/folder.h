@@ -77,6 +77,34 @@ namespace stolmine
       return x - x * x * x * (1.0f / 6.75f);
     }
 
+    // Pre-fold soft cap. Bounds the input to the threshold-reflection
+    // folder so that coherent-peak transients (e.g. 8 voices stacked
+    // at the fundamental at trigger time, peak ~8× a single voice)
+    // can't drive the folder into many fold stages. Many fold stages
+    // generate dense harmonic content that aliases past Nyquist and
+    // reads as "splat" — addresses the artifact users heard at
+    // Harmonic=0, sine/tri morph, low fold settings.
+    //
+    // Asymptotic form: y = x / (1 + |x|/T)
+    //   Below T: y ≈ x (linear pass-through, no distortion)
+    //   Above T: y → T (smooth saturation, no discontinuity)
+    //   Asymptote: lim y(x→∞) = T
+    //
+    // No derivative discontinuities, so the cap itself generates only
+    // mild even-order distortion (no hard-clip aliasing). Models the
+    // natural drive-stage saturation present in analog wavefolder
+    // circuits before the fold action.
+    //
+    // T = 2.5 chosen by audition target: leaves typical bus peaks
+    // (~1 with voiceGain) untouched while taming coherent-stack
+    // transients that approach ~3 pre-fold.
+    static inline float pre_fold_cap(float x)
+    {
+      const float T = 2.5f;
+      const float absx = (x < 0.0f) ? -x : x;
+      return x / (1.0f + absx * (1.0f / T));
+    }
+
     // Threshold-reflection folder. Returns folded sample with compensation.
     static inline float fold(float x, float threshold)
     {

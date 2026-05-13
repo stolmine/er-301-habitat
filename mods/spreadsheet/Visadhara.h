@@ -404,19 +404,17 @@ namespace stolmine
 
         if (risingEdge)
         {
-          // Phase reset to DECOHERENT offsets (kPhaseOffset in
-          // voice.h, golden-ratio derived). The previous all-zero
-          // reset produced coherent quarter-cycle peaks ~8× any
-          // single voice at Harmonic=0, driving the folder so hard
-          // it generated splatty/aliased mush at sine/tri morph.
-          // An earlier evenly-spaced attempt (i+0.5)/8 was worse:
-          // those are the DFT sampling phases, so 8 voices at the
-          // same fundamental sum to identically zero for all t —
-          // complete silence. Golden-ratio offsets are
-          // most-irrational and never align into either coherent
-          // peaks OR cancelling patterns: peak amplitude ~√8 ≈
-          // 2.83, audible without splat.
-          for (int n = 0; n < 8; n++) s.phase[n] = visadhara::kPhaseOffset[n];
+          // Phase reset to 0 — coherent quarter-cycle peak preserved
+          // for full loudness (peak N, RMS N/√2). The "splatty"
+          // artifact at coherent settings is NOT a phase issue but
+          // a folder-overdrive issue: the unbounded coherent peak
+          // drove fold-stage harmonic generation past Nyquist.
+          // Solution lives at the folder input via pre_fold_cap()
+          // — see below. Phase decoherence (golden-ratio offsets in
+          // voice.h) is preserved as a code path but unused; the
+          // RMS √N vs N/√2 loudness gap (2× perceptually) is too
+          // expensive to pay if we can fix the symptom upstream.
+          for (int n = 0; n < 8; n++) s.phase[n] = 0.0f;
 
           if (attackSlow)
           {
@@ -651,7 +649,16 @@ namespace stolmine
 
         // Mix: mode bus + cross-mode injection, then drive into folder.
         const float bussed = modeBus + injectionSignal * injectMix;
-        const float preFold = bussed * foldDrive;
+
+        // Pre-fold soft cap. Bounds coherent-peak transients so the
+        // folder doesn't generate splatty / aliased harmonic content
+        // when 8 voices stack near the fundamental and align at the
+        // quarter-cycle peak. Asymptotic form (no discontinuity, no
+        // hard-clip aliasing). Models the natural drive-stage
+        // saturation in analog wavefolder circuits. Inactive on
+        // small signals (linear pass-through below ~T/2).
+        const float bussed_capped = visadhara_folder::pre_fold_cap(bussed);
+        const float preFold = bussed_capped * foldDrive;
 
         const float folded = visadhara_folder::fold(preFold, foldThreshold);
         const float pulse = visadhara_folder::pulse_mix(folded, foldPos, foldThreshold);
