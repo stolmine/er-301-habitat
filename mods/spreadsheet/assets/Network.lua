@@ -111,7 +111,7 @@ function Network:onLoadViews(objects, branches)
   return {
     size = GainBias {
       button = "size",
-      description = "Size (max tap delay)",
+      description = "Size",
       branch = branches.size,
       gainbias = objects.size,
       range = objects.size,
@@ -122,7 +122,7 @@ function Network:onLoadViews(objects, branches)
     },
     density = GainBias {
       button = "dens",
-      description = "Density (active reflectors)",
+      description = "Density",
       branch = branches.density,
       gainbias = objects.density,
       range = objects.density,
@@ -133,7 +133,7 @@ function Network:onLoadViews(objects, branches)
     },
     motion = GainBias {
       button = "motn",
-      description = "Motion (auto-modulation depth)",
+      description = "Motion",
       branch = branches.motion,
       gainbias = objects.motion,
       range = objects.motion,
@@ -144,7 +144,7 @@ function Network:onLoadViews(objects, branches)
     },
     connectivity = GainBias {
       button = "conn",
-      description = "Connectivity (recycled tap fraction)",
+      description = "Connectivity",
       branch = branches.connectivity,
       gainbias = objects.connectivity,
       range = objects.connectivity,
@@ -155,7 +155,7 @@ function Network:onLoadViews(objects, branches)
     },
     decay = GainBias {
       button = "decay",
-      description = "Decay (feedback)",
+      description = "Decay",
       branch = branches.decay,
       gainbias = objects.decay,
       range = objects.decay,
@@ -166,7 +166,7 @@ function Network:onLoadViews(objects, branches)
     },
     glitch = NetworkOverviewControl {
       button = "gltch",
-      description = "Glitch (Character macro)",
+      description = "Glitch",
       branch = branches.glitch,
       gainbias = objects.glitch,
       range = objects.glitch,
