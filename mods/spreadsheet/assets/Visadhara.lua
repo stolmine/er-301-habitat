@@ -153,7 +153,7 @@ function Visadhara:onLoadViews(objects, branches)
 
   controls.mode = GainBias {
     button = "mode",
-    description = "Mode (Skin / Liquid / Metal, CV-able)",
+    description = "Mode",
     branch = branches.mode,
     gainbias = objects.mode,
     range = objects.mode,
@@ -165,7 +165,7 @@ function Visadhara:onLoadViews(objects, branches)
 
   controls.spread = GainBias {
     button = "spread",
-    description = "Spread (harmonic ↔ prime)",
+    description = "Spread",
     branch = branches.spread,
     gainbias = objects.spread,
     range = objects.spread,
@@ -177,7 +177,7 @@ function Visadhara:onLoadViews(objects, branches)
 
   controls.harmonic = GainBias {
     button = "harm",
-    description = "Harmonic (per-voice decay+amp)",
+    description = "Harmonic",
     branch = branches.harmonic,
     gainbias = objects.harmonic,
     range = objects.harmonic,
@@ -189,7 +189,7 @@ function Visadhara:onLoadViews(objects, branches)
 
   controls.morph = GainBias {
     button = "morph",
-    description = "Morph (sin → tri → saw → sq)",
+    description = "Morph",
     branch = branches.morph,
     gainbias = objects.morph,
     range = objects.morph,
@@ -201,7 +201,7 @@ function Visadhara:onLoadViews(objects, branches)
 
   controls.fold = GainBias {
     button = "fold",
-    description = "Fold (top quarter mixes pulse train)",
+    description = "Fold",
     branch = branches.fold,
     gainbias = objects.fold,
     range = objects.fold,
@@ -213,7 +213,7 @@ function Visadhara:onLoadViews(objects, branches)
 
   controls.attack = GainBias {
     button = "attack",
-    description = "Attack (CCW=noise / 0=instant / CW=slow)",
+    description = "Attack",
     branch = branches.attack,
     gainbias = objects.attack,
     range = objects.attack,
@@ -254,14 +254,16 @@ local menu = {
   "octaveHeader",
   "octave",
   "modeSnapHeader",
-  "modeSnap"
+  "modeSnap",
+  "driftHeader",
+  "drift"
 }
 
 function Visadhara:onShowMenu(objects, branches)
   local controls = {}
 
   controls.octaveHeader = MenuHeader {
-    description = "Octave (BAT switch):"
+    description = "Octave:"
   }
 
   controls.octave = OptionControl {
@@ -278,6 +280,16 @@ function Visadhara:onShowMenu(objects, branches)
     description = "Mode crossfade",
     option = objects.op:getOption("ModeSnap"),
     choices = { "smooth", "snap" }
+  }
+
+  controls.driftHeader = MenuHeader {
+    description = "Drift:"
+  }
+
+  controls.drift = OptionControl {
+    description = "Drift",
+    option = objects.op:getOption("Drift"),
+    choices = { "on", "off" }
   }
 
   return controls, menu
