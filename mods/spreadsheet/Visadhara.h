@@ -404,12 +404,17 @@ namespace stolmine
 
         if (risingEdge)
         {
-          // Phase reset: snap all 8 voices to phase=0 so they start
-          // coherent. For sine/triangle morph positions this is a
-          // clean zero crossing (output=0 at phase=0). For saw/square
-          // there's still a residual step discontinuity; mitigation
-          // for those corners is queued for Phase 5 polish.
-          for (int n = 0; n < 8; n++) s.phase[n] = 0.0f;
+          // Phase reset to DECOHERENT offsets (kPhaseOffset in
+          // voice.h). All 8 voices starting at phase=0 produced a
+          // coherent quarter-cycle peak ~8× any single voice — at
+          // sine/tri morph + Harmonic=0 (all voices at fundamental)
+          // this drove the folder so hard it produced a "splatty"
+          // digital signature. Evenly-distributed phase offsets
+          // (i+0.5)/8 spread the voices across the cycle: their
+          // sum-at-t=0 is exactly 0 (anti-symmetric pairs cancel,
+          // so no click), but no aligned peak develops afterward.
+          // RMS-sum peak ~√8 ≈ 2.83 instead of coherent 8.
+          for (int n = 0; n < 8; n++) s.phase[n] = visadhara::kPhaseOffset[n];
 
           if (attackSlow)
           {

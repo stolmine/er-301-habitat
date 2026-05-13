@@ -42,6 +42,37 @@ namespace stolmine
     static const float kPrimeSeries[8]    = {1.0f, 2.0f, 3.0f, 5.0f,
                                               7.0f, 11.0f, 13.0f, 17.0f};
 
+    // Per-voice phase offset at trigger reset. Decoherent — voices
+    // start at evenly-distributed phases across [0, 1) rather than
+    // all at 0. Two-fold purpose:
+    //   1. Eliminates the coherent quarter-cycle peak that happens
+    //      when all voices start at sin(0)=0 and accelerate together
+    //      toward their first peak. At Harmonic=0 (all voices at
+    //      fundamental) the coherent peak was ~8× a single voice,
+    //      driving the folder hard and creating the "splatty"
+    //      character users hear at sine/tri morph positions.
+    //      Decoherent reset caps the peak at ~√8 ≈ 2.83 (RMS sum
+    //      of uncorrelated phases), about a 3× reduction.
+    //   2. Anti-symmetric distribution (i+0.5)/8 ensures the
+    //      voice-sum AT t=0 is exactly zero — no audible step /
+    //      click when triggered. The voices then oscillate
+    //      independently; with detune they slowly drift through
+    //      phase relationships, giving organic-feeling sustain.
+    //
+    // Saw and square morph shapes already have built-in
+    // discontinuities so their coherence is less problematic, but
+    // the decoherent reset applies uniformly to all morph positions.
+    static const float kPhaseOffset[8] = {
+        0.0625f,   // voice 0 — (0 + 0.5) / 8
+        0.1875f,   // voice 1
+        0.3125f,   // voice 2
+        0.4375f,   // voice 3
+        0.5625f,   // voice 4
+        0.6875f,   // voice 5
+        0.8125f,   // voice 6
+        0.9375f    // voice 7
+    };
+
     // Per-voice fixed detune. Asymmetric ~3-cent spread emulates BIA's
     // analog oscillator drift; non-symmetric so beat patterns between
     // adjacent voices stay irregular across chord-style spread sweeps.
