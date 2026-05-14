@@ -298,6 +298,56 @@ namespace stolmine
       }
     }
 
+    // Phase-3e Fold contour field — the background texture at Fold>0.
+    // A triangle-wave "folded crease" pattern whose crease density
+    // rises with foldPos: the white field literally gets more folded
+    // as the Fold knob turns, so the background performs the
+    // wavefolder metaphor rather than just decorating. Low-contrast
+    // dark creases sit within the bright range, breaking up the harsh
+    // flat white without competing with the dark figure. The fold
+    // axis is tilted to match the carousel's elevated view. Drawn
+    // per-pixel with fb.pixel (SET) — fb.fill BLENDs (OR) and can't do
+    // per-pixel variation anyway. At Fold=0 every pixel resolves to 0,
+    // identical to the prior flat-black background.
+    void drawFoldField(od::FrameBuffer &fb, int left, int bot,
+                       int w, int h, float foldPos) const
+    {
+      const int bgBase = (int)(foldPos * 15.0f);
+      // Crease count grows with Fold (~1.5 near Fold=0, ~11 at
+      // Fold=1); ripple depth (how far creases dip below the field)
+      // also scales in from 0, so Fold=0 stays flat black.
+      const float foldCount   = 1.5f + foldPos * 9.5f;
+      const float rippleDepth = foldPos * 3.0f;
+      // Fold axis tilted ~17° to match the carousel tilt — creases
+      // feel integrated rather than a flat backdrop.
+      const float foldTilt = 0.30f;
+      const float axisA = lutSinRad(foldTilt);
+      const float axisB = lutCosRad(foldTilt);
+      // Scale the tilted coordinate to span exactly foldCount
+      // triangle periods across the region's worst-case extent.
+      const float extent = (float)w * axisA + (float)h * axisB;
+      const float uScale = (extent > 1.0f) ? (foldCount / extent) : foldCount;
+      for (int py = 0; py < h; py++)
+      {
+        for (int px = 0; px < w; px++)
+        {
+          // Tilted fold-axis coordinate, scaled to crease count.
+          const float u = ((float)px * axisA + (float)py * axisB) * uScale;
+          // Triangle-wave fold: a linear ramp reflected every unit —
+          // the literal wavefolder operation. frac via bias+truncate
+          // (no floorf in a package draw path).
+          const float biased = u + 1024.0f;
+          const float frac = biased - (float)((int)biased);
+          const float tri = (frac < 0.5f ? frac : 1.0f - frac) * 2.0f;
+          // Creases (tri→1) dip darker; valleys (tri→0) sit at bgBase.
+          int v = bgBase - (int)(tri * rippleDepth);
+          if (v < 0) v = 0;
+          if (v > 15) v = 15;
+          fb.pixel(v, left + px, bot + py);
+        }
+      }
+    }
+
   public:
 #ifndef SWIGLUA
     virtual void draw(od::FrameBuffer &fb)
@@ -398,7 +448,7 @@ namespace stolmine
       // black field with reveal (brightening) bands; Fold=1 is dark
       // wireframe on a white field with obscure (darkening) bands.
       // Three coordinated moves:
-      //   1. background fill: 0 → 15 (here),
+      //   1. background: black → Fold contour field (here),
       //   2. wireframe shade: mirrored per-edge in the render loop,
       //   3. band polarity: +1 → −1 (mBandPolarity, into bandGain).
       // NOTE the figure does NOT mirror through 15−x. The 0..15
@@ -414,17 +464,14 @@ namespace stolmine
       // [2,9] also leaves the shockwave headroom to push past the
       // base in either direction. Mid-Fold is a low-contrast
       // crossover (figure ≈ ground, band polarity 0).
-      const int bgBright = (int)(foldPos * 15.0f);
-      // fb.fill and fb.line BLEND — they bitwise-OR the colour into
-      // the 4-bit nibble, so they can only ever turn bits ON, never
-      // off. fill(15) at Fold=1 makes a white field that no later OR
-      // can draw a dark figure onto (15 | anything == 15). fb.clear
-      // zeros the region first (a true clear); the fill then ORs
-      // bgBright onto 0, which lands exactly bgBright. The figure
-      // itself is drawn with fb.pixel, which SETs — see the render
-      // loop.
-      fb.clear(left, bot, left + w - 1, bot + h - 1);
-      fb.fill(bgBright, left, bot, left + w - 1, bot + h - 1);
+      //
+      // The background is the Fold contour field: a triangle-wave
+      // "folded crease" texture whose crease density rises with
+      // foldPos (drawFoldField). It breaks up the harsh flat white at
+      // high Fold and makes the field itself perform the wavefolder
+      // metaphor — more Fold, more folds. At Fold=0 it resolves to a
+      // flat black field, identical to the prior behaviour.
+      drawFoldField(fb, left, bot, w, h, foldPos);
       mBandPolarity = 1.0f - 2.0f * foldPos;   // +1 reveal → −1 obscure
 
       // --- Phase-3d shockwave band emission + advance ---

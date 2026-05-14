@@ -1059,6 +1059,19 @@ Fix, two parts:
 Mid-Fold is a low-contrast crossover (figure ≈ ground, band
 polarity 0) — accepted as a momentary transitional state.
 
+**2.6.2.36 — Fold contour field.** The flat white background at
+high Fold read as harsh, so the flat `clear`+`fill` is replaced
+by `drawFoldField()`: a triangle-wave "folded crease" texture
+whose crease density rises with `foldPos` (~1.5 creases near
+Fold=0, ~11 at Fold=1) — the background itself performs the
+wavefolder metaphor. Dark creases (ripple depth `3·foldPos`) sit
+within the bright range, so it breaks up the white without
+competing with the dark figure. The fold axis is tilted ~17° to
+match the carousel. Drawn per-pixel with `fb.pixel` (SET); at
+Fold=0 every pixel resolves to 0 — identical to the prior flat
+black. Voronoi was rejected (cellular cells confuse with the
+K-gon petals); Perlin rejected (organic, doesn't read as "fold").
+
 ### Phase 3f — optional, deferred
 
 - **V/Oct → tumble speed**: carousel orbit rate from pitch. Not
