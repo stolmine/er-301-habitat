@@ -159,6 +159,23 @@ namespace stolmine
     return t * (2.0f - t);
   }
 
+  // Phase-3e Fold contour field — nodule seed points. The background
+  // at Fold>0 is a multi-source radial-wave interference field:
+  // concentric rings emanate from each nodule, and rings from
+  // neighbouring nodules merge/interfere — approximating a
+  // reaction-diffusion / Turing-pattern look without a stateful,
+  // multi-pass RD simulation. Positions are normalized [0,1]² within
+  // the graphic's region, a hand-scattered set (deliberately off-grid
+  // and off-edge). Static — a backdrop; only the ring phase animates.
+  // Count is the dominant cost dial (per-pixel work is O(nodules)).
+  static const int kCoronaNoduleCount = 6;
+  static const float kCoronaNoduleX[kCoronaNoduleCount] = {
+    0.20f, 0.68f, 0.42f, 0.85f, 0.30f, 0.74f
+  };
+  static const float kCoronaNoduleY[kCoronaNoduleCount] = {
+    0.25f, 0.16f, 0.52f, 0.62f, 0.82f, 0.88f
+  };
+
   class VisadharaCoronaGraphic : public od::Graphic
   {
   public:
@@ -185,6 +202,7 @@ namespace stolmine
     // Continuous animation state — both advance every draw frame.
     float mGlobalTumble = 0.0f;    // orbital rotation, Z axis
     float mPetalSpin = 0.0f;       // per-petal own-axis rotation
+    float mFoldPhase = 0.0f;       // Fold contour-field ring phase
 
     // --- Phase-3d trigger-driven radial shockwave bands ---
     // On each trigger Visadhara reports (vizTriggerCount advances)
@@ -299,58 +317,64 @@ namespace stolmine
     }
 
     // Phase-3e Fold contour field — the background texture at Fold>0.
-    // A triangle-wave "folded crease" pattern whose crease density
-    // rises with foldPos: the white field literally gets more folded
-    // as the Fold knob turns, so the background performs the
-    // wavefolder metaphor rather than just decorating. Low-contrast
-    // dark creases sit within the bright range, breaking up the harsh
-    // flat white without competing with the dark figure. The crease
-    // DEPTH breathes live with the post-fold envelope (envLevel):
-    // creases dig deeper on each hit and relax as the sound decays.
-    // Crease COUNT stays fixed — per-frame density changes would read
-    // as jitter / moiré against the wireframe. The fold axis is
-    // tilted to match the carousel's elevated view. Drawn per-pixel
-    // with fb.pixel (SET) — fb.fill BLENDs (OR) and can't do per-pixel
-    // variation anyway. At Fold=0 every pixel resolves to 0,
-    // identical to the prior flat-black background.
+    // A multi-source radial-wave interference field: concentric rings
+    // emanate from each kCoronaNodule* seed point, and rings from
+    // neighbouring nodules merge/interfere — approximating a
+    // reaction-diffusion / Turing-pattern look without a stateful RD
+    // simulation. The summed cosine field is hard-thresholded to two
+    // brightness levels (the reference look). Live modulation: the
+    // ring `phase` advances every frame so rings continuously fan
+    // outward, and the post-fold envelope both speeds that drift (in
+    // draw()) and deepens `rippleDepth` — the gap between the two
+    // levels — on each hit. Drawn per-pixel with fb.pixel (SET):
+    // fb.fill BLENDs (OR) and can't do per-pixel variation anyway. At
+    // Fold=0 bgBase and rippleDepth are both 0, so every pixel
+    // resolves to 0 — a flat black field, identical to the
+    // pre-Phase-3e background.
     void drawFoldField(od::FrameBuffer &fb, int left, int bot,
-                       int w, int h, float foldPos, float envLevel) const
+                       int w, int h, float foldPos, float envLevel,
+                       float phase) const
     {
       const int bgBase = (int)(foldPos * 15.0f);
-      // Crease count grows with Fold (~1.5 near Fold=0, ~11 at
-      // Fold=1) and is fixed per frame. Ripple depth — how far
-      // creases dip below the field — breathes with the envelope:
-      // a shallow resting depth (foldPos·2) swells to foldPos·6 at a
-      // full-amplitude hit. The foldPos factor keeps Fold=0 flat
+      // Gap between the two contrast levels — breathes with the
+      // envelope (resting foldPos·2, swelling to foldPos·6 on a
+      // full-amplitude hit). The foldPos factor pins Fold=0 to flat
       // black regardless of envelope.
-      const float foldCount   = 1.5f + foldPos * 9.5f;
-      const float rippleDepth = foldPos * (2.0f + envLevel * 4.0f);
-      // Fold axis tilted ~17° to match the carousel tilt — creases
-      // feel integrated rather than a flat backdrop.
-      const float foldTilt = 0.30f;
-      const float axisA = lutSinRad(foldTilt);
-      const float axisB = lutCosRad(foldTilt);
-      // Scale the tilted coordinate to span exactly foldCount
-      // triangle periods across the region's worst-case extent.
-      const float extent = (float)w * axisA + (float)h * axisB;
-      const float uScale = (extent > 1.0f) ? (foldCount / extent) : foldCount;
+      const int rippleDepth = (int)(foldPos * (2.0f + envLevel * 4.0f));
+      const int darkLevel = (bgBase - rippleDepth < 0) ? 0
+                                                       : bgBase - rippleDepth;
+      // Ring spatial frequency — roughly one full cycle per ~7 px.
+      const float ringFreq = 0.90f;
+      // Nodule positions are normalized; scale to region pixels once.
+      // Scalar stack array — fine; only a NEON vld1q on a stack array
+      // would be the alignment trap, and this is plain element access.
+      float nodeX[kCoronaNoduleCount];
+      float nodeY[kCoronaNoduleCount];
+      for (int n = 0; n < kCoronaNoduleCount; n++)
+      {
+        nodeX[n] = kCoronaNoduleX[n] * (float)w;
+        nodeY[n] = kCoronaNoduleY[n] * (float)h;
+      }
       for (int py = 0; py < h; py++)
       {
         for (int px = 0; px < w; px++)
         {
-          // Tilted fold-axis coordinate, scaled to crease count.
-          const float u = ((float)px * axisA + (float)py * axisB) * uScale;
-          // Triangle-wave fold: a linear ramp reflected every unit —
-          // the literal wavefolder operation. frac via bias+truncate
-          // (no floorf in a package draw path).
-          const float biased = u + 1024.0f;
-          const float frac = biased - (float)((int)biased);
-          const float tri = (frac < 0.5f ? frac : 1.0f - frac) * 2.0f;
-          // Creases (tri→1) dip darker; valleys (tri→0) sit at bgBase.
-          int v = bgBase - (int)(tri * rippleDepth);
-          if (v < 0) v = 0;
-          if (v > 15) v = 15;
-          fb.pixel(v, left + px, bot + py);
+          // Sum a radial cosine wave from every nodule. Near a nodule
+          // its term dominates the local variation → tight concentric
+          // rings; between nodules the terms interfere → the organic
+          // merged look. lutCosRad handles arbitrary-radian wrap (no
+          // runtime cosf in a package draw path).
+          float field = 0.0f;
+          for (int n = 0; n < kCoronaNoduleCount; n++)
+          {
+            const float dx = (float)px - nodeX[n];
+            const float dy = (float)py - nodeY[n];
+            const float d  = sqrtf(dx * dx + dy * dy);
+            field += lutCosRad(d * ringFreq - phase);
+          }
+          // Hard two-level threshold: ridges at bgBase, troughs
+          // rippleDepth darker.
+          fb.pixel(field > 0.0f ? bgBase : darkLevel, left + px, bot + py);
         }
       }
     }
@@ -476,13 +500,18 @@ namespace stolmine
       // base in either direction. Mid-Fold is a low-contrast
       // crossover (figure ≈ ground, band polarity 0).
       //
-      // The background is the Fold contour field: a triangle-wave
-      // "folded crease" texture whose crease density rises with
-      // foldPos (drawFoldField). It breaks up the harsh flat white at
-      // high Fold and makes the field itself perform the wavefolder
-      // metaphor — more Fold, more folds. At Fold=0 it resolves to a
-      // flat black field, identical to the prior behaviour.
-      drawFoldField(fb, left, bot, w, h, foldPos, envLevel);
+      // The background is the Fold contour field (drawFoldField): a
+      // multi-source radial-wave interference texture — concentric
+      // rings emanating from a scattered set of nodules, merging
+      // where they meet, hard-thresholded to two contrast levels. It
+      // breaks up the harsh flat white at high Fold. The ring phase
+      // advances every frame so the rings fan outward; the envelope
+      // kicks that drift faster and deepens the contrast on each hit.
+      // At Fold=0 it resolves to a flat black field, identical to the
+      // prior behaviour.
+      mFoldPhase += 0.05f + envLevel * 0.25f;
+      if (mFoldPhase > 6.28318530718f) mFoldPhase -= 6.28318530718f;
+      drawFoldField(fb, left, bot, w, h, foldPos, envLevel, mFoldPhase);
       mBandPolarity = 1.0f - 2.0f * foldPos;   // +1 reveal → −1 obscure
 
       // --- Phase-3d shockwave band emission + advance ---

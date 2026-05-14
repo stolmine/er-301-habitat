@@ -1086,6 +1086,37 @@ the radial shockwave bands rather than competing — bands are the
 sharp transient accent on the figure, field-breathing is the
 slower whole-background body response.
 
+**2.6.2.38 — Fold field reworked: triangle creases → radial-wave
+interference.** The triangle-crease field "hardly looked like
+anything." Replaced with a multi-source radial-wave interference
+field — concentric rings emanate from a scattered set of 6
+`kCoronaNodule*` seed points, each pixel sums `lutCosRad(d·freq −
+phase)` over all nodules, and the sum is hard-thresholded to two
+contrast levels. Rings from neighbouring nodules merge/interfere,
+approximating a reaction-diffusion / Turing-pattern look (target:
+image (b) from the user's texture reference) **without** a
+stateful RD simulation. The ring `phase` advances every frame so
+rings fan outward; the post-fold envelope speeds that drift and
+deepens the contrast on each hit. `rippleDepth` still breathes
+with the envelope as before.
+
+Voronoi rejected earlier (cellular cells confuse with the K-gon
+petals); Perlin rejected (organic, doesn't read as "fold").
+
+Cost: per-pixel O(nodules) — ~6 `sqrtf` + ~6 `lutCosRad` over the
+42×64 region, est. ~3–5% CPU while the Mode control is on screen.
+Nodule count is the dominant cost dial. **Scalar first by
+decision** — get the look right on hardware (tuning-heavy: nodule
+count/positions, `ringFreq`, phase drift rates) before optimizing,
+and we may find fewer nodules suffices. Vectorization is a clean
+follow-up if the cost bites: SIMD over *pixels* (4 at a time),
+`vrsqrteq` for the distance, NEON poly-cos (the `neonAdvanceSines`
+pattern). Verified there is currently **no NEON in any graphics
+code** in the package — Helicase/Ngoma NEON is all DSP-side — so
+that would be the first graphics-path NEON entry; objdump-check
+mandatory, and the graphic compiles into `spreadsheet_swig.o` at
+`-Os`, not the DSP path's `-O3 -ffast-math`.
+
 ### Phase 3f — optional, deferred
 
 - **V/Oct → tumble speed**: carousel orbit rate from pitch. Not
