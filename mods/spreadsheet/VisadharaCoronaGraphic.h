@@ -415,6 +415,15 @@ namespace stolmine
       // base in either direction. Mid-Fold is a low-contrast
       // crossover (figure ≈ ground, band polarity 0).
       const int bgBright = (int)(foldPos * 15.0f);
+      // fb.fill and fb.line BLEND — they bitwise-OR the colour into
+      // the 4-bit nibble, so they can only ever turn bits ON, never
+      // off. fill(15) at Fold=1 makes a white field that no later OR
+      // can draw a dark figure onto (15 | anything == 15). fb.clear
+      // zeros the region first (a true clear); the fill then ORs
+      // bgBright onto 0, which lands exactly bgBright. The figure
+      // itself is drawn with fb.pixel, which SETs — see the render
+      // loop.
+      fb.clear(left, bot, left + w - 1, bot + h - 1);
       fb.fill(bgBright, left, bot, left + w - 1, bot + h - 1);
       mBandPolarity = 1.0f - 2.0f * foldPos;   // +1 reveal → −1 obscure
 
@@ -528,12 +537,10 @@ namespace stolmine
       const float invMaxR = (maxR > 1.0f) ? (1.0f / maxR) : 1.0f;
       float gMinR2 = 1.0e30f;
       float gMaxR2 = -1.0f;
-      bool anyBand = false;
       for (int b = 0; b < kMaxBands; b++)
       {
         if (!mBands[b].active)
           continue;
-        anyBand = true;
         float lo = (mBands[b].pos - mBands[b].halfWidth) * maxR;
         float hi = (mBands[b].pos + mBands[b].halfWidth) * maxR;
         if (lo < 0.0f) lo = 0.0f;
@@ -603,11 +610,14 @@ namespace stolmine
         // Fold=0 becomes invertShade = 11 − normalShade (9..2, front
         // dark) at Fold=1: the figure stays dark and readable at both
         // extremes, the depth shading flips, and the [2,9] bounds
-        // leave the shockwave headroom past the base either way. When
-        // any band is active each edge is rastered per-pixel through
-        // drawBandLine() so the band's raised-cosine profile
-        // modulates brightness smoothly along the segment; otherwise
-        // the fast fb.line() path is used.
+        // leave the shockwave headroom past the base either way.
+        // Every edge is rastered per-pixel through drawBandLine(),
+        // which draws with fb.pixel (SET). fb.line cannot be used —
+        // it BLENDs (bitwise-OR), so it can only lighten and could
+        // never draw the dark Fold=1 wireframe onto the bright field.
+        // When no band is active gMinR2/gMaxR2 reject every pixel and
+        // drawBandLine simply sets baseBright — the band machinery is
+        // a no-op, not a cost worth a separate path.
         for (int j = 0; j < numVerts; j++)
         {
           const int nj = (j + 1) % numVerts;
@@ -623,19 +633,9 @@ namespace stolmine
           if (baseBright < 0) baseBright = 0;
           if (baseBright > 15) baseBright = 15;
 
-          if (anyBand)
-          {
-            drawBandLine(fb, sx[j], sy[j], sx[nj], sy[nj], baseBright,
-                         fcx, fcy, invMaxR, bandGain, gMinR2, gMaxR2,
-                         left, left + w - 1, bot, bot + h - 1);
-          }
-          else if (sx[j] >= left && sx[j] < left + w &&
-                   sy[j] >= bot  && sy[j] < bot + h  &&
-                   sx[nj] >= left && sx[nj] < left + w &&
-                   sy[nj] >= bot  && sy[nj] < bot + h)
-          {
-            fb.line(baseBright, sx[j], sy[j], sx[nj], sy[nj]);
-          }
+          drawBandLine(fb, sx[j], sy[j], sx[nj], sy[nj], baseBright,
+                       fcx, fcy, invMaxR, bandGain, gMinR2, gMaxR2,
+                       left, left + w - 1, bot, bot + h - 1);
         }
       }
     }

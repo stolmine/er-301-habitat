@@ -1029,14 +1029,31 @@ so it must be drawn. depthN is clamped to [0,1].
 - 2.6.2.32 only *dimmed* the figure toward 0..4 instead of
   inverting it; background topped out at 13.
 - 2.6.2.33 made figure + background a literal `15 − x` mirror.
-  But that fails perceptually: the 0..15 greyscale resolves
-  cleanly at the dark end and poorly at the bright end, so a
-  Fold=1 figure at 6..13 on a 15 field vanished into the ground.
-- 2.6.2.34 mirrors the figure **within its own [2,9] band**
-  (`11 − x`) instead of across the full scale — it stays in the
-  perceptually-readable dark region at both fold extremes while
-  still visibly inverting (depth shading flips). Background still
-  sweeps the full 0 → 15.
+- 2.6.2.34 mirrored the figure within its own [2,9] band.
+- 2.6.2.32–34 ALL looked broken at Fold=1 for the same hidden
+  reason — see below.
+
+**2.6.2.35 — the actual bug: `line`/`fill` BLEND, they don't SET.**
+`MainFrameBuffer::line` and `::fill` route through
+`blend_pixel_proc`, which is `*frame |= color` — a bitwise-OR
+into the 4-bit nibble. They can only turn bits ON. `fb.fill(15)`
+at Fold=1 makes a white field, and `fb.line(2..9)` over it is
+`15 | x == 15` — the figure literally cannot be drawn. Only
+`fb.pixel` (→ `set_pixel_proc`) does a true clear-then-set. That
+is exactly why the shockwave bands stayed visible at Fold=1
+(drawBandLine uses `fb.pixel`) while the static wireframe and
+everything else vanished. Fold=0 worked only by luck: the field
+is 0 there, and OR-ing onto 0 behaves like SET.
+
+Fix, two parts:
+1. **Background**: `fb.clear(region)` then `fb.fill(bgBright)`.
+   The clear zeros the nibbles; the fill ORs bgBright onto 0,
+   landing exactly bgBright.
+2. **Figure**: the `fb.line` idle fast-path is gone. Every edge
+   now rasters through `drawBandLine` (per-pixel `fb.pixel` =
+   SET) whether or not a band is active — the only primitive
+   that can draw a figure darker than its background. `anyBand`
+   removed (the branch it gated is gone).
 
 Mid-Fold is a low-contrast crossover (figure ≈ ground, band
 polarity 0) — accepted as a momentary transitional state.
