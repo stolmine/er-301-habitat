@@ -405,10 +405,11 @@ namespace stolmine
     {
       const int bgBase = (int)(foldPos * 15.0f);
       // Gap between the two contrast levels — breathes with the
-      // envelope (resting foldPos·2, swelling to foldPos·6 on a
-      // full-amplitude hit). The foldPos factor pins Fold=0 to flat
-      // black regardless of envelope.
-      const int rippleDepth = (int)(foldPos * (2.0f + envLevel * 4.0f));
+      // envelope (resting foldPos·7, swelling to foldPos·13 on a
+      // full-amplitude hit, so the dark troughs sit well below the
+      // bright ridges). The foldPos factor pins Fold=0 to flat black
+      // regardless of envelope.
+      const int rippleDepth = (int)(foldPos * (7.0f + envLevel * 6.0f));
       const int darkLevel = (bgBase - rippleDepth < 0) ? 0
                                                        : bgBase - rippleDepth;
       // Angle-subtraction: Σcos(dₙ·freq − phase) = cosP·C + sinP·S,

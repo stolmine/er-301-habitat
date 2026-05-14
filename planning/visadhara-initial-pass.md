@@ -1143,6 +1143,12 @@ pass is still too heavy — and that pass is a flat `vmlaq` over a
 contiguous heap array, no `sqrt`/`cos` in the loop, the easy/safe
 kind. Likely unnecessary.
 
+**2.6.2.40 — Fold field contrast tuning.** Dark-trough depth raised:
+`rippleDepth` `foldPos·(2 + envLevel·4)` → `foldPos·(7 + envLevel·6)`.
+Troughs now drop well below the bright ridges (at Fold=1: resting
+darkLevel 13→8, full-hit 9→2) for stronger overall field contrast;
+max stays at 13 so the trough never clips to pure 0.
+
 ### Phase 3f — optional, deferred
 
 - **V/Oct → tumble speed**: carousel orbit rate from pitch. Not
