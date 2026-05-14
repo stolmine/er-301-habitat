@@ -163,38 +163,62 @@ namespace stolmine
       //     but at different orbital positions. The rate difference
       //     between orbit and spin (5:2-ish) drives the parallax
       //     evolution.
-      // Phase 3b parameter mappings:
-      //   Spread → N  : petal count. 1 voice-cluster petal at
-      //                 Spread=0 (audio voices all at fundamental)
-      //                 up to 8 petals at Spread=1 (voices spread
-      //                 across the harmonic/prime series). The
-      //                 viz spreads as the audio spreads.
-      //   Mode   → K  : polygon sides. 3 (triangle) at Skin,
-      //                 ~5 (pentagon) at Liquid, 8 (octagon) at
-      //                 Metal. More sides = more complex shape,
-      //                 mirroring timbral complexity.
-      // Both read live every frame — CV modulation of Mode/Spread
-      // animates the geometry. Integer steps cause discrete petal
-      // pop-in / side-count changes; honest representation of the
-      // discrete-ish nature of those param ranges. Falls back to
-      // N=4 / K=6 if no Visadhara is followed.
+      // Parameter mappings (Phase 3b + 3c):
+      //   Spread   → N        : petal count, 1..8.
+      //   Mode     → K        : polygon sides, 3..8.
+      //   Harmonic → R_petal  : orbital radius. At H=0 petals cluster
+      //              tight near the center (audio: all voices at the
+      //              fundamental); at H=1 they spread to a wide orbit
+      //              (audio: voices spread across the series). The
+      //              carousel radius tracks the voice distribution.
+      //   Morph    → star     : K-gon ↔ K-pointed star. At Morph=0 a
+      //              regular convex K-gon; at Morph=1 a pointy
+      //              K-pointed star. Implemented as 2K vertices with
+      //              alternating outer/inner radius — at Morph=0 the
+      //              inner verts sit exactly on the K-gon edges
+      //              (rInner = rOuter·cos(π/K)) so the shape reads as
+      //              a plain K-gon; Morph pulls them inward.
+      // All read live every frame — CV modulation animates the
+      // geometry. Falls back to N=4 / K=6 / mid radius / convex if
+      // no Visadhara is followed.
+      const int minDim = (w < h) ? w : h;
       int N = 4;
       int K = 6;
+      float harmonicPos = 0.5f;
+      float morphPos = 0.0f;
       if (mpVisadhara)
       {
         const float spreadPos = mpVisadhara->mSpread.value();
         const float modePos   = mpVisadhara->mMode.value();
+        harmonicPos           = mpVisadhara->mHarmonic.value();
+        morphPos              = mpVisadhara->mMorph.value();
         N = 1 + (int)(spreadPos * 7.0f);
         if (N < 1) N = 1;
         if (N > 8) N = 8;
         K = 3 + (int)(modePos * 2.5f);
         if (K < 3) K = 3;
-        if (K > 8) K = 8;   // sx/sy/sz arrays sized 16, K=8 safe
+        if (K > 8) K = 8;
+        if (harmonicPos < 0.0f) harmonicPos = 0.0f;
+        if (harmonicPos > 1.0f) harmonicPos = 1.0f;
+        if (morphPos < 0.0f) morphPos = 0.0f;
+        if (morphPos > 1.0f) morphPos = 1.0f;
       }
+
       const float tiltAngle = 0.30f;     // ~17° elevated view
-      const int minDim = (w < h) ? w : h;
-      const float R_petal = (float)minDim * 0.30f;     // orbit radius
+      // Harmonic drives the orbital radius: 0.12 (tight cluster) to
+      // 0.34 (wide spread) of minDim.
+      const float R_petal = (float)minDim * (0.12f + 0.22f * harmonicPos);
       const float r_polygon = (float)minDim * 0.23f;   // petal size
+
+      // Star morph geometry. 2K vertices, alternating outer / inner
+      // radius. rInner at Morph=0 places the inner verts exactly on
+      // the convex K-gon edges (cos(π/K)·rOuter), so the rendered
+      // 2K-gon outline is indistinguishable from a regular K-gon.
+      // Morph=1 pulls them in to 0.38·rOuter for a pointy star.
+      const int numVerts = 2 * K;        // K≤8 → numVerts≤16
+      const float rOuter = r_polygon;
+      const float kInnerFlat = lutCosRad(3.14159265f / (float)K);
+      const float rInner = rOuter * (kInnerFlat + (0.38f - kInnerFlat) * morphPos);
 
       const float cosTilt = lutCosRad(tiltAngle);
       const float sinTilt = lutSinRad(tiltAngle);
@@ -213,15 +237,17 @@ namespace stolmine
         const float petalWorldX = R_petal * lutCosRad(orbitAngle);
         const float petalWorldZ = R_petal * lutSinRad(orbitAngle);
 
-        int sx[16], sy[16];      // screen-projected x, y
-        float sz[16];            // depth (post-tilt z)
+        int sx[20], sy[20];      // screen-projected x, y (numVerts ≤ 16)
+        float sz[20];            // depth (post-tilt z)
 
-        for (int j = 0; j < K; j++)
+        for (int j = 0; j < numVerts; j++)
         {
-          // K-gon vertex in local XY plane (vertical face).
-          const float vAngle = 6.28318530718f * (float)j / (float)K;
-          const float lx = r_polygon * lutCosRad(vAngle);
-          const float ly = r_polygon * lutSinRad(vAngle);
+          // 2K-vertex star/polygon in local XY plane (vertical face).
+          // Even index → outer radius, odd → inner radius.
+          const float vAngle = 6.28318530718f * (float)j / (float)numVerts;
+          const float radius = (j & 1) ? rInner : rOuter;
+          const float lx = radius * lutCosRad(vAngle);
+          const float ly = radius * lutSinRad(vAngle);
 
           // Spin around the petal's vertical axis (world Y axis
           // through the petal center). Local X rotates toward Z.
@@ -246,13 +272,13 @@ namespace stolmine
           sz[j] = tiltedZ;
         }
 
-        // Draw K edges with per-line brightness from midpoint depth.
-        // The "front edge" of each spinning K-gon (closer to viewer)
-        // is bright; the "back edge" (farther) is dim. Cue rotates
-        // with the spin.
-        for (int j = 0; j < K; j++)
+        // Draw numVerts edges with per-line brightness from midpoint
+        // depth. The "front edge" of each spinning shape (closer to
+        // viewer) is bright; the "back edge" (farther) is dim. Cue
+        // rotates with the spin.
+        for (int j = 0; j < numVerts; j++)
         {
-          const int nj = (j + 1) % K;
+          const int nj = (j + 1) % numVerts;
           const float midZ = (sz[j] + sz[nj]) * 0.5f;
           const float maxAbsZ = (R_petal + r_polygon) * cosTilt;
           const float depthN = 0.5f + 0.5f * (midZ / maxAbsZ);
