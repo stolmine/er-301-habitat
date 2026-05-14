@@ -2,23 +2,38 @@
 
 // Visadhara Corona — 2D polar oscilloscope on the Mode ply's main
 // fader area. Phase 3a (this commit): bare polar waveform reading
-// the decimated audio buffer from Visadhara::Internal::vizBuf. No
-// background, no rings, no trail yet — those land in 3b/3c/3d.
+// the decimated audio buffer from Visadhara::Internal::vizBuf with
+// Helicase-style smoothing infrastructure (snapshot caching, per-
+// point slew, DC blocker, Catmull-Rom subdivision). No background,
+// no rings, no trail yet — those land in 3b/3c/3d.
 //
-// Header-only per feedback_no_out_of_line_virtuals (no .cpp file,
-// vtable stays COMDAT). 64-entry cos/sin LUT at file scope avoids
-// runtime sinf/cosf which miscompute from a package .so on am335x
-// per feedback_package_trig_lut. The LUT has 64 entries lining up
-// 1:1 with the 64-sample viz buffer — direct indexing, no
-// interpolation, no floorf.
+// Smoothing pipeline matches HelicaseOrbitalGraphic exactly:
+//   - 256-sample snapshot from the viz ring buffer, refreshed every
+//     2 draw frames (rather than every frame — reduces flicker).
+//   - DC blocker: slow LP filter on the snapshot mean recenters the
+//     wave so it sits at the base radius rather than drifting.
+//   - Downsample 256 → 128 plot points via per-bin averaging.
+//   - Per-point slew with α=0.08 LP factor (~12-frame time constant
+//     at 30 fps draw rate) — gives the slow flowing motion that
+//     reads as "smooth and considered" rather than rushed.
+//   - 3× Catmull-Rom subdivision per base point → 384 effective
+//     line segments around the circle. Curved polyline instead of
+//     straight-segment angular shape.
+//
+// Header-only per feedback_no_out_of_line_virtuals (no .cpp file).
+// 64-entry cos/sin LUT at file scope avoids runtime sinf/cosf per
+// feedback_package_trig_lut; sub-point angles use linear LUT
+// interpolation between adjacent integer indices.
 
 #include <od/graphics/Graphic.h>
 #include "Visadhara.h"
+#include <string.h>
 
 namespace stolmine
 {
   // cos(2π · i / 64) for i = 0..63. Angle = i × 5.625°.
   // Step 0 at angle 0 (3 o'clock); increases counterclockwise.
+  // Sub-point angles via linear interp between adjacent entries.
   static const float kCoronaCos[64] = {
     +1.00000000f, +0.99518473f, +0.98078528f, +0.95694034f, +0.92387953f,
     +0.88192126f, +0.83146961f, +0.77301045f, +0.70710678f, +0.63439328f,
@@ -73,6 +88,32 @@ namespace stolmine
         mpVisadhara->attach();
     }
 
+  private:
+    Visadhara *mpVisadhara;
+    bool mSlewInit = false;
+    int mUpdateCounter = 0;
+    float mSnapshot[256];
+    float mSlewShape[128];
+    float mDcState = 0.0f;
+
+    static const int kPoints = 128;   // base plot points around circle
+    static const int kSubdiv = 3;     // Catmull-Rom subdivisions per segment
+
+    // Catmull-Rom interpolation between 4 control points. Same form
+    // as HelicaseOrbitalGraphic. tau=0.5 = standard tension.
+    static inline float catmullRom(float p0, float p1, float p2, float p3,
+                                   float t, float tau)
+    {
+      float t2 = t * t;
+      float t3 = t2 * t;
+      float a = -tau * p0 + (2.0f - tau) * p1 + (tau - 2.0f) * p2 + tau * p3;
+      float b = 2.0f * tau * p0 + (tau - 3.0f) * p1 + (3.0f - 2.0f * tau) * p2 - tau * p3;
+      float c = -tau * p0 + tau * p2;
+      float d = p1;
+      return a * t3 + b * t2 + c * t + d;
+    }
+
+  public:
 #ifndef SWIGLUA
     virtual void draw(od::FrameBuffer &fb)
     {
@@ -90,31 +131,93 @@ namespace stolmine
       if (!mpVisadhara)
         return;
 
-      // Geometric center of the graphic and a base radius. Audio
-      // samples modulate the radius around the base, producing a
-      // pulsing-ring polar plot. Base radius leaves room for ±1
-      // amplitude excursion within the graphic bounds.
+      if (!mSlewInit)
+      {
+        for (int i = 0; i < kPoints; i++)
+          mSlewShape[i] = 0.0f;
+        memset(mSnapshot, 0, sizeof(mSnapshot));
+        mSlewInit = true;
+      }
+
+      // Snapshot the viz ring buffer every 2 frames. Halves CPU
+      // and reduces flicker when audio is changing fast.
+      mUpdateCounter++;
+      if (mUpdateCounter >= 2)
+      {
+        mUpdateCounter = 0;
+        for (int i = 0; i < 256; i++)
+          mSnapshot[i] = mpVisadhara->getVizSample(i);
+      }
+
+      // DC blocker on snapshot: slow LP on the mean. Keeps the
+      // polar plot centered on the base radius even if audio
+      // accumulates DC offset from asymmetric folding.
+      float dcSum = 0.0f;
+      for (int i = 0; i < 256; i++)
+        dcSum += mSnapshot[i];
+      const float dcTarget = dcSum * (1.0f / 256.0f);
+      mDcState += (dcTarget - mDcState) * 0.1f;
+
+      // Downsample 256 → kPoints with per-bin averaging, DC
+      // subtracted; then per-point slew (α=0.08, ~12-frame time
+      // constant at 30fps) for smooth motion.
+      for (int i = 0; i < kPoints; i++)
+      {
+        const int s0 = (i * 256) / kPoints;
+        int s1 = ((i + 1) * 256) / kPoints;
+        if (s1 > 256) s1 = 256;
+        float avg = 0.0f;
+        int count = s1 - s0;
+        if (count < 1) count = 1;
+        for (int j = s0; j < s1; j++)
+          avg += mSnapshot[j] - mDcState;
+        avg /= (float)count;
+        mSlewShape[i] += (avg - mSlewShape[i]) * 0.08f;
+      }
+
+      // Geometric center + radius constants.
       const int cx = left + w / 2;
       const int cy = bot + h / 2;
       const int minDim = (w < h) ? w : h;
       const float baseR = (float)minDim * 0.34f;
       const float ampScale = (float)minDim * 0.14f;
 
-      // Read all 64 viz samples, project to polar coords, draw a
-      // closed polyline around the circle. Step i maps to age=i
-      // (newest at angle 0, older clockwise around the circle).
+      // Plot with 3× Catmull-Rom subdivision per base segment.
+      // 128 × 3 = 384 line segments around the circle — smooth
+      // curved polyline rather than angular straight segments.
       int firstX = 0, firstY = 0;
       int prevX = 0, prevY = 0;
+      const int total = kPoints * kSubdiv;
 
-      for (int i = 0; i < 64; i++)
+      for (int i = 0; i < total; i++)
       {
-        float sample = mpVisadhara->getVizSample(i);
-        if (sample > 1.0f) sample = 1.0f;
-        else if (sample < -1.0f) sample = -1.0f;
+        const int baseIdx = i / kSubdiv;
+        const float subFrac = (float)(i % kSubdiv) / (float)kSubdiv;
 
-        const float r = baseR + sample * ampScale;
-        const int x = cx + (int)(kCoronaCos[i] * r);
-        const int y = cy + (int)(kCoronaSin[i] * r);
+        // Catmull-Rom across 4 neighboring slewed values.
+        const int i0 = (baseIdx - 1 + kPoints) % kPoints;
+        const int i1 = baseIdx % kPoints;
+        const int i2 = (baseIdx + 1) % kPoints;
+        const int i3 = (baseIdx + 2) % kPoints;
+        const float val = catmullRom(mSlewShape[i0], mSlewShape[i1],
+                                     mSlewShape[i2], mSlewShape[i3],
+                                     subFrac, 0.5f);
+
+        // Sub-point angle via linear interp between adjacent LUT
+        // entries. Cheap; error at 5.625° spacing is negligible
+        // (< 0.1% over a quarter cycle).
+        const int lutStep = (kPoints / 64);   // base points per LUT entry = 2
+        const float angIdx = (float)baseIdx / (float)lutStep + subFrac / (float)lutStep;
+        const int li = (int)angIdx;
+        const int lia = li & 63;
+        const int lib = (li + 1) & 63;
+        const float lfrac = angIdx - (float)li;
+        const float ca = kCoronaCos[lia] + (kCoronaCos[lib] - kCoronaCos[lia]) * lfrac;
+        const float sa = kCoronaSin[lia] + (kCoronaSin[lib] - kCoronaSin[lia]) * lfrac;
+
+        const float r = baseR + val * ampScale;
+        const int x = cx + (int)(ca * r);
+        const int y = cy + (int)(sa * r);
 
         if (i == 0)
         {
@@ -133,7 +236,7 @@ namespace stolmine
         prevY = y;
       }
 
-      // Close the loop (sample 63 → sample 0).
+      // Close the loop (final subdiv segment → first point).
       if (firstX >= left && firstX < left + w && firstY >= bot && firstY < bot + h &&
           prevX >= left && prevX < left + w && prevY >= bot && prevY < bot + h)
       {
@@ -141,8 +244,5 @@ namespace stolmine
       }
     }
 #endif
-
-  private:
-    Visadhara *mpVisadhara;
   };
 } // namespace stolmine

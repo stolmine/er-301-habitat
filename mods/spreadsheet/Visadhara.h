@@ -82,11 +82,15 @@ namespace stolmine
 
       // Viz buffer for the Corona graphic. Decimated audio output
       // ring buffer: one sample captured per kVizSampleInterval
-      // output samples (~187 Hz update at 48 kHz output rate). 64
-      // entries span ~340 ms of recent audio — long enough to show
-      // a full kick decay. Graphic reads via Visadhara::getVizSample
-      // which maps "newest" to age=0.
-      float vizBuf[64];
+      // (64 → ~750 Hz capture). 256 entries span ~340 ms of recent
+      // audio — long enough to show a full kick decay. Graphic
+      // reads via Visadhara::getVizSample (age=0 = most recent).
+      //
+      // Sized 256 to match HelicaseOrbitalGraphic's snapshot length
+      // pattern — the Corona graphic copies it into a draw-time
+      // snapshot, downsamples to 128 plot points with averaging,
+      // then slews per-point for smoothness.
+      float vizBuf[256];
       int vizWriteIdx;
       int vizSampleCounter;
 
@@ -709,17 +713,19 @@ namespace stolmine
         outBuf[i] = 0.5f * (osSamp[0] + osSamp[1]);
 
         // Corona viz capture: one sample per kVizSampleInterval
-        // (256 samples → ~187 Hz update rate at 48 kHz output). Ring
-        // buffer feeds VisadharaCoronaGraphic which reads via
-        // getVizSample. No locking — single-writer audio thread,
-        // single-reader UI thread, one-off stale read is a single
-        // sample's worth of skew (invisible).
-        const int kVizSampleInterval = 256;
+        // (64 samples → ~750 Hz update rate at 48 kHz output). Ring
+        // buffer of 256 samples spans ~340 ms of recent audio.
+        // Graphic snapshots every 2 frames, downsamples to 128 plot
+        // points with averaging + slew for smoothness. No locking —
+        // single-writer audio thread, single-reader UI thread; a
+        // stale read is at most a single sample's worth of skew
+        // (invisible).
+        const int kVizSampleInterval = 64;
         s.vizSampleCounter++;
         if (s.vizSampleCounter >= kVizSampleInterval)
         {
           s.vizSampleCounter = 0;
-          s.vizBuf[s.vizWriteIdx & 63] = outBuf[i];
+          s.vizBuf[s.vizWriteIdx & 255] = outBuf[i];
           s.vizWriteIdx++;
         }
       }
@@ -727,15 +733,15 @@ namespace stolmine
 
     // Corona graphic read accessor. Returns the audio output sample
     // at the given age-from-newest (age=0 = most recent capture,
-    // age=63 = oldest in the ring). Inline + inside SWIGLUA guard
+    // age=255 = oldest in the ring). Inline + inside SWIGLUA guard
     // since it dereferences Internal which is also guarded; the
     // graphic compilation unit sees Visadhara.h with SWIGLUA
     // undefined and can call it directly through mpVisadhara.
     inline float getVizSample(int age) const
     {
-      if (!mpInternal || age < 0 || age >= 64) return 0.0f;
+      if (!mpInternal || age < 0 || age >= 256) return 0.0f;
       Internal &s = *mpInternal;
-      int idx = (s.vizWriteIdx - 1 - age) & 63;
+      int idx = (s.vizWriteIdx - 1 - age) & 255;
       return s.vizBuf[idx];
     }
 #endif
