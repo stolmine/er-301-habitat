@@ -1149,6 +1149,15 @@ Troughs now drop well below the bright ridges (at Fold=1: resting
 darkLevel 13→8, full-hit 9→2) for stronger overall field contrast;
 max stays at 13 so the trough never clips to pure 0.
 
+**2.6.2.41 — figure darkened at Fold=1 to clear the field troughs.**
+Deepening the field troughs in 2.6.2.40 brought the field's dark
+range up against the figure's brightness range — visible
+interference. Figure mirror lowered: `invertShade` `11−normalShade`
+→ `9−normalShade`, so the Fold=1 figure shifts from [2,9] to [0,7].
+Its brightest (back) edge now sits at 7, below the field's resting
+trough (~8), so figure and field separate again. Fold=0 figure
+(2..9) unchanged — only the Fold=1 endpoint moved.
+
 ### Phase 3f — optional, deferred
 
 - **V/Oct → tumble speed**: carousel orbit rate from pitch. Not

@@ -541,14 +541,16 @@ namespace stolmine
       // cleanly, the bright end does not (13 vs 15 is invisible). A
       // literal 15−x figure (tried in 2.6.2.33) put the Fold=1
       // wireframe at 6..13 on a 15 field, where it vanished into the
-      // ground. Instead the figure shade mirrors WITHIN its own [2,9]
-      // band (11−x): it stays dark and clearly readable at BOTH fold
-      // extremes — light-on-dark at Fold=0, dark-on-light at Fold=1 —
-      // and the depth shading flips (front edge bright ↔ dark) so the
-      // static, no-band figure still visibly inverts. Staying inside
-      // [2,9] also leaves the shockwave headroom to push past the
-      // base in either direction. Mid-Fold is a low-contrast
-      // crossover (figure ≈ ground, band polarity 0).
+      // ground. Instead the figure shade mirrors toward the dark end
+      // (9−x): 2..9 at Fold=0 becomes 7..0 at Fold=1 — it stays dark
+      // and clearly readable at BOTH fold extremes — light-on-dark at
+      // Fold=0, dark-on-light at Fold=1 — and the depth shading flips
+      // (front edge bright ↔ dark) so the static, no-band figure still
+      // visibly inverts. The Fold=1 range [0,7] sits below the Fold
+      // contour field's dark troughs (~8 at rest) so figure and field
+      // don't interfere, and still leaves the shockwave headroom to
+      // push past the base. Mid-Fold is a low-contrast crossover
+      // (figure ≈ ground, band polarity 0).
       //
       // The background is the Fold contour field (drawFoldField): a
       // multi-source radial-wave interference texture — concentric
@@ -745,13 +747,15 @@ namespace stolmine
 
         // Draw numVerts edges. Base brightness is the depth shade
         // (front edge bright, back edge dim), inverted by Fold —
-        // mirrored WITHIN the figure's own [2,9] band (11−x), not
-        // across the full 0..15 scale (see the Fold block above for
-        // why). normalShade = 2 + depthN·7 (2..9, front bright) at
-        // Fold=0 becomes invertShade = 11 − normalShade (9..2, front
-        // dark) at Fold=1: the figure stays dark and readable at both
-        // extremes, the depth shading flips, and the [2,9] bounds
-        // leave the shockwave headroom past the base either way.
+        // mirrored toward the dark end (9−x), not across the full
+        // 0..15 scale (see the Fold block above for why).
+        // normalShade = 2 + depthN·7 (2..9, front bright) at Fold=0
+        // becomes invertShade = 9 − normalShade (7..0, front dark) at
+        // Fold=1: the figure stays dark and readable at both extremes,
+        // the depth shading flips, and the figure sits below the Fold
+        // contour field's dark troughs (~8 at rest) so the two don't
+        // interfere. The dark bound also leaves the shockwave headroom
+        // past the base either way.
         // Every edge is rastered per-pixel through drawBandLine(),
         // which draws with fb.pixel (SET). fb.line cannot be used —
         // it BLENDs (bitwise-OR), so it can only lighten and could
@@ -768,7 +772,7 @@ namespace stolmine
           if (depthN < 0.0f) depthN = 0.0f;
           if (depthN > 1.0f) depthN = 1.0f;
           const float normalShade = 2.0f + depthN * 7.0f;   // 2..9 (Fold=0, front bright)
-          const float invertShade = 11.0f - normalShade;    // 9..2 (Fold=1, front dark)
+          const float invertShade = 9.0f - normalShade;     // 7..0 (Fold=1, front dark)
           int baseBright =
               (int)(normalShade + (invertShade - normalShade) * foldPos);
           if (baseBright < 0) baseBright = 0;
