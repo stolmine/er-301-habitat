@@ -80,19 +80,12 @@ namespace stolmine
       float pitchEnvCoeffLanes[8];
       float pitchSweepGainLanes[8];
 
-      // Viz buffer for the Corona graphic. Decimated audio output
-      // ring buffer: one sample captured per kVizSampleInterval
-      // (64 → ~750 Hz capture). 256 entries span ~340 ms of recent
-      // audio — long enough to show a full kick decay. Graphic
-      // reads via Visadhara::getVizSample (age=0 = most recent).
-      //
-      // Sized 256 to match HelicaseOrbitalGraphic's snapshot length
-      // pattern — the Corona graphic copies it into a draw-time
-      // snapshot, downsamples to 128 plot points with averaging,
-      // then slews per-point for smoothness.
-      float vizBuf[256];
-      int vizWriteIdx;
-      int vizSampleCounter;
+      // (Audio-waveform capture removed at 2.6.2.23 when Corona
+      // pivoted from transient oscilloscope to spirograph/arabesque
+      // geometric viz. If audio-derived viz returns — envelope
+      // tracker, peak follower, etc. — restore vizBuf[N] + counter
+      // here and capture in process(). For now the geometric viz
+      // reads param state directly from public Parameter members.)
 
       // Metal mode PMM state, NEON-friendly layout (replaces former
       // visadhara_pmm::Voice pmm1/pmm2 scalar structs). Op index outer,
@@ -128,9 +121,6 @@ namespace stolmine
         // Coeffs and gains are block-rate computed before first use.
         memset(pitchEnvCoeffLanes, 0, sizeof(pitchEnvCoeffLanes));
         memset(pitchSweepGainLanes, 0, sizeof(pitchSweepGainLanes));
-        memset(vizBuf, 0, sizeof(vizBuf));
-        vizWriteIdx = 0;
-        vizSampleCounter = 0;
       }
     };
 #endif
@@ -711,38 +701,7 @@ namespace stolmine
         // higher-order halfband FIR is a future refinement only if
         // residual aliasing is audible after 2×.
         outBuf[i] = 0.5f * (osSamp[0] + osSamp[1]);
-
-        // Corona viz capture: one sample per kVizSampleInterval
-        // (64 samples → ~750 Hz update rate at 48 kHz output). Ring
-        // buffer of 256 samples spans ~340 ms of recent audio.
-        // Graphic snapshots every 2 frames, downsamples to 128 plot
-        // points with averaging + slew for smoothness. No locking —
-        // single-writer audio thread, single-reader UI thread; a
-        // stale read is at most a single sample's worth of skew
-        // (invisible).
-        const int kVizSampleInterval = 64;
-        s.vizSampleCounter++;
-        if (s.vizSampleCounter >= kVizSampleInterval)
-        {
-          s.vizSampleCounter = 0;
-          s.vizBuf[s.vizWriteIdx & 255] = outBuf[i];
-          s.vizWriteIdx++;
-        }
       }
-    }
-
-    // Corona graphic read accessor. Returns the audio output sample
-    // at the given age-from-newest (age=0 = most recent capture,
-    // age=255 = oldest in the ring). Inline + inside SWIGLUA guard
-    // since it dereferences Internal which is also guarded; the
-    // graphic compilation unit sees Visadhara.h with SWIGLUA
-    // undefined and can call it directly through mpVisadhara.
-    inline float getVizSample(int age) const
-    {
-      if (!mpInternal || age < 0 || age >= 256) return 0.0f;
-      Internal &s = *mpInternal;
-      int idx = (s.vizWriteIdx - 1 - age) & 255;
-      return s.vizBuf[idx];
     }
 #endif
 
