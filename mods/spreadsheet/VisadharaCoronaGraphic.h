@@ -94,6 +94,50 @@ namespace stolmine
     return kCoronaSin[i] + (kCoronaSin[next] - kCoronaSin[i]) * frac;
   }
 
+  // Radius of a regular K-gon (integer K) at angle theta, morphing
+  // toward a K-pointed star as `morph` goes 0→1. At morph=0 the
+  // return is the convex K-gon radius (apothem / cos(phi)). At
+  // morph=1 the valleys (edge midpoints) are pulled in to
+  // 0.38·rKgon while the points (vertices) stay at full radius.
+  static inline float coronaKgonStar(float theta, int K, float morph, float rOuter)
+  {
+    const float twoPi = 6.28318530718f;
+    const float sectorW = twoPi / (float)K;
+    // local angle within one sector [0, sectorW); phi centered so
+    // 0 = edge midpoint (star valley), ±sectorW/2 = vertex (point).
+    const float local = theta - (float)((int)(theta / sectorW)) * sectorW;
+    const float phi = local - sectorW * 0.5f;
+    const float apothem = rOuter * lutCosRad(3.14159265f / (float)K);
+    const float cphi = lutCosRad(phi);
+    const float rKgon = (cphi > 0.0001f) ? (apothem / cphi) : rOuter;
+    // Star modulation: 1.0 at the points, valleyRatio at the
+    // valleys, linear between.
+    const float halfSector = sectorW * 0.5f;
+    float normPhi = (phi < 0.0f ? -phi : phi) / halfSector;  // 0 valley .. 1 point
+    if (normPhi > 1.0f) normPhi = 1.0f;
+    const float valleyRatio = 1.0f - morph * 0.62f;          // 1.0 .. 0.38
+    const float starFactor = valleyRatio + (1.0f - valleyRatio) * normPhi;
+    return rKgon * starFactor;
+  }
+
+  // Continuous-K radial function. Kf is a FLOAT so Mode changes are
+  // smooth — a "4.5-gon" isn't a real closed shape, so we render
+  // the radius as a crossfade between the floor(Kf)-gon and the
+  // ceil(Kf)-gon radius at each fixed angular sample. Combined with
+  // a fixed high vertex count this gives a shape that morphs
+  // smoothly through the integer polygon counts instead of
+  // popping.
+  static inline float coronaRadius(float theta, float Kf, float morph, float rOuter)
+  {
+    int Klo = (int)Kf;
+    if (Klo < 3) Klo = 3;
+    const int Khi = Klo + 1;
+    const float kfrac = Kf - (float)Klo;
+    const float rLo = coronaKgonStar(theta, Klo, morph, rOuter);
+    const float rHi = coronaKgonStar(theta, Khi, morph, rOuter);
+    return rLo + (rHi - rLo) * kfrac;
+  }
+
   class VisadharaCoronaGraphic : public od::Graphic
   {
   public:
@@ -164,26 +208,24 @@ namespace stolmine
       //     between orbit and spin (5:2-ish) drives the parallax
       //     evolution.
       // Parameter mappings (Phase 3b + 3c):
-      //   Spread   → N        : petal count, 1..8.
-      //   Mode     → K        : polygon sides, 3..8.
-      //   Harmonic → R_petal  : orbital radius. At H=0 petals cluster
-      //              tight near the center (audio: all voices at the
-      //              fundamental); at H=1 they spread to a wide orbit
-      //              (audio: voices spread across the series). The
-      //              carousel radius tracks the voice distribution.
-      //   Morph    → star     : K-gon ↔ K-pointed star. At Morph=0 a
-      //              regular convex K-gon; at Morph=1 a pointy
-      //              K-pointed star. Implemented as 2K vertices with
-      //              alternating outer/inner radius — at Morph=0 the
-      //              inner verts sit exactly on the K-gon edges
-      //              (rInner = rOuter·cos(π/K)) so the shape reads as
-      //              a plain K-gon; Morph pulls them inward.
+      //   Spread   → N   : petal count, 1..8 (integer — petals are
+      //              discrete by nature, no smooth interp needed).
+      //   Mode     → Kf  : polygon sides as a FLOAT, 3.0..8.0.
+      //              Rendered via the continuous coronaRadius()
+      //              radial function (crossfade between adjacent
+      //              integer polygons) so Mode sweeps morph the
+      //              shape smoothly instead of popping side counts.
+      //   Harmonic → R_petal : orbital radius. At H=0 petals cluster
+      //              near center; at H=1 they spread to a wide orbit.
+      //              Mirrors the audio voice distribution.
+      //   Morph    → star: K-gon ↔ K-pointed star, also continuous
+      //              via coronaRadius()'s star modulation.
       // All read live every frame — CV modulation animates the
-      // geometry. Falls back to N=4 / K=6 / mid radius / convex if
+      // geometry. Falls back to N=4 / Kf=6 / mid radius / convex if
       // no Visadhara is followed.
       const int minDim = (w < h) ? w : h;
       int N = 4;
-      int K = 6;
+      float Kf = 6.0f;
       float harmonicPos = 0.5f;
       float morphPos = 0.0f;
       if (mpVisadhara)
@@ -195,9 +237,10 @@ namespace stolmine
         N = 1 + (int)(spreadPos * 7.0f);
         if (N < 1) N = 1;
         if (N > 8) N = 8;
-        K = 3 + (int)(modePos * 2.5f);
-        if (K < 3) K = 3;
-        if (K > 8) K = 8;
+        // Kf stays float: 3.0 (Skin) → 5.5 (Liquid) → 8.0 (Metal).
+        Kf = 3.0f + modePos * 2.5f;
+        if (Kf < 3.0f) Kf = 3.0f;
+        if (Kf > 8.0f) Kf = 8.0f;
         if (harmonicPos < 0.0f) harmonicPos = 0.0f;
         if (harmonicPos > 1.0f) harmonicPos = 1.0f;
         if (morphPos < 0.0f) morphPos = 0.0f;
@@ -205,20 +248,20 @@ namespace stolmine
       }
 
       const float tiltAngle = 0.30f;     // ~17° elevated view
-      // Harmonic drives the orbital radius: 0.12 (tight cluster) to
-      // 0.34 (wide spread) of minDim.
-      const float R_petal = (float)minDim * (0.12f + 0.22f * harmonicPos);
+      // Harmonic drives the orbital radius. Minimum (H=0) sits at
+      // 0.177 of minDim — where H=0.26 sat in the prior 0.12+0.22h
+      // mapping — so the carousel never collapses too tight. Max
+      // (H=1) stays at 0.34.
+      const float R_petal = (float)minDim * (0.177f + 0.163f * harmonicPos);
       const float r_polygon = (float)minDim * 0.23f;   // petal size
 
-      // Star morph geometry. 2K vertices, alternating outer / inner
-      // radius. rInner at Morph=0 places the inner verts exactly on
-      // the convex K-gon edges (cos(π/K)·rOuter), so the rendered
-      // 2K-gon outline is indistinguishable from a regular K-gon.
-      // Morph=1 pulls them in to 0.38·rOuter for a pointy star.
-      const int numVerts = 2 * K;        // K≤8 → numVerts≤16
+      // Fixed-count vertex sampling for the continuous radial
+      // function. 48 samples per petal — enough to render a K=8
+      // star (16 features) crisply while morphing smoothly through
+      // fractional K. Higher than the old 2K count but the radial
+      // function needs dense sampling to capture star points.
+      const int numVerts = 48;
       const float rOuter = r_polygon;
-      const float kInnerFlat = lutCosRad(3.14159265f / (float)K);
-      const float rInner = rOuter * (kInnerFlat + (0.38f - kInnerFlat) * morphPos);
 
       const float cosTilt = lutCosRad(tiltAngle);
       const float sinTilt = lutSinRad(tiltAngle);
@@ -237,15 +280,16 @@ namespace stolmine
         const float petalWorldX = R_petal * lutCosRad(orbitAngle);
         const float petalWorldZ = R_petal * lutSinRad(orbitAngle);
 
-        int sx[20], sy[20];      // screen-projected x, y (numVerts ≤ 16)
-        float sz[20];            // depth (post-tilt z)
+        int sx[48], sy[48];      // screen-projected x, y (numVerts == 48)
+        float sz[48];            // depth (post-tilt z)
 
         for (int j = 0; j < numVerts; j++)
         {
-          // 2K-vertex star/polygon in local XY plane (vertical face).
-          // Even index → outer radius, odd → inner radius.
+          // Continuous K-gon/star vertex in local XY plane (vertical
+          // face). Radius from coronaRadius() — smooth in both K
+          // (Mode) and star morph (Morph).
           const float vAngle = 6.28318530718f * (float)j / (float)numVerts;
-          const float radius = (j & 1) ? rInner : rOuter;
+          const float radius = coronaRadius(vAngle, Kf, morphPos, rOuter);
           const float lx = radius * lutCosRad(vAngle);
           const float ly = radius * lutSinRad(vAngle);
 
