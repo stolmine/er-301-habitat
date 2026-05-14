@@ -159,8 +159,9 @@ namespace stolmine
       mDcState += (dcTarget - mDcState) * 0.1f;
 
       // Downsample 256 → kPoints with per-bin averaging, DC
-      // subtracted; then per-point slew (α=0.08, ~12-frame time
-      // constant at 30fps) for smooth motion.
+      // subtracted; then per-point slew (α=0.20, ~5-frame time
+      // constant at 30fps). Less aggressive than the .20 build's
+      // 0.08 so kick transients show without being instant-snap.
       for (int i = 0; i < kPoints; i++)
       {
         const int s0 = (i * 256) / kPoints;
@@ -172,15 +173,19 @@ namespace stolmine
         for (int j = s0; j < s1; j++)
           avg += mSnapshot[j] - mDcState;
         avg /= (float)count;
-        mSlewShape[i] += (avg - mSlewShape[i]) * 0.08f;
+        mSlewShape[i] += (avg - mSlewShape[i]) * 0.20f;
       }
 
-      // Geometric center + radius constants.
+      // Geometric center + radius constants. Tightened baseR
+      // (smaller resting circle) leaves more headroom for the
+      // amplitude swing; bumped ampScale gives ~1.6× more radial
+      // motion per audio unit. Max radius at amp=1 ≈ 0.50 of
+      // minDim — wave reaches the graphic edge at full amplitude.
       const int cx = left + w / 2;
       const int cy = bot + h / 2;
       const int minDim = (w < h) ? w : h;
-      const float baseR = (float)minDim * 0.34f;
-      const float ampScale = (float)minDim * 0.14f;
+      const float baseR = (float)minDim * 0.28f;
+      const float ampScale = (float)minDim * 0.22f;
 
       // Plot with 3× Catmull-Rom subdivision per base segment.
       // 128 × 3 = 384 line segments around the circle — smooth
