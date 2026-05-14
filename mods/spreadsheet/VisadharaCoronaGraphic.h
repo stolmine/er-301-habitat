@@ -159,9 +159,15 @@ namespace stolmine
       mDcState += (dcTarget - mDcState) * 0.1f;
 
       // Downsample 256 → kPoints with per-bin averaging, DC
-      // subtracted; then per-point slew (α=0.20, ~5-frame time
-      // constant at 30fps). Less aggressive than the .20 build's
-      // 0.08 so kick transients show without being instant-snap.
+      // subtracted; then per-point slew at α=0.60 (TC ~1.5 frames
+      // at 30fps). The Helicase precedent uses α=0.08 because its
+      // modulator is a sustained oscillator — adjacent frames see
+      // similar audio values, so heavy slew smooths without
+      // amplitude loss. Visadhara's audio is transient: a kick
+      // exists for ~5-10 frames and the slew has to track fast or
+      // it averages the transient into a hum. α=0.60 catches ~60%
+      // of peak in 1 frame, ~85% by frame 2 — kicks show as
+      // meaningful amplitude excursions.
       for (int i = 0; i < kPoints; i++)
       {
         const int s0 = (i * 256) / kPoints;
@@ -173,19 +179,22 @@ namespace stolmine
         for (int j = s0; j < s1; j++)
           avg += mSnapshot[j] - mDcState;
         avg /= (float)count;
-        mSlewShape[i] += (avg - mSlewShape[i]) * 0.20f;
+        mSlewShape[i] += (avg - mSlewShape[i]) * 0.60f;
       }
 
-      // Geometric center + radius constants. Tightened baseR
-      // (smaller resting circle) leaves more headroom for the
-      // amplitude swing; bumped ampScale gives ~1.6× more radial
-      // motion per audio unit. Max radius at amp=1 ≈ 0.50 of
-      // minDim — wave reaches the graphic edge at full amplitude.
+      // Geometric center + radius constants. baseR tightened
+      // further to make room for the bumped ampScale: at audio=+1
+      // peak the radius reaches 0.62 of minDim (just past the edge,
+      // wave clips slightly on the brightest peaks — visually OK).
+      // At audio=-1, the unclamped radius would be -0.18 of minDim;
+      // floor-clamp at 2 px prevents the wave from collapsing
+      // through the center and drawing on the opposite side.
       const int cx = left + w / 2;
       const int cy = bot + h / 2;
       const int minDim = (w < h) ? w : h;
-      const float baseR = (float)minDim * 0.28f;
-      const float ampScale = (float)minDim * 0.22f;
+      const float baseR = (float)minDim * 0.22f;
+      const float ampScale = (float)minDim * 0.40f;
+      const float minR = 2.0f;
 
       // Plot with 3× Catmull-Rom subdivision per base segment.
       // 128 × 3 = 384 line segments around the circle — smooth
@@ -220,7 +229,8 @@ namespace stolmine
         const float ca = kCoronaCos[lia] + (kCoronaCos[lib] - kCoronaCos[lia]) * lfrac;
         const float sa = kCoronaSin[lia] + (kCoronaSin[lib] - kCoronaSin[lia]) * lfrac;
 
-        const float r = baseR + val * ampScale;
+        float r = baseR + val * ampScale;
+        if (r < minR) r = minR;     // floor-clamp prevents center-crossing
         const int x = cx + (int)(ca * r);
         const int y = cy + (int)(sa * r);
 
