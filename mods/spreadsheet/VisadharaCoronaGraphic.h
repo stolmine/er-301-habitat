@@ -394,24 +394,26 @@ namespace stolmine
       }
 
       // --- Phase-3e Fold colour inversion ---
-      // Fold drives a continuous, CLEAN photographic inversion of the
-      // whole viz. Fold=0: black field, bright wireframe, bands
-      // brighten (reveal). Fold=1: the exact inverse — white field,
-      // dark wireframe, bands darken (obscure). Every value mirrors
-      // through 15−x, so the Fold=1 look has the same figure/ground
-      // contrast ratio as Fold=0, just inverted. Three coordinated
-      // moves:
+      // Fold inverts the whole viz: Fold=0 is bright wireframe on a
+      // black field with reveal (brightening) bands; Fold=1 is dark
+      // wireframe on a white field with obscure (darkening) bands.
+      // Three coordinated moves:
       //   1. background fill: 0 → 15 (here),
-      //   2. wireframe shade: normalShade ↔ 15−normalShade, per-edge
-      //      in the render loop — the figure's STATIC (no-band) state
-      //      inverts, it does not merely dim,
+      //   2. wireframe shade: mirrored per-edge in the render loop,
       //   3. band polarity: +1 → −1 (mBandPolarity, into bandGain).
-      // The figure's base shade stays inside [2,13] (never 0/15), so
-      // the shockwave always has headroom to push past it — lighter
-      // than the lightest base at Fold=0, darker than the darkest
-      // base at Fold=1. Mid-Fold is a uniform-grey crossover (figure
-      // == ground, band polarity 0): inherent to a clean linear
-      // inversion, accepted as a momentary transitional state.
+      // NOTE the figure does NOT mirror through 15−x. The 0..15
+      // greyscale is perceptually lopsided — the dark end resolves
+      // cleanly, the bright end does not (13 vs 15 is invisible). A
+      // literal 15−x figure (tried in 2.6.2.33) put the Fold=1
+      // wireframe at 6..13 on a 15 field, where it vanished into the
+      // ground. Instead the figure shade mirrors WITHIN its own [2,9]
+      // band (11−x): it stays dark and clearly readable at BOTH fold
+      // extremes — light-on-dark at Fold=0, dark-on-light at Fold=1 —
+      // and the depth shading flips (front edge bright ↔ dark) so the
+      // static, no-band figure still visibly inverts. Staying inside
+      // [2,9] also leaves the shockwave headroom to push past the
+      // base in either direction. Mid-Fold is a low-contrast
+      // crossover (figure ≈ ground, band polarity 0).
       const int bgBright = (int)(foldPos * 15.0f);
       fb.fill(bgBright, left, bot, left + w - 1, bot + h - 1);
       mBandPolarity = 1.0f - 2.0f * foldPos;   // +1 reveal → −1 obscure
@@ -594,16 +596,18 @@ namespace stolmine
         }
 
         // Draw numVerts edges. Base brightness is the depth shade
-        // (front edge bright, back edge dim), cleanly inverted by
-        // Fold: the normal wireframe shade (2..9 on a black field) at
-        // Fold=0 mirrors through 15−x to its photographic negative
-        // (13..6 on a white field) at Fold=1. The figure's static,
-        // no-band state fully inverts — and because the shade stays
-        // inside [2,13], the shockwave always has headroom to push
-        // past it in either direction. When any band is active each
-        // edge is rastered per-pixel through drawBandLine() so the
-        // band's raised-cosine profile modulates brightness smoothly
-        // along the segment; otherwise the fast fb.line() path is used.
+        // (front edge bright, back edge dim), inverted by Fold —
+        // mirrored WITHIN the figure's own [2,9] band (11−x), not
+        // across the full 0..15 scale (see the Fold block above for
+        // why). normalShade = 2 + depthN·7 (2..9, front bright) at
+        // Fold=0 becomes invertShade = 11 − normalShade (9..2, front
+        // dark) at Fold=1: the figure stays dark and readable at both
+        // extremes, the depth shading flips, and the [2,9] bounds
+        // leave the shockwave headroom past the base either way. When
+        // any band is active each edge is rastered per-pixel through
+        // drawBandLine() so the band's raised-cosine profile
+        // modulates brightness smoothly along the segment; otherwise
+        // the fast fb.line() path is used.
         for (int j = 0; j < numVerts; j++)
         {
           const int nj = (j + 1) % numVerts;
@@ -612,8 +616,8 @@ namespace stolmine
           float depthN = 0.5f + 0.5f * (midZ / maxAbsZ);
           if (depthN < 0.0f) depthN = 0.0f;
           if (depthN > 1.0f) depthN = 1.0f;
-          const float normalShade = 2.0f + depthN * 7.0f;   // 2..9  (Fold=0)
-          const float invertShade = 15.0f - normalShade;    // 13..6 (Fold=1)
+          const float normalShade = 2.0f + depthN * 7.0f;   // 2..9 (Fold=0, front bright)
+          const float invertShade = 11.0f - normalShade;    // 9..2 (Fold=1, front dark)
           int baseBright =
               (int)(normalShade + (invertShade - normalShade) * foldPos);
           if (baseBright < 0) baseBright = 0;
