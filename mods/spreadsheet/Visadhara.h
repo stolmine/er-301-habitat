@@ -47,6 +47,11 @@ namespace stolmine
 
       float prevTrig = 0.0f;
 
+      // Trigger event counter — bumped on every rising edge in
+      // process(). Polled by VisadharaCoronaGraphic each frame to
+      // detect new triggers and fire the Phase-3d shockwave bands.
+      int triggerCount = 0;
+
       float slowAttack = 0.0f;
       float slowAttackInc = 0.0f;
 
@@ -172,6 +177,12 @@ namespace stolmine
     // snap + addThresholdLabel for text display. Rounded via clamp+cast
     // at the use site.
     od::Parameter mOctave{"Octave", 2.0f};
+
+    // Trigger event counter for the Corona viz (Phase-3d shockwave
+    // bands). Incremented on every rising edge in process(); the
+    // graphic polls this each frame to detect new triggers. Plain
+    // int — a missed or double-counted frame is visually irrelevant.
+    int vizTriggerCount() const { return mpInternal->triggerCount; }
 
     __attribute__((optimize("no-tree-vectorize")))
     virtual void process()
@@ -420,6 +431,9 @@ namespace stolmine
 
         if (risingEdge)
         {
+          // Viz: report this trigger to the Corona graphic.
+          s.triggerCount++;
+
           // Phase reset to 0 — coherent quarter-cycle peak preserved
           // for full loudness (peak N, RMS N/√2). The "splatty"
           // artifact at coherent settings is NOT a phase issue but

@@ -926,3 +926,63 @@ Version: spreadsheet 2.6.2.9 → 2.6.2.10.
 Phase 1 first. Goal: Skin-mode skeleton with 6-voice additive +
 Spread + Harmonic + Morph. Will commit at end of phase before
 moving to Phase 2.
+
+---
+
+## Corona viz — geometric pivot (supersedes polar-scope plan above)
+
+The 2.6.2.18 polar-oscilloscope concept (lines 621-673) was
+abandoned: Helicase's slew/trail infra is tuned for steady-state
+oscillators, not transient kicks — the wave never travelled off
+the surface of the circle (2.6.2.19-2.6.2.22, all failed). The
+audio-capture vizBuf was removed at 2.6.2.23.
+
+Replacement: a **spirograph / arabesque carousel**. N vertical-
+standing K-gons orbit a tilted horizontal carousel, each spinning
+on its own vertical axis. Header-only (VisadharaCoronaGraphic.h),
+LUT trig, no audio capture — reads param state directly.
+
+### Mappings (live)
+
+- **Spread → N**: petal count, integer 1..8.
+- **Mode → Kf**: polygon sides as a FLOAT 3.0..8.0, rendered via a
+  continuous radial function (coronaRadius crossfades floor/ceil
+  integer polygons) so Mode sweeps smoothly — no side-count pops.
+- **Harmonic → carousel radius**: 0.177..0.34 of minDim. Floor
+  raised at 2.6.2.29 (was 0.12) so petals never collapse too tight.
+- **Morph → star**: K-gon ↔ K-pointed star, continuous via
+  coronaKgonStar's valley pull-in.
+
+### Phase 3d — trigger shockwave bands (2.6.2.30)
+
+Per-pixel radial brightness bands that sweep over the whole
+geometry on each trigger.
+
+- Visadhara.h gains `Internal::triggerCount` (bumped on every
+  rising edge) + inline `vizTriggerCount()` accessor. PIMPL state
+  only — no SWIG-visible layout change.
+- Graphic polls the counter each frame; a change emits a band
+  PAIR: an OUTWARD shockwave from center (speed/width from Decay —
+  long decay = slow, wide, languid; short = fast snap) and an
+  INWARD collapse from beyond the rim (speed/width from Attack's
+  bipolar value folded to 0..1 "slowness").
+- 8-slot ring buffer → up to 4 trigger pairs in flight at once
+  (overlapping pulses). Emission capped at one pair/frame, so
+  dense trigger streams become a framerate-bound flicker/strobe —
+  intentional, per the user's vision.
+- Each band = a raised-cosine bump in normalized-radius space
+  (1.0 at center → 0 at ±halfWidth), summed across bands.
+- Rendering: base depth shade compressed to 2..9 so bands have
+  headroom to flare a line to white. When any band is active each
+  K-gon edge is rastered per-pixel (DDA walker + bandModAt); a
+  squared-radius annulus reject [gMinR2,gMaxR2] skips the sqrt +
+  per-band loop for pixels no band touches. Idle frames (no active
+  bands) use the fast fb.line() path.
+- `kCoronaBandStrength = 11.0` — a full-strength band adds 11
+  levels, clamped at 15.
+
+### Phase 3e — remaining
+
+- **Fold → band polarity**: bright (reveal, current default) vs
+  dark (obscure). The base 2..9 shade leaves room for both.
+- **V/Oct → tumble speed**: carousel orbit rate from pitch.

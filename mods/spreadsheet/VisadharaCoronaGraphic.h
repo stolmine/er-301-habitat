@@ -4,10 +4,12 @@
 // main fader area. Phase 3a' (this commit): scaffold the geometric
 // engine with fixed values. N=4 instances of a K=6 hexagon, each
 // orbiting around screen center on a tilted plane while
-// independently spinning around its own axis. Parameter mappings
-// (Spread → N, Mode → K, Harmonic → petal direction, Morph → star
-// twist, Decay → trim sweep, Fold → contrast, V/Oct → tumble speed)
-// land in subsequent phases 3b-3e.
+// independently spinning around its own axis. Parameter mappings:
+// Spread → N (petal count), Mode → K (polygon sides), Harmonic →
+// carousel radius, Morph → star points — all live (phases 3b/3c).
+// Phase 3d adds trigger-driven radial shockwave bands that modulate
+// per-pixel brightness, with Attack/Decay driving band kinematics.
+// Fold → band polarity and V/Oct → tumble speed land in phase 3e.
 //
 // Geometry (three rotations):
 //   1. Global tumble: whole assembly rotates around central Z axis
@@ -31,6 +33,7 @@
 // at file scope. lutCosRad / lutSinRad helpers do linear interp
 // for arbitrary radians (FilterResponseGraphic pattern).
 
+#include <math.h>
 #include <od/graphics/Graphic.h>
 #include "Visadhara.h"
 
@@ -138,6 +141,12 @@ namespace stolmine
     return rLo + (rHi - rLo) * kfrac;
   }
 
+  // Phase-3d shockwave band brightness gain. A band at full strength
+  // (raised-cosine peak = 1.0) adds this many brightness levels to
+  // the depth-shaded base — enough to flare a mid-gray wireframe
+  // line to full white. Overlapping bands sum and clamp at 15.
+  static const float kCoronaBandStrength = 11.0f;
+
   class VisadharaCoronaGraphic : public od::Graphic
   {
   public:
@@ -164,6 +173,97 @@ namespace stolmine
     // Continuous animation state — both advance every draw frame.
     float mGlobalTumble = 0.0f;    // orbital rotation, Z axis
     float mPetalSpin = 0.0f;       // per-petal own-axis rotation
+
+    // --- Phase-3d trigger-driven radial shockwave bands ---
+    // On each trigger Visadhara reports (vizTriggerCount advances)
+    // the graphic emits two bands: an OUTWARD shockwave from the
+    // center (speed from Decay — long decay = slow languid sweep,
+    // short decay = fast snap) and an INWARD collapse from beyond
+    // the rim (speed from Attack — slow attack = slow visible
+    // converge, instant/negative attack = quick flash). Each band
+    // modulates per-pixel brightness with a raised-cosine profile so
+    // its edges gradate smoothly. Several can be in flight at once
+    // (overlapping pulses); emission is capped at one pair per frame,
+    // so dense trigger streams thin to a framerate-bound flicker /
+    // strobe — intentional.
+    static const int kMaxBands = 8;
+    struct Band
+    {
+      float pos;        // band center: normalized radius (0=ctr,1=rim)
+      float speed;      // per-frame advance, signed (+out / -in)
+      float halfWidth;  // raised-cosine half-extent, normalized radius
+      bool  active;
+    };
+    Band mBands[kMaxBands] = {};
+    int  mLastTriggerCount = -1;   // <0 → not yet synced to the unit
+    int  mNextBandSlot = 0;        // ring index for band emission
+
+    // Accumulated band brightness modulation at a normalized radius.
+    // Each active band contributes a raised-cosine bump: 1.0 at its
+    // center, smoothly → 0 at ±halfWidth. Summed across bands so
+    // overlapping pulses reinforce. Typical result 0..~2.
+    float bandModAt(float rNorm) const
+    {
+      float mod = 0.0f;
+      for (int b = 0; b < kMaxBands; b++)
+      {
+        if (!mBands[b].active)
+          continue;
+        float d = rNorm - mBands[b].pos;
+        if (d < 0.0f)
+          d = -d;
+        const float hw = mBands[b].halfWidth;
+        if (d < hw)
+        {
+          const float x = d / hw;   // 0 at band center .. 1 at edge
+          mod += 0.5f * (1.0f + lutCosRad(3.14159265f * x));
+        }
+      }
+      return mod;
+    }
+
+    // Per-pixel line raster with radial-band brightness modulation.
+    // Walks the segment with a DDA stepper; for each pixel computes
+    // its radius from the system center, evaluates bandModAt(), and
+    // adds the band contribution to the depth-shaded base. gMinR2 /
+    // gMaxR2 are the squared screen-radius bounds spanning ALL active
+    // bands — pixels outside that annulus skip the sqrt and the
+    // per-band loop entirely (the common case). Clips per pixel.
+    void drawBandLine(od::FrameBuffer &fb,
+                      int x0, int y0, int x1, int y1, int baseBright,
+                      float fcx, float fcy, float invMaxR,
+                      float gMinR2, float gMaxR2,
+                      int clipL, int clipR, int clipB, int clipT) const
+    {
+      const int dx = x1 - x0, dy = y1 - y0;
+      const int adx = dx < 0 ? -dx : dx;
+      const int ady = dy < 0 ? -dy : dy;
+      const int steps = adx > ady ? adx : ady;
+      const float stepX = (steps > 0) ? (float)dx / (float)steps : 0.0f;
+      const float stepY = (steps > 0) ? (float)dy / (float)steps : 0.0f;
+      float fx = (float)x0, fy = (float)y0;
+      for (int s = 0; s <= steps; s++)
+      {
+        const int px = (int)(fx + 0.5f);
+        const int py = (int)(fy + 0.5f);
+        int bright = baseBright;
+        const float ddx = (float)px - fcx;
+        const float ddy = (float)py - fcy;
+        const float r2 = ddx * ddx + ddy * ddy;
+        if (r2 >= gMinR2 && r2 <= gMaxR2)
+        {
+          const float rNorm = sqrtf(r2) * invMaxR;
+          bright = baseBright + (int)(bandModAt(rNorm) * kCoronaBandStrength);
+          if (bright > 15)
+            bright = 15;
+        }
+        if (bright > 0 &&
+            px >= clipL && px <= clipR && py >= clipB && py <= clipT)
+          fb.pixel(bright, px, py);
+        fx += stepX;
+        fy += stepY;
+      }
+    }
 
   public:
 #ifndef SWIGLUA
@@ -228,12 +328,16 @@ namespace stolmine
       float Kf = 6.0f;
       float harmonicPos = 0.5f;
       float morphPos = 0.0f;
+      float attackPos = 0.0f;   // bipolar -1..+1 (noise / instant / slow)
+      float decayPos  = 0.5f;   // 0..1
       if (mpVisadhara)
       {
         const float spreadPos = mpVisadhara->mSpread.value();
         const float modePos   = mpVisadhara->mMode.value();
         harmonicPos           = mpVisadhara->mHarmonic.value();
         morphPos              = mpVisadhara->mMorph.value();
+        attackPos             = mpVisadhara->mAttack.value();
+        decayPos              = mpVisadhara->mDecay.value();
         N = 1 + (int)(spreadPos * 7.0f);
         if (N < 1) N = 1;
         if (N > 8) N = 8;
@@ -245,6 +349,76 @@ namespace stolmine
         if (harmonicPos > 1.0f) harmonicPos = 1.0f;
         if (morphPos < 0.0f) morphPos = 0.0f;
         if (morphPos > 1.0f) morphPos = 1.0f;
+        if (attackPos < -1.0f) attackPos = -1.0f;
+        if (attackPos > 1.0f) attackPos = 1.0f;
+        if (decayPos < 0.0f) decayPos = 0.0f;
+        if (decayPos > 1.0f) decayPos = 1.0f;
+      }
+
+      // --- Phase-3d shockwave band emission + advance ---
+      // Poll Visadhara's trigger counter. mLastTriggerCount < 0 means
+      // we haven't synced to the unit yet — adopt the current count
+      // silently so the first rendered frame doesn't fire a spurious
+      // band. Thereafter any change emits one outward + one inward
+      // band pair (emission capped at one pair per frame, so dense
+      // trigger streams become a framerate-bound strobe).
+      if (mpVisadhara)
+      {
+        const int tc = mpVisadhara->vizTriggerCount();
+        if (mLastTriggerCount < 0)
+        {
+          mLastTriggerCount = tc;
+        }
+        else if (tc != mLastTriggerCount)
+        {
+          mLastTriggerCount = tc;
+
+          // Decay → outward shockwave kinematics. Long decay = slow,
+          // wide, languid sweep; short decay = fast, tight snap.
+          const float outSpeed = 0.018f + (1.0f - decayPos) * 0.060f;
+          const float outWidth = 0.13f + decayPos * 0.13f;
+          // Attack → inward collapse kinematics. Attack is bipolar;
+          // fold to a 0..1 "slowness" (slow attack → slow, visible
+          // converge; instant/negative attack → quick flash).
+          float aSlow = (attackPos + 1.0f) * 0.5f;
+          if (aSlow < 0.0f) aSlow = 0.0f;
+          if (aSlow > 1.0f) aSlow = 1.0f;
+          const float inSpeed = 0.030f + (1.0f - aSlow) * 0.095f;
+          const float inWidth = 0.10f + aSlow * 0.12f;
+
+          // Outward band — born at the center.
+          mBands[mNextBandSlot].pos       = 0.0f;
+          mBands[mNextBandSlot].speed     = outSpeed;
+          mBands[mNextBandSlot].halfWidth = outWidth;
+          mBands[mNextBandSlot].active    = true;
+          mNextBandSlot = (mNextBandSlot + 1) % kMaxBands;
+          // Inward band — born just beyond the rim.
+          mBands[mNextBandSlot].pos       = 1.15f + inWidth;
+          mBands[mNextBandSlot].speed     = -inSpeed;
+          mBands[mNextBandSlot].halfWidth = inWidth;
+          mBands[mNextBandSlot].active    = true;
+          mNextBandSlot = (mNextBandSlot + 1) % kMaxBands;
+        }
+      }
+
+      // Advance every active band; retire those fully past the
+      // geometry — outward bands clear beyond the rim, inward bands
+      // clear once collapsed through the center.
+      for (int b = 0; b < kMaxBands; b++)
+      {
+        if (!mBands[b].active)
+          continue;
+        mBands[b].pos += mBands[b].speed;
+        if (mBands[b].speed > 0.0f)
+        {
+          if (mBands[b].pos - mBands[b].halfWidth > 1.25f)
+            mBands[b].active = false;
+        }
+        else
+        {
+          if (mBands[b].pos + mBands[b].halfWidth < 0.0f)
+            mBands[b].active = false;
+        }
       }
 
       const float tiltAngle = 0.30f;     // ~17° elevated view
@@ -268,6 +442,34 @@ namespace stolmine
 
       const int cx = left + w / 2;
       const int cy = bot + h / 2;
+      const float fcx = (float)cx;
+      const float fcy = (float)cy;
+
+      // Band reject bounds: the squared screen-radius annulus that
+      // spans every active band. A pixel whose r² falls outside
+      // [gMinR2, gMaxR2] gets no band modulation, so drawBandLine()
+      // can skip its sqrt and per-band loop. maxR normalizes screen
+      // radius to the band's 0..1 space (rim = R_petal + r_polygon,
+      // the worst-case horizontal extent of the geometry).
+      const float maxR = R_petal + r_polygon;
+      const float invMaxR = (maxR > 1.0f) ? (1.0f / maxR) : 1.0f;
+      float gMinR2 = 1.0e30f;
+      float gMaxR2 = -1.0f;
+      bool anyBand = false;
+      for (int b = 0; b < kMaxBands; b++)
+      {
+        if (!mBands[b].active)
+          continue;
+        anyBand = true;
+        float lo = (mBands[b].pos - mBands[b].halfWidth) * maxR;
+        float hi = (mBands[b].pos + mBands[b].halfWidth) * maxR;
+        if (lo < 0.0f) lo = 0.0f;
+        if (hi < 0.0f) hi = 0.0f;
+        const float lo2 = lo * lo;
+        const float hi2 = hi * hi;
+        if (lo2 < gMinR2) gMinR2 = lo2;
+        if (hi2 > gMaxR2) gMaxR2 = hi2;
+      }
 
       // Shared spin (same for all petals).
       const float cosSpin = lutCosRad(mPetalSpin);
@@ -316,26 +518,35 @@ namespace stolmine
           sz[j] = tiltedZ;
         }
 
-        // Draw numVerts edges with per-line brightness from midpoint
-        // depth. The "front edge" of each spinning shape (closer to
-        // viewer) is bright; the "back edge" (farther) is dim. Cue
-        // rotates with the spin.
+        // Draw numVerts edges. Base brightness is the depth shade
+        // (front edge bright, back edge dim) compressed to 2..9 so
+        // the Phase-3d shockwave bands have headroom to flare a line
+        // toward full white. When any band is active each edge is
+        // rastered per-pixel through drawBandLine() so the band's
+        // raised-cosine profile modulates brightness smoothly along
+        // the segment; otherwise the fast fb.line() path is used.
         for (int j = 0; j < numVerts; j++)
         {
           const int nj = (j + 1) % numVerts;
           const float midZ = (sz[j] + sz[nj]) * 0.5f;
           const float maxAbsZ = (R_petal + r_polygon) * cosTilt;
           const float depthN = 0.5f + 0.5f * (midZ / maxAbsZ);
-          int bright = 3 + (int)(depthN * 12.0f);
-          if (bright < 3) bright = 3;
-          if (bright > 15) bright = 15;
+          int baseBright = 2 + (int)(depthN * 7.0f);
+          if (baseBright < 2) baseBright = 2;
+          if (baseBright > 9) baseBright = 9;
 
-          if (sx[j] >= left && sx[j] < left + w &&
-              sy[j] >= bot  && sy[j] < bot + h  &&
-              sx[nj] >= left && sx[nj] < left + w &&
-              sy[nj] >= bot  && sy[nj] < bot + h)
+          if (anyBand)
           {
-            fb.line(bright, sx[j], sy[j], sx[nj], sy[nj]);
+            drawBandLine(fb, sx[j], sy[j], sx[nj], sy[nj], baseBright,
+                         fcx, fcy, invMaxR, gMinR2, gMaxR2,
+                         left, left + w - 1, bot, bot + h - 1);
+          }
+          else if (sx[j] >= left && sx[j] < left + w &&
+                   sy[j] >= bot  && sy[j] < bot + h  &&
+                   sx[nj] >= left && sx[nj] < left + w &&
+                   sy[nj] >= bot  && sy[nj] < bot + h)
+          {
+            fb.line(baseBright, sx[j], sy[j], sx[nj], sy[nj]);
           }
         }
       }
