@@ -148,13 +148,19 @@ namespace stolmine
       if (mPetalSpin > 6283.0f) mPetalSpin -= 6283.0f;
 
       // Geometry constants. Fixed for Phase 3a'; parameters take
-      // these over in 3b+.
+      // these over in 3b+. Petal radius bumped to 0.23 of minDim
+      // (was 0.13) — at minDim=42 that's ~9.7 px radius hexagons,
+      // edges ~9.7 px long, reads as a clear K-gon rather than a
+      // pixel-blob "chicken nugget". Front/back petal pair now
+      // overlaps ~7 px (vertical orbital distance ≈ 12 px vs
+      // 2×r_polygon ≈ 19 px), giving the user-requested "dramatic
+      // intersection" character.
       const int N = 4;                  // petal instances
       const int K = 6;                  // sides per polygon (hexagon)
       const float tiltAngle = 0.50f;    // ~28.6° tilt around X axis
       const int minDim = (w < h) ? w : h;
       const float R_petal = (float)minDim * 0.30f;     // orbit radius
-      const float r_polygon = (float)minDim * 0.13f;   // petal size
+      const float r_polygon = (float)minDim * 0.23f;   // petal size
 
       const float cosTilt = lutCosRad(tiltAngle);
       const float sinTilt = lutSinRad(tiltAngle);
@@ -162,61 +168,72 @@ namespace stolmine
       const int cx = left + w / 2;
       const int cy = bot + h / 2;
 
-      // Draw each petal: project orbital center to 3D-tilted screen
-      // position; render K-gon at that position with its own spin.
+      // 3D vertex pipeline: each petal's polygon sits in the world
+      // XZ plane (the orbital plane), so vertices have varying
+      // depth z-coordinate as they spin around the petal center.
+      // After tilt around X, depth maps to per-vertex brightness —
+      // lines on the "front" side of each polygon are bright,
+      // lines on the "back" are dim, giving each spinning petal a
+      // proper 3D rendered look rather than a flat camera-facing
+      // shape.
       for (int i = 0; i < N; i++)
       {
         const float orbitAngle = mGlobalTumble + 6.28318530718f * (float)i / (float)N;
         const float cosOrbit = lutCosRad(orbitAngle);
         const float sinOrbit = lutSinRad(orbitAngle);
 
-        // Orbit on the world XZ plane (Y=0 always). Tilting around
-        // X by tiltAngle maps Z → screen Y and preserves X.
-        //   worldX = R * cosOrbit
-        //   worldZ = R * sinOrbit
-        //   After tilt: y' = -worldZ * sinTilt
-        //               z' =  worldZ * cosTilt
-        // Z position (depth) determines brightness.
-        const float petalScreenX = R_petal * cosOrbit;
-        const float petalScreenY = -R_petal * sinOrbit * sinTilt;
-        const float depthZ      =  R_petal * sinOrbit * cosTilt;
+        // Petal center in world space (XZ plane).
+        const float petalWorldX = R_petal * cosOrbit;
+        const float petalWorldZ = R_petal * sinOrbit;
 
-        // Brightness from depth: petals in front (depthZ > 0) brighter,
-        // petals in back (depthZ < 0) dimmer. Range gray 4-14.
-        const float depthN = 0.5f + 0.5f * (depthZ / R_petal);   // 0..1
-        int petalBright = 4 + (int)(depthN * 10.0f);
-        if (petalBright < 4) petalBright = 4;
-        if (petalBright > 14) petalBright = 14;
-
-        // Per-petal spin angle. Same speed for all petals but with
-        // a per-index phase offset so they don't all show the same
-        // orientation at once.
+        // Per-petal spin offset by petal index so all 4 don't show
+        // the same orientation at once.
         const float spinAngle = mPetalSpin + 6.28318530718f * (float)i / (float)(N * 2);
 
-        // Compute K vertex positions for this petal. Centered at
-        // (petalScreenX, petalScreenY), radius r_polygon, rotated
-        // by spinAngle.
-        int vx[16], vy[16];  // K up to 16 reserved
+        // K vertex positions in world space (also in XZ plane).
+        int sx[16], sy[16];      // screen-projected x, y
+        float sz[16];            // world z after tilt (depth)
+
         for (int j = 0; j < K; j++)
         {
           const float vAngle = spinAngle + 6.28318530718f * (float)j / (float)K;
-          const float vox = r_polygon * lutCosRad(vAngle);
-          const float voy = r_polygon * lutSinRad(vAngle);
-          vx[j] = cx + (int)(petalScreenX + vox);
-          vy[j] = cy + (int)(petalScreenY + voy);
+          const float lx = r_polygon * lutCosRad(vAngle);
+          const float lz = r_polygon * lutSinRad(vAngle);
+
+          // World vertex
+          const float worldVx = petalWorldX + lx;
+          const float worldVz = petalWorldZ + lz;
+          // World Y is 0 (orbital plane is the world XZ plane)
+
+          // Tilt around X axis. World Y stays 0; world Z maps to
+          // screen Y (with sign flip so +Z is up) and to depth.
+          sx[j] = cx + (int)worldVx;
+          sy[j] = cy - (int)(worldVz * sinTilt);
+          sz[j] = worldVz * cosTilt;
         }
 
-        // Draw closed polygon: K edges connecting consecutive vertices.
-        // Bounds-check each line to silently clip outside the graphic.
+        // Draw K edges with per-line brightness from midpoint depth.
+        // Each polygon now has a "front edge" (bright) and a
+        // "back edge" (dim) as it spins — depth cue is per-line.
         for (int j = 0; j < K; j++)
         {
           const int nj = (j + 1) % K;
-          if (vx[j] >= left && vx[j] < left + w &&
-              vy[j] >= bot  && vy[j] < bot + h  &&
-              vx[nj] >= left && vx[nj] < left + w &&
-              vy[nj] >= bot  && vy[nj] < bot + h)
+          const float midZ = (sz[j] + sz[nj]) * 0.5f;
+          // depthN: 0 (back) to 1 (front). Range based on the
+          // full orbit + polygon extent: midZ varies roughly
+          // -(R+r)*cosTilt to +(R+r)*cosTilt.
+          const float maxAbsZ = (R_petal + r_polygon) * cosTilt;
+          const float depthN = 0.5f + 0.5f * (midZ / maxAbsZ);
+          int bright = 3 + (int)(depthN * 12.0f);
+          if (bright < 3) bright = 3;
+          if (bright > 15) bright = 15;
+
+          if (sx[j] >= left && sx[j] < left + w &&
+              sy[j] >= bot  && sy[j] < bot + h  &&
+              sx[nj] >= left && sx[nj] < left + w &&
+              sy[nj] >= bot  && sy[nj] < bot + h)
           {
-            fb.line(petalBright, vx[j], vy[j], vx[nj], vy[nj]);
+            fb.line(bright, sx[j], sy[j], sx[nj], sy[nj]);
           }
         }
       }
