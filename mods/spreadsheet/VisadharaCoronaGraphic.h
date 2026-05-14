@@ -144,8 +144,20 @@ namespace stolmine
   // Phase-3d shockwave band brightness gain. A band at full strength
   // (raised-cosine peak = 1.0) adds this many brightness levels to
   // the depth-shaded base — enough to flare a mid-gray wireframe
-  // line to full white. Overlapping bands sum and clamp at 15.
+  // line to full white. Multiplied by the band polarity (+1 reveal /
+  // -1 obscure) at the call site; overlapping bands sum, clamped
+  // 0..15.
   static const float kCoronaBandStrength = 11.0f;
+
+  // Band-position easing. A band travels its startPos→endPos span on
+  // a quadratic ease-out curve (t·(2−t)) rather than linearly — a
+  // fast initial burst that decelerates, the way a shockwave loses
+  // energy as it expands. Single tunable point: swap for a cubic
+  // (1−(1−t)³) or smoothstep here to restyle every band at once.
+  static inline float coronaEase(float t)
+  {
+    return t * (2.0f - t);
+  }
 
   class VisadharaCoronaGraphic : public od::Graphic
   {
@@ -177,26 +189,39 @@ namespace stolmine
     // --- Phase-3d trigger-driven radial shockwave bands ---
     // On each trigger Visadhara reports (vizTriggerCount advances)
     // the graphic emits two bands: an OUTWARD shockwave from the
-    // center (speed from Decay — long decay = slow languid sweep,
-    // short decay = fast snap) and an INWARD collapse from beyond
-    // the rim (speed from Attack — slow attack = slow visible
-    // converge, instant/negative attack = quick flash). Each band
-    // modulates per-pixel brightness with a raised-cosine profile so
-    // its edges gradate smoothly. Several can be in flight at once
-    // (overlapping pulses); emission is capped at one pair per frame,
-    // so dense trigger streams thin to a framerate-bound flicker /
-    // strobe — intentional.
+    // center (Decay sets its lifetime — long decay = slow languid
+    // sweep, short decay = fast snap) and an INWARD collapse from
+    // beyond the rim (Attack sets its lifetime — slow attack = slow
+    // visible converge, instant/negative attack = quick flash). Each
+    // band modulates per-pixel brightness with a raised-cosine
+    // profile so its edges gradate smoothly, and travels its span on
+    // the coronaEase() curve rather than linearly. Several can be in
+    // flight at once (overlapping pulses); emission is capped at one
+    // pair per frame, so dense trigger streams thin to a framerate-
+    // bound flicker / strobe — intentional.
     static const int kMaxBands = 8;
     struct Band
     {
-      float pos;        // band center: normalized radius (0=ctr,1=rim)
-      float speed;      // per-frame advance, signed (+out / -in)
+      float t;          // lifetime progress, 0..1 (advances linearly)
+      float tInc;       // per-frame progress increment
+      float startPos;   // normalized radius at t=0
+      float endPos;     // normalized radius at t=1
+      float pos;        // cached eased position: lerp(start,end,ease(t))
       float halfWidth;  // raised-cosine half-extent, normalized radius
       bool  active;
     };
     Band mBands[kMaxBands] = {};
     int  mLastTriggerCount = -1;   // <0 → not yet synced to the unit
     int  mNextBandSlot = 0;        // ring index for band emission
+
+    // Band polarity: +1 = reveal (bands brighten the wireframe),
+    // -1 = obscure (bands darken it toward black). Phase 3e wires
+    // this to Fold; held as a float (not bool) so Fold can drive a
+    // continuous reveal↔obscure crossfade if desired. The signed
+    // brightness application + 0..15 dual clamp in drawBandLine() is
+    // the invertibility infrastructure — flipping this member is all
+    // Phase 3e needs to invert the whole effect.
+    float mBandPolarity = 1.0f;
 
     // Accumulated band brightness modulation at a normalized radius.
     // Each active band contributes a raised-cosine bump: 1.0 at its
@@ -231,7 +256,7 @@ namespace stolmine
     // per-band loop entirely (the common case). Clips per pixel.
     void drawBandLine(od::FrameBuffer &fb,
                       int x0, int y0, int x1, int y1, int baseBright,
-                      float fcx, float fcy, float invMaxR,
+                      float fcx, float fcy, float invMaxR, float bandGain,
                       float gMinR2, float gMaxR2,
                       int clipL, int clipR, int clipB, int clipT) const
     {
@@ -252,10 +277,15 @@ namespace stolmine
         const float r2 = ddx * ddx + ddy * ddy;
         if (r2 >= gMinR2 && r2 <= gMaxR2)
         {
+          // bandGain carries the polarity sign: +reveal brightens,
+          // -obscure darkens. Dual clamp keeps the result on-scale
+          // in both directions.
           const float rNorm = sqrtf(r2) * invMaxR;
-          bright = baseBright + (int)(bandModAt(rNorm) * kCoronaBandStrength);
+          bright = baseBright + (int)(bandModAt(rNorm) * bandGain);
           if (bright > 15)
             bright = 15;
+          if (bright < 0)
+            bright = 0;
         }
         if (bright > 0 &&
             px >= clipL && px <= clipR && py >= clipB && py <= clipT)
@@ -375,7 +405,10 @@ namespace stolmine
 
           // Decay → outward shockwave kinematics. Long decay = slow,
           // wide, languid sweep; short decay = fast, tight snap.
-          const float outSpeed = 0.018f + (1.0f - decayPos) * 0.060f;
+          // tInc is the per-frame lifetime-progress step (1/tInc =
+          // band lifetime in frames); width sets the raised-cosine
+          // half-extent.
+          const float outTInc  = 0.014f + (1.0f - decayPos) * 0.048f;
           const float outWidth = 0.13f + decayPos * 0.13f;
           // Attack → inward collapse kinematics. Attack is bipolar;
           // fold to a 0..1 "slowness" (slow attack → slow, visible
@@ -383,42 +416,49 @@ namespace stolmine
           float aSlow = (attackPos + 1.0f) * 0.5f;
           if (aSlow < 0.0f) aSlow = 0.0f;
           if (aSlow > 1.0f) aSlow = 1.0f;
-          const float inSpeed = 0.030f + (1.0f - aSlow) * 0.095f;
+          const float inTInc  = 0.023f + (1.0f - aSlow) * 0.073f;
           const float inWidth = 0.10f + aSlow * 0.12f;
 
-          // Outward band — born at the center.
-          mBands[mNextBandSlot].pos       = 0.0f;
-          mBands[mNextBandSlot].speed     = outSpeed;
-          mBands[mNextBandSlot].halfWidth = outWidth;
-          mBands[mNextBandSlot].active    = true;
+          // Outward band — center → past the rim.
+          Band &ob = mBands[mNextBandSlot];
+          ob.t         = 0.0f;
+          ob.tInc      = outTInc;
+          ob.startPos  = 0.0f;
+          ob.endPos    = 1.25f;
+          ob.pos       = 0.0f;
+          ob.halfWidth = outWidth;
+          ob.active    = true;
           mNextBandSlot = (mNextBandSlot + 1) % kMaxBands;
-          // Inward band — born just beyond the rim.
-          mBands[mNextBandSlot].pos       = 1.15f + inWidth;
-          mBands[mNextBandSlot].speed     = -inSpeed;
-          mBands[mNextBandSlot].halfWidth = inWidth;
-          mBands[mNextBandSlot].active    = true;
+          // Inward band — beyond the rim → through the center.
+          Band &ib = mBands[mNextBandSlot];
+          ib.t         = 0.0f;
+          ib.tInc      = inTInc;
+          ib.startPos  = 1.15f + inWidth;
+          ib.endPos    = -inWidth;
+          ib.pos       = ib.startPos;
+          ib.halfWidth = inWidth;
+          ib.active    = true;
           mNextBandSlot = (mNextBandSlot + 1) % kMaxBands;
         }
       }
 
-      // Advance every active band; retire those fully past the
-      // geometry — outward bands clear beyond the rim, inward bands
-      // clear once collapsed through the center.
+      // Advance every active band: step its linear lifetime progress
+      // t, retire it once t ≥ 1, otherwise refresh the cached eased
+      // position. coronaEase() shapes the start→end travel so the
+      // band decelerates as it goes (quadratic ease-out).
       for (int b = 0; b < kMaxBands; b++)
       {
         if (!mBands[b].active)
           continue;
-        mBands[b].pos += mBands[b].speed;
-        if (mBands[b].speed > 0.0f)
+        mBands[b].t += mBands[b].tInc;
+        if (mBands[b].t >= 1.0f)
         {
-          if (mBands[b].pos - mBands[b].halfWidth > 1.25f)
-            mBands[b].active = false;
+          mBands[b].active = false;
+          continue;
         }
-        else
-        {
-          if (mBands[b].pos + mBands[b].halfWidth < 0.0f)
-            mBands[b].active = false;
-        }
+        const float e = coronaEase(mBands[b].t);
+        mBands[b].pos = mBands[b].startPos +
+                        (mBands[b].endPos - mBands[b].startPos) * e;
       }
 
       const float tiltAngle = 0.30f;     // ~17° elevated view
@@ -470,6 +510,10 @@ namespace stolmine
         if (lo2 < gMinR2) gMinR2 = lo2;
         if (hi2 > gMaxR2) gMaxR2 = hi2;
       }
+      // Polarity-signed band strength: +reveal / -obscure. Computed
+      // once per frame, passed into drawBandLine for the per-pixel
+      // application. Phase 3e drives mBandPolarity from Fold.
+      const float bandGain = kCoronaBandStrength * mBandPolarity;
 
       // Shared spin (same for all petals).
       const float cosSpin = lutCosRad(mPetalSpin);
@@ -538,7 +582,7 @@ namespace stolmine
           if (anyBand)
           {
             drawBandLine(fb, sx[j], sy[j], sx[nj], sy[nj], baseBright,
-                         fcx, fcy, invMaxR, gMinR2, gMaxR2,
+                         fcx, fcy, invMaxR, bandGain, gMinR2, gMaxR2,
                          left, left + w - 1, bot, bot + h - 1);
           }
           else if (sx[j] >= left && sx[j] < left + w &&

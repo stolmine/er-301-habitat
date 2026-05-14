@@ -981,8 +981,25 @@ geometry on each trigger.
 - `kCoronaBandStrength = 11.0` — a full-strength band adds 11
   levels, clamped at 15.
 
+### Phase 3d.1 — easing + polarity infra (2.6.2.31)
+
+- **coronaEase()**: bands no longer advance `pos` linearly. Each
+  carries a linear lifetime progress `t` ∈ [0,1] (stepped by
+  `tInc`); `pos` is `lerp(startPos, endPos, coronaEase(t))`.
+  coronaEase is quadratic ease-out (`t·(2−t)`) — fast burst,
+  decelerating, like a shockwave dissipating. Single namespace
+  function = one tunable point to restyle every band.
+- **mBandPolarity** (`float`, default +1): the invertibility
+  infra for Phase 3e. drawBandLine applies the band as a *signed*
+  brightness delta (`baseBright + bandModAt·bandGain`, where
+  `bandGain = kCoronaBandStrength · mBandPolarity`) with a 0..15
+  dual clamp. +1 = reveal (brighten), −1 = obscure (darken). Held
+  as a float so Fold can drive a continuous reveal↔obscure
+  crossfade, not just a hard flip. Phase 3e only has to write
+  this member.
+
 ### Phase 3e — remaining
 
-- **Fold → band polarity**: bright (reveal, current default) vs
-  dark (obscure). The base 2..9 shade leaves room for both.
+- **Fold → band polarity**: write `mBandPolarity` from Fold
+  (infra already in place — see 3d.1). Continuous or stepped.
 - **V/Oct → tumble speed**: carousel orbit rate from pitch.
