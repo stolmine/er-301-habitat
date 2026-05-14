@@ -1117,6 +1117,32 @@ that would be the first graphics-path NEON entry; objdump-check
 mandatory, and the graphic compiles into `spreadsheet_swig.o` at
 `-Os`, not the DSP path's `-O3 -ffast-math`.
 
+**2.6.2.39 — frame cache (the actual fix for the encoder capture).**
+2.6.2.38 caused immediate encoder capture — per
+`feedback_viz_encoder_capture_architectural`, viz UI lag is
+architectural (recomputing frame-invariant work every frame), not
+CPU. Key realization: the ring `phase` is a *global offset*
+subtracted from every term, so the angle-subtraction identity
+
+  `Σcos(dₙ·freq − phase) = cos(phase)·Σcos(dₙ·freq) + sin(phase)·Σsin(dₙ·freq)`
+
+splits the per-pixel sum into two **phase-independent** tables
+(`mFieldC` / `mFieldS`, `float[w·h]` each, ~21 KB total, heap).
+`buildFoldCache` fills them once — the only place `sqrt` / `cos` /
+`sin` over the nodules runs — lazily on first draw, rebuilt only on
+resize. The per-frame `drawFoldField` is now just `cosP`/`sinP`
+once + a `C·cosP + S·sinP` MAC and threshold per pixel: ~3 ops
+versus ~270, roughly a ~50× cut in per-frame cost. `envLevel` /
+`foldPos` still feed only the per-frame scalars (`bgBase`,
+`rippleDepth`), so the tables stay valid.
+
+This was chosen over NEON deliberately: the cache is ~50× (NEON of
+the old approach would be ~4×, and would still do the wasteful
+per-frame `sqrt`s). NEON now only matters if the *residual* MAC
+pass is still too heavy — and that pass is a flat `vmlaq` over a
+contiguous heap array, no `sqrt`/`cos` in the loop, the easy/safe
+kind. Likely unnecessary.
+
 ### Phase 3f — optional, deferred
 
 - **V/Oct → tumble speed**: carousel orbit rate from pitch. Not

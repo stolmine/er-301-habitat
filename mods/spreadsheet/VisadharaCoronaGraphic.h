@@ -175,6 +175,8 @@ namespace stolmine
   static const float kCoronaNoduleY[kCoronaNoduleCount] = {
     0.25f, 0.16f, 0.52f, 0.62f, 0.82f, 0.88f
   };
+  // Ring spatial frequency — roughly one full cycle per ~7 px.
+  static const float kCoronaRingFreq = 0.90f;
 
   class VisadharaCoronaGraphic : public od::Graphic
   {
@@ -186,6 +188,8 @@ namespace stolmine
     {
       if (mpVisadhara)
         mpVisadhara->release();
+      delete[] mFieldC;
+      delete[] mFieldS;
     }
 
     void follow(Visadhara *p)
@@ -203,6 +207,18 @@ namespace stolmine
     float mGlobalTumble = 0.0f;    // orbital rotation, Z axis
     float mPetalSpin = 0.0f;       // per-petal own-axis rotation
     float mFoldPhase = 0.0f;       // Fold contour-field ring phase
+
+    // Fold contour-field frame cache. The per-pixel ring sum
+    // Σcos(dₙ·freq − phase) factors via the angle-subtraction identity
+    // into phase-INDEPENDENT cos/sin tables —
+    //   field[i] = cos(phase)·mFieldC[i] + sin(phase)·mFieldS[i]
+    // so the sqrt/cos work happens ONCE in buildFoldCache (lazily, on
+    // first draw, sized to the region) and the per-frame drawFoldField
+    // is just a cheap MAC + threshold per pixel. ~2688 floats each.
+    float *mFieldC = nullptr;
+    float *mFieldS = nullptr;
+    int mFieldCacheW = 0;
+    int mFieldCacheH = 0;
 
     // --- Phase-3d trigger-driven radial shockwave bands ---
     // On each trigger Visadhara reports (vizTriggerCount advances)
@@ -316,21 +332,73 @@ namespace stolmine
       }
     }
 
+    // Build the Fold contour-field frame cache (see the mFieldC /
+    // mFieldS members). For every pixel, sum cos and sin of
+    // (dₙ · kCoronaRingFreq) over all nodules — the phase-independent
+    // halves of the angle-subtraction identity. This is the expensive
+    // pass (per pixel: kCoronaNoduleCount × sqrt + cos + sin), but it
+    // runs ONCE — lazily on first draw, and again only if the region
+    // is ever resized. A sub-millisecond one-time hitch when the Mode
+    // control is first shown.
+    void buildFoldCache(int w, int h)
+    {
+      delete[] mFieldC;
+      delete[] mFieldS;
+      const int count = w * h;
+      mFieldC = new float[count];
+      mFieldS = new float[count];
+      mFieldCacheW = w;
+      mFieldCacheH = h;
+      // Nodule positions are normalized; scale to region pixels once.
+      float nodeX[kCoronaNoduleCount];
+      float nodeY[kCoronaNoduleCount];
+      for (int n = 0; n < kCoronaNoduleCount; n++)
+      {
+        nodeX[n] = kCoronaNoduleX[n] * (float)w;
+        nodeY[n] = kCoronaNoduleY[n] * (float)h;
+      }
+      int i = 0;
+      for (int py = 0; py < h; py++)
+      {
+        for (int px = 0; px < w; px++, i++)
+        {
+          float cAccum = 0.0f;
+          float sAccum = 0.0f;
+          for (int n = 0; n < kCoronaNoduleCount; n++)
+          {
+            const float dx = (float)px - nodeX[n];
+            const float dy = (float)py - nodeY[n];
+            const float d  = sqrtf(dx * dx + dy * dy);
+            const float a  = d * kCoronaRingFreq;
+            cAccum += lutCosRad(a);
+            sAccum += lutSinRad(a);
+          }
+          mFieldC[i] = cAccum;
+          mFieldS[i] = sAccum;
+        }
+      }
+    }
+
     // Phase-3e Fold contour field — the background texture at Fold>0.
     // A multi-source radial-wave interference field: concentric rings
     // emanate from each kCoronaNodule* seed point, and rings from
     // neighbouring nodules merge/interfere — approximating a
     // reaction-diffusion / Turing-pattern look without a stateful RD
     // simulation. The summed cosine field is hard-thresholded to two
-    // brightness levels (the reference look). Live modulation: the
-    // ring `phase` advances every frame so rings continuously fan
-    // outward, and the post-fold envelope both speeds that drift (in
-    // draw()) and deepens `rippleDepth` — the gap between the two
-    // levels — on each hit. Drawn per-pixel with fb.pixel (SET):
-    // fb.fill BLENDs (OR) and can't do per-pixel variation anyway. At
-    // Fold=0 bgBase and rippleDepth are both 0, so every pixel
-    // resolves to 0 — a flat black field, identical to the
-    // pre-Phase-3e background.
+    // brightness levels (the reference look).
+    //
+    // The expensive part — Σ sqrt + cos/sin over the nodules — is
+    // frame-INVARIANT except for the global ring `phase`, so it lives
+    // in buildFoldCache's mFieldC / mFieldS tables. This per-frame
+    // pass just reconstructs the sum via the angle-subtraction
+    // identity (field = cosP·C + sinP·S) — a cheap MAC per pixel — and
+    // thresholds. `phase` advances every frame (rings fan outward);
+    // the post-fold envelope speeds that drift (in draw()) and deepens
+    // `rippleDepth`, the gap between the two levels, on each hit.
+    // Drawn per-pixel with fb.pixel (SET): fb.fill BLENDs (OR) and
+    // can't do per-pixel variation anyway. At Fold=0 bgBase and
+    // rippleDepth are both 0, so every pixel resolves to 0 — a flat
+    // black field, identical to the pre-Phase-3e background.
     void drawFoldField(od::FrameBuffer &fb, int left, int bot,
                        int w, int h, float foldPos, float envLevel,
                        float phase) const
@@ -343,37 +411,18 @@ namespace stolmine
       const int rippleDepth = (int)(foldPos * (2.0f + envLevel * 4.0f));
       const int darkLevel = (bgBase - rippleDepth < 0) ? 0
                                                        : bgBase - rippleDepth;
-      // Ring spatial frequency — roughly one full cycle per ~7 px.
-      const float ringFreq = 0.90f;
-      // Nodule positions are normalized; scale to region pixels once.
-      // Scalar stack array — fine; only a NEON vld1q on a stack array
-      // would be the alignment trap, and this is plain element access.
-      float nodeX[kCoronaNoduleCount];
-      float nodeY[kCoronaNoduleCount];
-      for (int n = 0; n < kCoronaNoduleCount; n++)
-      {
-        nodeX[n] = kCoronaNoduleX[n] * (float)w;
-        nodeY[n] = kCoronaNoduleY[n] * (float)h;
-      }
+      // Angle-subtraction: Σcos(dₙ·freq − phase) = cosP·C + sinP·S,
+      // with C/S precomputed per pixel in buildFoldCache.
+      const float cosP = lutCosRad(phase);
+      const float sinP = lutSinRad(phase);
+      const float *fc = mFieldC;
+      const float *fs = mFieldS;
+      int i = 0;
       for (int py = 0; py < h; py++)
       {
-        for (int px = 0; px < w; px++)
+        for (int px = 0; px < w; px++, i++)
         {
-          // Sum a radial cosine wave from every nodule. Near a nodule
-          // its term dominates the local variation → tight concentric
-          // rings; between nodules the terms interfere → the organic
-          // merged look. lutCosRad handles arbitrary-radian wrap (no
-          // runtime cosf in a package draw path).
-          float field = 0.0f;
-          for (int n = 0; n < kCoronaNoduleCount; n++)
-          {
-            const float dx = (float)px - nodeX[n];
-            const float dy = (float)py - nodeY[n];
-            const float d  = sqrtf(dx * dx + dy * dy);
-            field += lutCosRad(d * ringFreq - phase);
-          }
-          // Hard two-level threshold: ridges at bgBase, troughs
-          // rippleDepth darker.
+          const float field = fc[i] * cosP + fs[i] * sinP;
           fb.pixel(field > 0.0f ? bgBase : darkLevel, left + px, bot + py);
         }
       }
@@ -511,6 +560,10 @@ namespace stolmine
       // prior behaviour.
       mFoldPhase += 0.05f + envLevel * 0.25f;
       if (mFoldPhase > 6.28318530718f) mFoldPhase -= 6.28318530718f;
+      // Lazily (re)build the phase-independent contour cache — once on
+      // first draw, again only if the region is ever resized.
+      if (mFieldCacheW != w || mFieldCacheH != h)
+        buildFoldCache(w, h);
       drawFoldField(fb, left, bot, w, h, foldPos, envLevel, mFoldPhase);
       mBandPolarity = 1.0f - 2.0f * foldPos;   // +1 reveal → −1 obscure
 
