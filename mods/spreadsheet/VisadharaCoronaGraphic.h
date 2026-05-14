@@ -134,30 +134,38 @@ namespace stolmine
 
       fb.fill(BLACK, left, bot, left + w - 1, bot + h - 1);
 
-      // Advance both rotation axes. Speeds chosen for slow legible
-      // motion at the 30 fps draw rate. mGlobalTumble at ~0.7°/frame
-      // = ~21°/sec — petals complete an orbit in ~17 seconds.
-      // mPetalSpin at ~1.4°/frame = ~43°/sec — each petal rotates
-      // its own face in ~8.4 seconds. Distinct enough rates that
-      // the two motions don't synchronize.
-      mGlobalTumble += 0.012f;
-      mPetalSpin += 0.025f;
-      // Keep angles in a sane range to avoid float precision drift
-      // over long runs. 1000 full rotations is plenty before wrap.
+      // Advance both rotation axes. Carousel orbit slower; petal
+      // spin faster. Crucially the two RATES are different (and
+      // not integer multiples) so configurations evolve continuously
+      // — each frame shows a new relationship between orbital
+      // position and petal orientation. Ratio 0.030 / 0.012 = 2.5
+      // (rational but not aligned to N=4 symmetries).
+      mGlobalTumble += 0.012f;   // carousel orbit, ~17 sec per turn
+      mPetalSpin += 0.030f;      // petal vertical-axis spin, ~7 sec
       if (mGlobalTumble > 6283.0f) mGlobalTumble -= 6283.0f;
       if (mPetalSpin > 6283.0f) mPetalSpin -= 6283.0f;
 
-      // Geometry constants. Fixed for Phase 3a'; parameters take
-      // these over in 3b+. Petal radius bumped to 0.23 of minDim
-      // (was 0.13) — at minDim=42 that's ~9.7 px radius hexagons,
-      // edges ~9.7 px long, reads as a clear K-gon rather than a
-      // pixel-blob "chicken nugget". Front/back petal pair now
-      // overlaps ~7 px (vertical orbital distance ≈ 12 px vs
-      // 2×r_polygon ≈ 19 px), giving the user-requested "dramatic
-      // intersection" character.
-      const int N = 4;                  // petal instances
-      const int K = 6;                  // sides per polygon (hexagon)
-      const float tiltAngle = 0.50f;    // ~28.6° tilt around X axis
+      // Geometry: vertical-standing K-gons on a horizontal carousel.
+      //   - K-gon local plane = world XY (vertical, faces camera at
+      //     spin=0). Vertices at (lx, ly, 0) with lx, ly in K-gon
+      //     local space.
+      //   - Each petal spins around its own vertical axis (the world
+      //     Y axis through its center): K-gon X axis rotates toward
+      //     world Z. At spin=π/2, K-gon is edge-on (zero horizontal
+      //     extent, full vertical extent).
+      //   - Petal centers travel on a horizontal carousel (world XZ
+      //     plane, Y=0).
+      //   - Carousel tilted slightly around world X axis for an
+      //     elevated view (mild 3D depth cue without consuming much
+      //     vertical screen space).
+      //   - All petals share the same spin angle (no per-petal phase
+      //     offset). They all reach face-on / edge-on simultaneously
+      //     but at different orbital positions. The rate difference
+      //     between orbit and spin (5:2-ish) drives the parallax
+      //     evolution.
+      const int N = 4;                   // petal instances
+      const int K = 6;                   // sides per polygon (hexagon)
+      const float tiltAngle = 0.30f;     // ~17° elevated view
       const int minDim = (w < h) ? w : h;
       const float R_petal = (float)minDim * 0.30f;     // orbit radius
       const float r_polygon = (float)minDim * 0.23f;   // petal size
@@ -168,60 +176,58 @@ namespace stolmine
       const int cx = left + w / 2;
       const int cy = bot + h / 2;
 
-      // 3D vertex pipeline: each petal's polygon sits in the world
-      // XZ plane (the orbital plane), so vertices have varying
-      // depth z-coordinate as they spin around the petal center.
-      // After tilt around X, depth maps to per-vertex brightness —
-      // lines on the "front" side of each polygon are bright,
-      // lines on the "back" are dim, giving each spinning petal a
-      // proper 3D rendered look rather than a flat camera-facing
-      // shape.
+      // Shared spin (same for all petals).
+      const float cosSpin = lutCosRad(mPetalSpin);
+      const float sinSpin = lutSinRad(mPetalSpin);
+
       for (int i = 0; i < N; i++)
       {
+        // Per-petal orbital position on the horizontal carousel.
         const float orbitAngle = mGlobalTumble + 6.28318530718f * (float)i / (float)N;
-        const float cosOrbit = lutCosRad(orbitAngle);
-        const float sinOrbit = lutSinRad(orbitAngle);
+        const float petalWorldX = R_petal * lutCosRad(orbitAngle);
+        const float petalWorldZ = R_petal * lutSinRad(orbitAngle);
 
-        // Petal center in world space (XZ plane).
-        const float petalWorldX = R_petal * cosOrbit;
-        const float petalWorldZ = R_petal * sinOrbit;
-
-        // Per-petal spin offset by petal index so all 4 don't show
-        // the same orientation at once.
-        const float spinAngle = mPetalSpin + 6.28318530718f * (float)i / (float)(N * 2);
-
-        // K vertex positions in world space (also in XZ plane).
         int sx[16], sy[16];      // screen-projected x, y
-        float sz[16];            // world z after tilt (depth)
+        float sz[16];            // depth (post-tilt z)
 
         for (int j = 0; j < K; j++)
         {
-          const float vAngle = spinAngle + 6.28318530718f * (float)j / (float)K;
+          // K-gon vertex in local XY plane (vertical face).
+          const float vAngle = 6.28318530718f * (float)j / (float)K;
           const float lx = r_polygon * lutCosRad(vAngle);
-          const float lz = r_polygon * lutSinRad(vAngle);
+          const float ly = r_polygon * lutSinRad(vAngle);
 
-          // World vertex
-          const float worldVx = petalWorldX + lx;
-          const float worldVz = petalWorldZ + lz;
-          // World Y is 0 (orbital plane is the world XZ plane)
+          // Spin around the petal's vertical axis (world Y axis
+          // through the petal center). Local X rotates toward Z.
+          //   localX'  =  lx · cosSpin
+          //   localY'  =  ly
+          //   localZ'  = -lx · sinSpin
+          const float localX = lx * cosSpin;
+          const float localY = ly;
+          const float localZ = -lx * sinSpin;
 
-          // Tilt around X axis. World Y stays 0; world Z maps to
-          // screen Y (with sign flip so +Z is up) and to depth.
+          // Translate to petal center in world space.
+          const float worldVx = petalWorldX + localX;
+          const float worldVy = localY;
+          const float worldVz = petalWorldZ + localZ;
+
+          // Tilt the whole world around X axis for elevated view.
+          const float tiltedY = worldVy * cosTilt - worldVz * sinTilt;
+          const float tiltedZ = worldVy * sinTilt + worldVz * cosTilt;
+
           sx[j] = cx + (int)worldVx;
-          sy[j] = cy - (int)(worldVz * sinTilt);
-          sz[j] = worldVz * cosTilt;
+          sy[j] = cy + (int)tiltedY;
+          sz[j] = tiltedZ;
         }
 
         // Draw K edges with per-line brightness from midpoint depth.
-        // Each polygon now has a "front edge" (bright) and a
-        // "back edge" (dim) as it spins — depth cue is per-line.
+        // The "front edge" of each spinning K-gon (closer to viewer)
+        // is bright; the "back edge" (farther) is dim. Cue rotates
+        // with the spin.
         for (int j = 0; j < K; j++)
         {
           const int nj = (j + 1) % K;
           const float midZ = (sz[j] + sz[nj]) * 0.5f;
-          // depthN: 0 (back) to 1 (front). Range based on the
-          // full orbit + polygon extent: midZ varies roughly
-          // -(R+r)*cosTilt to +(R+r)*cosTilt.
           const float maxAbsZ = (R_petal + r_polygon) * cosTilt;
           const float depthN = 0.5f + 0.5f * (midZ / maxAbsZ);
           int bright = 3 + (int)(depthN * 12.0f);
