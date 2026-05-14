@@ -1,8 +1,9 @@
 # Visadhara — initial-pass implementation plan
 
-Status: **active**, 2026-05-01. Detailed phase plan persisted to repo
-per `feedback_persist_plans_to_repo`. Companion to
-`planning/bia-clone-scoping.md` (architecture-from-manual reference).
+Status: **shipped** at spreadsheet 2.6.2.35 (2026-05-14). Detailed
+phase plan persisted to repo per `feedback_persist_plans_to_repo`.
+Companion to `planning/bia-clone-scoping.md` (architecture-from-manual
+reference).
 
 Working name: **Visadhara** (Sanskrit, "poison-holder" / "venom-stream";
 also an epithet of Shiva for holding the world's venom). Avoids
@@ -1058,6 +1059,25 @@ Fix, two parts:
 Mid-Fold is a low-contrast crossover (figure ≈ ground, band
 polarity 0) — accepted as a momentary transitional state.
 
-### Phase 3f — remaining
+### Phase 3f — optional, deferred
 
-- **V/Oct → tumble speed**: carousel orbit rate from pitch.
+- **V/Oct → tumble speed**: carousel orbit rate from pitch. Not
+  done — the Corona viz reads as complete without it, so this was
+  left as optional future polish rather than a ship blocker.
+
+## Status: Visadhara shipped at 2.6.2.35 (2026-05-14)
+
+DSP, UI (7 plies + Mode-ply Corona viz), and the full Phase-3
+Corona graphic — geometric carousel → continuous Mode/Morph →
+trigger shockwave bands → Fold colour inversion — are complete and
+on hardware.
+
+Cross-conversation discoveries from this unit, captured in memory:
+- `feedback_neon_voice_bus_template` — the full 11-layer NEON
+  pattern (2× OS shell, 4-lane×2 voice bus, block-rate bake-in,
+  inline/noinline discipline). Took Visadhara to ~26% CPU/instance.
+- `feedback_framebuffer_blend_vs_set` — od `line()`/`fill()` are
+  bitwise-OR (lighten-only); only `pixel()` SETs. This is what made
+  the Fold inversion appear broken for four versions. Plus: the
+  0–15 greyscale bright end is perceptually mush — mirror inverted
+  figure shades within a dark sub-band, not across the full scale.
