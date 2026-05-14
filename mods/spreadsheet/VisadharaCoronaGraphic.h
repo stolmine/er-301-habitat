@@ -214,13 +214,13 @@ namespace stolmine
     int  mLastTriggerCount = -1;   // <0 → not yet synced to the unit
     int  mNextBandSlot = 0;        // ring index for band emission
 
-    // Band polarity: +1 = reveal (bands brighten the wireframe),
-    // -1 = obscure (bands darken it toward black). Phase 3e wires
-    // this to Fold; held as a float (not bool) so Fold can drive a
-    // continuous reveal↔obscure crossfade if desired. The signed
-    // brightness application + 0..15 dual clamp in drawBandLine() is
-    // the invertibility infrastructure — flipping this member is all
-    // Phase 3e needs to invert the whole effect.
+    // Band polarity, refreshed every frame from Fold (Phase 3e):
+    // +1 = reveal (bands brighten the wireframe), -1 = obscure
+    // (bands darken it toward black), continuous through 0 at the
+    // mid-Fold crossover. Multiplied into bandGain and applied as a
+    // signed brightness delta with a 0..15 dual clamp in
+    // drawBandLine() — that signed path is what makes the whole band
+    // effect invertible.
     float mBandPolarity = 1.0f;
 
     // Accumulated band brightness modulation at a normalized radius.
@@ -287,8 +287,11 @@ namespace stolmine
           if (bright < 0)
             bright = 0;
         }
-        if (bright > 0 &&
-            px >= clipL && px <= clipR && py >= clipB && py <= clipT)
+        // Draw unconditionally within clip bounds. At Fold>0 the
+        // background is bright and a brightness-0 pixel is the dark
+        // figure (negative space), not a no-op against black — so it
+        // must not be skipped.
+        if (px >= clipL && px <= clipR && py >= clipB && py <= clipT)
           fb.pixel(bright, px, py);
         fx += stepX;
         fy += stepY;
@@ -306,7 +309,8 @@ namespace stolmine
       const int left = mWorldLeft;
       const int bot = mWorldBottom;
 
-      fb.fill(BLACK, left, bot, left + w - 1, bot + h - 1);
+      // Background is filled later, once Fold is known — see the
+      // Phase-3e Fold colour inversion block below.
 
       // Advance both rotation axes. Carousel orbit slower; petal
       // spin faster. Crucially the two RATES are different (and
@@ -360,6 +364,7 @@ namespace stolmine
       float morphPos = 0.0f;
       float attackPos = 0.0f;   // bipolar -1..+1 (noise / instant / slow)
       float decayPos  = 0.5f;   // 0..1
+      float foldPos   = 0.0f;   // 0..1 — drives the Phase-3e colour inversion
       if (mpVisadhara)
       {
         const float spreadPos = mpVisadhara->mSpread.value();
@@ -368,6 +373,7 @@ namespace stolmine
         morphPos              = mpVisadhara->mMorph.value();
         attackPos             = mpVisadhara->mAttack.value();
         decayPos              = mpVisadhara->mDecay.value();
+        foldPos               = mpVisadhara->mFold.value();
         N = 1 + (int)(spreadPos * 7.0f);
         if (N < 1) N = 1;
         if (N > 8) N = 8;
@@ -383,7 +389,24 @@ namespace stolmine
         if (attackPos > 1.0f) attackPos = 1.0f;
         if (decayPos < 0.0f) decayPos = 0.0f;
         if (decayPos > 1.0f) decayPos = 1.0f;
+        if (foldPos < 0.0f) foldPos = 0.0f;
+        if (foldPos > 1.0f) foldPos = 1.0f;
       }
+
+      // --- Phase-3e Fold colour inversion ---
+      // Fold drives a continuous photographic inversion of the whole
+      // viz. Fold=0: black field, bright wireframe, bands brighten
+      // (reveal). As Fold rises the background lifts toward bright,
+      // the wireframe sinks toward dark "negative space", and the
+      // bands flip to subtractive (obscure). Fold=1: a dark figure on
+      // a bright field with shadow-pulse bands. Mid-Fold is the
+      // contrast-matching crossover. Three coordinated moves:
+      //   1. background fill brightness (here),
+      //   2. wireframe shade crossfade (per-edge in the render loop),
+      //   3. band polarity sign (mBandPolarity, into bandGain).
+      const int bgBright = (int)(foldPos * 13.0f);
+      fb.fill(bgBright, left, bot, left + w - 1, bot + h - 1);
+      mBandPolarity = 1.0f - 2.0f * foldPos;   // +1 reveal → -1 obscure
 
       // --- Phase-3d shockwave band emission + advance ---
       // Poll Visadhara's trigger counter. mLastTriggerCount < 0 means
@@ -563,10 +586,12 @@ namespace stolmine
         }
 
         // Draw numVerts edges. Base brightness is the depth shade
-        // (front edge bright, back edge dim) compressed to 2..9 so
-        // the Phase-3d shockwave bands have headroom to flare a line
-        // toward full white. When any band is active each edge is
-        // rastered per-pixel through drawBandLine() so the band's
+        // (front edge bright, back edge dim), crossfaded by Fold:
+        // the normal bright wireframe (2..9 on a black field) at
+        // Fold=0 morphs to a dark "negative space" shade (0..4 on a
+        // bright field) at Fold=1, so the figure reads as cut-out
+        // holes in the background. When any band is active each edge
+        // is rastered per-pixel through drawBandLine() so the band's
         // raised-cosine profile modulates brightness smoothly along
         // the segment; otherwise the fast fb.line() path is used.
         for (int j = 0; j < numVerts; j++)
@@ -574,10 +599,15 @@ namespace stolmine
           const int nj = (j + 1) % numVerts;
           const float midZ = (sz[j] + sz[nj]) * 0.5f;
           const float maxAbsZ = (R_petal + r_polygon) * cosTilt;
-          const float depthN = 0.5f + 0.5f * (midZ / maxAbsZ);
-          int baseBright = 2 + (int)(depthN * 7.0f);
-          if (baseBright < 2) baseBright = 2;
-          if (baseBright > 9) baseBright = 9;
+          float depthN = 0.5f + 0.5f * (midZ / maxAbsZ);
+          if (depthN < 0.0f) depthN = 0.0f;
+          if (depthN > 1.0f) depthN = 1.0f;
+          const float normalShade = 2.0f + depthN * 7.0f;   // 2..9
+          const float darkShade   = depthN * 4.0f;          // 0..4
+          int baseBright =
+              (int)(normalShade + (darkShade - normalShade) * foldPos);
+          if (baseBright < 0) baseBright = 0;
+          if (baseBright > 15) baseBright = 15;
 
           if (anyBand)
           {
