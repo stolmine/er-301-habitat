@@ -28,6 +28,16 @@ SWIG_WRAPPER = $(OUT_DIR)/$(MOD_DIR)/$(PKGNAME)_swig.cpp
 SWIG_OBJECT = $(SWIG_WRAPPER:%.cpp=%.o)
 OBJECTS += $(SWIG_OBJECT)
 
+# All headers (including subdirectory headers like visadhara/*.h,
+# jf/*.h) that the SWIG wrapper TU may pull in via #include. The
+# wrapper's inline-function bodies live in the wrapper .o, so any
+# header change must trigger wrapper .o recompilation — otherwise
+# the wrapper carries stale function bodies / class layouts and we
+# get the "small change crashed hardware" trap from
+# feedback_swig_header_dep. Recursive glob so subdirectory headers
+# (visadhara/voice.h, etc.) are tracked too.
+SWIG_HEADER_DEPS := $(call rwildcard, $(MOD_DIR), *.h)
+
 ASSETS := $(call rwildcard, $(ASSET_DIR), *)
 
 INCLUDES = $(MOD_DIR) mods $(SDKPATH) $(SDKPATH)/arch/$(ARCH) $(SDKPATH)/emu $(EURORACK)
@@ -110,12 +120,19 @@ $(OUT_DIR)/%.o: %.c
 	@mkdir -p $(@D)
 	@$(CC) $(CFLAGS) -std=gnu11 -c $< -o $@
 
-$(SWIG_WRAPPER): $(SWIG_SOURCE)
+# SWIG re-runs when the .swig file OR any %include'd header changes.
+# Without the header deps, editing e.g. VisadharaCoronaGraphic.h
+# (header-only graphic, inline draw()) wouldn't regen the wrapper —
+# stale wrapper.o ships with old function bodies, hard-crashes on
+# hardware. The header dep list catches this automatically.
+$(SWIG_WRAPPER): $(SWIG_SOURCE) $(SWIG_HEADER_DEPS)
 	@echo [SWIG $<]
 	@mkdir -p $(@D)
 	@$(SWIG) -c++ $(SWIGFLAGS) -o $@ $<
 
-$(SWIG_OBJECT): $(SWIG_WRAPPER)
+# Wrapper .o also depends on headers — its inline-function bodies
+# are pulled in via #include and need a recompile if any change.
+$(SWIG_OBJECT): $(SWIG_WRAPPER) $(SWIG_HEADER_DEPS)
 	@echo [C++ SWIG $<]
 	@mkdir -p $(@D)
 	@$(CPP) $(CFLAGS.swig) -std=gnu++11 -I$(MOD_DIR) -c $< -o $@
