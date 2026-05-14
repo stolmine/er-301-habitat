@@ -394,19 +394,27 @@ namespace stolmine
       }
 
       // --- Phase-3e Fold colour inversion ---
-      // Fold drives a continuous photographic inversion of the whole
-      // viz. Fold=0: black field, bright wireframe, bands brighten
-      // (reveal). As Fold rises the background lifts toward bright,
-      // the wireframe sinks toward dark "negative space", and the
-      // bands flip to subtractive (obscure). Fold=1: a dark figure on
-      // a bright field with shadow-pulse bands. Mid-Fold is the
-      // contrast-matching crossover. Three coordinated moves:
-      //   1. background fill brightness (here),
-      //   2. wireframe shade crossfade (per-edge in the render loop),
-      //   3. band polarity sign (mBandPolarity, into bandGain).
-      const int bgBright = (int)(foldPos * 13.0f);
+      // Fold drives a continuous, CLEAN photographic inversion of the
+      // whole viz. Fold=0: black field, bright wireframe, bands
+      // brighten (reveal). Fold=1: the exact inverse — white field,
+      // dark wireframe, bands darken (obscure). Every value mirrors
+      // through 15−x, so the Fold=1 look has the same figure/ground
+      // contrast ratio as Fold=0, just inverted. Three coordinated
+      // moves:
+      //   1. background fill: 0 → 15 (here),
+      //   2. wireframe shade: normalShade ↔ 15−normalShade, per-edge
+      //      in the render loop — the figure's STATIC (no-band) state
+      //      inverts, it does not merely dim,
+      //   3. band polarity: +1 → −1 (mBandPolarity, into bandGain).
+      // The figure's base shade stays inside [2,13] (never 0/15), so
+      // the shockwave always has headroom to push past it — lighter
+      // than the lightest base at Fold=0, darker than the darkest
+      // base at Fold=1. Mid-Fold is a uniform-grey crossover (figure
+      // == ground, band polarity 0): inherent to a clean linear
+      // inversion, accepted as a momentary transitional state.
+      const int bgBright = (int)(foldPos * 15.0f);
       fb.fill(bgBright, left, bot, left + w - 1, bot + h - 1);
-      mBandPolarity = 1.0f - 2.0f * foldPos;   // +1 reveal → -1 obscure
+      mBandPolarity = 1.0f - 2.0f * foldPos;   // +1 reveal → −1 obscure
 
       // --- Phase-3d shockwave band emission + advance ---
       // Poll Visadhara's trigger counter. mLastTriggerCount < 0 means
@@ -586,14 +594,16 @@ namespace stolmine
         }
 
         // Draw numVerts edges. Base brightness is the depth shade
-        // (front edge bright, back edge dim), crossfaded by Fold:
-        // the normal bright wireframe (2..9 on a black field) at
-        // Fold=0 morphs to a dark "negative space" shade (0..4 on a
-        // bright field) at Fold=1, so the figure reads as cut-out
-        // holes in the background. When any band is active each edge
-        // is rastered per-pixel through drawBandLine() so the band's
-        // raised-cosine profile modulates brightness smoothly along
-        // the segment; otherwise the fast fb.line() path is used.
+        // (front edge bright, back edge dim), cleanly inverted by
+        // Fold: the normal wireframe shade (2..9 on a black field) at
+        // Fold=0 mirrors through 15−x to its photographic negative
+        // (13..6 on a white field) at Fold=1. The figure's static,
+        // no-band state fully inverts — and because the shade stays
+        // inside [2,13], the shockwave always has headroom to push
+        // past it in either direction. When any band is active each
+        // edge is rastered per-pixel through drawBandLine() so the
+        // band's raised-cosine profile modulates brightness smoothly
+        // along the segment; otherwise the fast fb.line() path is used.
         for (int j = 0; j < numVerts; j++)
         {
           const int nj = (j + 1) % numVerts;
@@ -602,10 +612,10 @@ namespace stolmine
           float depthN = 0.5f + 0.5f * (midZ / maxAbsZ);
           if (depthN < 0.0f) depthN = 0.0f;
           if (depthN > 1.0f) depthN = 1.0f;
-          const float normalShade = 2.0f + depthN * 7.0f;   // 2..9
-          const float darkShade   = depthN * 4.0f;          // 0..4
+          const float normalShade = 2.0f + depthN * 7.0f;   // 2..9  (Fold=0)
+          const float invertShade = 15.0f - normalShade;    // 13..6 (Fold=1)
           int baseBright =
-              (int)(normalShade + (darkShade - normalShade) * foldPos);
+              (int)(normalShade + (invertShade - normalShade) * foldPos);
           if (baseBright < 0) baseBright = 0;
           if (baseBright > 15) baseBright = 15;
 

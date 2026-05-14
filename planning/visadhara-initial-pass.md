@@ -998,31 +998,45 @@ geometry on each trigger.
   crossfade, not just a hard flip. Phase 3e only has to write
   this member.
 
-### Phase 3e — Fold colour inversion (2.6.2.32)
+### Phase 3e — Fold colour inversion (2.6.2.32 → 2.6.2.33)
 
-Fold drives a continuous photographic inversion of the whole
-viz — three coordinated moves keyed off `foldPos`:
+Fold drives a continuous, **clean** photographic inversion of the
+whole viz: Fold=1 is the exact `15 − x` mirror of Fold=0, so the
+black-on-white look has the same figure/ground contrast ratio as
+white-on-black. Three coordinated moves keyed off `foldPos`:
 
-1. **Background**: `fb.fill(bgBright)` where
-   `bgBright = foldPos · 13` — black field at Fold=0, bright
-   field at Fold=1. The old unconditional `fb.fill(BLACK)` is
-   removed; the fill now happens after Fold is read.
-2. **Wireframe shade**: per-edge `baseBright` crossfades from the
-   normal depth shade (`2 + depthN·7` = 2..9, bright lines on
-   black) toward a dark shade (`depthN·4` = 0..4, dark lines =
-   "negative space" on the bright field) as Fold rises.
+1. **Background**: `bgBright = foldPos · 15` — pure black field
+   at Fold=0, pure white at Fold=1. The old unconditional
+   `fb.fill(BLACK)` is removed; the fill happens after Fold is
+   read.
+2. **Wireframe shade**: per-edge `baseBright` mirrors through
+   `15 − x` — `normalShade = 2 + depthN·7` (2..9, bright lines on
+   black) at Fold=0 ↔ `invertShade = 15 − normalShade` (13..6,
+   dark lines on white) at Fold=1. The figure's STATIC, no-band
+   state fully inverts — it does not merely dim. Because the base
+   shade stays inside [2,13] (never touching 0/15), the shockwave
+   always has headroom to push past it: brighter than the
+   lightest base at Fold=0, darker than the darkest base at
+   Fold=1.
 3. **Band polarity**: `mBandPolarity = 1 − 2·foldPos` → +1
-   (reveal) at Fold=0, through 0 at the mid-Fold crossover, to
-   −1 (obscure) at Fold=1. Feeds `bandGain` (the signed-delta
-   infra from 3d.1).
+   (reveal) at Fold=0, through 0 at the crossover, to −1
+   (obscure) at Fold=1. Feeds `bandGain` (signed-delta infra
+   from 3d.1).
 
 Also: drawBandLine's `bright > 0` skip was removed — at Fold>0 a
 brightness-0 pixel is the dark figure, not a no-op against black,
-so it must be drawn. depthN is now clamped to [0,1].
+so it must be drawn. depthN is clamped to [0,1].
 
-Mid-Fold is inherently a low-contrast crossover (figure ≈ bg,
-bands at polarity 0) — accepted as a momentary transitional
-state, the "contrast-crossing point" from the original concept.
+2.6.2.32 → 2.6.2.33 correction: 2.6.2.32 only *dimmed* the figure
+toward 0..4 instead of cleanly inverting it, and the background
+topped out at 13 not 15 — so the Fold=1 state was not a true
+mirror of Fold=0 and the shockwave had no headroom below the
+darkest figure base. 2.6.2.33 makes both the figure base and the
+background a clean `15 − x` inversion.
+
+Mid-Fold is a uniform-grey crossover (figure == ground, band
+polarity 0) — inherent to a clean linear inversion, accepted as a
+momentary transitional state.
 
 ### Phase 3f — remaining
 
