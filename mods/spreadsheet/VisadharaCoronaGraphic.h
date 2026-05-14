@@ -304,20 +304,27 @@ namespace stolmine
     // as the Fold knob turns, so the background performs the
     // wavefolder metaphor rather than just decorating. Low-contrast
     // dark creases sit within the bright range, breaking up the harsh
-    // flat white without competing with the dark figure. The fold
-    // axis is tilted to match the carousel's elevated view. Drawn
-    // per-pixel with fb.pixel (SET) — fb.fill BLENDs (OR) and can't do
-    // per-pixel variation anyway. At Fold=0 every pixel resolves to 0,
+    // flat white without competing with the dark figure. The crease
+    // DEPTH breathes live with the post-fold envelope (envLevel):
+    // creases dig deeper on each hit and relax as the sound decays.
+    // Crease COUNT stays fixed — per-frame density changes would read
+    // as jitter / moiré against the wireframe. The fold axis is
+    // tilted to match the carousel's elevated view. Drawn per-pixel
+    // with fb.pixel (SET) — fb.fill BLENDs (OR) and can't do per-pixel
+    // variation anyway. At Fold=0 every pixel resolves to 0,
     // identical to the prior flat-black background.
     void drawFoldField(od::FrameBuffer &fb, int left, int bot,
-                       int w, int h, float foldPos) const
+                       int w, int h, float foldPos, float envLevel) const
     {
       const int bgBase = (int)(foldPos * 15.0f);
       // Crease count grows with Fold (~1.5 near Fold=0, ~11 at
-      // Fold=1); ripple depth (how far creases dip below the field)
-      // also scales in from 0, so Fold=0 stays flat black.
+      // Fold=1) and is fixed per frame. Ripple depth — how far
+      // creases dip below the field — breathes with the envelope:
+      // a shallow resting depth (foldPos·2) swells to foldPos·6 at a
+      // full-amplitude hit. The foldPos factor keeps Fold=0 flat
+      // black regardless of envelope.
       const float foldCount   = 1.5f + foldPos * 9.5f;
-      const float rippleDepth = foldPos * 3.0f;
+      const float rippleDepth = foldPos * (2.0f + envLevel * 4.0f);
       // Fold axis tilted ~17° to match the carousel tilt — creases
       // feel integrated rather than a flat backdrop.
       const float foldTilt = 0.30f;
@@ -415,6 +422,7 @@ namespace stolmine
       float attackPos = 0.0f;   // bipolar -1..+1 (noise / instant / slow)
       float decayPos  = 0.5f;   // 0..1
       float foldPos   = 0.0f;   // 0..1 — drives the Phase-3e colour inversion
+      float envLevel  = 0.0f;   // 0..1 post-fold envelope — Fold field breathing
       if (mpVisadhara)
       {
         const float spreadPos = mpVisadhara->mSpread.value();
@@ -424,6 +432,7 @@ namespace stolmine
         attackPos             = mpVisadhara->mAttack.value();
         decayPos              = mpVisadhara->mDecay.value();
         foldPos               = mpVisadhara->mFold.value();
+        envLevel              = mpVisadhara->vizEnvLevel();
         N = 1 + (int)(spreadPos * 7.0f);
         if (N < 1) N = 1;
         if (N > 8) N = 8;
@@ -441,6 +450,8 @@ namespace stolmine
         if (decayPos > 1.0f) decayPos = 1.0f;
         if (foldPos < 0.0f) foldPos = 0.0f;
         if (foldPos > 1.0f) foldPos = 1.0f;
+        if (envLevel < 0.0f) envLevel = 0.0f;
+        if (envLevel > 1.0f) envLevel = 1.0f;
       }
 
       // --- Phase-3e Fold colour inversion ---
@@ -471,7 +482,7 @@ namespace stolmine
       // high Fold and makes the field itself perform the wavefolder
       // metaphor — more Fold, more folds. At Fold=0 it resolves to a
       // flat black field, identical to the prior behaviour.
-      drawFoldField(fb, left, bot, w, h, foldPos);
+      drawFoldField(fb, left, bot, w, h, foldPos, envLevel);
       mBandPolarity = 1.0f - 2.0f * foldPos;   // +1 reveal → −1 obscure
 
       // --- Phase-3d shockwave band emission + advance ---

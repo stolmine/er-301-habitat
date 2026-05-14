@@ -184,6 +184,12 @@ namespace stolmine
     // int — a missed or double-counted frame is visually irrelevant.
     int vizTriggerCount() const { return mpInternal->triggerCount; }
 
+    // Post-fold master envelope level (0..1) for the Corona viz —
+    // 1.0 on trigger, decays toward 0. Drives the Fold contour
+    // field's live "breathing": creases dig deeper as it rises,
+    // relax as it decays. Same PIMPL-read pattern as vizTriggerCount.
+    float vizEnvLevel() const { return mpInternal->finalEnv; }
+
     __attribute__((optimize("no-tree-vectorize")))
     virtual void process()
     {

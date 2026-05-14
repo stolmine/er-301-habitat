@@ -1072,6 +1072,20 @@ Fold=0 every pixel resolves to 0 — identical to the prior flat
 black. Voronoi was rejected (cellular cells confuse with the
 K-gon petals); Perlin rejected (organic, doesn't read as "fold").
 
+**2.6.2.37 — Fold contour field breathes with the envelope.** New
+`Visadhara::vizEnvLevel()` accessor exposes `Internal::finalEnv`
+(post-fold master envelope, 0..1) — same one-line PIMPL pattern as
+`vizTriggerCount()`, no SWIG layout change. `drawFoldField`'s
+ripple depth now tracks it: `foldPos·(2 + envLevel·4)` — shallow
+resting creases (`foldPos·2`) swell to `foldPos·6` on a full hit,
+then relax as the sound decays. Crease *count* stays fixed (per-
+frame density changes would read as jitter / moiré). Envelope
+follower chosen over graphic-side trigger-decay: it tracks the
+actual sound, not a fixed-rate approximation, and it complements
+the radial shockwave bands rather than competing — bands are the
+sharp transient accent on the figure, field-breathing is the
+slower whole-background body response.
+
 ### Phase 3f — optional, deferred
 
 - **V/Oct → tumble speed**: carousel orbit rate from pitch. Not
