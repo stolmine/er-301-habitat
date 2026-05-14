@@ -163,8 +163,34 @@ namespace stolmine
       //     but at different orbital positions. The rate difference
       //     between orbit and spin (5:2-ish) drives the parallax
       //     evolution.
-      const int N = 4;                   // petal instances
-      const int K = 6;                   // sides per polygon (hexagon)
+      // Phase 3b parameter mappings:
+      //   Spread → N  : petal count. 1 voice-cluster petal at
+      //                 Spread=0 (audio voices all at fundamental)
+      //                 up to 8 petals at Spread=1 (voices spread
+      //                 across the harmonic/prime series). The
+      //                 viz spreads as the audio spreads.
+      //   Mode   → K  : polygon sides. 3 (triangle) at Skin,
+      //                 ~5 (pentagon) at Liquid, 8 (octagon) at
+      //                 Metal. More sides = more complex shape,
+      //                 mirroring timbral complexity.
+      // Both read live every frame — CV modulation of Mode/Spread
+      // animates the geometry. Integer steps cause discrete petal
+      // pop-in / side-count changes; honest representation of the
+      // discrete-ish nature of those param ranges. Falls back to
+      // N=4 / K=6 if no Visadhara is followed.
+      int N = 4;
+      int K = 6;
+      if (mpVisadhara)
+      {
+        const float spreadPos = mpVisadhara->mSpread.value();
+        const float modePos   = mpVisadhara->mMode.value();
+        N = 1 + (int)(spreadPos * 7.0f);
+        if (N < 1) N = 1;
+        if (N > 8) N = 8;
+        K = 3 + (int)(modePos * 2.5f);
+        if (K < 3) K = 3;
+        if (K > 8) K = 8;   // sx/sy/sz arrays sized 16, K=8 safe
+      }
       const float tiltAngle = 0.30f;     // ~17° elevated view
       const int minDim = (w < h) ? w : h;
       const float R_petal = (float)minDim * 0.30f;     // orbit radius
