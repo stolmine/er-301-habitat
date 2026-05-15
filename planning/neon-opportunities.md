@@ -139,26 +139,40 @@ In rough order of expected win-per-effort, given current evidence:
 
 ~~**Filterbank (Tomograph)** — DONE at spreadsheet 2.6.2.42.~~
 
-1. **Rings non-modal modes (mi)** — sympathetic string + FM. NEON
-   precedent in the same file (modal), explicit todo. Caveat: the
-   modes' serial-feedback structure won't map straight to the
-   voice-bus template; needs a structural look first.
-2. **Clouds SRC + ShyFFT (mi)** — explicit todos. FFT/FIR have
+~~**Rings (mi)** — Phase 1 (modal tighten) shipped at mi 1.0.2
+(commit a8c8a3c). Phases 2 (FM) and 3 (String) closed out without
+code work: FM blocked by Cortex-A8 NEON's no-gather constraint on
+the `SineFm` LUT (would require polynomial-sine substitution = tone
+audition decision, separate work); String's available SIMD axis is
+only the filter portion (~25 % mode CPU at the poly=1 sympathetic
+best case), modest payoff for invasive refactor. Hardware audit at
+poly=4 full-band modal showed ~5 pp improvement from Phase 1 —
+modal kernel is structurally near its NEON ceiling. See
+`planning/rings-neon-pass.md` and `feedback_neon_no_gather_lut_dsp`
+for the constraint-of-record.~~
+
+1. **Clouds SRC + ShyFFT (mi)** — explicit todos. FFT/FIR have
    their own NEON disciplines (well-trodden, not voice-bus or
    delay-gather); heavy DSP path with known headroom.
-3. **MultitapDelay (Petrichor) — explicit NEON intrinsics tier.**
+2. **MultitapDelay (Petrichor) — explicit NEON intrinsics tier.**
    Algorithmic tier already landed (prefetch, fast math, LCG, grain
    bypass). Remaining work is the Pecto-style NEON intrinsics on
    passes A/C; complicated by per-tap grain machinery — needs a
    structural choice (NEON across taps or across grains-within-a-tap)
    before any lift. Not the easy template lift I'd implied.
-4. **Parfait + Impasto (Multiband Sat / Comp)** — per-bin and
+3. **Parfait + Impasto (Multiband Sat / Comp)** — per-bin and
    per-band processing around the pffft FFT (RMS detection,
    envelope biquads, gain reduction, saturation). FFT itself is
    already NEON'd by the library; win comes from the surrounding
    code. Magnitude less predictable than the bigger wins above.
-5. **Helicase voice morph** — template Layers 4–5 on the scalar
+4. **Helicase voice morph** — template Layers 4–5 on the scalar
    voice morph. Memory flags this specifically; clean targeted gain.
+5. **Plaits (mi) — per-engine recon** — 24-engine zoo, no single
+   template lift. Per-engine analysis required: additive-style
+   engines (Harmonic, Chord, Swarm, Wavetable) likely clean SIMD
+   targets; LUT-dominated (FM, Speech) and stateful-sequential
+   (Grain, Sample) blocked by the same no-gather constraint that
+   shut down Rings FM.
 6. **AlembicVoice** — Layer 7 / Layer 8 audit (struct refs,
    pre-multiply). Likely small cleanup, low risk.
 7. **JF** — template compliance audit. Working; verify Layers 5/7/8
