@@ -86,9 +86,9 @@ State per grep of NEON intrinsics in `.cpp` / `.h`, 2026-05-14.
 | **Helicase** | Scalar audio (`Helicase.cpp`, 0 hits) | voice-morph NEON (template Layers 4–5) | **medium-high** | "4-shape scalar morph" per template memory — clean target |
 | **MultitapDelay** | Scalar (877 lines) | delay-gather template | **high** | likely underpins Petrichor/Lofi presets (Lua refs) |
 | **Larets** | Scalar (511 lines) | delay-gather template | **high** | delay-shaped; named in delay-gather memory |
-| **MultibandSaturator** | Scalar (681 lines) | per-band parallelism — atypical | low | FFT-y; different pattern |
-| **MultibandCompressor** | Scalar (494 lines) | similar to MBS | low | |
-| **Filterbank** | Scalar (632 lines) | sequential filter state — may not vectorize | low | inspect for parallel-band opportunity |
+| **Filterbank (Tomograph)** | Scalar (632 lines) | SIMD-over-bands — verified shape | **medium-high** | inner loop: per sample, `for (b<bandCount) s.filters[b].Process<MODE>(x)` + per-band gain + per-band energy follower. Bands fully independent — classic NEON-over-bands fit. Wrinkle: per-band mode is `switch (filterType[b])`; handle branchless (compute all modes from same SVF + lane-mask) per `feedback_runtime_branched_dsp_dispatch` |
+| **MultibandSaturator (Parfait)** | Scalar (681 lines); pffft for FFT (NEON via lib) | NEON the per-bin / per-band post-FFT work — RMS (`sqrt(re²+im²)`), biquad envelopes, saturation | medium | FFT itself already NEON via pffft (auto-detects with `-mfpu=neon`); win magnitude depends on what share of CPU lives outside the FFT |
+| **MultibandCompressor (Impasto)** | Scalar (494 lines); pffft for FFT (NEON via lib) | same shape as Parfait | medium | per-bin / per-band post-FFT processing |
 | **Etcher** | Scalar (550 lines) | unaudited | low | inspect first |
 | **Rauschen** | Scalar (531 lines) | likely sequential RNG | low | inspect first |
 | **Colmatage** | Scalar (436 lines) | viz-heavy; audio likely simple | low | |
@@ -142,18 +142,28 @@ In rough order of expected win-per-effort, given current evidence:
    Single biggest available win.
 2. **Larets** — apply delay-gather. Same template, smaller file but
    same shape.
-3. **Rings non-modal modes (mi)** — sympathetic string + FM. NEON
+3. **Filterbank (Tomograph)** — SIMD-over-bands. Verified shape:
+   per-sample inner loop over N independent SVF bands with per-band
+   gain + energy follower; naturally lane-parallel. Main wrinkle is
+   the per-band mode dispatch — needs branchless handling (compute
+   all modes from the same SVF + lane-mask). Clean, well-scoped target.
+4. **Rings non-modal modes (mi)** — sympathetic string + FM. NEON
    precedent in the same file (modal), explicit todo. Caveat: the
    modes' serial-feedback structure won't map straight to the
    voice-bus template; needs a structural look first.
-4. **Clouds SRC + ShyFFT (mi)** — explicit todos. FFT/FIR have
+5. **Clouds SRC + ShyFFT (mi)** — explicit todos. FFT/FIR have
    their own NEON disciplines (well-trodden, not voice-bus or
    delay-gather); heavy DSP path with known headroom.
-5. **Helicase voice morph** — template Layers 4–5 on the scalar
+6. **Parfait + Impasto (Multiband Sat / Comp)** — per-bin and
+   per-band processing around the pffft FFT (RMS detection,
+   envelope biquads, gain reduction, saturation). FFT itself is
+   already NEON'd by the library; win comes from the surrounding
+   code. Magnitude less predictable than #1–4.
+7. **Helicase voice morph** — template Layers 4–5 on the scalar
    voice morph. Memory flags this specifically; clean targeted gain.
-6. **AlembicVoice** — Layer 7 / Layer 8 audit (struct refs,
+8. **AlembicVoice** — Layer 7 / Layer 8 audit (struct refs,
    pre-multiply). Likely small cleanup, low risk.
-7. **JF** — template compliance audit. Working; verify Layers 5/7/8
+9. **JF** — template compliance audit. Working; verify Layers 5/7/8
    before any new feature work.
 
 ## Procedural notes (for any pass)
