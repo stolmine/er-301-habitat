@@ -295,3 +295,34 @@ auto-tracks header deps anyway since 2.6.2.29.
 8. **Update `planning/neon-opportunities.md`:** mark Filterbank
    entry DONE; promote item #2 (Rings non-modal modes) to top of
    Recommended Next Moves.
+
+## Results (2026-05-14)
+
+Shipped at spreadsheet 2.6.2.42 (`8c7b79b`).
+
+- **Build**: clean both arches (linux + am335x); no new warnings.
+- **NEON hint audit**: `Filterbank.o` lands with **zero** `:64`
+  hints (total 0; safe 0; suspect-sp-quad 0; suspect-non-sp 0).
+  Best possible result — file-level `no-tree-vectorize` pragma
+  killed the auto-vec init surface, and hand-written intrinsics
+  emit plain `vld1q_f32`/`vst1q_f32` with no alignment hint.
+- **`spreadsheet_swig.o` unchanged** at 3 sp quad-D / 0 non-sp
+  (the known PMM tick2 false positives).
+- **Hardware verification**: **8 % CPU at stereo + bandCount = 16 +
+  max Q**, no audible regression. ~4–5× improvement vs the scalar
+  baseline at full density — matches the Rings precedent
+  prediction (~3–4× kernel, slightly better here because the SVF
+  kernel is the dominant CPU slice when `tanhAmt = 0`).
+
+## Remaining follow-ups (out of scope here)
+
+- **`tanhf` libm call** at the post-band stage now dominates when
+  `tanhAmt > 0`. Now the *largest* remaining slice in Filterbank.
+  Candidate for a polynomial / `stmlib::SoftLimit`-style
+  replacement in a separate change.
+- **Dead-field cleanup**: `bandQValues[16]` (write-only, never
+  read) and `mLastVOctOffset` (never written or read) flagged by
+  the planning pass. Drop in a separate hygiene commit.
+- **Hardcoded `48000.0f`** in `Init` (`Filterbank.cpp:~94`) — wrong
+  if `globalConfig.sampleRate` ≠ 48 kHz at construction. Separate
+  cleanup.
