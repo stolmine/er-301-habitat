@@ -84,8 +84,8 @@ State per grep of NEON intrinsics in `.cpp` / `.h`, 2026-05-14.
 | **Ngoma (DrumVoice)** | Partial (`DrumVoice.cpp`) | template re-pass for the 1 SUSPECT hint | **DO NOT TOUCH** | release-stable .175; see Principle 2 |
 | **JF** | Partial (`JF.cpp`, 12 hits) | template compliance audit (Layers 5–8) | low | working; Phase 6 polish open per codex |
 | **Helicase** | Scalar audio (`Helicase.cpp`, 0 hits) | voice-morph NEON (template Layers 4–5) | **medium-high** | "4-shape scalar morph" per template memory — clean target |
-| **MultitapDelay** | Scalar (877 lines) | delay-gather template | **high** | likely underpins Petrichor/Lofi presets (Lua refs) |
-| **Larets** | Scalar (511 lines) | delay-gather template | **high** | delay-shaped; named in delay-gather memory |
+| **MultitapDelay (Petrichor)** | No explicit NEON, but **heavily optimized** (`__builtin_prefetch` upfront, fast math, LCG, grain bypass for unity pitch, smoothed delay, etc.) | explicit NEON intrinsics on Pecto-style passes A/C — gap remaining | medium | algorithmic delay-gather tier already landed (`d281acc`, `17074ce`, `3ae8a16`, `8046cd2`). Complication: per-tap **grain machinery** (`kGrainsPerTap` grains per tap with envelope / phase / reverse) doesn't map straight to Pecto's flat tap reads — NEON shape needs a structural choice (per-tap vs per-grain) before any lift |
+| **Larets** | Scalar (511 lines) | **none — not a multitap.** Stepped multi-effect unit: single-tap delay (`s.buffer[idx]`), single-tap comb, 2-grain Dattorro pitch shifter. No N-tap structure to gather. | **N/A** | the delay-gather memory's claim that the template applies to Larets was wrong; no structural fit. Verified by code read |
 | **Filterbank (Tomograph)** | Scalar (632 lines) | SIMD-over-bands — verified shape | **medium-high** | inner loop: per sample, `for (b<bandCount) s.filters[b].Process<MODE>(x)` + per-band gain + per-band energy follower. Bands fully independent — classic NEON-over-bands fit. Wrinkle: per-band mode is `switch (filterType[b])`; handle branchless (compute all modes from same SVF + lane-mask) per `feedback_runtime_branched_dsp_dispatch` |
 | **MultibandSaturator (Parfait)** | Scalar (681 lines); pffft for FFT (NEON via lib) | NEON the per-bin / per-band post-FFT work — RMS (`sqrt(re²+im²)`), biquad envelopes, saturation | medium | FFT itself already NEON via pffft (auto-detects with `-mfpu=neon`); win magnitude depends on what share of CPU lives outside the FFT |
 | **MultibandCompressor (Impasto)** | Scalar (494 lines); pffft for FFT (NEON via lib) | same shape as Parfait | medium | per-bin / per-band post-FFT processing |
@@ -137,34 +137,43 @@ of scope** unless a specific CPU complaint surfaces.
 
 In rough order of expected win-per-effort, given current evidence:
 
-1. **MultitapDelay** — apply delay-gather. High confidence (template
-   proven on Pecto), likely underpins Petrichor / Lofi presets too.
-   Single biggest available win.
-2. **Larets** — apply delay-gather. Same template, smaller file but
-   same shape.
-3. **Filterbank (Tomograph)** — SIMD-over-bands. Verified shape:
+1. **Filterbank (Tomograph)** — SIMD-over-bands. Verified shape:
    per-sample inner loop over N independent SVF bands with per-band
    gain + energy follower; naturally lane-parallel. Main wrinkle is
    the per-band mode dispatch — needs branchless handling (compute
-   all modes from the same SVF + lane-mask). Clean, well-scoped target.
-4. **Rings non-modal modes (mi)** — sympathetic string + FM. NEON
+   all modes from the same SVF + lane-mask). Clean, well-scoped, the
+   single biggest fresh win currently identified.
+2. **Rings non-modal modes (mi)** — sympathetic string + FM. NEON
    precedent in the same file (modal), explicit todo. Caveat: the
    modes' serial-feedback structure won't map straight to the
    voice-bus template; needs a structural look first.
-5. **Clouds SRC + ShyFFT (mi)** — explicit todos. FFT/FIR have
+3. **Clouds SRC + ShyFFT (mi)** — explicit todos. FFT/FIR have
    their own NEON disciplines (well-trodden, not voice-bus or
    delay-gather); heavy DSP path with known headroom.
-6. **Parfait + Impasto (Multiband Sat / Comp)** — per-bin and
+4. **MultitapDelay (Petrichor) — explicit NEON intrinsics tier.**
+   Algorithmic tier already landed (prefetch, fast math, LCG, grain
+   bypass). Remaining work is the Pecto-style NEON intrinsics on
+   passes A/C; complicated by per-tap grain machinery — needs a
+   structural choice (NEON across taps or across grains-within-a-tap)
+   before any lift. Not the easy template lift I'd implied.
+5. **Parfait + Impasto (Multiband Sat / Comp)** — per-bin and
    per-band processing around the pffft FFT (RMS detection,
    envelope biquads, gain reduction, saturation). FFT itself is
    already NEON'd by the library; win comes from the surrounding
-   code. Magnitude less predictable than #1–4.
-7. **Helicase voice morph** — template Layers 4–5 on the scalar
+   code. Magnitude less predictable than the bigger wins above.
+6. **Helicase voice morph** — template Layers 4–5 on the scalar
    voice morph. Memory flags this specifically; clean targeted gain.
-8. **AlembicVoice** — Layer 7 / Layer 8 audit (struct refs,
+7. **AlembicVoice** — Layer 7 / Layer 8 audit (struct refs,
    pre-multiply). Likely small cleanup, low risk.
-9. **JF** — template compliance audit. Working; verify Layers 5/7/8
+8. **JF** — template compliance audit. Working; verify Layers 5/7/8
    before any new feature work.
+
+**Larets removed** from the candidate list. Earlier ordering had it
+at #2 based on the `feedback_neon_delay_gather` memory's mention.
+Code read disproved that claim — Larets is a stepped multi-effect
+unit with single-tap reads, not a multitap. No structural fit for
+the delay-gather template. The memory entry should be corrected
+(drop Larets; note grain caveat on Petrichor).
 
 ## Procedural notes (for any pass)
 
