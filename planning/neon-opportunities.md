@@ -101,11 +101,37 @@ State per grep of NEON intrinsics in `.cpp` / `.h`, 2026-05-14.
 |---|---|---|---|---|
 | **AlembicVoice** | Heavy NEON (`AlembicVoice.cpp`, 40 hits) | Layer 7 (struct refs) & Layer 8 (pre-multiply) audit | medium | per template memory; codex Phase 5a-5d-4 done |
 
-### biome / mi / peaks / porcelain / scope / kryos
+### mi/
 
-No NEON anywhere (verified). OOB ports, scope/utility tools — low
-DSP density. **Out of scope** unless a specific CPU complaint
-surfaces.
+Recursive sweep (2026-05-14) — the initial top-level grep missed
+the eurorack symlinks / override subdirs; corrected here.
+
+| Unit | NEON state | Opportunity | Priority | Notes |
+|---|---|---|---|---|
+| **Rings** | Partial — modal mode NEON in `rings/dsp/resonator.cc` | sympathetic-string + FM modes still scalar | medium-high | per todo "currently only modal is vectorized." Modal is easy because the modes sum in parallel (voice-bus shape); sympathetic / FM have serial feedback structure, so NEON likely needs a different angle, not a straight template lift |
+| **Clouds** | Partial — `clouds/dsp/grain.h` + `clouds/dsp/pvoc/frame_transformation.cc` | SRC polyphase FIR + ShyFFT butterflies still scalar | medium-high | per todo "Further NEON optimization — ShyFFT butterflies, SRC polyphase FIR." Heavy DSP path; FFT/FIR are their own NEON disciplines (not voice-bus or delay-gather), but well-trodden patterns exist |
+| **Plaits** | Scalar (24 engines) | per-engine audit | low (sweep cost) | engines vary widely — additive/wavetable/FM/modal etc.; not a flat opportunity, each engine is its own shape |
+| **Commotio** | Scalar | full NEON pass on backlog | low-medium | per todo "NEON optimization pass" |
+| **Warps** | Scalar | low DSP density (small unit) | low | vocoder upsample is a todo but for fidelity, not perf |
+| **Stratos** | Scalar | unaudited | low | small unit |
+| **Grids / MarblesT / MarblesX** | Scalar | clock / random / sequencer — control logic | OUT OF SCOPE | not DSP-bound |
+
+### biome/
+
+Recursive sweep confirmed zero NEON. Largely small utility units —
+parallelism payoff is structurally low (per user). Audited for
+completeness.
+
+| Unit | NEON state | Opportunity | Priority | Notes |
+|---|---|---|---|---|
+| **Canals** | Scalar (233 lines) | NEON vectorize if hardware CPU bench warrants | low | per todo "Bench CPU cost on hardware; NEON vectorize if needed" — Three Sisters fidelity filter |
+| **CodescanOsc / CodescanFilter / NR / GestureSeq / DJFilter / LatchFilter / SpectralFollower / VarishapeVoice / FadeMixer / Discont** | Scalar | low DSP density across the board | OUT OF SCOPE | <200 line utility units; not parallelism-shaped |
+
+### peaks / porcelain / scope / kryos
+
+Recursive sweep confirmed zero NEON. Mostly control logic / scope /
+sequencer / spectral-freeze utility tools — low DSP density. **Out
+of scope** unless a specific CPU complaint surfaces.
 
 ## Recommended next moves
 
@@ -116,11 +142,18 @@ In rough order of expected win-per-effort, given current evidence:
    Single biggest available win.
 2. **Larets** — apply delay-gather. Same template, smaller file but
    same shape.
-3. **Helicase voice morph** — template Layers 4–5 on the scalar
+3. **Rings non-modal modes (mi)** — sympathetic string + FM. NEON
+   precedent in the same file (modal), explicit todo. Caveat: the
+   modes' serial-feedback structure won't map straight to the
+   voice-bus template; needs a structural look first.
+4. **Clouds SRC + ShyFFT (mi)** — explicit todos. FFT/FIR have
+   their own NEON disciplines (well-trodden, not voice-bus or
+   delay-gather); heavy DSP path with known headroom.
+5. **Helicase voice morph** — template Layers 4–5 on the scalar
    voice morph. Memory flags this specifically; clean targeted gain.
-4. **AlembicVoice** — Layer 7 / Layer 8 audit (struct refs,
+6. **AlembicVoice** — Layer 7 / Layer 8 audit (struct refs,
    pre-multiply). Likely small cleanup, low risk.
-5. **JF** — template compliance audit. Working; verify Layers 5/7/8
+7. **JF** — template compliance audit. Working; verify Layers 5/7/8
    before any new feature work.
 
 ## Procedural notes (for any pass)
