@@ -10,7 +10,19 @@
 #ifndef TEST
 #define TEST
 #endif
-#include "stmlib/dsp/filter.h"
+#include "stmlib/dsp/filter.h"   // only for stmlib::OnePole::tan; SVF state
+                                  // is hand-rolled SoA here (NEON-friendly).
+
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
+
+// File-level guard against the auto-vec init trap
+// (feedback_neon_hint_surfaces): scalar init loops over our new SoA
+// arrays would otherwise auto-vectorize into [reg :64] hints that trap
+// on Cortex-A8. Hand-written NEON intrinsics in the hot loop are not
+// gated by tree-vectorize, so this pragma costs them nothing.
+#pragma GCC optimize("no-tree-vectorize")
 
 namespace stolmine
 {
@@ -59,7 +71,23 @@ namespace stolmine
     float gain[kMaxBands];
     int filterType[kMaxBands];
 
-    stmlib::Svf filters[kMaxBands];
+    // SoA SVF bank (mirror of mods/mi/rings/dsp/resonator.cc layout).
+    // Coefficients are written block-rate from updateFilterCoefficients;
+    // state evolves per sample inside the NEON kernel in process().
+    float svfG[kMaxBands];        // tan(pi * f_normalized)
+    float svfR[kMaxBands];        // 1 / Q
+    float svfH[kMaxBands];        // 1 / (1 + r*g + g*g)
+    float svfState1[kMaxBands];   // SVF s1 state
+    float svfState2[kMaxBands];   // SVF s2 state
+    // Branchless mode dispatch — bake at block-rate, apply per-sample
+    // (per feedback_runtime_branched_dsp_dispatch — no switch per band
+    // per sample). FTYPE_LP: bpGain=0, lpGain=gain[b]; PEAK/RESON:
+    // bpGain=gain[b], lpGain=0 (PEAK and RESON are byte-identical
+    // per-sample, differing only in Q-floor at coeff setup).
+    float bpGain[kMaxBands];
+    float lpGain[kMaxBands];
+    float lpMask[kMaxBands];      // 1.0 if FTYPE_LP else 0.0 (energy path)
+
     float bandQValues[kMaxBands]; // stored for BPF gain compensation
     float bandEnergy[kMaxBands];  // per-band RMS energy follower
 
@@ -95,8 +123,21 @@ namespace stolmine
         currentFreq[i] = targetFreq[i];
         gain[i] = 1.0f;
         filterType[i] = FTYPE_PEAK;
-        filters[i].Init();
       }
+      // SoA SVF state and coefficients init. svfG=0 keeps the SVF state
+      // permanently zero until updateFilterCoefficients writes real
+      // coefficients (which it does once per process() call, before the
+      // band loop runs). Padding bands beyond the runtime bandCount
+      // keep g=0 so their state stays frozen at zero — no contribution
+      // to the wet sum, no NaN risk.
+      memset(svfG, 0, sizeof(svfG));
+      memset(svfR, 0, sizeof(svfR));
+      memset(svfH, 0, sizeof(svfH));
+      memset(svfState1, 0, sizeof(svfState1));
+      memset(svfState2, 0, sizeof(svfState2));
+      memset(bpGain, 0, sizeof(bpGain));
+      memset(lpGain, 0, sizeof(lpGain));
+      memset(lpMask, 0, sizeof(lpMask));
       memset(bandEnergy, 0, sizeof(bandEnergy));
       candidateCount = 0;
       numCustomScales = 0;
@@ -472,9 +513,43 @@ namespace stolmine
       if (s.filterType[i] == FTYPE_RESON && bandQ < 20.0f)
         bandQ = 20.0f;
       s.bandQValues[i] = bandQ;
-      s.filters[i].set_f_q<stmlib::FREQUENCY_FAST>(freq, bandQ);
+      // Inlined from stmlib::Svf::set_f_q<FREQUENCY_FAST> (filter.h:222-227).
+      // Writing direct to SoA arrays — the per-sample NEON kernel reads
+      // these as quads. (PEAK and RESON differ only in the bandQ floor
+      // above; both emit BP from the per-sample SVF update — dispatch is
+      // entirely encoded in the per-mode gain bake below.)
+      const float g = stmlib::OnePole::tan<stmlib::FREQUENCY_FAST>(freq);
+      const float r = 1.0f / bandQ;
+      s.svfG[i] = g;
+      s.svfR[i] = r;
+      s.svfH[i] = 1.0f / (1.0f + r * g + g * g);
+
+      // Branchless per-mode bake (no `switch` per band per sample).
+      const bool isLP = (s.filterType[i] == FTYPE_LP);
+      s.lpMask[i] = isLP ? 1.0f : 0.0f;
+      s.bpGain[i] = isLP ? 0.0f : s.gain[i];
+      s.lpGain[i] = isLP ? s.gain[i] : 0.0f;
 
       q *= q_loss;
+    }
+
+    // Zero out padding bands beyond the runtime bandCount, up to the
+    // next multiple of 4 (the NEON kernel processes bands in quads).
+    // g=0 freezes their SVF state at zero — no contribution to wet sum,
+    // no NaN risk. bpGain/lpGain=0 also zero them from the output sum.
+    // svfState1/svfState2 reset to 0 so a band that becomes active later
+    // starts clean instead of resuming stale state.
+    const int bandsPadded = (bandCount + 3) & ~3;
+    for (int i = bandCount; i < bandsPadded; i++)
+    {
+      s.svfG[i] = 0.0f;
+      s.svfR[i] = 1.0f;   // harmless any-finite value
+      s.svfH[i] = 1.0f;   // harmless any-finite value
+      s.svfState1[i] = 0.0f;
+      s.svfState2[i] = 0.0f;
+      s.bpGain[i] = 0.0f;
+      s.lpGain[i] = 0.0f;
+      s.lpMask[i] = 0.0f;
     }
   }
 
@@ -589,32 +664,92 @@ namespace stolmine
     // Normalize parallel sum by 1/sqrt(bandCount)
     float sumNorm = 1.0f / sqrtf((float)bandCount);
 
+    // Band loop bound — padded to next multiple of 4 so the NEON kernel
+    // never has a scalar tail (Rings-style: padding bands have
+    // g=0, gain=0, state=0 so they're a no-op contribution).
+    const int bandsPadded = (bandCount + 3) & ~3;
+
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float x = in[i] * inputLevel;
-      float wet = 0.0f;
+      float wet;
 
-      for (int b = 0; b < bandCount; b++)
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+      // NEON SVF bank — TPT update, 4 bands at a time. Transcribed from
+      // mods/mi/rings/dsp/resonator.cc:107-142 (the canonical SVF NEON
+      // kernel on Cortex-A8). Mode dispatch is encoded entirely in the
+      // bpGain/lpGain bake at block-rate — no per-sample switch on
+      // filterType[b] (per feedback_runtime_branched_dsp_dispatch).
+      const float32x4_t inV     = vdupq_n_f32(x);
+      const float32x4_t energyA = vdupq_n_f32(0.001f);
+      float32x4_t wetV          = vdupq_n_f32(0.0f);
+
+      for (int b = 0; b < bandsPadded; b += 4)
       {
-        float bandOut;
-        switch (s.filterType[b])
-        {
-        case FTYPE_LP:
-          bandOut = s.filters[b].Process<stmlib::FILTER_MODE_LOW_PASS>(x);
-          break;
-        case FTYPE_RESON:
-          bandOut = s.filters[b].Process<stmlib::FILTER_MODE_BAND_PASS>(x);
-          break;
-        case FTYPE_PEAK:
-        default:
-          bandOut = s.filters[b].Process<stmlib::FILTER_MODE_BAND_PASS>(x);
-          break;
-        }
-        wet += bandOut * s.gain[b];
-        // Per-band energy follower (~20ms time constant at 48kHz)
-        float e = bandOut * bandOut;
+        float32x4_t s1 = vld1q_f32(&s.svfState1[b]);
+        float32x4_t s2 = vld1q_f32(&s.svfState2[b]);
+        float32x4_t g  = vld1q_f32(&s.svfG[b]);
+        float32x4_t r  = vld1q_f32(&s.svfR[b]);
+        float32x4_t h  = vld1q_f32(&s.svfH[b]);
+
+        // TPT SVF update — exact transcription of
+        // stmlib::Svf::Process (filter.h:232-236):
+        //   hp = (in - r*s1 - g*s1 - s2) * h
+        //   bp = s1 + g*hp;  s1' = bp + g*hp
+        //   lp = s2 + g*bp;  s2' = lp + g*bp
+        float32x4_t rs1   = vmulq_f32(r, s1);
+        float32x4_t gs1   = vmulq_f32(g, s1);
+        float32x4_t inner = vsubq_f32(vsubq_f32(vsubq_f32(inV, rs1), gs1), s2);
+        float32x4_t hp    = vmulq_f32(inner, h);
+        float32x4_t bp    = vmlaq_f32(s1, g, hp);
+        float32x4_t s1New = vmlaq_f32(bp, g, hp);
+        float32x4_t lp    = vmlaq_f32(s2, g, bp);
+        float32x4_t s2New = vmlaq_f32(lp, g, bp);
+        vst1q_f32(&s.svfState1[b], s1New);
+        vst1q_f32(&s.svfState2[b], s2New);
+
+        // Output: wet += bp*bpGain + lp*lpGain (mode dispatch baked in)
+        float32x4_t bpG = vld1q_f32(&s.bpGain[b]);
+        float32x4_t lpG = vld1q_f32(&s.lpGain[b]);
+        wetV = vmlaq_f32(wetV, bp, bpG);
+        wetV = vmlaq_f32(wetV, lp, lpG);
+
+        // Per-band energy follower (~20 ms @ 48 kHz):
+        //   bandOut = bp + lpMask*(lp - bp)
+        //   energy += (bandOut*bandOut - energy) * 0.001
+        float32x4_t lpMaskV = vld1q_f32(&s.lpMask[b]);
+        float32x4_t bandOut = vmlaq_f32(bp, lpMaskV, vsubq_f32(lp, bp));
+        float32x4_t e       = vmulq_f32(bandOut, bandOut);
+        float32x4_t en      = vld1q_f32(&s.bandEnergy[b]);
+        en                  = vmlaq_f32(en, vsubq_f32(e, en), energyA);
+        vst1q_f32(&s.bandEnergy[b], en);
+      }
+
+      // Horizontal sum of the 4-lane wet accumulator (vpadd cascade —
+      // Cortex-A8 has no vaddvq_f32, that's A7+).
+      float32x2_t pair = vadd_f32(vget_low_f32(wetV), vget_high_f32(wetV));
+      wet = vget_lane_f32(vpadd_f32(pair, pair), 0);
+#else
+      // Scalar fallback (linux x86, macOS) — same SoA TPT math, no
+      // intrinsics. Padding bands have g=0/gain=0/state=0 so they
+      // contribute nothing and stay stable.
+      wet = 0.0f;
+      for (int b = 0; b < bandsPadded; b++)
+      {
+        const float rs1 = s.svfR[b] * s.svfState1[b];
+        const float gs1 = s.svfG[b] * s.svfState1[b];
+        const float hp  = (x - rs1 - gs1 - s.svfState2[b]) * s.svfH[b];
+        const float bp  = s.svfState1[b] + s.svfG[b] * hp;
+        s.svfState1[b]  = bp + s.svfG[b] * hp;
+        const float lp  = s.svfState2[b] + s.svfG[b] * bp;
+        s.svfState2[b]  = lp + s.svfG[b] * bp;
+        wet += bp * s.bpGain[b] + lp * s.lpGain[b];
+        const float bandOut = bp + s.lpMask[b] * (lp - bp);
+        const float e = bandOut * bandOut;
         s.bandEnergy[b] += (e - s.bandEnergy[b]) * 0.001f;
       }
+#endif
+
       wet *= sumNorm;
 
       float mixed = x * (1.0f - mix) + wet * mix;
