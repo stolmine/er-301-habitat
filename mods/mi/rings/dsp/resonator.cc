@@ -29,6 +29,7 @@ void Resonator::Init() {
     state_1_[i] = 0.0f;
     state_2_[i] = 0.0f;
   }
+  amp_scratch_[0] = amp_scratch_[1] = amp_scratch_[2] = amp_scratch_[3] = 0.0f;
 
   set_frequency(220.0f / kSampleRate);
   set_structure(0.25f);
@@ -86,13 +87,29 @@ int32_t Resonator::ComputeFilters() {
     q *= q_loss;
   }
 
-  return num_modes;
+  // Pad to next multiple of 4 (kMaxModes=64 is already a multiple, so
+  // no risk of going past the array bound). Zero coefficients AND state
+  // for padding lanes: g=0 alone freezes state but doesn't zero an
+  // already-non-zero state from a previous larger num_modes — we need
+  // bp=s1=0 at the SVF output. Belt + suspenders: zero both.
+  int32_t num_modes_padded = (num_modes + 3) & ~3;
+  if (num_modes_padded > kMaxModes) num_modes_padded = kMaxModes;
+  for (int32_t i = num_modes; i < num_modes_padded; ++i) {
+    g_[i] = 0.0f;
+    r_[i] = 0.0f;
+    h_[i] = 0.0f;
+    state_1_[i] = 0.0f;
+    state_2_[i] = 0.0f;
+  }
+
+  return num_modes_padded;
 }
 
 void Resonator::Process(const float* in, float* out, float* aux, size_t size) {
-  int32_t num_modes = ComputeFilters();
-  // Round down to multiple of 4 for NEON, must also be even for odd/even split
-  int32_t num_modes_simd = num_modes & ~3;
+  // ComputeFilters returns num_modes_padded — already a multiple of 4
+  // (kMaxModes is 64). Padding lanes have g=r=h=0 and zeroed state, so
+  // they contribute bp=0 to the NEON inner loop. No scalar tail needed.
+  int32_t num_modes_padded = ComputeFilters();
 
   ParameterInterpolator position(&previous_position_, position_, size);
   while (size--) {
@@ -100,16 +117,20 @@ void Resonator::Process(const float* in, float* out, float* aux, size_t size) {
     amplitudes.Init<COSINE_OSCILLATOR_APPROXIMATE>(position.Next());
 
     float input = *in++ * 0.125f;
-    float odd = 0.0f;
-    float even = 0.0f;
     amplitudes.Start();
+    float odd, even;
 
 #ifdef __ARM_NEON__
     float32x4_t v_input = vdupq_n_f32(input);
-    float32x4_t v_odd = vdupq_n_f32(0.0f);
-    float32x4_t v_even = vdupq_n_f32(0.0f);
+    // Single accumulator quad — holds amplitude·bp contributions across
+    // all 4 lanes. Replaces the prior per-iter vst1q_f32(bp_vals,…) +
+    // 4 scalar reads + 4 scalar mla (which drained the NEON pipeline
+    // every quad). At end-of-sample we extract: odd = lane0+lane2,
+    // even = lane1+lane3. NEON→FPU crossings drop from O(num_modes)
+    // per sample to 4 per sample.
+    float32x4_t v_acc = vdupq_n_f32(0.0f);
 
-    for (int32_t i = 0; i < num_modes_simd; i += 4) {
+    for (int32_t i = 0; i < num_modes_padded; i += 4) {
       // Load coefficients
       float32x4_t v_g = vld1q_f32(&g_[i]);
       float32x4_t v_r = vld1q_f32(&r_[i]);
@@ -117,8 +138,8 @@ void Resonator::Process(const float* in, float* out, float* aux, size_t size) {
       float32x4_t v_s1 = vld1q_f32(&state_1_[i]);
       float32x4_t v_s2 = vld1q_f32(&state_2_[i]);
 
-      // SVF bandpass: 4 filters in parallel
-      // hp = (in - r*s1 - g*s1 - s2) * h
+      // TPT SVF bandpass — 4 filters in parallel.
+      // hp = (in - r·s1 - g·s1 - s2) · h
       float32x4_t v_hp = vmulq_f32(
           vsubq_f32(
               vsubq_f32(
@@ -126,78 +147,49 @@ void Resonator::Process(const float* in, float* out, float* aux, size_t size) {
                   vmulq_f32(v_g, v_s1)),
               v_s2),
           v_h);
-
-      // bp = g*hp + s1
-      float32x4_t v_bp = vmlaq_f32(v_s1, v_g, v_hp);
-
-      // new_s1 = g*hp + bp
+      // bp = g·hp + s1;  s1' = g·hp + bp
+      float32x4_t v_bp     = vmlaq_f32(v_s1, v_g, v_hp);
       float32x4_t v_new_s1 = vmlaq_f32(v_bp, v_g, v_hp);
-
-      // new_s2 = g*bp + (g*bp + s2)  [lp = g*bp + s2, new_s2 = g*bp + lp]
-      float32x4_t v_lp = vmlaq_f32(v_s2, v_g, v_bp);
+      // lp = g·bp + s2;  s2' = g·bp + lp
+      float32x4_t v_lp     = vmlaq_f32(v_s2, v_g, v_bp);
       float32x4_t v_new_s2 = vmlaq_f32(v_lp, v_g, v_bp);
-
-      // Store updated state
       vst1q_f32(&state_1_[i], v_new_s1);
       vst1q_f32(&state_2_[i], v_new_s2);
 
-      // Compute 4 amplitude weights
-      float a0 = amplitudes.Next();
-      float a1 = amplitudes.Next();
-      float a2 = amplitudes.Next();
-      float a3 = amplitudes.Next();
-
-      // Weighted accumulation: odd modes (0,2) and even modes (1,3)
-      // Modes i+0, i+2 go to odd; i+1, i+3 go to even
-      float bp_vals[4];
-      vst1q_f32(bp_vals, v_bp);
-
-      odd  += a0 * bp_vals[0] + a2 * bp_vals[2];
-      even += a1 * bp_vals[1] + a3 * bp_vals[3];
+      // Accumulate amp·bp into v_acc, staying in NEON. Fill the
+      // class-member scratch (heap-allocated, NEON-safe per
+      // feedback_neon_intrinsics_drumvoice — no stack-local :64 trap).
+      amp_scratch_[0] = amplitudes.Next();
+      amp_scratch_[1] = amplitudes.Next();
+      amp_scratch_[2] = amplitudes.Next();
+      amp_scratch_[3] = amplitudes.Next();
+      float32x4_t v_amp = vld1q_f32(amp_scratch_);
+      v_acc = vmlaq_f32(v_acc, v_amp, v_bp);
     }
 
-    // Scalar tail for remaining modes (0-3 modes)
-    for (int32_t i = num_modes_simd; i < num_modes;) {
-      float a = amplitudes.Next();
-      // SVF scalar
-      float hp = (input - r_[i] * state_1_[i] - g_[i] * state_1_[i] - state_2_[i]) * h_[i];
-      float bp = g_[i] * hp + state_1_[i];
-      state_1_[i] = g_[i] * hp + bp;
-      float lp = g_[i] * bp + state_2_[i];
-      state_2_[i] = g_[i] * bp + lp;
-      odd += a * bp;
-      i++;
-
-      if (i < num_modes) {
-        a = amplitudes.Next();
-        hp = (input - r_[i] * state_1_[i] - g_[i] * state_1_[i] - state_2_[i]) * h_[i];
-        bp = g_[i] * hp + state_1_[i];
-        state_1_[i] = g_[i] * hp + bp;
-        lp = g_[i] * bp + state_2_[i];
-        state_2_[i] = g_[i] * bp + lp;
-        even += a * bp;
-        i++;
+    // Extract odd (lanes 0+2) and even (lanes 1+3). Four NEON→FPU
+    // crossings per output sample, total, vs the prior ~num_modes
+    // per-iter crossings.
+    odd  = vgetq_lane_f32(v_acc, 0) + vgetq_lane_f32(v_acc, 2);
+    even = vgetq_lane_f32(v_acc, 1) + vgetq_lane_f32(v_acc, 3);
+#else
+    // Scalar fallback (linux x86, macOS, anywhere __ARM_NEON__ is undef).
+    // Same single-accumulator pattern, scalar arithmetic.
+    float acc[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    for (int32_t i = 0; i < num_modes_padded; i += 4) {
+      for (int32_t k = 0; k < 4; ++k) {
+        const float gv = g_[i+k], rv = r_[i+k], hv = h_[i+k];
+        const float s1 = state_1_[i+k], s2 = state_2_[i+k];
+        const float hp = (input - rv*s1 - gv*s1 - s2) * hv;
+        const float bp = s1 + gv*hp;
+        state_1_[i+k]  = bp + gv*hp;
+        const float lp = s2 + gv*bp;
+        state_2_[i+k]  = lp + gv*bp;
+        acc[k] += amplitudes.Next() * bp;
       }
     }
-#else
-    // Scalar fallback for non-NEON platforms (emulator)
-    for (int32_t i = 0; i < num_modes;) {
-      float a = amplitudes.Next();
-      float hp = (input - r_[i] * state_1_[i] - g_[i] * state_1_[i] - state_2_[i]) * h_[i];
-      float bp = g_[i] * hp + state_1_[i];
-      state_1_[i] = g_[i] * hp + bp;
-      state_2_[i] = g_[i] * bp + (g_[i] * bp + state_2_[i]);
-      odd += a * bp;
-      i++;
-
-      a = amplitudes.Next();
-      hp = (input - r_[i] * state_1_[i] - g_[i] * state_1_[i] - state_2_[i]) * h_[i];
-      bp = g_[i] * hp + state_1_[i];
-      state_1_[i] = g_[i] * hp + bp;
-      state_2_[i] = g_[i] * bp + (g_[i] * bp + state_2_[i]);
-      even += a * bp;
-      i++;
-    }
+    odd  = acc[0] + acc[2];
+    even = acc[1] + acc[3];
 #endif
 
     *out++ = odd;

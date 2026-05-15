@@ -108,7 +108,7 @@ the eurorack symlinks / override subdirs; corrected here.
 
 | Unit | NEON state | Opportunity | Priority | Notes |
 |---|---|---|---|---|
-| **Rings** | Partial — modal mode NEON in `rings/dsp/resonator.cc` | sympathetic-string + FM modes still scalar | medium-high | per todo "currently only modal is vectorized." Modal is easy because the modes sum in parallel (voice-bus shape); sympathetic / FM have serial feedback structure, so NEON likely needs a different angle, not a straight template lift |
+| **Rings** | Modal NEON tightened (mi 1.0.2); FM scalar (no-gather constraint, deferred); String scalar (Phase 3 spike-gated) | Phase 3 String SoA pending hardware spike | partial | Modal: single-accumulator quad + padding-to-multiple-of-4 (mi 1.0.2 / commit pending). FM: see plan `planning/rings-neon-pass.md` Phase 2 — Cortex-A8 NEON has no gather load and `SineFm` is a 4096-entry LUT, so cross-voice NEON would be break-even or negative without polynomial-sine substitution (separate tone-audition gate). String: structural fit but per-string state heavy + delay-line reads inherently scalar; spike-gated. |
 | **Clouds** | Partial — `clouds/dsp/grain.h` + `clouds/dsp/pvoc/frame_transformation.cc` | SRC polyphase FIR + ShyFFT butterflies still scalar | medium-high | per todo "Further NEON optimization — ShyFFT butterflies, SRC polyphase FIR." Heavy DSP path; FFT/FIR are their own NEON disciplines (not voice-bus or delay-gather), but well-trodden patterns exist |
 | **Plaits** | Scalar (24 engines) | per-engine audit | low (sweep cost) | engines vary widely — additive/wavetable/FM/modal etc.; not a flat opportunity, each engine is its own shape |
 | **Commotio** | Scalar | full NEON pass on backlog | low-medium | per todo "NEON optimization pass" |

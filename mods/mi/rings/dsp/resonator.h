@@ -70,6 +70,10 @@ class Resonator {
   float h_[kMaxModes];
   float state_1_[kMaxModes];
   float state_2_[kMaxModes];
+  // Per-iter amplitude scratch (filled scalar, loaded NEON quad). Class
+  // member ⇒ heap-allocated ⇒ NEON-safe (no stack-local :64 trap surface,
+  // per feedback_neon_intrinsics_drumvoice).
+  float amp_scratch_[4];
 
   DISALLOW_COPY_AND_ASSIGN(Resonator);
 };
