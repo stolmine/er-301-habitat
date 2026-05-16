@@ -37,15 +37,13 @@ namespace stolmine
     return 0.0f;
   }
 
-  // OPL3 waveform set (8 shapes)
-  // Used for modulator shape (hard-switched) and discontinuity folder (morphable)
-  static inline float opl3Wave(float phase, int shape)
+  // OPL3 shape branch — applies the per-shape transformation to a
+  // pre-computed sine value `s` at wrapped phase `p`. Split out from
+  // opl3Wave so that opl3WaveMorph can share one sine_poly_hq
+  // evaluation across two adjacent-shape evaluations (both shape
+  // branches reference the same underlying sin at the same phase).
+  static inline float opl3ShapeBranch(float p, float s, int shape)
   {
-    // Wrap phase to [0, 1) first so both the sine evaluator and the
-    // shape branches see a clean wrapped value (sine_poly_hq requires
-    // its phase01 argument in [0, 1)).
-    float p = phase - floorf(phase);
-    float s = neon_math::sine_poly_hq(p);  // 13th-order Taylor, ~-100 dB
     switch (shape)
     {
     case 0: return s;                                             // sine
@@ -60,6 +58,18 @@ namespace stolmine
     return s;
   }
 
+  // OPL3 waveform set (8 shapes)
+  // Used for modulator shape (hard-switched) and discontinuity folder (morphable)
+  static inline float opl3Wave(float phase, int shape)
+  {
+    // Wrap phase to [0, 1) first so both the sine evaluator and the
+    // shape branches see a clean wrapped value (sine_poly_hq requires
+    // its phase01 argument in [0, 1)).
+    float p = phase - floorf(phase);
+    float s = neon_math::sine_poly_hq(p);  // 13th-order Taylor, ~-100 dB
+    return opl3ShapeBranch(p, s, shape);
+  }
+
   // Fold shapes 8-15: actual wavefolding transfer functions
   // Input is -1..1 (raw carrier signal, not phase-mapped)
   static inline float foldShape(float x, int shape)
@@ -68,7 +78,13 @@ namespace stolmine
     {
     case 8: // triangle fold -- Serge-style, bounces off rails
     {
-      float y = fmodf(fabsf(x + 1.0f), 4.0f);
+      // Input x guaranteed ∈ [-1, 1] (upstream opl3WaveMorph output is
+      // a linear interp between [-1, 1] bounded shapes), so
+      // fabsf(x + 1) ∈ [0, 2] — fmodf with 4 is identity in this range
+      // (max 2 < 4). Libm fmodf (~40-100 cyc on Cortex-A8 newlib)
+      // eliminated. Conditional kept as a safety net for any future
+      // upstream change that breaks the input bound.
+      float y = fabsf(x + 1.0f);
       return (y < 2.0f) ? y - 1.0f : 3.0f - y;
     }
     case 9: // sine fold -- Buchla-style, wraps through sine
@@ -77,7 +93,12 @@ namespace stolmine
       return neon_math::sine_poly_hq_x(x * kPi);
     case 10: // hard fold -- sharp V reflect at boundaries
     {
-      float y = fmodf(fabsf(x + 1.0f), 2.0f);
+      // Input x ∈ [-1, 1] → y ∈ [0, 2]. fmodf with 2 only wraps at
+      // the exact boundary y = 2 (i.e., x = 1) where it returns 0.
+      // Conditional subtract handles that single boundary case and
+      // saves the libm fmodf call.
+      float y = fabsf(x + 1.0f);
+      if (y >= 2.0f) y -= 2.0f;
       return y < 1.0f ? y * 2.0f - 1.0f : 1.0f - (y - 1.0f) * 2.0f;
     }
     case 11: // staircase -- quantized levels
@@ -87,13 +108,19 @@ namespace stolmine
     }
     case 12: // wrap -- phase wrapping, input exceeding +-1 wraps around
     {
-      float y = fmodf(x + 1.0f, 2.0f);
-      if (y < 0.0f) y += 2.0f;
+      // Input x ∈ [-1, 1] → x + 1 ∈ [0, 2]. fmodf wraps at exactly 2
+      // (x = 1) to 0; otherwise identity. The `if (y < 0) y += 2`
+      // safety branch in the original can never trigger for x ≥ -1
+      // and is dropped.
+      float y = x + 1.0f;
+      if (y >= 2.0f) y -= 2.0f;
       return y - 1.0f;
     }
     case 13: // asymmetric fold -- different up/down slopes
     {
-      float y = fmodf(fabsf(x * 1.5f + 1.0f), 4.0f);
+      // Input x ∈ [-1, 1] → fabsf(1.5x + 1) ∈ [0, 2.5] — fmodf with 4
+      // is identity (max 2.5 < 4). Libm fmodf eliminated.
+      float y = fabsf(x * 1.5f + 1.0f);
       return (y < 2.0f) ? y - 1.0f : 3.0f - y;
     }
     case 14: // chebyshev T3 -- 3rd order harmonic generation
@@ -117,7 +144,11 @@ namespace stolmine
     return x;
   }
 
-  // Morphable OPL3 waveform (hi-fi mode): interpolate between adjacent shapes
+  // Morphable OPL3 waveform (hi-fi mode): interpolate between adjacent shapes.
+  // Computes the underlying sine_poly_hq once and reuses it across both
+  // shape branches (each adjacent shape applies its own transformation
+  // to the same sin value at the same phase). Halves the polynomial-sine
+  // load in this function vs naive double-call.
   static inline float opl3WaveMorph(float phase, float shapeF)
   {
     int s0 = (int)shapeF;
@@ -126,8 +157,10 @@ namespace stolmine
     if (s1 > 7) s1 = 7;
     if (s0 > 7) s0 = 7;
     float frac = shapeF - (float)s0;
-    float w0 = opl3Wave(phase, s0);
-    float w1 = opl3Wave(phase, s1);
+    float p = phase - floorf(phase);
+    float s = neon_math::sine_poly_hq(p);  // shared between both shape branches
+    float w0 = opl3ShapeBranch(p, s, s0);
+    float w1 = opl3ShapeBranch(p, s, s1);
     return w0 + (w1 - w0) * frac;
   }
 
@@ -178,6 +211,13 @@ namespace stolmine
     };
 
     float w0 = evalShape(input, t0);
+    // Block-rate morph skip: when typeF is effectively integer (frac
+    // ≈ 0), the second evalShape contributes nothing because the
+    // morph blend is `w0 + (w1 - w0) × 0 = w0`. typeF is a block-rate
+    // parameter so `frac` is sample-rate-constant — the branch is
+    // perfectly predictable. Halves discFold cost for users who snap
+    // to a specific disc type rather than morphing between two.
+    if (frac < 0.001f) return w0;
     float w1 = evalShape(input, t1);
     return w0 + (w1 - w0) * frac;
   }
