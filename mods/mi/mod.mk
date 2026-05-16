@@ -1,5 +1,5 @@
 PKGNAME ?= mi
-PKGVERSION ?= 1.0.2
+PKGVERSION ?= 1.0.3.15
 
 include scripts/env.mk
 
@@ -84,6 +84,15 @@ SWIG_SOURCE = $(MOD_DIR)/$(PKGNAME).cpp.swig
 SWIG_WRAPPER = $(OUT_DIR)/$(MOD_DIR)/$(PKGNAME)_swig.cpp
 SWIG_OBJECT = $(SWIG_WRAPPER:%.cpp=%.o)
 OBJECTS += $(SWIG_OBJECT)
+
+# Track all package headers as SWIG dependencies. Without this,
+# editing a %include'd header doesn't retrigger SWIG; stale wrapper's
+# sizeof corrupts the heap, crashing later on delete/quicksave. Per
+# feedback_swig_header_dep. Recursive glob so subdirectory headers are
+# tracked too. NOTE: only catches changes in mods/<pkg>/*.h — eurorack/
+# or shared-header edits still require `make <pkg>-clean` to force a
+# rebuild of source .o files that transitively include them.
+SWIG_HEADER_DEPS := $(call rwildcard, $(MOD_DIR), *.h)
 
 ASSETS := $(call rwildcard, $(ASSET_DIR), *)
 
@@ -170,12 +179,12 @@ $(OUT_DIR)/%.o: %.c
 	@mkdir -p $(@D)
 	@$(CC) $(CFLAGS) -std=gnu11 -c $< -o $@
 
-$(SWIG_WRAPPER): $(SWIG_SOURCE)
+$(SWIG_WRAPPER): $(SWIG_SOURCE) $(SWIG_HEADER_DEPS)
 	@echo [SWIG $<]
 	@mkdir -p $(@D)
 	@$(SWIG) -c++ $(SWIGFLAGS) -o $@ $<
 
-$(SWIG_OBJECT): $(SWIG_WRAPPER)
+$(SWIG_OBJECT): $(SWIG_WRAPPER) $(SWIG_HEADER_DEPS)
 	@echo [C++ SWIG $<]
 	@mkdir -p $(@D)
 	@$(CPP) $(CFLAGS.swig) -std=gnu++11 -I$(MOD_DIR) -c $< -o $@

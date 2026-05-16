@@ -11,6 +11,11 @@
 
 #include "clouds/dsp/granular_processor.h"
 
+// AAPCS NEON spill barrier — see feedback_neon_aapcs_call_barrier and
+// planning/mi-mode-switch-aapcs-barrier-resolution.md. Crashes the
+// Cortex-A8 on mode switch without it.
+extern "C" void mi_barrier_noop();
+
 namespace clouds_unit
 {
 
@@ -88,6 +93,7 @@ namespace clouds_unit
     int mode = CLAMP(0, 2, (int)(mMode.value() + 0.5f));
     if (mode != s.cachedMode)
     {
+      mi_barrier_noop();
       s.processor.set_playback_mode(modeMap[mode]);
       s.cachedMode = mode;
     }

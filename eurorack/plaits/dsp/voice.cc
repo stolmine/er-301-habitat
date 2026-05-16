@@ -29,6 +29,8 @@
 #include "plaits/dsp/voice.h"
 #include "plaits/user_data.h"
 
+extern "C" void mi_barrier_noop();
+
 namespace plaits {
 
 using namespace std;
@@ -127,6 +129,15 @@ void Voice::Render(
   Engine* e = engines_.get(engine_index);
   
   if (engine_index != previous_engine_index_ || reload_user_data_) {
+    // AAPCS NEON spill barrier — without this single call, the
+    // Cortex-A8 hard-faults on the first NEON op of the new engine
+    // after a swap. See feedback_neon_aapcs_call_barrier and
+    // planning/mi-mode-switch-aapcs-barrier-resolution.md. The
+    // function body is empty; what matters is that GCC must spill
+    // all caller-saved NEON regs (D0-D7, D16-D31) to stack around
+    // the call. Minimum proven sufficient at mi 1.0.3.14.
+    mi_barrier_noop();
+
     // Re-init allocator and engine on switch (Cortex-A8 safety:
     // shared arena means only the last-init'd engine's buffers are valid)
     allocator_->Free();
