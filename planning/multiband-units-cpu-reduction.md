@@ -326,11 +326,16 @@ transcendentals.
 | 1c | Foundation: `util/neon_math.h` | Both | (enables 2,4) | Small | Low — math primitives | **SHIPPED 2.6.2.43** |
 | 2 | O2: Impasto per-band SoA NEON | Impasto | ⭐⭐⭐ (~35 % CPU) | Medium | Low — direct Rings/Filterbank pattern | **SHIPPED 2.6.2.43** |
 | 3 | O4 + O8: Parfait AA+SVF NEON + morph bake | Parfait | ⭐⭐ (~20 % CPU) | Medium | Low — same pattern as O2 | **SHIPPED 2.6.2.43** |
-| 4 | O6: block-rate hoists (both units) | Both | ⭐ (5–10 % CPU each) | Small | None | pending |
-| 5 | O3: Impasto audio+SC 2-lane (when SC on) | Impasto | ⭐ (~15 % CPU when SC on) | Medium | Low | pending |
-| 6 | O5: Parfait shaper SIMD (same-type case) | Parfait | ⭐ (situational, ~10–20 % when shapers match) | High | Medium — 8 shapers to NEON | pending |
-| ✗ | O11: crossover matrix-form | — | NEGATIVE | — | Reject | — |
-| ✗ | O10: FFT NEON | — | already done | — | Verify only | — |
+| 4a | block-rate `anyCompActive` fast path | Impasto | ⭐ (~1-2pp partial engagement) | Small | None | **SHIPPED 2.6.2.44** |
+| 4b | block-rate `anySvfActive` fast path | Parfait | ⭐ (~0-3pp config-dependent) | Small | None | **SHIPPED 2.6.2.44** |
+| 5 | FFT viz rate every-4 → every-6 (62 Hz) | Parfait | ⭐⭐ (~3pp at full-tilt) | Trivial | None | **SHIPPED 2.6.2.45/.46 (Parfait only — Impasto reverted on regression)** |
+| ✗ | O3: Impasto audio+SC 2-lane | — | ~0.05% measured | — | Reject | rejected in recon |
+| ✗ | downsampled detector envelope | — | ~0.18% measured | — | Reject | per-band loop already too lean |
+| ✗ | block-of-4 NEON crossover | — | negative FLOPs ratio | — | Reject | matrix form costs more than scalar |
+| ✗ | O11: crossover matrix-form | — | NEGATIVE | — | Reject | same as above |
+| ✗ | O10: FFT NEON | — | already done in pffft | — | Verified | 791 NEON insns in pffft.o |
+| 6 | O5: Parfait shaper SIMD (same-type case) | Parfait | ⭐⭐ (2-4pp situational) | High | Medium — 6+ shapers to NEON | pending (only worth if user runs matched-shaper patches) |
+| 7 | sine LUT for Parfait sine-fold shaper | Parfait | ⭐ (1-3pp when sine-fold active) | Small | Low | pending — feeds Phase 6 prep |
 
 ## 2.6.2.43 ship notes
 

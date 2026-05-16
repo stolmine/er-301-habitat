@@ -1,4 +1,15 @@
 // MultitapDelay -- Rainmaker-inspired multitap delay for ER-301
+//
+// Per-tap filter bank vectorized to NEON SoA on Cortex-A8. 8 taps × TPT
+// SVF (g/r/h/state_1/state_2) packed as 2 NEON quads; mode dispatch
+// (LP/BP/HP/Notch/Off) hoisted to block-rate-baked per-tap gain
+// coefficients with branchless useFilterMask select. Per-tap level +
+// stereo pan + energy follower also lane-parallel in Pass C.
+//
+// no-tree-vectorize is load-bearing per feedback_neon_hint_surfaces:
+// prevents GCC from auto-vectorizing the SoA brace-init and emitting
+// :64 hints that trap on Cortex-A8.
+#pragma GCC optimize("no-tree-vectorize")
 
 #include "MultitapDelay.h"
 #include <od/config.h>
@@ -7,6 +18,10 @@
 #include <string.h>
 #include <math.h>
 #include <new>
+
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
 
 #ifndef TEST
 #define TEST
@@ -70,12 +85,45 @@ namespace stolmine
     float tapLevel[kMaxTaps];  // 0-1
     float tapPan[kMaxTaps];    // -1 to +1
 
-    // Per-tap filter
+    // Per-tap filter — user-facing params
     float filterCutoff[kMaxTaps]; // 0-1 normalized
     float filterQ[kMaxTaps];      // 0-1
     int filterType[kMaxTaps];
-    stmlib::Svf filters[kMaxTaps];
     float cachedBandQ[kMaxTaps]; // for feedback compensation
+
+    // Per-tap filter — NEON SoA SVF bank (replaces stmlib::Svf instances).
+    // 8 taps = 2 NEON quads; aligned(16) + heap-allocated (Internal lives
+    // on the heap) per feedback_neon_intrinsics_drumvoice. Block-rate
+    // setup writes g/r/h; per-sample inner kernel updates state_1/state_2.
+    float svfG_[kMaxTaps] __attribute__((aligned(16)));
+    float svfR_[kMaxTaps] __attribute__((aligned(16)));
+    float svfH_[kMaxTaps] __attribute__((aligned(16)));
+    float svfS1_[kMaxTaps] __attribute__((aligned(16)));
+    float svfS2_[kMaxTaps] __attribute__((aligned(16)));
+
+    // Block-rate-baked per-tap filter mode gains. Branchless dispatch
+    // replaces the per-sample switch on filterType[t]. Notch = lp + hp;
+    // useFilterMask = 0 for OFF mode (pass tap through unfiltered).
+    float lpGain_[kMaxTaps] __attribute__((aligned(16)));
+    float bpGain_[kMaxTaps] __attribute__((aligned(16)));
+    float hpGain_[kMaxTaps] __attribute__((aligned(16)));
+    float notchGain_[kMaxTaps] __attribute__((aligned(16)));  // 1 for notch, else 0
+    float useFilterMask_[kMaxTaps] __attribute__((aligned(16)));
+
+    // Pass-B scratch: per-tap pre-filter output (after buffer read + grain
+    // interp). Pass C reads this, runs SVF, writes back the post-filter
+    // output. Class-member (heap) to dodge :64 stack-local trap.
+    float tapOutScratch_[kMaxTaps] __attribute__((aligned(16)));
+
+    // Pre-cached pan SoA quads (also in Object's mCachedPanL/R but we
+    // need them aligned for NEON loads in Pass C). Refreshed at block
+    // rate alongside the tap distribution recompute.
+    float panL_[kMaxTaps] __attribute__((aligned(16)));
+    float panR_[kMaxTaps] __attribute__((aligned(16)));
+
+    // Pre-cached effective tap level (tapLevel × inactive mask). Muted
+    // taps get 0 here so the NEON multiply zeros their contribution.
+    float effectiveTapLevel_[kMaxTaps] __attribute__((aligned(16)));
 
     // Per-tap pitch (octaves, -2 to +2)
     float tapPitch[kMaxTaps];
@@ -140,7 +188,7 @@ namespace stolmine
         filterCutoff[i] = 10000.0f; // Hz
         filterQ[i] = 0.0f;
         filterType[i] = TAP_FILTER_OFF;
-        filters[i].Init();
+        cachedBandQ[i] = 0.5f;
         tapEnergy[i] = 0.0f;
         driftPhase[i] = (float)i * 1.618f; // golden ratio spread
         grainSpawnCounter[i] = 0;
@@ -150,6 +198,21 @@ namespace stolmine
           grains[i][g].active = false;
           grains[i][g].reverse = false;
         }
+        // NEON SoA SVF init: g=0 freezes state, h=1 neutral
+        svfG_[i] = 0.0f;
+        svfR_[i] = 1.0f;
+        svfH_[i] = 1.0f;
+        svfS1_[i] = 0.0f;
+        svfS2_[i] = 0.0f;
+        lpGain_[i] = 0.0f;
+        bpGain_[i] = 0.0f;
+        hpGain_[i] = 0.0f;
+        notchGain_[i] = 0.0f;
+        useFilterMask_[i] = 0.0f;
+        tapOutScratch_[i] = 0.0f;
+        panL_[i] = 0.707f;
+        panR_[i] = 0.707f;
+        effectiveTapLevel_[i] = 0.0f;
       }
       // Pre-compute Hann window LUT: 0.5 * (1 - cos(2 pi t)).
       for (int i = 0; i < kSineLUTSize; i++)
@@ -613,18 +676,66 @@ namespace stolmine
         loadTap(mLastLoadedTap);
     }
 
-    // Update filter coefficients -- FFB parametrization
+    // Block-rate filter coefficient + mode bake. Writes SVF TPT
+    // coefficients (g/r/h) and mode gain coefficients directly into
+    // Internal's SoA arrays for NEON Pass C. Replaces the per-tap
+    // stmlib::Svf::set_f_q calls (mathematically identical, same
+    // FREQUENCY_FAST tan approximation: tan(f) ≈ f + f³/3).
     for (int t = 0; t < tapCount; t++)
     {
       // filterCutoff stored as Hz (20-20000), convert to normalized
       float cutoffHz = CLAMP(20.0f, 10000.0f, s.filterCutoff[t]);
       float freq = cutoffHz / sr;
       freq = CLAMP(0.0001f, 0.49f, freq);
-      float q = 1.0f + 29.0f * s.filterQ[t] * s.filterQ[t]; // 1 to 30, moderate resonance
+      float q = 1.0f + 29.0f * s.filterQ[t] * s.filterQ[t]; // 1 to 30
       float bandQ = q * (0.5f + freq * 2.0f);
       if (bandQ < 0.5f) bandQ = 0.5f;
       s.cachedBandQ[t] = bandQ;
-      s.filters[t].set_f_q<stmlib::FREQUENCY_FAST>(freq, bandQ);
+
+      // TPT SVF coefficients (mirror stmlib::OnePole::tan FREQUENCY_FAST)
+      float g = freq * (1.0f + freq * freq * 0.333333333f);
+      float r = 1.0f / bandQ;
+      s.svfG_[t] = g;
+      s.svfR_[t] = r;
+      s.svfH_[t] = 1.0f / (1.0f + r * g + g * g);
+
+      // Mode gain bake — branchless dispatch replaces the per-sample switch
+      int ft = s.filterType[t];
+      s.lpGain_[t]    = (ft == TAP_FILTER_LP    || ft == TAP_FILTER_NOTCH) ? 1.0f : 0.0f;
+      s.bpGain_[t]    = (ft == TAP_FILTER_BP)                              ? 1.0f : 0.0f;
+      s.hpGain_[t]    = (ft == TAP_FILTER_HP    || ft == TAP_FILTER_NOTCH) ? 1.0f : 0.0f;
+      s.notchGain_[t] = 0.0f;  // notch handled via lp+hp combo above
+      s.useFilterMask_[t] = (ft != TAP_FILTER_OFF) ? 1.0f : 0.0f;
+
+      // Effective per-tap level (used in NEON Pass C). Muted-tap mask
+      // is folded in via the sample-rate `if (tapLevel < 0.001) continue`
+      // path in Pass B which zeros tapOutScratch_; this fold is just the
+      // amplitude scaling. Pan cached SoA-aligned for NEON loads.
+      s.effectiveTapLevel_[t] = s.tapLevel[t];
+      s.panL_[t] = mCachedPanL[t];
+      s.panR_[t] = mCachedPanR[t];
+    }
+    // Pad unused lanes to neutral (g=0 freezes state, zero contribution)
+    for (int t = tapCount; t < kMaxTaps; t++)
+    {
+      s.svfG_[t] = 0.0f;
+      s.svfR_[t] = 1.0f;
+      s.svfH_[t] = 1.0f;
+      s.lpGain_[t] = 0.0f;
+      s.bpGain_[t] = 0.0f;
+      s.hpGain_[t] = 0.0f;
+      s.notchGain_[t] = 0.0f;
+      s.useFilterMask_[t] = 0.0f;
+      s.effectiveTapLevel_[t] = 0.0f;
+      s.panL_[t] = 0.0f;
+      s.panR_[t] = 0.0f;
+    }
+
+    // Last active tap index — for feedback extraction after Pass C
+    int lastActiveTapIdx = 0;
+    for (int t = tapCount - 1; t >= 0; t--)
+    {
+      if (s.tapLevel[t] >= 0.001f) { lastActiveTapIdx = t; break; }
     }
 
     float fbNorm = feedback / (1.0f + 0.15f * sqrtf((float)tapCount));
@@ -705,10 +816,18 @@ namespace stolmine
           __builtin_prefetch(&buf[prefIdx[t]], 0, 1);
       }
 
+      // ---- Pass B: per-tap scalar gather (grain machinery + buffer reads)
+      // Each tap reads from a different scattered location in the delay
+      // buffer — fundamentally scalar on Cortex-A8 (no NEON gather load
+      // per feedback_neon_no_gather_lut_dsp). Writes pre-filter tap
+      // output into tapOutScratch_[t] for Pass C to consume.
       for (int t = 0; t < tapCount; t++)
       {
         if (s.tapLevel[t] < 0.001f)
+        {
+          s.tapOutScratch_[t] = 0.0f;
           continue;
+        }
 
         float delaySamples = mCachedDelaySamples[t];
         float tapOut = 0.0f;
@@ -792,44 +911,115 @@ namespace stolmine
           tapOut = bufRead(buf, idx) + (bufRead(buf, idx2) - bufRead(buf, idx)) * frac;
         }
 
-        // Apply per-tap filter
-        switch (s.filterType[t])
-        {
-        case TAP_FILTER_OFF:
-          break; // bypass
-        case TAP_FILTER_LP:
-          tapOut = s.filters[t].Process<stmlib::FILTER_MODE_LOW_PASS>(tapOut);
-          break;
-        case TAP_FILTER_BP:
-          tapOut = s.filters[t].Process<stmlib::FILTER_MODE_BAND_PASS>(tapOut);
-          break;
-        case TAP_FILTER_HP:
-          tapOut = s.filters[t].Process<stmlib::FILTER_MODE_HIGH_PASS>(tapOut);
-          break;
-        case TAP_FILTER_NOTCH:
-        {
-          float lp, hp;
-          s.filters[t].Process<stmlib::FILTER_MODE_LOW_PASS, stmlib::FILTER_MODE_HIGH_PASS>(tapOut, &lp, &hp);
-          tapOut = lp + hp;
-          break;
-        }
-        default:
-          break;
-        }
-
-        float filteredOut = tapOut * s.tapLevel[t];
-
-        // Energy follower for visualization
-        float e = filteredOut * filteredOut;
-        s.tapEnergy[t] += (e - s.tapEnergy[t]) * 0.001f;
-
-        // Pan: pre-cached equal power (full resonant signal to output)
-        wetL += filteredOut * mCachedPanL[t];
-        wetR += filteredOut * mCachedPanR[t];
-
-        // Feedback gets Q-compensated signal (resonance audible but doesn't accumulate)
-        lastTapOut = filteredOut / (1.0f + s.cachedBandQ[t] * 0.1f);
+        s.tapOutScratch_[t] = tapOut;
       }
+      // Zero out unused lanes (taps tapCount..kMaxTaps-1) so NEON Pass C
+      // sees clean zeros instead of stale state.
+      for (int t = tapCount; t < kMaxTaps; t++)
+        s.tapOutScratch_[t] = 0.0f;
+
+      // ---- Pass C: NEON SoA filter bank (8 taps × TPT SVF in 2 quads)
+      // + branchless mode dispatch + level × pan accumulate. Mirrors
+      // the SoA SVF kernels in Filterbank, Rings modal, and Impasto.
+      // Lane 3 of each quad either holds a real tap or is padding (g=0,
+      // useFilterMask=0, effectiveTapLevel=0 → contributes 0).
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+      float32x4_t wetLAccQ = vdupq_n_f32(0.0f);
+      float32x4_t wetRAccQ = vdupq_n_f32(0.0f);
+
+      for (int q = 0; q < 2; q++)
+      {
+        int o = q * 4;
+        float32x4_t tapInQ = vld1q_f32(&s.tapOutScratch_[o]);
+        float32x4_t gQ  = vld1q_f32(&s.svfG_[o]);
+        float32x4_t rQ  = vld1q_f32(&s.svfR_[o]);
+        float32x4_t hQ  = vld1q_f32(&s.svfH_[o]);
+        float32x4_t s1Q = vld1q_f32(&s.svfS1_[o]);
+        float32x4_t s2Q = vld1q_f32(&s.svfS2_[o]);
+
+        // TPT SVF: hp = (in - r·s1 - g·s1 - s2) · h
+        float32x4_t hpQ = vmulq_f32(
+            vsubq_f32(
+                vsubq_f32(
+                    vsubq_f32(tapInQ, vmulq_f32(rQ, s1Q)),
+                    vmulq_f32(gQ, s1Q)),
+                s2Q),
+            hQ);
+        // bp = s1 + g·hp;  s1' = bp + g·hp
+        float32x4_t bpQ    = vmlaq_f32(s1Q, gQ, hpQ);
+        float32x4_t newS1Q = vmlaq_f32(bpQ, gQ, hpQ);
+        // lp = s2 + g·bp;  s2' = lp + g·bp
+        float32x4_t lpQ    = vmlaq_f32(s2Q, gQ, bpQ);
+        float32x4_t newS2Q = vmlaq_f32(lpQ, gQ, bpQ);
+        vst1q_f32(&s.svfS1_[o], newS1Q);
+        vst1q_f32(&s.svfS2_[o], newS2Q);
+
+        // Mode mix: branchless dispatch via baked gains. NOTCH = lp + hp
+        // (handled by setting both lpGain_ and hpGain_ to 1 for notch
+        // taps in the block-rate setup).
+        float32x4_t lpGQ = vld1q_f32(&s.lpGain_[o]);
+        float32x4_t bpGQ = vld1q_f32(&s.bpGain_[o]);
+        float32x4_t hpGQ = vld1q_f32(&s.hpGain_[o]);
+        float32x4_t filteredQ = vmlaq_f32(
+            vmlaq_f32(vmulq_f32(lpQ, lpGQ), bpQ, bpGQ),
+            hpQ, hpGQ);
+
+        // Branchless OFF mode: final = useFilter ? filtered : tapIn
+        float32x4_t maskQ = vld1q_f32(&s.useFilterMask_[o]);
+        float32x4_t finalQ = vmlaq_f32(tapInQ, maskQ,
+                                       vsubq_f32(filteredQ, tapInQ));
+
+        // Apply effective per-tap level (folds muted-tap zeroing)
+        float32x4_t levelQ = vld1q_f32(&s.effectiveTapLevel_[o]);
+        float32x4_t filteredOutQ = vmulq_f32(finalQ, levelQ);
+        // Store back so feedback path can read post-filter post-level value
+        vst1q_f32(&s.tapOutScratch_[o], filteredOutQ);
+
+        // Pan accumulate: wetL += filteredOut · panL;  wetR += · panR
+        float32x4_t panLQ = vld1q_f32(&s.panL_[o]);
+        float32x4_t panRQ = vld1q_f32(&s.panR_[o]);
+        wetLAccQ = vmlaq_f32(wetLAccQ, filteredOutQ, panLQ);
+        wetRAccQ = vmlaq_f32(wetRAccQ, filteredOutQ, panRQ);
+      }
+
+      // Horizontal sum the wet accumulators (4 lanes each, both quads)
+      wetL = vgetq_lane_f32(wetLAccQ, 0) + vgetq_lane_f32(wetLAccQ, 1)
+           + vgetq_lane_f32(wetLAccQ, 2) + vgetq_lane_f32(wetLAccQ, 3);
+      wetR = vgetq_lane_f32(wetRAccQ, 0) + vgetq_lane_f32(wetRAccQ, 1)
+           + vgetq_lane_f32(wetRAccQ, 2) + vgetq_lane_f32(wetRAccQ, 3);
+#else
+      // Scalar fallback (linux x86, darwin). Same math, 8 lanes.
+      for (int t = 0; t < kMaxTaps; t++)
+      {
+        float tapIn = s.tapOutScratch_[t];
+        float g = s.svfG_[t], r = s.svfR_[t], h = s.svfH_[t];
+        float hp = (tapIn - r * s.svfS1_[t] - g * s.svfS1_[t] - s.svfS2_[t]) * h;
+        float bp = s.svfS1_[t] + g * hp;
+        s.svfS1_[t] = bp + g * hp;
+        float lp = s.svfS2_[t] + g * bp;
+        s.svfS2_[t] = lp + g * bp;
+        float filtered = lp * s.lpGain_[t] + bp * s.bpGain_[t] + hp * s.hpGain_[t];
+        float final = tapIn + s.useFilterMask_[t] * (filtered - tapIn);
+        float filteredOut = final * s.effectiveTapLevel_[t];
+        s.tapOutScratch_[t] = filteredOut;
+        wetL += filteredOut * s.panL_[t];
+        wetR += filteredOut * s.panR_[t];
+      }
+#endif
+
+      // Energy follower for viz — scalar, only across active taps.
+      // tapEnergy isn't aligned(16) so we don't NEON-load it; cost is
+      // sub-1pp either way.
+      for (int t = 0; t < tapCount; t++)
+      {
+        float e = s.tapOutScratch_[t] * s.tapOutScratch_[t];
+        s.tapEnergy[t] += (e - s.tapEnergy[t]) * 0.001f;
+      }
+
+      // Feedback: pick last active tap's post-filter output with
+      // Q-compensation (resonance audible but doesn't accumulate).
+      lastTapOut = s.tapOutScratch_[lastActiveTapIdx]
+                 / (1.0f + s.cachedBandQ[lastActiveTapIdx] * 0.1f);
 
       // Feedback: tone-controlled damping + soft limiter
       float fb = lastTapOut * fbNorm;
