@@ -87,8 +87,10 @@ end
 function MultitapDelay:onLoadGraph(channelCount)
   local op = self:addObject("op", libstolmine.MultitapDelay())
 
-  -- Allocate delay buffer (default 20s, configurable via menu)
-  self.bufferSeconds = self.bufferSeconds or 20.0
+  -- Allocate delay buffer (default 5s — covers most use cases and
+  -- keeps average CPU lower than the 20s default did; user can bump
+  -- to 10s/20s via the menu when long-tail patches need it).
+  self.bufferSeconds = self.bufferSeconds or 5.0
   op:allocateTimeUpTo(self.bufferSeconds)
 
   connect(self, "In1", op, "In")
@@ -536,7 +538,7 @@ function MultitapDelay:onLoadViews()
       branch = self.branches.masterTime,
       gainbias = self.objects.masterTime,
       range = self.objects.masterTime,
-      biasMap = floatMap(0.01, self.bufferSeconds or 20.0),
+      biasMap = floatMap(0.01, self.bufferSeconds or 5.0),
       biasUnits = app.unitSecs,
       biasPrecision = 2,
       initialBias = 0.5,
