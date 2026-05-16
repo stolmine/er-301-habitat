@@ -1,7 +1,14 @@
 // Helicase -- 2-operator FM oscillator for ER-301
 // OPL3-inspired architecture: carrier + modulator with feedback and discontinuity folder
+//
+// libm sinf / tanhf replaced with high-accuracy polynomial primitives
+// from util/neon_math.h (sine_poly_hq @ ~-100 dB, tanh_poly Padé 3/3
+// @ ~-80 dB in operating range). Per-sample hifi load was up to 12
+// sinf + 2 tanhf; polynomial swap saves ~5-10% CPU in hifi mode with
+// audibly transparent character preservation.
 
 #include "Helicase.h"
+#include "util/neon_math.h"
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
@@ -11,6 +18,7 @@ namespace stolmine
 {
 
   static const float kTwoPi = 6.28318530718f;
+  static const float kPi = 3.14159265359f;
 
   // Polynomial BLEP residual for naive saw/wrap discontinuities.
   // t: fractional phase position in [0, 1); dt: phase step per sample.
@@ -33,9 +41,11 @@ namespace stolmine
   // Used for modulator shape (hard-switched) and discontinuity folder (morphable)
   static inline float opl3Wave(float phase, int shape)
   {
-    float s = sinf(phase * kTwoPi);
-    // Wrap phase to 0-1
+    // Wrap phase to [0, 1) first so both the sine evaluator and the
+    // shape branches see a clean wrapped value (sine_poly_hq requires
+    // its phase01 argument in [0, 1)).
     float p = phase - floorf(phase);
+    float s = neon_math::sine_poly_hq(p);  // 13th-order Taylor, ~-100 dB
     switch (shape)
     {
     case 0: return s;                                             // sine
@@ -62,7 +72,9 @@ namespace stolmine
       return (y < 2.0f) ? y - 1.0f : 3.0f - y;
     }
     case 9: // sine fold -- Buchla-style, wraps through sine
-      return sinf(x * (float)M_PI);
+      // sin(π·x) for x ∈ [-1, 1] = sin(π·x) over [-π, π]; pass directly
+      // to sine_poly_hq_x which accepts [-π, π] radian input.
+      return neon_math::sine_poly_hq_x(x * kPi);
     case 10: // hard fold -- sharp V reflect at boundaries
     {
       float y = fmodf(fabsf(x + 1.0f), 2.0f);
@@ -91,7 +103,13 @@ namespace stolmine
     }
     case 15: // ring fold -- smoothed-abs to round V-corners at sin zero crossings
     {
-      float s = sinf(x * (float)M_PI * 2.0f);
+      // sin(2π·x) for x ∈ [-1, 1]. Wrap x into phase01 ∈ [0, 1) so
+      // sine_poly_hq's centered domain holds: for x ∈ [-1, 0), wrap
+      // adds 1; for x ∈ [0, 1) no wrap needed. Equivalent to
+      // `x - floorf(x)` since the input range guarantees floor is
+      // -1 or 0.
+      float phase01 = (x < 0.0f) ? (x + 1.0f) : x;
+      float s = neon_math::sine_poly_hq(phase01);
       const float eps = 0.03f;
       return sqrtf(s * s + eps * eps) * 2.0f - 1.0f;
     }
@@ -404,7 +422,7 @@ namespace stolmine
             }
           }
 
-          float fb = tanhf(s.modFeedbackState) * feedback * 0.5f;
+          float fb = neon_math::tanh_poly(s.modFeedbackState) * feedback * 0.5f;
           float modPhaseFB = s.modPhase + fb;
           float modOutSub = opl3WaveMorph(modPhaseFB, modShapeF);
           s.modFeedbackState = modOutSub;
@@ -462,7 +480,7 @@ namespace stolmine
           }
         }
 
-        float fb = tanhf(s.modFeedbackState) * feedback * 0.5f;
+        float fb = neon_math::tanh_poly(s.modFeedbackState) * feedback * 0.5f;
         float modPhaseFB = s.modPhase + fb;
         modOut = opl3Wave(modPhaseFB, modShape);
         s.modFeedbackState = modOut;

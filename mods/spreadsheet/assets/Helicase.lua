@@ -201,10 +201,12 @@ function Helicase:onLoadViews()
   }
   local carrShapeMap = (function()
     local m = app.LinearDialMap(0, 7)
-    -- Fine/super-fine tuned for audibly smooth morphs between adjacent
-    -- integer shapes. Coarse stays at 1 so users can still snap to a
-    -- specific shape.
-    m:setSteps(1, 0.02, 0.001, 0.0001)
+    -- Coarse/fine layout matches the mod shape ply (`shapeMap` below):
+    -- coarse=1 snaps to integer OPL3 shape, fine=0.1 morphs cleanly
+    -- between adjacent shapes, super-fine=0.01 and very-fine=0.001
+    -- for delicate inter-shape blending. Keeping mod and carrier on
+    -- the same step rhythm so the encoder feel matches across both.
+    m:setSteps(1, 0.1, 0.01, 0.001)
     return m
   end)()
   controls.overCarrierShape = GainBias {
