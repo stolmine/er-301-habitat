@@ -1,5 +1,26 @@
 # Plaits 6-op OS attempt — rollback postmortem
 
+> **2026-05-16 RETROACTIVE NOTE**: The crashes documented below were
+> almost certainly NOT caused by the OS-related code changes
+> (templating Voice<>::Render, inlining FMVoice::Render, class-member
+> os_buffer_). They were the same Cortex-A8 AAPCS NEON spill issue
+> that was independently isolated the next day and fixed at mi 1.0.3.13
+> with `mi_barrier_noop()` (see `planning/mi-mode-switch-aapcs-barrier-resolution.md`
+> and memory `feedback_neon_aapcs_call_barrier`). Smoking gun: 1.0.3.3
+> set `kSixOpOversampling = 1` (no OS work at all, just kept the
+> structural infrastructure) and STILL crashed. That's exactly the
+> baseline 1.0.3.4 behavior post-rollback — also crashed without the
+> AAPCS barrier.
+>
+> **Re-attempted at mi 1.0.3.16** with a minimal-risk approach
+> (entire OS implementation contained inside `SixOpEngine::Render`,
+> no template/inline/class-member changes to fm::Voice). All four
+> rollback "lessons" about what NOT to touch are still followed by
+> .16 — not because they were validated, but because they're
+> orthogonal to the surgical fix this re-attempt uses.
+
+---
+
 Session 2026-05-15. Attempted to add 2× oversampling to Plaits' 6-op
 FM engine to fix DX7-style aliasing noise. **Aborted after 4 ship
 versions failed** — every attempt crashed on engine/algorithm

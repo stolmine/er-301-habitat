@@ -83,6 +83,12 @@ CFLAGS += $(CFLAGS.common) $(CFLAGS.$(ARCH)) $(CFLAGS.$(PROFILE))
 CFLAGS += $(addprefix -I,$(INCLUDES))
 CFLAGS += $(addprefix -D,$(SYMBOLS))
 CFLAGS += -Wno-unused-variable -Wno-unused-parameter -Wno-sign-compare
+# Append am335x NEON-safety overrides LAST so they win against any
+# -ftree-vectorize that came from CFLAGS.speed earlier in the line.
+# See feedback_disable_tree_vectorize_am335x — TOP-PRIORITY rule.
+ifeq ($(ARCH),am335x)
+CFLAGS += -fno-tree-vectorize
+endif
 
 SWIGFLAGS = -lua -no-old-metatable-bindings -nomoduleglobal -small -fvirtual
 SWIGFLAGS += $(addprefix -I,$(INCLUDES))
@@ -98,6 +104,7 @@ $(LIB_FILE): $(OBJECTS)
 	@echo [LINK $@]
 	@mkdir -p $(@D)
 	@$(CC) $(CFLAGS) -o $@ $(OBJECTS) $(LFLAGS)
+	$(call neon_hint_check,$@)
 
 $(PACKAGE_FILE): $(LIB_FILE) $(ASSETS)
 	@echo [ZIP $@]

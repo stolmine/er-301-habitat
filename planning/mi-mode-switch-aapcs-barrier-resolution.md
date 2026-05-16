@@ -1,6 +1,24 @@
 # mi mode/engine-switch crash — root cause + AAPCS barrier resolution (2026-05-16)
 
-**Status: RESOLVED at mi 1.0.3.13 (8 calls) and minimized at 1.0.3.14 (single call).** Habitat-side codegen issue, not firmware. Closes the open hypotheses in `planning/mi-mode-selector-crash-firmware-bisect.md` and `er-301/docs/HABITAT_MI_MODE_SELECTOR_CRASH.md`.
+> 🚨 **2026-05-16 LATE-EVENING UPDATE**: this entire AAPCS-barrier
+> resolution was a **masking workaround**, not the root cause.
+> Re-attempting 2× OS at mi 1.0.3.16 crashed AGAIN at a different
+> code site — confirming the AAPCS theory was incomplete. The
+> ACTUAL root cause is GCC `-ftree-vectorize` (default at `-O3`)
+> emitting Cortex-A8-trapping NEON alignment hints (`vld1.64 ... :64`,
+> `vst1.64 ... :64`, etc.). **Fixed durably at mi 1.0.3.18** by
+> appending `-fno-tree-vectorize` LAST in CFLAGS for am335x builds
+> (so it wins against the upstream `-ftree-vectorize` from
+> `CFLAGS.speed`). Full new resolution doc: see
+> `feedback_disable_tree_vectorize_am335x.md` (TOP-PRIORITY memory).
+>
+> The `mi_barrier_noop()` calls landed at 1.0.3.14/.15 ARE STILL IN
+> PLACE as belt-and-suspenders. They no longer protect against
+> anything (the flag does), but they cost nothing and provide a
+> safety net if `-fno-tree-vectorize` ever gets stripped from a
+> mod.mk by accident.
+
+**Status: RESOLVED at mi 1.0.3.13 (8 calls) and minimized at 1.0.3.14 (single call).** Habitat-side codegen issue, not firmware. Closes the open hypotheses in `planning/mi-mode-selector-crash-firmware-bisect.md` and `er-301/docs/HABITAT_MI_MODE_SELECTOR_CRASH.md`. **Superseded by `-fno-tree-vectorize` at mi 1.0.3.18 — see banner above.**
 
 ## TL;DR
 

@@ -1,5 +1,5 @@
 PKGNAME ?= mi
-PKGVERSION ?= 1.0.3.15
+PKGVERSION ?= 1.0.3.18
 
 include scripts/env.mk
 
@@ -107,6 +107,9 @@ INCLUDES = $(MOD_DIR) $(MOD_DIR)/elements/dsp mods $(SDKPATH) \
 SYMBOLS = TEST
 
 CFLAGS.common = -Wall -ffunction-sections -fdata-sections
+# Note: -ftree-vectorize is enabled here for linux/darwin but explicitly
+# overridden by -fno-tree-vectorize in CFLAGS.am335x (appended LAST in
+# the final CFLAGS line below) so it doesn't reach Cortex-A8 builds.
 CFLAGS.speed = -O3 -ftree-vectorize -ffast-math
 CFLAGS.size = -Os
 
@@ -142,6 +145,11 @@ CFLAGS += $(CFLAGS.common) $(CFLAGS.$(ARCH)) $(CFLAGS.$(PROFILE))
 CFLAGS += $(addprefix -I,$(INCLUDES))
 CFLAGS += $(addprefix -D,$(SYMBOLS))
 CFLAGS += -Wno-unused-variable -Wno-unused-parameter -Wno-sign-compare
+# Append the am335x NEON-safety overrides LAST so they win against any
+# -ftree-vectorize that came from CFLAGS.speed earlier in the line.
+ifeq ($(ARCH),am335x)
+CFLAGS += -fno-tree-vectorize
+endif
 
 SWIGFLAGS = -lua -no-old-metatable-bindings -nomoduleglobal -small -fvirtual
 SWIGFLAGS += $(addprefix -I,$(INCLUDES))
@@ -157,6 +165,7 @@ $(LIB_FILE): $(OBJECTS)
 	@echo [LINK $@]
 	@mkdir -p $(@D)
 	@$(CC) $(CFLAGS) -o $@ $(OBJECTS) $(LFLAGS)
+	$(call neon_hint_check,$@)
 
 $(PACKAGE_FILE): $(LIB_FILE) $(ASSETS)
 	@echo [ZIP $@]

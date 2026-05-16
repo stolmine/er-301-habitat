@@ -82,15 +82,17 @@ awk -v obj="$OBJ" '
   }
 
   END {
-    flush_symbol()
-    printf "\n--- summary for %s ---\n", obj
-    printf "total hinted vld1/vst1 ops : %d\n", op_total + 0
-    printf "  safe (sp single-D)       : %d\n", safe_count + 0
-    printf "  suspect (sp quad-D)      : %d\n", suspect_kinds["sp-quad-spill"] + 0
-    printf "  suspect (non-sp hint)    : %d\n", suspect_kinds["non-sp-hint"] + 0
     if ((suspect_count + 0) > 0) {
+      flush_symbol()
+      printf "\n--- summary for %s ---\n", obj
+      printf "total hinted vld1/vst1 ops : %d\n", op_total + 0
+      printf "  safe (sp single-D)       : %d\n", safe_count + 0
+      printf "  suspect (sp quad-D)      : %d\n", suspect_kinds["sp-quad-spill"] + 0
+      printf "  suspect (non-sp hint)    : %d\n", suspect_kinds["non-sp-hint"] + 0
       printf "\nNOTE: Cortex-A8 with -O3 -ffast-math can trap on suspect hints.\n"
       printf "      See feedback_neon_intrinsics_drumvoice.md / feedback_neon_hint_surfaces.md.\n"
+    } else {
+      printf "[neon-hints] %s: clean (%d safe, 0 suspect)\n", obj, safe_count + 0
     }
   }
 ' <<< "$DUMP"
