@@ -1,8 +1,32 @@
 // Presse -- 3-band multiband compressor for ER-301
 // Crossover engine from Parfait, compression algo adapted from tomf's CPR
 // (Giannoulis/Massberg/Reiss feedforward design)
+//
+// Per-band compressor vectorized to 4-lane NEON SoA on Cortex-A8:
+// detector update, dB compute, gain reduction, and apply are all 3-of-4
+// lane operations. Lane 3 is zero-padded; horizontal sum of lanes 0..2
+// recovers the per-sample summed output.
+//
+// no-tree-vectorize is load-bearing per feedback_neon_hint_surfaces:
+// prevents GCC from auto-vectorizing the SoA init code and emitting
+// :64 alignment hints that trap on Cortex-A8.
+#pragma GCC optimize("no-tree-vectorize")
+
+// FFT viz update period (in audio process() blocks). At 48k/128 = 375
+// blocks/sec, 4 blocks = 94 Hz, 6 blocks = 62 Hz, 8 blocks = 47 Hz.
+// Must stay above the 55 Hz viz framerate floor.
+// rmsDecay is calibrated for the chosen period: rmsDecay^(period/4)
+// preserves the original 4-block time-constant. For period=6 use 0.784f.
+//
+// NOTE: tried 6/0.784 in 2.6.2.45 → measured 3pp idle CPU regression
+// on hardware vs 2.6.2.44 (Parfait benefited, Impasto did not — likely
+// asymmetric iCache effects from the recompile). Reverted Impasto to
+// every-4 in 2.6.2.46; Parfait stays at every-6.
+#define FFT_BLOCKS_PER_UPDATE 4
+#define FFT_RMS_DECAY 0.85f
 
 #include "MultibandCompressor.h"
+#include "util/neon_math.h"
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
@@ -51,13 +75,29 @@ namespace stolmine
     float xoverState[2][4];    // audio crossover
     float scXoverState[2][4];  // sidechain crossover (separate state)
 
-    // Per-band compressor
-    struct BandComp
-    {
-      float detector;
-      float gainReduction; // linear, 1.0 = no reduction
-    };
-    BandComp comp[3];
+    // Per-band compressor state — SoA, padded to 4 lanes for NEON.
+    // Lane 3 is padding; init to 0 and the math keeps it at 0 forever.
+    // (Old BandComp::gainReduction was a dead store and is dropped.)
+    float detector_[4] __attribute__((aligned(16)));
+
+    // Block-rate per-band coefficients, SoA-padded. Heap-allocated
+    // (Internal lives on the heap) so the NEON loads against these
+    // arrays don't surface :64 stack-local alignment hints. Filled
+    // in process()'s block-rate setup; consumed by the per-sample
+    // NEON kernel. Lane 3 is neutral (no-op coefficients).
+    float riseCoeff_[4] __attribute__((aligned(16)));
+    float fallCoeff_[4] __attribute__((aligned(16)));
+    float thresholdDb_[4] __attribute__((aligned(16)));
+    float ratioI_[4] __attribute__((aligned(16)));
+    float makeupCombined_[4] __attribute__((aligned(16)));
+
+    // Per-sample NEON scratch — heap-allocated to keep vld1q_f32 off
+    // stack-local addresses (which can emit :64 alignment hints that
+    // trap on Cortex-A8 per feedback_neon_intrinsics_drumvoice).
+    float scBandsScratch_[4] __attribute__((aligned(16)));
+    float aBandsScratch_[4] __attribute__((aligned(16)));
+    float compScratch_[4] __attribute__((aligned(16)));
+    float grScratch_[4] __attribute__((aligned(16)));
 
     // Per-band energy (for graphic)
     float bandEnergy[3];
@@ -88,10 +128,17 @@ namespace stolmine
         }
       for (int i = 0; i < 3; i++)
       {
-        comp[i].detector = 0.0f;
-        comp[i].gainReduction = 1.0f;
         bandEnergy[i] = 0.0f;
         bandGR[i] = 0.0f;
+      }
+      for (int i = 0; i < 4; i++)
+      {
+        detector_[i] = 0.0f;
+        riseCoeff_[i] = 1.0f;
+        fallCoeff_[i] = 1.0f;
+        thresholdDb_[i] = 0.0f;
+        ratioI_[i] = 0.0f;
+        makeupCombined_[i] = 0.0f;
       }
 
       fftSetup = 0;
@@ -336,23 +383,61 @@ namespace stolmine
       xCoeff[c] = 1.0f / (1.0f + 1.0f / (2.0f * 3.14159f * fc));
     }
 
-    // Per-band compressor coefficients
-    float riseCoeff[3], fallCoeff[3], thresholdDb[3], ratioI[3], makeupGain[3];
+    // Per-band compressor coefficients -- write into Internal's SoA
+    // arrays so the per-sample NEON kernel can vld1q_f32 them directly.
+    // makeupCombined folds makeup gain × band-level fader so the
+    // per-sample apply is a single multiply.
     for (int b = 0; b < 3; b++)
     {
       float sp = 1.0f / sr;
-      riseCoeff[b] = expf(-sp / (attack[b] > sp ? attack[b] : sp));
-      fallCoeff[b] = expf(-sp / (release[b] > sp ? release[b] : sp));
+      s.riseCoeff_[b] = expf(-sp / (attack[b] > sp ? attack[b] : sp));
+      s.fallCoeff_[b] = expf(-sp / (release[b] > sp ? release[b] : sp));
 
-      thresholdDb[b] = 20.0f * fast_log10(threshold[b] + 1e-10f);
-      ratioI[b] = 1.0f / (ratio[b] > 1.0f ? ratio[b] : 1.0f);
+      s.thresholdDb_[b] = 20.0f * fast_log10(threshold[b] + 1e-10f);
+      s.ratioI_[b] = 1.0f / (ratio[b] > 1.0f ? ratio[b] : 1.0f);
 
       // Auto makeup: compensate for gain reduction at threshold
-      float overDb = -thresholdDb[b];
+      float overDb = -s.thresholdDb_[b];
       if (overDb < 0.0f) overDb = 0.0f;
-      float makeupDb = overDb - overDb * ratioI[b];
-      makeupGain[b] = autoMakeup ? fast_fromDb(makeupDb) : 1.0f;
+      float makeupDb = overDb - overDb * s.ratioI_[b];
+      float makeupGain = autoMakeup ? fast_fromDb(makeupDb) : 1.0f;
+
+      float bandLevel = mBandLevelBias[b] ? CLAMP(0.0f, 2.0f, mBandLevelBias[b]->value()) : 1.0f;
+      s.makeupCombined_[b] = makeupGain * bandLevel;
     }
+    // Lane 3 padding: neutral coeffs (init sets these to 0/1; rewrite
+    // each block to be safe in case Init wasn't called recently).
+    s.riseCoeff_[3] = 1.0f;
+    s.fallCoeff_[3] = 1.0f;
+    s.thresholdDb_[3] = 0.0f;
+    s.ratioI_[3] = 0.0f;
+    s.makeupCombined_[3] = 0.0f;  // zeros padding lane's contribution to sum
+
+    // Fast-path flag: any band actually doing compression? A band needs
+    // BOTH a sub-unity threshold (so signal can exceed it) AND a >1
+    // ratio (so reduction is non-zero) to compress. If neither condition
+    // holds on any band, skip the entire NEON detector→log2→exp2→apply
+    // path per sample — just sum aBands × makeupCombined.
+    //
+    // When the fast path is taken the detector state goes stale; that's
+    // OK — re-engaging compression starts with a fresh attack ramp,
+    // which is musically natural. Detector is zeroed on the fast-path
+    // edge below to keep re-engage clean.
+    bool anyCompActive = false;
+    for (int b = 0; b < 3; b++)
+    {
+      if (s.thresholdDb_[b] < -0.1f && s.ratioI_[b] < 0.995f)
+      {
+        anyCompActive = true;
+        break;
+      }
+    }
+    if (!anyCompActive && mPrevCompActive)
+    {
+      // Just entered no-comp state — flush detector so re-engage starts fresh
+      for (int b = 0; b < 4; b++) s.detector_[b] = 0.0f;
+    }
+    mPrevCompActive = anyCompActive;
 
     float energyAccum[3] = {0, 0, 0};
     float grAccum[3] = {0, 0, 0};
@@ -380,9 +465,6 @@ namespace stolmine
         x = s.tiltLpState * tiltLGain + (x - s.tiltLpState) * tiltGain;
       }
 
-      // Sidechain source (self-detect or external)
-      float scSig = scEnabled ? (sc[i] * inputGain) : x;
-
       // --- Audio crossover (LR4, 24dB/oct) ---
       s.xoverState[0][0] += (x - s.xoverState[0][0]) * xCoeff[0];
       s.xoverState[0][1] += (s.xoverState[0][0] - s.xoverState[0][1]) * xCoeff[0];
@@ -399,49 +481,128 @@ namespace stolmine
       float aBand2 = aHp0 - aBand1;
 
       // --- Sidechain crossover (same coeffs, separate state) ---
-      s.scXoverState[0][0] += (scSig - s.scXoverState[0][0]) * xCoeff[0];
-      s.scXoverState[0][1] += (s.scXoverState[0][0] - s.scXoverState[0][1]) * xCoeff[0];
-      s.scXoverState[0][2] += (s.scXoverState[0][1] - s.scXoverState[0][2]) * xCoeff[0];
-      s.scXoverState[0][3] += (s.scXoverState[0][2] - s.scXoverState[0][3]) * xCoeff[0];
-      float scBand0 = s.scXoverState[0][3];
-      float scHp0 = scSig - scBand0;
+      // When SC is disabled, scSig == x and the SC xover would produce
+      // the same bands as the audio xover after state convergence. Skip
+      // the SC xover entirely and copy audio bands to SC bands.
+      float scBand0, scBand1, scBand2;
+      if (scEnabled)
+      {
+        float scSig = sc[i] * inputGain;
 
-      s.scXoverState[1][0] += (scHp0 - s.scXoverState[1][0]) * xCoeff[1];
-      s.scXoverState[1][1] += (s.scXoverState[1][0] - s.scXoverState[1][1]) * xCoeff[1];
-      s.scXoverState[1][2] += (s.scXoverState[1][1] - s.scXoverState[1][2]) * xCoeff[1];
-      s.scXoverState[1][3] += (s.scXoverState[1][2] - s.scXoverState[1][3]) * xCoeff[1];
-      float scBand1 = s.scXoverState[1][3];
-      float scBand2 = scHp0 - scBand1;
+        s.scXoverState[0][0] += (scSig - s.scXoverState[0][0]) * xCoeff[0];
+        s.scXoverState[0][1] += (s.scXoverState[0][0] - s.scXoverState[0][1]) * xCoeff[0];
+        s.scXoverState[0][2] += (s.scXoverState[0][1] - s.scXoverState[0][2]) * xCoeff[0];
+        s.scXoverState[0][3] += (s.scXoverState[0][2] - s.scXoverState[0][3]) * xCoeff[0];
+        scBand0 = s.scXoverState[0][3];
+        float scHp0 = scSig - scBand0;
 
-      float scBands[3] = { scBand0, scBand1, scBand2 };
-      float aBands[3] = { aBand0, aBand1, aBand2 };
+        s.scXoverState[1][0] += (scHp0 - s.scXoverState[1][0]) * xCoeff[1];
+        s.scXoverState[1][1] += (s.scXoverState[1][0] - s.scXoverState[1][1]) * xCoeff[1];
+        s.scXoverState[1][2] += (s.scXoverState[1][1] - s.scXoverState[1][2]) * xCoeff[1];
+        s.scXoverState[1][3] += (s.scXoverState[1][2] - s.scXoverState[1][3]) * xCoeff[1];
+        scBand1 = s.scXoverState[1][3];
+        scBand2 = scHp0 - scBand1;
+      }
+      else
+      {
+        scBand0 = aBand0;
+        scBand1 = aBand1;
+        scBand2 = aBand2;
+      }
 
-      // --- Per-band compression ---
-      float sum = 0.0f;
+      // --- Per-band compression: NEON 4-lane SoA, lane 3 padded to 0 ---
+      // Scratch arrays live in Internal (heap) — stack-locals here would
+      // emit :64 hints that trap on Cortex-A8.
+      s.scBandsScratch_[0] = scBand0;
+      s.scBandsScratch_[1] = scBand1;
+      s.scBandsScratch_[2] = scBand2;
+      s.scBandsScratch_[3] = 0.0f;
+      s.aBandsScratch_[0] = aBand0;
+      s.aBandsScratch_[1] = aBand1;
+      s.aBandsScratch_[2] = aBand2;
+      s.aBandsScratch_[3] = 0.0f;
+
+      // Fast path: no band is configured to compress. Skip the entire
+      // detector→log2→exp2 chain (the bulk of the per-sample NEON cost)
+      // and just apply makeupCombined to the audio bands. Per-sample
+      // branch is predictable (block-rate flag).
+      if (!anyCompActive)
+      {
+        s.compScratch_[0] = aBand0 * s.makeupCombined_[0];
+        s.compScratch_[1] = aBand1 * s.makeupCombined_[1];
+        s.compScratch_[2] = aBand2 * s.makeupCombined_[2];
+        s.grScratch_[0] = s.grScratch_[1] = s.grScratch_[2] = 1.0f;
+      }
+      else
+      {
+
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+      using namespace stolmine::neon_math;
+
+      // Envelope detection (branchless coefficient select via vbslq_f32)
+      float32x4_t scQ  = vld1q_f32(s.scBandsScratch_);
+      float32x4_t absQ = vabsq_f32(scQ);
+      float32x4_t detQ = vld1q_f32(s.detector_);
+      uint32x4_t rising = vcgtq_f32(absQ, detQ);
+      float32x4_t riseQ = vld1q_f32(s.riseCoeff_);
+      float32x4_t fallQ = vld1q_f32(s.fallCoeff_);
+      float32x4_t coeffQ = vbslq_f32(rising, riseQ, fallQ);
+      float32x4_t one = vdupq_n_f32(1.0f);
+      float32x4_t omc = vsubq_f32(one, coeffQ);
+      detQ = vmlaq_f32(vmulq_f32(coeffQ, detQ), omc, absQ);
+      vst1q_f32(s.detector_, detQ);
+
+      // dB compute: 20*log10(x) = 20*0.30103*log2(x) = 6.0206*log2(x)
+      float32x4_t detEps = vaddq_f32(detQ, vdupq_n_f32(1e-10f));
+      float32x4_t levelDbQ = vmulq_f32(
+          log2_poly_4lane(detEps),
+          vdupq_n_f32(6.02059991f));
+      float32x4_t threshQ  = vld1q_f32(s.thresholdDb_);
+      float32x4_t overQ    = vmaxq_f32(vsubq_f32(levelDbQ, threshQ),
+                                       vdupq_n_f32(0.0f));
+      float32x4_t ratioIQ  = vld1q_f32(s.ratioI_);
+      float32x4_t reductQ  = vmulq_f32(overQ, vsubq_f32(one, ratioIQ));
+
+      // gr = exp2(-reductionDb * 0.16609640474)  (== fast_fromDb(-rd))
+      float32x4_t grQ = exp2_poly_4lane(
+          vmulq_f32(reductQ, vdupq_n_f32(-0.16609640474f)));
+      vst1q_f32(s.grScratch_, grQ);
+
+      // Apply: compressed = aBand * gr * makeupCombined
+      float32x4_t aQ = vld1q_f32(s.aBandsScratch_);
+      float32x4_t makeupQ = vld1q_f32(s.makeupCombined_);
+      float32x4_t compQ = vmulq_f32(vmulq_f32(aQ, grQ), makeupQ);
+      vst1q_f32(s.compScratch_, compQ);
+#else
+      // Scalar fallback (linux x86, darwin). Same math, same coeffs.
+      using namespace stolmine::neon_math;
+      for (int b = 0; b < 4; b++)
+      {
+        float absLevel = s.scBandsScratch_[b] < 0 ? -s.scBandsScratch_[b] : s.scBandsScratch_[b];
+        float coeff = absLevel > s.detector_[b] ? s.riseCoeff_[b] : s.fallCoeff_[b];
+        s.detector_[b] = coeff * s.detector_[b] + (1.0f - coeff) * absLevel;
+
+        float levelDb = 6.02059991f * log2_poly(s.detector_[b] + 1e-10f);
+        float overDb = levelDb - s.thresholdDb_[b];
+        if (overDb < 0.0f) overDb = 0.0f;
+        float reductionDb = overDb * (1.0f - s.ratioI_[b]);
+        float gr = exp2_poly(-reductionDb * 0.16609640474f);
+        s.grScratch_[b] = gr;
+        s.compScratch_[b] = s.aBandsScratch_[b] * gr * s.makeupCombined_[b];
+      }
+#endif
+
+      }  // end else (anyCompActive == true branch)
+
+      // Horizontal sum lanes 0..2 (lane 3 = 0 by makeupCombined padding)
+      float sum = s.compScratch_[0] + s.compScratch_[1] + s.compScratch_[2];
+
+      // Metering accumulators (per-band scalar, only lanes 0..2)
       for (int b = 0; b < 3; b++)
       {
-        // Envelope detection on sidechain band
-        float absLevel = scBands[b] < 0 ? -scBands[b] : scBands[b];
-        float coeff = absLevel > s.comp[b].detector ? riseCoeff[b] : fallCoeff[b];
-        s.comp[b].detector = coeff * s.comp[b].detector + (1.0f - coeff) * absLevel;
-
-        // Gain computation in dB domain
-        float levelDb = 20.0f * fast_log10(s.comp[b].detector + 1e-10f);
-        float overDb = levelDb - thresholdDb[b];
-        if (overDb < 0.0f) overDb = 0.0f;
-        float reductionDb = overDb * (1.0f - ratioI[b]);
-        float gr = fast_fromDb(-reductionDb);
-        s.comp[b].gainReduction = gr;
-
-        // Apply GR + makeup + band level to audio band
-        float bandLevel = mBandLevelBias[b] ? CLAMP(0.0f, 2.0f, mBandLevelBias[b]->value()) : 1.0f;
-        float compressed = aBands[b] * gr * makeupGain[b] * bandLevel;
-        sum += compressed;
-
-        // Metering accumulators
-        float absComp = compressed < 0 ? -compressed : compressed;
+        float absComp = s.compScratch_[b] < 0 ? -s.compScratch_[b] : s.compScratch_[b];
         energyAccum[b] += absComp;
-        grAccum[b] += (1.0f - gr); // 0 = no reduction, 1 = full
+        grAccum[b] += (1.0f - s.grScratch_[b]);
       }
 
       // Output: level + dry/wet
@@ -465,9 +626,9 @@ namespace stolmine
       s.bandGR[b] += (avgGR - s.bandGR[b]) * grSlew;
     }
 
-    // FFT (every 4 blocks = ~21ms at 48kHz)
+    // FFT viz update — see FFT_BLOCKS_PER_UPDATE at file top for tuning.
     s.fftFrameCount++;
-    if (s.fftFrameCount >= 4 && s.fftSetup)
+    if (s.fftFrameCount >= FFT_BLOCKS_PER_UPDATE && s.fftSetup)
     {
       s.fftFrameCount = 0;
       for (int i = 0; i < 256; i++)
@@ -475,7 +636,7 @@ namespace stolmine
 
       pffft_transform_ordered(s.fftSetup, s.fftIn, s.fftOut, s.fftWork, PFFFT_FORWARD);
 
-      float rmsDecay = 0.85f;
+      float rmsDecay = FFT_RMS_DECAY;
       for (int bin = 0; bin < 128; bin++)
       {
         float re = s.fftOut[bin * 2];

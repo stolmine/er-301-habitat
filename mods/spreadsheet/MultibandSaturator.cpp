@@ -1,4 +1,29 @@
+// Per-band AA + SVF vectorized to 4-lane NEON SoA on Cortex-A8. The
+// waveshaper stays scalar per band (8 shaper types with per-band
+// dispatch); AA filter + SVF + morph crossfade are identical math
+// across bands and packed lane 0..2 with lane 3 zero-padded. Branchless
+// morph mix via per-band-baked lpGain/bpGain/hpGain/useSvfMask.
+//
+// no-tree-vectorize per feedback_neon_hint_surfaces: keeps GCC from
+// auto-vectorizing the SoA brace-init and emitting :64 hints that trap
+// on Cortex-A8.
+#pragma GCC optimize("no-tree-vectorize")
+
+// FFT viz update period (in audio process() blocks). At 48k/128 = 375
+// blocks/sec, 4 blocks = 94 Hz, 6 blocks = 62 Hz, 8 blocks = 47 Hz.
+// Must stay above the 55 Hz viz framerate floor. To roll back, set to 4
+// and restore peakDecay=0.92f, rmsSmooth=0.3f below.
+// Constants below are calibrated for the chosen period:
+//   peakDecay^(period/4) preserves the original 4-block decay rate.
+//   1 - (1-rmsSmooth)^(period/4) preserves the original smoothing.
+// For period=6: peakDecay = 0.92^1.5 ≈ 0.882, rmsSmooth = 1-0.7^1.5 ≈ 0.414
+// For period=4: peakDecay = 0.92, rmsSmooth = 0.3
+#define FFT_BLOCKS_PER_UPDATE 6
+#define FFT_PEAK_DECAY 0.882f
+#define FFT_RMS_SMOOTH 0.414f
+
 #include "MultibandSaturator.h"
+#include "util/neon_math.h"
 #include "pffft.h"
 #include <od/config.h>
 #include <hal/ops.h>
@@ -6,6 +31,10 @@
 #include <string.h>
 #include <new>
 #include <stdlib.h>
+
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
 
 namespace stolmine
 {
@@ -152,19 +181,35 @@ namespace stolmine
     float crossoverHz[2];
     float xoverState[2][4];  // [crossover][cascade stage]
 
-    // Per-band post-shaper SVF filter (inline state, not stmlib::Svf)
-    float svfState1[3];
-    float svfState2[3];
-    float svfG[3];   // frequency coefficient
-    float svfR[3];   // damping (1/Q)
-    float svfH[3];   // denominator
+    // Per-band post-shaper SVF filter (inline state, not stmlib::Svf).
+    // Widened to 4 lanes for NEON SoA; lane 3 is padding kept at
+    // neutral (g=0, h=1) so the SVF math produces zero contribution
+    // from the padding lane.
+    float svfState1[4] __attribute__((aligned(16)));
+    float svfState2[4] __attribute__((aligned(16)));
+    float svfG[4] __attribute__((aligned(16)));
+    float svfR[4] __attribute__((aligned(16)));
+    float svfH[4] __attribute__((aligned(16)));
+
+    // Block-rate-baked morph crossfade gains + active mask + combined
+    // band gain. All 4-lane SoA; the per-sample NEON kernel reads
+    // these to build the branchless final output.
+    float lpGain[4] __attribute__((aligned(16)));
+    float bpGain[4] __attribute__((aligned(16)));
+    float hpGain[4] __attribute__((aligned(16)));
+    float useSvfMask[4] __attribute__((aligned(16)));      // 1.0 if morph>0.01, else 0
+    float bandCombinedGain[4] __attribute__((aligned(16))); // bandLevel × !mute
+
+    // Per-sample NEON scratch (heap, never stack — :64 hint safety per
+    // feedback_neon_intrinsics_drumvoice).
+    float bandSigScratch[4] __attribute__((aligned(16)));
 
     // Compressor state
     float compDetector = 0.0f;
     float scHpState = 0.0f;
 
-    // Anti-alias lowpass state (~18kHz one-pole per band)
-    float aaState[3];
+    // Anti-alias lowpass state (~18kHz one-pole per band). Widened to 4.
+    float aaState[4] __attribute__((aligned(16)));
 
     // DC blocker state (one-pole highpass ~5Hz)
     float dcState = 0.0f;
@@ -193,19 +238,23 @@ namespace stolmine
       for (int i = 0; i < 2; i++)
         for (int j = 0; j < 4; j++)
           xoverState[i][j] = 0.0f;
-      for (int i = 0; i < 3; i++)
+      for (int i = 0; i < 4; i++)
       {
         svfState1[i] = 0.0f;
         svfState2[i] = 0.0f;
-        svfG[i] = 0.1f;
+        svfG[i] = (i < 3) ? 0.1f : 0.0f;   // pad lane: g=0 freezes state
         svfR[i] = 1.0f;
-        svfH[i] = 0.5f;
+        svfH[i] = (i < 3) ? 0.5f : 1.0f;
+        lpGain[i] = 0.0f;
+        bpGain[i] = 0.0f;
+        hpGain[i] = 0.0f;
+        useSvfMask[i] = 0.0f;
+        bandCombinedGain[i] = 0.0f;
+        aaState[i] = 0.0f;
       }
       compDetector = 0.0f;
       scHpState = 0.0f;
       dcState = 0.0f;
-      for (int i = 0; i < 3; i++)
-        aaState[i] = 0.0f;
       for (int i = 0; i < 3; i++)
         bandEnergy[i] = 0.0f;
 
@@ -466,7 +515,9 @@ namespace stolmine
       xCoeff[c] = 1.0f / (1.0f + 1.0f / (2.0f * 3.14159f * fc));
     }
 
-    // Set per-band SVF coefficients (ZDF topology)
+    // Set per-band SVF coefficients (ZDF topology), bake morph
+    // crossfade gains + useSvfMask + bandCombinedGain into SoA arrays
+    // so the per-sample NEON kernel can vld1q_f32 them.
     for (int b = 0; b < 3; b++)
     {
       // Avoid tanf (may not be available on ARM ELF loader)
@@ -478,7 +529,64 @@ namespace stolmine
       s.svfG[b] = g;
       s.svfR[b] = r;
       s.svfH[b] = 1.0f / (1.0f + r * g + g * g);
+
+      // Morph crossfade — same segmented mapping as the original
+      // inner-loop branches, hoisted to block rate.
+      float morph = bandFilterMorph[b];
+      if (morph > 0.01f)
+      {
+        s.useSvfMask[b] = 1.0f;
+        float m = (morph - 0.01f) / 0.99f;
+        if (m < 0.333f)
+        {
+          float t = m * 3.0f;
+          s.lpGain[b] = 1.0f - t; s.bpGain[b] = t; s.hpGain[b] = 0.0f;
+        }
+        else if (m < 0.666f)
+        {
+          float t = (m - 0.333f) * 3.0f;
+          s.lpGain[b] = 0.0f; s.bpGain[b] = 1.0f - t; s.hpGain[b] = t;
+        }
+        else
+        {
+          float t = (m - 0.666f) * 3.0f;
+          s.lpGain[b] = t; s.bpGain[b] = 0.0f; s.hpGain[b] = 1.0f;
+        }
+      }
+      else
+      {
+        s.useSvfMask[b] = 0.0f;
+        s.lpGain[b] = s.bpGain[b] = s.hpGain[b] = 0.0f;
+      }
+
+      // Combined band gain: bandLevel × !mute. Muted bands contribute
+      // zero to the output sum and zero to the energy meter.
+      s.bandCombinedGain[b] = bandMute[b] ? 0.0f : bandLevel[b];
     }
+    // Lane 3 padding: neutral SVF (g=0 freezes state), zero gains, zero out
+    s.svfG[3] = 0.0f;
+    s.svfR[3] = 1.0f;
+    s.svfH[3] = 1.0f;
+    s.lpGain[3] = s.bpGain[3] = s.hpGain[3] = 0.0f;
+    s.useSvfMask[3] = 0.0f;
+    s.bandCombinedGain[3] = 0.0f;
+
+    // Fast-path flag: any band with SVF morph engaged? When false the
+    // SVF math is pure waste (final = aa + 0 * (svfMix - aa) = aa). Skip
+    // the SVF kernel entirely and pass the AA output through. SVF state
+    // is held frozen on the fast path; flushed on the edge so re-engage
+    // starts clean.
+    bool anySvfActive = (s.useSvfMask[0] + s.useSvfMask[1] + s.useSvfMask[2]) > 0.0f;
+    if (anySvfActive && !mPrevSvfActive)
+    {
+      // Edge: SVF re-engaging. Zero state to avoid stale-state transient.
+      for (int i = 0; i < 4; i++)
+      {
+        s.svfState1[i] = 0.0f;
+        s.svfState2[i] = 0.0f;
+      }
+    }
+    mPrevSvfActive = anySvfActive;
 
     // Compressor constants (hoisted out of sample loop)
     // Anti-alias lowpass coefficient (~18kHz)
@@ -523,62 +631,116 @@ namespace stolmine
       float band1 = s.xoverState[1][3];
       float band2 = hp0 - band1;
 
-      // Per-band shaping + filtering
-      float bandSig[3] = { band0, band1, band2 };
+      // Per-band waveshaper (scalar — per-band shaper-type dispatch).
+      // Skip muted bands to avoid the cost; AA + SVF still run on
+      // muted bands but their output is zeroed by bandCombinedGain=0.
+      // Scratch is heap-allocated in Internal — NOT stack-local — to
+      // dodge :64 hint trap per feedback_neon_intrinsics_drumvoice.
+      s.bandSigScratch[0] = band0;
+      s.bandSigScratch[1] = band1;
+      s.bandSigScratch[2] = band2;
+      s.bandSigScratch[3] = 0.0f;
       for (int b = 0; b < 3; b++)
       {
         if (bandMute[b]) continue;
-
-        // Waveshaper
         if (bandAmount[b] > 0.001f)
-          bandSig[b] = applyShaper(bandSig[b], bandType[b], bandAmount[b], bandBiasVal[b]);
+          s.bandSigScratch[b] = applyShaper(s.bandSigScratch[b], bandType[b], bandAmount[b], bandBiasVal[b]);
+      }
 
-        // Anti-alias lowpass (~18kHz, always on)
-        s.aaState[b] += (bandSig[b] - s.aaState[b]) * aaCoeff;
-        bandSig[b] = s.aaState[b];
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+      // NEON 4-lane: AA filter (always-on for anti-aliasing) then
+      // optional SVF kernel. Lane 3 is padding (g=0 freezes state).
+      float32x4_t bsQ = vld1q_f32(s.bandSigScratch);
 
-        // SVF morph filter: off(0) -> LP(0.25) -> BP(0.5) -> HP(0.75) -> Notch(1.0)
-        float morph = bandFilterMorph[b];
-        if (morph > 0.01f)
+      // AA one-pole LP: state += (in - state) * aaCoeff
+      float32x4_t aaStateQ = vld1q_f32(s.aaState);
+      aaStateQ = vmlaq_f32(aaStateQ,
+                           vsubq_f32(bsQ, aaStateQ),
+                           vdupq_n_f32(aaCoeff));
+      vst1q_f32(s.aaState, aaStateQ);
+
+      float32x4_t finalQ;
+      if (anySvfActive)
+      {
+        // SVF TPT: 4 filters in parallel.
+        float32x4_t gQ  = vld1q_f32(s.svfG);
+        float32x4_t rQ  = vld1q_f32(s.svfR);
+        float32x4_t hQ  = vld1q_f32(s.svfH);
+        float32x4_t s1Q = vld1q_f32(s.svfState1);
+        float32x4_t s2Q = vld1q_f32(s.svfState2);
+        // hp = (in - r·s1 - g·s1 - s2) · h
+        float32x4_t hpQ = vmulq_f32(
+            vsubq_f32(
+                vsubq_f32(
+                    vsubq_f32(aaStateQ, vmulq_f32(rQ, s1Q)),
+                    vmulq_f32(gQ, s1Q)),
+                s2Q),
+            hQ);
+        // bp = s1 + g·hp;  s1' = bp + g·hp
+        float32x4_t bpQ     = vmlaq_f32(s1Q, gQ, hpQ);
+        float32x4_t newS1Q  = vmlaq_f32(bpQ, gQ, hpQ);
+        // lp = s2 + g·bp;  s2' = lp + g·bp
+        float32x4_t lpQ     = vmlaq_f32(s2Q, gQ, bpQ);
+        float32x4_t newS2Q  = vmlaq_f32(lpQ, gQ, bpQ);
+        vst1q_f32(s.svfState1, newS1Q);
+        vst1q_f32(s.svfState2, newS2Q);
+
+        // Mix lp/bp/hp via block-rate-baked per-band gains
+        float32x4_t lpGQ = vld1q_f32(s.lpGain);
+        float32x4_t bpGQ = vld1q_f32(s.bpGain);
+        float32x4_t hpGQ = vld1q_f32(s.hpGain);
+        float32x4_t svfMixQ = vmlaq_f32(
+            vmlaq_f32(vmulq_f32(lpQ, lpGQ), bpQ, bpGQ),
+            hpQ, hpGQ);
+
+        // Branchless morph select: final = aa + useSvfMask · (svfMix - aa)
+        float32x4_t maskQ = vld1q_f32(s.useSvfMask);
+        finalQ = vmlaq_f32(aaStateQ, maskQ, vsubq_f32(svfMixQ, aaStateQ));
+      }
+      else
+      {
+        // No band morphs the SVF — skip the entire SVF kernel.
+        // Output is just the AA-filtered signal.
+        finalQ = aaStateQ;
+      }
+
+      // Apply combined gain (bandLevel × !mute)
+      float32x4_t cgQ = vld1q_f32(s.bandCombinedGain);
+      finalQ = vmulq_f32(finalQ, cgQ);
+      vst1q_f32(s.bandSigScratch, finalQ);
+#else
+      // Scalar fallback (linux x86, darwin). Mirrors the NEON dispatch:
+      // AA always runs; SVF only when anySvfActive.
+      for (int b = 0; b < 4; b++)
+      {
+        s.aaState[b] += (s.bandSigScratch[b] - s.aaState[b]) * aaCoeff;
+        float aaOut = s.aaState[b];
+        float fin;
+        if (anySvfActive)
         {
           float g = s.svfG[b], r = s.svfR[b], h = s.svfH[b];
-          float hp = (bandSig[b] - r * s.svfState1[b] - g * s.svfState1[b] - s.svfState2[b]) * h;
-          float bp = g * hp + s.svfState1[b];
-          s.svfState1[b] = g * hp + bp;
-          float lp = g * bp + s.svfState2[b];
-          s.svfState2[b] = g * bp + lp;
+          float hp = (aaOut - r * s.svfState1[b] - g * s.svfState1[b] - s.svfState2[b]) * h;
+          float bp = s.svfState1[b] + g * hp;
+          s.svfState1[b] = bp + g * hp;
+          float lp = s.svfState2[b] + g * bp;
+          s.svfState2[b] = lp + g * bp;
 
-          // Remap 0.01-1.0 to filter sweep
-          float m = (morph - 0.01f) / 0.99f; // 0-1 within active range
-          float lp_g, bp_g, hp_g;
-          if (m < 0.333f)
-          {
-            float t = m * 3.0f;
-            lp_g = 1.0f - t; bp_g = t; hp_g = 0.0f;
-          }
-          else if (m < 0.666f)
-          {
-            float t = (m - 0.333f) * 3.0f;
-            lp_g = 0.0f; bp_g = 1.0f - t; hp_g = t;
-          }
-          else
-          {
-            float t = (m - 0.666f) * 3.0f;
-            lp_g = t; bp_g = 0.0f; hp_g = 1.0f;
-          }
-          bandSig[b] = lp * lp_g + bp * bp_g + hp * hp_g;
+          float svfMix = lp * s.lpGain[b] + bp * s.bpGain[b] + hp * s.hpGain[b];
+          fin = aaOut + s.useSvfMask[b] * (svfMix - aaOut);
         }
-      }
-      float wet = 0.0f;
-      for (int b = 0; b < 3; b++)
-      {
-        if (!bandMute[b])
+        else
         {
-          float bv = bandSig[b] * bandLevel[b];
-          wet += bv;
-          energyAccum[b] += bv * bv;
+          fin = aaOut;
         }
+        s.bandSigScratch[b] = fin * s.bandCombinedGain[b];
       }
+#endif
+
+      // Sum lanes 0..2 (lane 3 is bandCombinedGain=0 zeroed)
+      float wet = s.bandSigScratch[0] + s.bandSigScratch[1] + s.bandSigScratch[2];
+      energyAccum[0] += s.bandSigScratch[0] * s.bandSigScratch[0];
+      energyAccum[1] += s.bandSigScratch[1] * s.bandSigScratch[1];
+      energyAccum[2] += s.bandSigScratch[2] * s.bandSigScratch[2];
 
       // DC blocker (~5Hz one-pole highpass)
       s.dcState += (wet - s.dcState) * (5.0f / sr);
@@ -652,9 +814,9 @@ namespace stolmine
       }
     }
 
-    // FFT: compute every 4 frames (~12 FFTs/sec at 48kHz/128)
+    // FFT viz update — see FFT_BLOCKS_PER_UPDATE at file top for tuning.
     s.fftFrameCount++;
-    if (s.fftFrameCount >= 4 && s.fftReady)
+    if (s.fftFrameCount >= FFT_BLOCKS_PER_UPDATE && s.fftReady)
     {
       s.fftFrameCount = 0;
       for (int k = 0; k < 256; k++)
@@ -662,8 +824,8 @@ namespace stolmine
 
       pffft_transform_ordered(s.fftSetup, s.fftIn, s.fftOut, s.fftWork, PFFFT_FORWARD);
 
-      float peakDecay = 0.92f;
-      float rmsSmooth = 0.3f;
+      float peakDecay = FFT_PEAK_DECAY;
+      float rmsSmooth = FFT_RMS_SMOOTH;
       for (int k = 0; k < 128; k++)
       {
         float re = s.fftOut[k * 2];

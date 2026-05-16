@@ -84,6 +84,10 @@ namespace stolmine
     float mLastWeight[3];
     float mLastSkew;
 
+    // Fast-path: SVF state flushed on re-engage edge to avoid stale
+    // transient when morph transitions 0 → on.
+    bool mPrevSvfActive = false;
+
 #ifndef SWIGLUA
     void recomputeCrossovers();
 #endif

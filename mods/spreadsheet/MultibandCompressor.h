@@ -81,6 +81,10 @@ namespace stolmine
     float mLastWeight[3];
     float mLastSkew;
 
+    // Fast-path tracking: when comp transitions from active to inactive
+    // we flush detector state so re-engage starts with fresh attack.
+    bool mPrevCompActive = false;
+
 #ifndef SWIGLUA
     void recomputeCrossovers();
 #endif
