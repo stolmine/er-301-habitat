@@ -125,6 +125,18 @@ namespace stolmine
     // taps get 0 here so the NEON multiply zeros their contribution.
     float effectiveTapLevel_[kMaxTaps] __attribute__((aligned(16)));
 
+    // Per-tap baked feedback contribution weight. Folds:
+    //   - feedback amount
+    //   - 1/sqrt(activeTapCount) energy normalization (constant total
+    //     feedback energy across N for uncorrelated audio)
+    //   - per-tap Q compensation 1/(1 + bandQ × 0.1) for filtered taps;
+    //     unity for OFF-mode taps (no resonance to compensate)
+    //   - tap-active mask: 0 for muted taps and unused lanes
+    // Replaces the old single-tap `lastTapOut × fbNorm` extraction
+    // (Pecto-style comb feedback) with a multi-tap weighted-sum
+    // network feedback (Rainmaker / Network Phase 2 style).
+    float fbWeightSum_[kMaxTaps] __attribute__((aligned(16)));
+
     // Per-tap pitch (octaves, -2 to +2)
     float tapPitch[kMaxTaps];
 
@@ -213,6 +225,7 @@ namespace stolmine
         panL_[i] = 0.707f;
         panR_[i] = 0.707f;
         effectiveTapLevel_[i] = 0.0f;
+        fbWeightSum_[i] = 0.0f;
       }
       // Pre-compute Hann window LUT: 0.5 * (1 - cos(2 pi t)).
       for (int i = 0; i < kSineLUTSize; i++)
@@ -731,14 +744,38 @@ namespace stolmine
       s.panR_[t] = 0.0f;
     }
 
-    // Last active tap index — for feedback extraction after Pass C
-    int lastActiveTapIdx = 0;
-    for (int t = tapCount - 1; t >= 0; t--)
+    // Bake per-tap feedback weights for multi-tap weighted-sum
+    // recirculation (replaces old single-tap `lastTapOut × fbNorm`).
+    // 1/sqrt(N) keeps total feedback energy roughly constant as the
+    // active tap count varies (uncorrelated audio assumption).
+    int activeTapCount = 0;
+    for (int t = 0; t < tapCount; t++)
+      if (s.tapLevel[t] >= 0.001f) activeTapCount++;
+    float fbNormFactor = (activeTapCount > 0)
+        ? (feedback / sqrtf((float)activeTapCount))
+        : 0.0f;
+    for (int t = 0; t < tapCount; t++)
     {
-      if (s.tapLevel[t] >= 0.001f) { lastActiveTapIdx = t; break; }
+      if (s.tapLevel[t] < 0.001f)
+      {
+        s.fbWeightSum_[t] = 0.0f;
+      }
+      else
+      {
+        // Q-comp only for filtered taps; OFF-mode taps don't have
+        // resonance to compensate.
+        float qComp = (s.filterType[t] != TAP_FILTER_OFF)
+            ? (1.0f / (1.0f + s.cachedBandQ[t] * 0.1f))
+            : 1.0f;
+        s.fbWeightSum_[t] = fbNormFactor * qComp;
+      }
     }
+    for (int t = tapCount; t < kMaxTaps; t++)
+      s.fbWeightSum_[t] = 0.0f;
 
-    float fbNorm = feedback / (1.0f + 0.15f * sqrtf((float)tapCount));
+    // (Old `fbNorm = feedback / (1 + 0.15 * sqrt(tapCount))` removed —
+    // tap-count normalization is now baked into fbWeightSum_ via the
+    // 1/sqrt(N) factor.)
 
     // Xform gate edge detection
     {
@@ -793,7 +830,6 @@ namespace stolmine
 
       float wetL = 0.0f;
       float wetR = 0.0f;
-      float lastTapOut = 0.0f;
 
       // Pre-pass: smooth the delaySamples used for grain spawn (20ms
       // time constant; tames CV / drift jitter so successive grain
@@ -1016,13 +1052,31 @@ namespace stolmine
         s.tapEnergy[t] += (e - s.tapEnergy[t]) * 0.001f;
       }
 
-      // Feedback: pick last active tap's post-filter output with
-      // Q-compensation (resonance audible but doesn't accumulate).
-      lastTapOut = s.tapOutScratch_[lastActiveTapIdx]
-                 / (1.0f + s.cachedBandQ[lastActiveTapIdx] * 0.1f);
+      // Multi-tap weighted-sum feedback: sum(tapOutScratch_[t] ×
+      // fbWeightSum_[t]) across 8 lanes. The block-rate-baked
+      // fbWeightSum_ folds in feedback amount × 1/sqrt(N) energy
+      // normalization × per-tap Q-comp × inactive-tap mask. Two NEON
+      // quads + horizontal sum; ~8 cycles/sample. Replaces the old
+      // single-tap `lastTapOut × fbNorm` (which produced a thin
+      // single-echo comb at high tap counts).
+      float fb;
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+      {
+        float32x4_t tap0 = vld1q_f32(&s.tapOutScratch_[0]);
+        float32x4_t tap1 = vld1q_f32(&s.tapOutScratch_[4]);
+        float32x4_t w0   = vld1q_f32(&s.fbWeightSum_[0]);
+        float32x4_t w1   = vld1q_f32(&s.fbWeightSum_[4]);
+        float32x4_t fbQ  = vmlaq_f32(vmulq_f32(tap0, w0), tap1, w1);
+        fb = vgetq_lane_f32(fbQ, 0) + vgetq_lane_f32(fbQ, 1)
+           + vgetq_lane_f32(fbQ, 2) + vgetq_lane_f32(fbQ, 3);
+      }
+#else
+      fb = 0.0f;
+      for (int t = 0; t < kMaxTaps; t++)
+        fb += s.tapOutScratch_[t] * s.fbWeightSum_[t];
+#endif
 
       // Feedback: tone-controlled damping + soft limiter
-      float fb = lastTapOut * fbNorm;
       s.fbFilterState += (fb - s.fbFilterState) * fbFilterCoeff;
       float fbOut = s.fbFilterState;
       if (tone > 0.0f)

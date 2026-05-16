@@ -295,6 +295,234 @@ neighbor). Lo halves buffer reads in both grain and direct paths.
 This is a UX decision, not pure optimization. Would need user-facing
 discussion before pursuing.
 
+---
+
+# Petrichor feedback rework (separate workstream)
+
+User complaint: Petrichor "really does not produce much space" — at
+typical 8-tap configs, feedback feels thin/monoacoustic instead of
+filling out the delay network.
+
+## Diagnosis
+
+Current feedback path (`MultitapDelay.cpp:851-857` after Phase 1):
+```cpp
+lastTapOut = tapOutScratch_[lastActiveTapIdx]
+           / (1.0f + cachedBandQ[lastActiveTapIdx] * 0.1f);
+float fb = lastTapOut * fbNorm;  // fbNorm = feedback / (1 + 0.15 * sqrt(tapCount))
+```
+
+Two problems compound:
+1. **Single-tap-source feedback** — only the *last* active tap
+   contributes to the feedback loop. That makes the recirculation
+   a single-echo comb, not a delay network. Pecto deliberately
+   uses this shape (it's a Karplus-Strong / resonator unit); for a
+   Rainmaker-style multi-tap delay it's the wrong default.
+2. **Tap-count attenuation in `fbNorm`** — `feedback / (1 + 0.15 *
+   sqrt(N))`. At N=8 this is feedback × 0.70. Combined with the
+   single-tap source, the recirculation at full taps is ~70% of
+   what a 1-tap config would produce, from one tap.
+
+Together: at 8 taps the user sees a single echo loop attenuated to
+~70%. That's the "no space" symptom.
+
+## Lessons from prior feedback designs
+
+### From Pecto (works as designed)
+Single-tap feedback is **correct** for a comb/resonator (Pecto's
+goal). The unit's character IS the single-tap recirculation.
+
+### From Network Phase 2 (shipped, working)
+Multi-tap weighted-sum feedback with `1/sqrt(N)` normalization +
+per-tap weights. Each tap contributes a portion; summed total
+energy stays roughly constant regardless of N (for uncorrelated
+audio). User dials the feedback amount; weights take care of
+stability.
+
+### From Network cascade FDN postmortem (failed, reverted)
+DO NOT retrofit FDN matrix math (Hadamard cross-feed, Jot decay
+calibration, per-line state vector) onto a multi-tap structure.
+The math fights itself:
+- Per-sample vs per-round-trip matrix application disagreement
+- Multi-tap |H(jω)| comb peaks vs unitary-matrix requirement
+- Sparse vs dense state regime ambiguity
+- Density × Hadamard normalization × T60 cancellation
+
+20 commits over 5 days produced an unstable design that was
+reverted to pre-FDN state. The takeaway: **stay with the simpler
+weighted-sum, don't reach for FDN**.
+
+### From Network's structural separation principle
+- **Multi-tap = early reflections** (coloration mechanism)
+- **Diffusion/space = SEPARATE late-tail mechanism** (FxEngine
+  allpass loop, if added)
+
+If multi-tap weighted feedback alone doesn't give enough space,
+the answer is to ADD a parallel diffusion stage (Phase B) — not
+to try to make the multi-tap path do double duty.
+
+## Phase A design — Multi-tap weighted feedback
+
+Replace `lastTapOut` single-tap extraction with weighted-sum dot
+product over all active taps. Energy normalized by `1/sqrt(N)`;
+per-tap Q-compensation preserved.
+
+### Code changes
+
+**1. Internal addition** (`MultitapDelay.cpp:62`):
+```cpp
+// Per-tap baked feedback contribution weight. Folds:
+//   - feedback amount
+//   - 1/sqrt(activeTapCount) energy normalization
+//   - per-tap Q compensation: 1 / (1 + bandQ * 0.1) for filtered taps,
+//     1.0 for OFF-mode taps
+//   - tap-active mask: 0 for muted (tapLevel < 0.001) and unused lanes
+// NEON-loaded for per-sample weighted-sum dot product.
+float fbWeightSum_[kMaxTaps] __attribute__((aligned(16)));
+```
+
+**2. Init()** — zero `fbWeightSum_[i]` alongside existing inits.
+
+**3. Block-rate setup** — replace the existing single line:
+```cpp
+float fbNorm = feedback / (1.0f + 0.15f * sqrtf((float)tapCount));
+```
+with a per-tap weight bake (placed AFTER the filter coefficient bake
+so `cachedBandQ_[t]` is current):
+```cpp
+// Count active taps for 1/sqrt(N) normalization
+int activeTapCount = 0;
+for (int t = 0; t < tapCount; t++)
+  if (s.tapLevel[t] >= 0.001f) activeTapCount++;
+float fbNormFactor = (activeTapCount > 0)
+    ? feedback / sqrtf((float)activeTapCount)
+    : 0.0f;
+
+for (int t = 0; t < tapCount; t++) {
+  if (s.tapLevel[t] < 0.001f) {
+    s.fbWeightSum_[t] = 0.0f;
+  } else {
+    // Q-comp only for filtered taps; OFF mode taps get unity comp
+    float qComp = (s.filterType[t] != TAP_FILTER_OFF)
+        ? (1.0f / (1.0f + s.cachedBandQ[t] * 0.1f))
+        : 1.0f;
+    s.fbWeightSum_[t] = fbNormFactor * qComp;
+  }
+}
+for (int t = tapCount; t < kMaxTaps; t++)
+  s.fbWeightSum_[t] = 0.0f;
+```
+
+**4. Remove `lastActiveTapIdx` tracking** — no longer needed.
+
+**5. Per-sample inner loop** — replace:
+```cpp
+lastTapOut = s.tapOutScratch_[lastActiveTapIdx]
+           / (1.0f + s.cachedBandQ[lastActiveTapIdx] * 0.1f);
+...
+float fb = lastTapOut * fbNorm;
+```
+with NEON dot product (2 quads):
+```cpp
+// Multi-tap weighted-sum feedback: sum(tapOutScratch_[t] * fbWeightSum_[t])
+// across 8 lanes. Energy normalized by 1/sqrt(N) at block rate so
+// total feedback contribution stays bounded as N varies.
+float fb;
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+  {
+    float32x4_t tap0 = vld1q_f32(&s.tapOutScratch_[0]);
+    float32x4_t tap1 = vld1q_f32(&s.tapOutScratch_[4]);
+    float32x4_t w0   = vld1q_f32(&s.fbWeightSum_[0]);
+    float32x4_t w1   = vld1q_f32(&s.fbWeightSum_[4]);
+    float32x4_t fbQ  = vmlaq_f32(vmulq_f32(tap0, w0), tap1, w1);
+    fb = vgetq_lane_f32(fbQ, 0) + vgetq_lane_f32(fbQ, 1)
+       + vgetq_lane_f32(fbQ, 2) + vgetq_lane_f32(fbQ, 3);
+  }
+#else
+  fb = 0.0f;
+  for (int t = 0; t < kMaxTaps; t++)
+    fb += s.tapOutScratch_[t] * s.fbWeightSum_[t];
+#endif
+```
+
+**6. Existing tone shaping stays intact** — `fbFilterState` LP IIR,
+optional `fbHpState` HP path, `if (|fb| > 1.5) fast_tanh()` soft clip,
+`bufWrite()` injection. All downstream of the new fb computation,
+unaffected.
+
+### Stability analysis
+
+Per-tap fb contribution: `tapOutScratch_[t] × (feedback / sqrt(N) / qComp[t])`.
+
+**Uncorrelated audio** (typical case): sum RMS ≈ sqrt(N) × per-tap-RMS
+× (feedback / sqrt(N)) = feedback × per-tap-RMS. Same as single-tap
+case — designed-in by sqrt(N) normalization.
+
+**Correlated worst case** (taps share filter freq, resonant peaks
+align): peak ≤ N × per-tap-peak × (feedback / sqrt(N)) = sqrt(N) ×
+per-tap-peak × feedback. At N=8, feedback=0.95: peak ≤ 2.69 ×
+per-tap-peak. The existing `|fb| > 1.5 → fast_tanh` soft clip catches
+this. **No new stability rule needed** — Phase 1's soft clip handles
+the worst case.
+
+Compared to current design: at N=8, current peak feedback contribution
+is `tapMax × 0.70` (single tap, attenuated). New design peak is
+`tapMax × 2.69` worst case (8 correlated taps), or `tapMax × 0.95`
+typical (uncorrelated). The dynamic range of "spatial feel" expands
+in both directions: more headroom for rich pattern AND more potential
+for hot peaks (clipped by the existing tanh).
+
+### CPU impact
+
+- Adds: 4 NEON loads + 1 mul + 1 mla + horizontal sum ≈ 8 cycles/sample
+- Removes: scalar lastTapOut compute ≈ 3 cycles/sample
+- Net: ~5 cycles/sample added = **~0.06% CPU**. Negligible.
+
+The CPU win from Phase 1 (25pp drop) easily absorbs this.
+
+### Tone-shaping audition concerns
+
+The existing `fbFilterState` LP IIR was tuned for single-tap
+feedback. With multi-tap weighted-sum:
+- LP IIR sees richer broadband content → tone control still works
+  (it's just a filter) but the perceived "darkness" curve may feel
+  different
+- HP path likewise
+- Soft clip threshold may engage more often on dense audio
+
+These are audition-gated. Tuning may want a follow-up if defaults
+feel wrong.
+
+## Out of scope (Phase A specifically)
+
+- Per-tap user-configurable feedback contribution (Network's
+  "connectivity" / fb selection policy). Default all-active-equal
+  weight is the cleanest first cut.
+- Cross-tap diffusion / Hadamard matrix. Explicitly avoided per
+  Network postmortem.
+- FxEngine diffusion stage (Phase B). Separate UX decision.
+
+## Verification
+
+1. `make spreadsheet ARCH=linux && cp testing/linux/*.pkg ~/.od/rear/`
+2. `make spreadsheet ARCH=am335x`
+3. `tools/check-neon-hints.sh
+   testing/am335x/mods/spreadsheet/MultitapDelay.o` — 0 SUSPECT
+4. Hardware audition (the load-bearing test):
+   - **Confirm space**: at 8 taps, feedback ~0.5-0.7, listen for
+     pattern recirculation (not single-echo). Should feel
+     spatial / diffuse rather than thin / single-bounce.
+   - **Stability**: push feedback to ceiling (0.95), various tap
+     configs, filter settings. No runaway, no harsh resonance
+     buildup. Soft clip should engage cleanly when triggered.
+   - **No regression on single-tap feel**: at tapCount=1, weighted
+     sum = single tap × (feedback / 1) = feedback × tap (same as
+     pre-rework). Single-tap configs should sound identical to
+     before within float precision.
+5. Emu A/B at tapCount=1: RMS within float-precision error.
+   At tapCount=8: WILL differ (designed behavior change).
+6. PKGVERSION bump 2.6.2.47 → 2.6.2.48.
+
 ## Implementation phases
 
 ### Phase 1 — SoA NEON SVF bank + branchless dispatch (O1 + O3)
