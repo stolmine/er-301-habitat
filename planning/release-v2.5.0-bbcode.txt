@@ -1,0 +1,60 @@
+[b]er-301-habitat v2.5.0[/b] -- 2026-05-16
+Requires firmware: v0.7.0-stolmine.9.x
+
+Package updates: [b]spreadsheet 2.6.1 -> 2.7.0[/b], [b]mi 1.0.1 -> 1.0.4[/b], [b]catchall 0.3.0 -> 0.4.0[/b]. biome, kryos, peaks, porcelain, scope unchanged.
+
+[b]Highlights[/b]
+Two new units, both in spreadsheet: Visadhara (phase-modulation matrix voice, 8 voices wide on a NEON 4-lane bus, animated Corona viz) and Network (multi-tap spatial / glitch reverb, promoted from catchall with a fully built-out character macro and new 3D phase-space viz). Big NEON optimization pass across Filterbank, Petrichor, Impasto, Parfait, Helicase, Rings modal. Plaits/Clouds mode switching deterministically fixed; Plaits 6-op FM now 2x oversampled.
+
+[b]New unit: Visadhara (spreadsheet)[/b]
+[list]
+[*]Phase-modulation matrix voice, 8 voices wide, NEON 4-lane voice bus, 2x oversampling on the inner DSP loop
+[*]Per-voice asymmetric pitch envelope, decoherent phase reset on trigger, golden-ratio phase offsets (avoids cancellation patterns of correlated detune)
+[*]Dedicated post-fold envelope; pre-fold soft cap to stay loud and clean simultaneously
+[*]7 plies: V/Oct with octave-register shift sub (Bass/Alto/Tenor), f0 with coarse/fine encoder stepping, trig, Mode with Spread/Harmonics/Morph paramMode subs, fold, level, expanded
+[*]Corona viz: vertical-standing K-gons on a carousel, per-pixel trigger shockwave bands, Fold contour field with photographic inversion when Fold>1, radial-wave interference field, Harmonic radius + Morph star overlays, frame-cached
+[/list]
+
+[b]New unit: Network (spreadsheet)[/b]
+[list]
+[*]Multi-tap spatial / glitch reverb. Promoted from catchall to spreadsheet during this cycle (the audio development happened there; now it sits alongside the other effect units in spreadsheet)
+[*]V1 parallel-multitap audio engine. A cascade FDN rebuild was attempted mid-cycle and reverted in favour of the V1 character. CloudSeed / Faust reverb port candidates queued as follow-up
+[*]Headline UI: gltch ply with G1-G8 mutually-exclusive character modes -- G1 S&H, G2 multi-block stutter (motion-driven reseed, triangular distributions, zero-crossing loop boundaries, NEON 4-wide playback), G3 mute, G4 transient events, G5 scrub, G6 reverse, G7 tap respawn (drift), G8 bitcrush/decimate (with sub-modes). Equal-share CRUSH/SCRUB/REVERSE/NORMAL at glitch=1
+[*]Listener-relative stereo pan, cap of 16 active stutter taps
+[*]Viz: listener-centered Fibonacci sphere with per-tap trails, sonar + reflector flash, motion-driven Fibonacci perturbation, tilted 3D ping rings with reverse counter-rotation, motion-independent ping speed
+[/list]
+
+[b]Optimization pass (secondary)[/b]
+None of these change audio character meaningfully; all free CPU budget at the same fidelity.
+[list]
+[*]Filterbank (was Tomograph): full NEON SoA SVF bank, drops stereo CPU to about 8% at 16 bands
+[*]Petrichor: NEON SoA SVF kernel + multi-tap weighted feedback (true delay character) + default buffer 20s -> 5s
+[*]Impasto + Parfait: NEON SoA refactor + fast paths
+[*]Helicase: polynomial sin/tanh saves about 5% CPU on lofi mode; carrier shape ply parity fix; morph-hoist + discFold polish
+[*]Rings modal kernel (mi): about 10-15% inner-loop speedup
+[/list]
+
+[b]Minor[/b]
+[list]
+[*]Cortex-A8 NEON build defense: -fno-tree-vectorize appended last in CFLAGS for am335x across every mods/<pkg>/mod.mk. Link-time NEON alignment-hint lint via tools/check-neon-hints.sh. Eliminates a recurring class of "works in emu, crashes on hardware" bugs caused by auto-vec emitting :64/:128 hints that trap when alignment inference goes wrong under -ffast-math
+[*]Plaits / Clouds mode switching deterministically fixed on hardware (was an occasional hard-fault on engine swap). Belt-and-suspenders mi_barrier_noop() AAPCS spill barrier at audio-thread state-swap points
+[*]Plaits 6-op FM (engines 5/6/7) now runs 2x oversampled. Less upper-octave aliasing on FM patches with mild treble rolloff from the gentle MA filter. kSixOpOversampling=1 in six_op_engine.cc is the one-line revert
+[*]AlembicSphereGraphic preventative refactor to v2.4.1's inline-virtual pattern (no-out-of-line-virtuals rule)
+[*]SWIG wrapper auto-tracks header changes across every mods/<pkg>/mod.mk
+[*]Dev-box portability install script + Claude memory rehydration snippets
+[/list]
+
+[b]Behavior changes from v2.4.1[/b]
+[list]
+[*]Plaits 6-op FM noticeably less grainy in upper octaves; some loss of brightness from the gentle MA filter
+[*]Plaits / Clouds mode switching no longer crashes on hardware
+[*]Petrichor default buffer halved-and-then-some (20s -> 5s); multi-tap weighted feedback gives delay character not resonator
+[*]Helicase polynomial sin/tanh: audibly unchanged at hifi, saves about 5% CPU on lofi
+[*]Network: was catchall.Network, now spreadsheet.Network -- saved patches need a re-bind on this one unit
+[/list]
+
+[b]Migration[/b]: Network unit reference moved from catchall to spreadsheet. Re-bind affected patches. No other breaking changes.
+
+[b]Known issues[/b]: D8 highlight bug from v2.4.0 still present. Pecto Doppler slew-time exposure still deferred. Alembic Phase 6 serialization still deferred. Remaining 169-179 NEON alignment-hint suspects flagged by the lint per DSP-heavy package are explicit-intrinsic NEON on heap-allocated data that IS aligned at runtime (false positives the script cannot statically verify).
+
+Full notes + binaries: <github release URL>
