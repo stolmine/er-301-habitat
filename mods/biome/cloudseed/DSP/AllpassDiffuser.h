@@ -23,6 +23,7 @@ THE SOFTWARE.
 #pragma once
 
 #include <vector>
+#include <cmath> // ER-301 port: pow()
 #include "ModulatedAllpass.h"
 #include "RandomBuffer.h"
 
@@ -148,7 +149,7 @@ namespace Cloudseed
 			for (int i = 0; i < MaxStageCount; i++)
 			{
 				auto r = seedValues[i];
-				auto d = std::pow(10, r) * 0.1; // 0.1 ... 1.0
+				auto d = pow(10, r) * 0.1; // 0.1 ... 1.0   // ER-301 port: drop std::
 				filters[i].SampleDelay = (int)(delay * d);
 			}
 		}

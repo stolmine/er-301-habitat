@@ -25,6 +25,8 @@ THE SOFTWARE.
 #include "ModulatedDelay.h"
 #include "Utils.h"
 #include <stdint.h>
+#include <cstdlib> // ER-301 port: RAND_MAX / rand()
+#include <cmath>   // ER-301 port: fmod()
 
 namespace Cloudseed
 {
@@ -33,7 +35,7 @@ namespace Cloudseed
 	private:
 
 		static const int ModulationUpdateRate = 8;
-		static const int DelayBufferSize = 192000 * 2;
+		static const int DelayBufferSize = 50000; // ER-301 port: ~1s+ at 48kHz (was 384000 = 4s at 192kHz). Max LateLineSize is 1000ms.
 
 		float delayBuffer[DelayBufferSize] = { 0 };
 		int writeIndex;
@@ -58,7 +60,7 @@ namespace Cloudseed
 			readIndexB = 0;
 			samplesProcessed = 0;
 
-			modPhase = 0.01 + 0.98 * (std::rand() / (float)RAND_MAX);
+			modPhase = 0.01 + 0.98 * (rand() / (float)RAND_MAX); // ER-301 port: drop std::
 			gainA = 0;
 			gainB = 0;
 
@@ -103,9 +105,9 @@ namespace Cloudseed
 		{
 			modPhase += ModRate * ModulationUpdateRate;
 			if (modPhase > 1)
-				modPhase = std::fmod(modPhase, 1.0);
+				modPhase = fmod(modPhase, 1.0); // ER-301 port: drop std::
 
-			auto mod = std::sinf(modPhase * 2 * M_PI);
+			auto mod = sinf(modPhase * 2 * M_PI); // ER-301 port: drop std::
 			auto totalDelay = SampleDelay + ModAmount * mod;
 
 			auto delayA = (int)totalDelay;

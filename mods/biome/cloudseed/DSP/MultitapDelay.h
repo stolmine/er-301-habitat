@@ -35,7 +35,7 @@ namespace Cloudseed
 	{
 	public:
 		static const int MaxTaps = 256;
-		static const int DelayBufferSize = 192000 * 2;
+		static const int DelayBufferSize = 50000; // ER-301 port: ~1s+ at 48kHz (was 384000 = 4s at 192kHz). Max TapLength is 1000ms.
 
 	private:
 		float delayBuffer[DelayBufferSize] = { 0 };
@@ -99,7 +99,7 @@ namespace Cloudseed
 		void Process(float* input, float* output, int bufSize)
 		{
 			float lengthScaler = lengthSamples / (float)count;
-			float totalGain = 3.0 / std::sqrtf(1 + count);
+			float totalGain = 3.0 / sqrtf(1 + count); // ER-301 port: drop std:: (newlib lacks sqrtf in std::)
 			totalGain *= (1 + decay * 2);
 
 			for (int i = 0; i < bufSize; i++)
@@ -110,7 +110,7 @@ namespace Cloudseed
 				for (int j = 0; j < count; j++)
 				{
 					float offset = tapPosition[j] * lengthScaler;
-					float decayEffective = std::expf(-offset / lengthSamples * 3.3) * decay + (1-decay);
+					float decayEffective = expf(-offset / lengthSamples * 3.3) * decay + (1-decay); // ER-301 port: drop std::
 					int readIdx = writeIdx - (int)offset;
 					if (readIdx < 0) readIdx += DelayBufferSize;
 

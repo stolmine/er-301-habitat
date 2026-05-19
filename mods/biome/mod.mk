@@ -48,6 +48,14 @@ EURORACK = eurorack
 INCLUDES = $(MOD_DIR) mods $(SDKPATH) $(SDKPATH)/arch/$(ARCH) $(SDKPATH)/emu $(EURORACK)
 
 SYMBOLS = TEST
+# (Cloudling/CloudSeed wind-down 2026-05-18: BUFFER_SIZE=128 was added
+# during Phase B to size the cloudseed DSP stack-arrays for FRAMELENGTH.
+# Phase B was shelved at biome 2.2.0.17 -- ReverbController::Process
+# hangs Cortex-A8 on first call regardless of compiler-opt level or
+# input data. See planning/cloudseed-port-plan.md "2026-05-17/18 wind
+# down" for the full bisect record. CloudSeed standalone .cpp files
+# don't reference BUFFER_SIZE so leaving it undefined here is safe;
+# future Phase B revisit will need to re-add it.)
 
 CFLAGS.common = -Wall -ffunction-sections -fdata-sections
 CFLAGS.speed = -O3 -ftree-vectorize -ffast-math

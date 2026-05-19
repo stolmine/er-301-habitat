@@ -25,13 +25,14 @@ THE SOFTWARE.
 #include "ModulatedAllpass.h"
 #include "Utils.h"
 #include <cmath>
+#include <cstdlib> // ER-301 port: RAND_MAX / rand() not transitively included on newlib
 
 namespace Cloudseed
 {
 	class ModulatedAllpass
 	{
 	public:
-		static const int DelayBufferSize = 19200; // 100ms at 192Khz
+		static const int DelayBufferSize = 2400; // ER-301 port: 50ms at 48kHz (was 19200 = 100ms at 192kHz). Allpass diffusion stages don't need more than ~50ms.
 		static const int ModulationUpdateRate = 8;
 
 	private:
@@ -60,7 +61,7 @@ namespace Cloudseed
 			index = DelayBufferSize - 1;
 			samplesProcessed = 0;
 
-			modPhase = 0.01 + 0.98 * std::rand() / (float)RAND_MAX;
+			modPhase = 0.01 + 0.98 * rand() / (float)RAND_MAX; // ER-301 port: drop std::
 			delayA = 0;
 			delayB = 0;
 			gainA = 0;
@@ -162,9 +163,9 @@ namespace Cloudseed
 		{
 			modPhase += ModRate * ModulationUpdateRate;
 			if (modPhase > 1)
-				modPhase = std::fmod(modPhase, 1.0);
+				modPhase = fmod(modPhase, 1.0); // ER-301 port: drop std::
 
-			auto mod = std::sinf(modPhase * 2 * M_PI);
+			auto mod = sinf(modPhase * 2 * M_PI); // ER-301 port: drop std::
 
 			if (ModAmount >= SampleDelay) // don't modulate to negative value
 				ModAmount = SampleDelay - 1;

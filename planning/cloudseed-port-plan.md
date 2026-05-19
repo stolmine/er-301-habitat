@@ -345,3 +345,111 @@ G4. Final PKGVERSION bump for release.
   scratch arrays
 - `feedback_viz_encoder_capture_architectural` — viz draw-path
   structure rules
+
+---
+
+## 2026-05-17/18 wind-down: Phase A done, Phase B shelved (hard freeze on first audio frame)
+
+### What landed (Phase A, committed at `2190131`)
+
+- `mods/biome/cloudseed/` vendored from GhostNoteAudio/CloudSeedCore master
+- `mods/biome/cloudseed/Parameters.h` portability shim: `strcpy_s -> snprintf` for non-MSVC, `MAX_STR_SIZE = 32`
+- `mods/biome/mod.mk` CLOUDSEED_CPP variable listing the 3 .cpp files (Parameters.cpp, DSP/Biquad.cpp, DSP/RandomBuffer.cpp). MOD_CPP wildcard only globs one level so subdirectory .cpp needs explicit listing.
+- biome PKGVERSION 2.2.0 -> 2.2.0.1
+
+Cloudseed/* code is still compiled into libbiome.so as dormant code (no consumer). No user-facing change. No registered unit. No `Cloudling` in the picker.
+
+### What was tried, what failed, what we learned
+
+A full evening of Phase B iteration through biome dev versions 2.2.0.2 -> 2.2.0.17. None of them produced a working unit on hardware. The trace below is the durable knowledge transfer for future revisit.
+
+#### Phase B attempt 1: Cloudling wrapper + stereo audio path
+
+- `mods/biome/Cloudling.{h,cpp}` od::Object subclass
+- Stereo `In L/R` / `Out L/R` matching Stratos's port-naming convention
+- pImpl idiom: `Internal` struct owns `Cloudseed::ReverbController`
+- Hardcoded DarkPlate preset baked into Internal::loadDarkPlate (45 SetParameter calls, exact values copied from upstream Programs.h initPrograms())
+- Lua wrapper with stereo wiring + mono fallback, empty `onLoadViews`
+- SWIG hook in biome.cpp.swig
+- toc.lua registration
+
+Insert hard-froze the device every time. Took many iterations through structural memories to converge on the actual failure surface.
+
+#### Pre-existing portability fixes that DID need to land
+
+These are real things future Phase B will need to re-apply (we partially reverted them at wind-down but they're documented here):
+
+- **MSVC isms in upstream**: `strcpy_s` -> `snprintf`, `MAX_STR_SIZE` define (already in Phase A's Parameters.h shim)
+- **std:: namespace drops on newlib**: `std::sqrtf` -> `sqrtf`, `std::expf` -> `expf`, `std::sinf` -> `sinf`, `std::fmod` -> `fmod`, `std::pow` -> `pow`, `std::sqrt` -> `sqrt`, `std::rand` -> `rand`. Newlib does not put C math functions in `std::`.
+- **Missing transitive includes**: `<cstdlib>` for `rand()`/`RAND_MAX`, `<cmath>` for `pow`/`fmod`. Add to `ModulatedAllpass.h`, `ModulatedDelay.h`, `AllpassDiffuser.h`.
+
+These edits should each be one-line with an `// ER-301 port:` inline comment so future upstream syncs stay diffable.
+
+#### Things ruled OUT as the cause of the hardware hang (with confidence)
+
+Each of these was tried and verified-not-the-issue via SD-trace logging:
+
+- ✗ NEON `:64`/`:128` alignment hints in libbiome.so (`tools/check-neon-hints.sh` reports `clean (0 safe, 0 suspect)`)
+- ✗ Out-of-line virtuals on the Cloudling class (vtable confirmed COMDAT-weak via objdump after moving virtuals inline; `mods/biome/Cloudling.cpp` keeps non-virtual `doConstruct_/doDestruct_/doProcess_` helpers behind inline virtual delegators)
+- ✗ SWIG wrapper staleness (force-clean rebuild + version bump each round)
+- ✗ Lua-side framework error (initial `attempt to call a nil value (method 'setParentWidget')` was `onLoadViews` returning a single table instead of `(controls, views)` two-tuple; once fixed, Lua-side is clean)
+- ✗ Regular heap exhaustion from large `new Internal()` (initial 17 MB heap allocation; moved to `od::BigHeap::allocateZeroed` per Petrichor precedent, shrank constants to ~4 MB)
+- ✗ BigHeap pointer alignment (LeastWasteAllocator does NOT align; manually round to 16 bytes via `(raw + 15) & ~15` before placement-new). Cortex-A8 hard-faults on misaligned access to `double` and `uint64_t` members in `ReverbController`.
+- ✗ Construction-cascade fault. SD trace proved the full construction completes including all 45 SetParameter calls in `loadDarkPlate`.
+- ✗ Compiler optimization (`-O3 -ffast-math` miscompile). Tested with `#pragma GCC optimize("O0")` on Cloudling.cpp + 3 cloudseed .cpp files. Same hang.
+- ✗ Input data (NaN cascade from input × uninit state). Tested by feeding static zero buffers to `Process` instead of live input. Same hang.
+
+#### The hard finding
+
+```
+Cloudling: doProcess_ call=0 ENTER (zero-input)
+```
+
+…is the last line written to `1:/ER-301/logs/cloudling-trace.log` (front SD). No `call=0 EXIT`. Whatever runs inside `ReverbController::Process` on its first invocation, the audio thread hangs and the device freezes hard (no Lua-error path triggers; no crash report; full power-cycle required).
+
+This is consistent with one of:
+- An infinite loop inside one of the per-sample inner DSP loops (`ModulatedDelay::Process`, `ModulatedAllpass::Process`, `MultitapDelay::Process`, `AllpassDiffuser::Process`, `DelayLine::Process`) triggered by some initial-state value
+- A NaN/denormal storm cascading through feedback paths that pegs the FP unit at full throttle, exceeding the audio thread's CPU budget enough to trigger a watchdog or scheduler-level freeze
+- A Cortex-A8-specific instruction sequence in the compiled DSP that hits an undocumented behavior (but the `-O0` test rules out compiler-introduced sequences for the most part)
+
+#### Front SD log path on hardware (verified working)
+
+For future C++-side syncTrace from biome: **`1:/ER-301/logs/<name>.log`**. Drives are mapped per `er-301/app/app.cpp:91`: `front="1:"`, `rear="0:"`, `x="x:"`. The earlier-attempted `"0:/..."` path lands on the rear (extracted-libs) SD which isn't writable from the unit context.
+
+Pattern that worked:
+
+```cpp
+static void syncTrace(const char* fmt, ...) {
+  FILE* f = fopen("1:/ER-301/logs/cloudling-trace.log", "a");
+  if (!f) return;
+  va_list ap; va_start(ap, fmt);
+  vfprintf(f, fmt, ap);
+  va_end(ap);
+  fputc('\n', f); fflush(f); fclose(f);
+}
+```
+
+The fclose forces FatFS to commit before returning. Every line lands on the card before the next instruction. Slow (one open/close per line) but survives hard crash provided the device hasn't pegged the SD bus.
+
+`syncTrace` is per-instance noise — wrap any further bisect in a static call counter so the first N frames trace and subsequent frames don't.
+
+### What's needed to actually continue Phase B
+
+- **Serial UART or JTAG access to the device.** SD trace works for setup but the per-frame audio cost makes it useless for bisecting inside `ReverbController::Process`. A serial console would let us instrument each sub-stage (preDelay / multitap / diffuser / lines / mixing) at audio rate without writing to the SD.
+- **In-source instrumentation of `ReverbChannel::Process`** to isolate which sub-stage hangs. Heavy upstream surgery but unavoidable without the above. Cost: 5+ hardware cycles even with serial.
+- **Alternative**: shrink the reverb to the minimum DSP shape (1 line, no diffusion, no multitap, no early reflections) and try inserting that. If even minimal-Process hangs, the issue is fundamental to the framework's audio-thread interaction with this code; if minimal works, build back up sub-stage by sub-stage.
+
+### State of `mods/biome/cloudseed/` after wind-down
+
+- All cloudseed `.h` files retain their tuning changes from Phase B (TotalLineCount=5, smaller DelayBufferSize constants, lineCount default change, LateLineCount clamp). These are not consumed by anything in the build today; they sit as a baseline for future work. Reverting them to upstream is a future-maintainer call.
+- All cloudseed std:: portability drops are preserved.
+- The `-O0` diagnostic pragmas added on the 3 standalone .cpp files have been removed (cleaned up).
+- mod.mk's CLOUDSEED_CPP entries remain (3 .cpp files compile into libbiome.so but produce no useful symbol). PKGVERSION reverted to 2.2.0.1 (Phase A state).
+
+### Plan-doc bookkeeping
+
+- Cloudling unit is NOT in the picker (toc.lua reverted)
+- biome.cpp.swig has no Cloudling include
+- No Cloudling.{h,cpp,lua} on disk
+- biome 2.2.0.1 is the published-dev state; biome 2.2.0 was the last public release (v2.5.0)
+- The Phase B development versions 2.2.0.2 -> 2.2.0.17 exist only as historical dev iterations and won't be referenced again

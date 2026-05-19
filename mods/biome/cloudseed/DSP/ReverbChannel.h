@@ -47,7 +47,7 @@ namespace Cloudseed
 	class ReverbChannel
 	{
 	private:
-		static const int TotalLineCount = 12;
+		static const int TotalLineCount = 5; // ER-301 port: was 12 (Daisy-port reference uses 5). Cuts ~7 * 307KB per channel from heap.
 
 		double paramsScaled[Parameter::COUNT] = { 0.0 };
 		int samplerate;
@@ -83,7 +83,7 @@ namespace Cloudseed
 		{
 			this->channelLr = leftOrRight;
 			crossSeed = 0.0;
-			lineCount = 8;
+			lineCount = TotalLineCount; // ER-301 port: was 8, but TotalLineCount may now be smaller. Default to max-safe.
 			diffuser.SetInterpolationEnabled(true);
 			highPass.SetCutoffHz(20);
 			lowPass.SetCutoffHz(20000);
@@ -210,6 +210,8 @@ namespace Cloudseed
 				break;
 			case Parameter::LateLineCount:
 				lineCount = (int)scaledValue;
+				if (lineCount > TotalLineCount) lineCount = TotalLineCount; // ER-301 port: clamp to static array
+				if (lineCount < 1) lineCount = 1;
 				break;
 			case Parameter::LateDiffuseEnabled:
 				for (int i = 0; i < TotalLineCount; i++)
@@ -375,7 +377,7 @@ namespace Cloudseed
 	private:
 		float GetPerLineGain()
 		{
-			return 1.0 / std::sqrt(lineCount);
+			return 1.0 / sqrt(lineCount); // ER-301 port: drop std::
 		}
 
 		void UpdateLines()
