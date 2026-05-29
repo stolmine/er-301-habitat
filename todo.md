@@ -314,8 +314,9 @@ Refinements:
 - [ ] Channel focus display switching — show L or R based on channel button selection
   - MiniScope supports runtime watchOutlet(), but SDK has no channel focus callback for custom ViewControls
   - Need to find where channel button events are dispatched in Lua UI layer
-- [ ] Timebase and gain controls (requires custom graphic or MiniScope subclass)
+- [x] Timebase and gain controls (scope dev 1.1.0.1). Header-only `ScopeGraphic.h` package-side, aped from firmware MiniScope, exposes `setDecimation` (uses public `FifoProbe::setDecimation`) and `setGain` (Y-axis scale in `calculate()`). Shared `ScopeView.lua` ViewControl with sub-display Time (7 stops, 1x..64x) + Gain (5 stops, 0.25x..4x) selectors driven by M1/M2 focus + encoder stepping. All three variants (Scope, Scope 2x, Scope Stereo) share the same view; stereo applies time/gain to both L and R graphics. State persists via Unit serialize/deserialize. No firmware changes. Plan: planning/scope-timebase-gain.md. **Open issue (2026-05-29)**: graphics not appearing on hardware in chain row — needs root-cause; emu vs hw divergence suspected.
 - [ ] Research headerless unit display (SDK hardcodes header — not currently possible)
+- [ ] Voltmeter unit in scope package. Inline numeric readout of input signal — V, possibly mV / Hz / dB selectable. Model on Joe Filbrun's Accents tuner (large-glyph centered readout). Passthrough audio, sample-and-hold the meter value at a slow refresh rate (~10-20 Hz) so the digits are readable. Decide: instantaneous vs RMS vs peak vs min/max-hold modes; bipolar sign display; precision (0.01 V is plenty for patch debugging). Single-slot. Useful as a patch-bay sanity tool — currently the only way to read a CV level is via a unit's readout strip.
 
 ## Serialization Audit
 

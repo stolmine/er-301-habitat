@@ -106,7 +106,7 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Larets | Stepped multi-effect -- 10 effects (stutter/reverse/bitcrush/downsample/filter/pitch shift/distortion/shuffle/delay/comb) with clock-locked buffer tricks, CPR single-band compressor, bipolar global param offset, 16-step sequencer with xform gate |
 | | Colmatage | Clock-driven breakbeat cutter -- WarpCut-derived algorithm with parameterized block size, repeat count, accel/ritard geometric series, bipolar duty cycle (reverse on negative), tanh saturation. Based on Nick Collins' BBCut library via Livecut |
 | | Pecto | Comb resonator -- 16 tap patterns, 4 resonator types (raw/guitar/clarinet/sitar), V/Oct, xform gate randomization |
-| **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization -- stereo-aware passthrough with waveform display |
+| **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization -- stereo-aware passthrough with waveform display, user-controllable timebase (1x-64x) and Y-axis gain (0.25x-4x) |
 | | Spectrogram | Inline FFT spectrum analyzer -- 256-point pffft, stereo passthrough, peak hold + RMS gradient |
 | **catchall** | Sfera | Z-plane morphing filter -- 32 configs, audio-reactive ferrofluid visualization (experimental) |
 | | Lambda | Seeded procedural synth -- PRNG wavetable + filter bank generation (experimental) |
