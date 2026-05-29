@@ -106,8 +106,23 @@ function ScopeView:init(args)
   self.gainLabel:setCenter(col2, center3)
   self.subGraphic:addChild(self.gainLabel)
 
+  local voltDesc = app.Label("VOLT", 10)
+  voltDesc:setJustification(app.justifyCenter)
+  voltDesc:setForegroundColor(app.GRAY7)
+  voltDesc:setCenter(col3, line1)
+  self.subGraphic:addChild(voltDesc)
+
+  -- Read-only voltage readout. Follows the first scope graphic for
+  -- the rolling-mean voltage; right-justified inside its region so
+  -- the decimal column stays put as digits change.
+  local readout = libscope.ScopeVoltsReadout(col3 - 24, center3 - 7, 48, 14)
+  readout:follow(self.scopes[1])
+  self.subGraphic:addChild(readout)
+  self.voltsReadout = readout
+
   self.subGraphic:addChild(app.SubButton("time", 1))
   self.subGraphic:addChild(app.SubButton("gain", 2))
+  self.subGraphic:addChild(app.SubButton("volt", 3))
 
   self.timeIdx = TIME_DEFAULT
   self.gainIdx = GAIN_DEFAULT
@@ -122,12 +137,19 @@ function ScopeView:applyTime()
   local d = DECIMATION[self.timeIdx]
   for _, s in ipairs(self.scopes) do s:setDecimation(d) end
   self.timeLabel:setText(TIME_LABELS[self.timeIdx])
+  -- Re-fit + re-center so the box expands/shrinks around the new text
+  -- rather than clipping wider readouts ("0.25x", "16x") against the
+  -- fixed box from the initial fitToText.
+  self.timeLabel:fitToText(4)
+  self.timeLabel:setCenter(col1, center3)
 end
 
 function ScopeView:applyGain()
   local g = GAIN_VALUES[self.gainIdx]
   for _, s in ipairs(self.scopes) do s:setGain(g) end
   self.gainLabel:setText(GAIN_LABELS[self.gainIdx])
+  self.gainLabel:fitToText(4)
+  self.gainLabel:setCenter(col2, center3)
 end
 
 function ScopeView:bumpTime(delta)

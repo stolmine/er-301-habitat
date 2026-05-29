@@ -86,6 +86,13 @@ namespace scope_unit
       mOffset = offset;
     }
 
+    // Rolling mean of the visible window scaled to volts (ER-301
+    // FULLSCALE_IN_VOLTS = 10). Stable for DC and V/Oct, ~0 for AC.
+    float getVolts() const
+    {
+      return mVoltsMean * 10.0f;
+    }
+
 #ifndef SWIGLUA
     virtual void draw(od::FrameBuffer &fb)
     {
@@ -159,6 +166,7 @@ namespace scope_unit
     float mTriggerThreshold = 0.0f;
     float mGain = 1.0f;
     float mOffset = 0.0f;
+    float mVoltsMean = 0.0f;
     int   mHorizontalSync = 0;
     int   mDecimation = 2;
     int   mCalculateCount = 0;
@@ -176,6 +184,13 @@ namespace scope_unit
       float *values = mpProbe->get(n);
 
       mTriggerThreshold = mEWMA.push(values, n);
+
+      // Rolling mean across the full probe buffer — integration window
+      // is depth * decimation / sampleRate (~0.33 s at decimation=2,
+      // ~10 s at decimation=64). Drives the voltmeter readout.
+      float sum = 0.0f;
+      for (int j = 0; j < n; j++) sum += values[j];
+      mVoltsMean = sum / (float)n;
 
       // search outward from the buffer midpoint for a below-to-above
       // (or above-to-below) crossing — gives a stable trigger.
