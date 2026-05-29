@@ -4,6 +4,7 @@
 %{
 #undef SWIGLUA
 #include "Scope.h"
+#include "ScopeControlBox.h"
 #include "ScopeGraphic.h"
 #include "ScopeVoltsReadout.h"
 #include "Spectrogram.h"
@@ -11,6 +12,7 @@
 %}
 
 %include "Scope.h"
+%include "ScopeControlBox.h"
 %include "ScopeGraphic.h"
 %include "ScopeVoltsReadout.h"
 %include "Spectrogram.h"

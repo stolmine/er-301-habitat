@@ -14,8 +14,6 @@ local ViewControl = require "Unit.ViewControl"
 local Encoder = require "Encoder"
 local ply = app.SECTION_PLY
 
-local line1 = app.GRID5_LINE1
-local center1 = app.GRID5_CENTER1
 local center3 = app.GRID5_CENTER3
 local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
@@ -75,48 +73,37 @@ function ScopeView:init(args)
     self.scopes[1] = scope
   end
 
-  -- Sub-display: Time + Gain selectors
+  -- Sub-display: Time / Gain / Volt readouts. Each value sits inside
+  -- a ScopeControlBox that renders dotted when unfocused, solid when
+  -- focused (Volt is read-only so its box stays dotted).
   self.subGraphic = app.Graphic(0, 0, 128, 64)
 
-  local timeDesc = app.Label("TIME", 10)
-  timeDesc:setJustification(app.justifyCenter)
-  timeDesc:setForegroundColor(app.GRAY7)
-  timeDesc:setCenter(col1, line1)
-  self.subGraphic:addChild(timeDesc)
+  self.timeBox = libscope.ScopeControlBox(0, 0, 22, 16)
+  self.subGraphic:addChild(self.timeBox)
 
   self.timeLabel = app.Label(TIME_LABELS[TIME_DEFAULT], 12)
-  self.timeLabel:fitToText(4)
   self.timeLabel:setJustification(app.justifyCenter)
   self.timeLabel:setForegroundColor(app.WHITE)
-  self.timeLabel:setCornerRadius(3, 3, 3, 3)
-  self.timeLabel:setCenter(col1, center3)
   self.subGraphic:addChild(self.timeLabel)
 
-  local gainDesc = app.Label("GAIN", 10)
-  gainDesc:setJustification(app.justifyCenter)
-  gainDesc:setForegroundColor(app.GRAY7)
-  gainDesc:setCenter(col2, line1)
-  self.subGraphic:addChild(gainDesc)
+  self.gainBox = libscope.ScopeControlBox(0, 0, 22, 16)
+  self.subGraphic:addChild(self.gainBox)
 
   self.gainLabel = app.Label(GAIN_LABELS[GAIN_DEFAULT], 12)
-  self.gainLabel:fitToText(4)
   self.gainLabel:setJustification(app.justifyCenter)
   self.gainLabel:setForegroundColor(app.WHITE)
-  self.gainLabel:setCornerRadius(3, 3, 3, 3)
-  self.gainLabel:setCenter(col2, center3)
   self.subGraphic:addChild(self.gainLabel)
 
-  local voltDesc = app.Label("VOLT", 10)
-  voltDesc:setJustification(app.justifyCenter)
-  voltDesc:setForegroundColor(app.GRAY7)
-  voltDesc:setCenter(col3, line1)
-  self.subGraphic:addChild(voltDesc)
+  -- Volt: wider box because "-9.999" is the longest readout.
+  self.voltBox = libscope.ScopeControlBox(0, 0, 44, 16)
+  self.voltBox:setCenter(col3, center3)
+  self.subGraphic:addChild(self.voltBox)
 
-  -- Read-only voltage readout. Follows the first scope graphic for
-  -- the rolling-mean voltage; right-justified inside its region so
-  -- the decimal column stays put as digits change.
-  local readout = libscope.ScopeVoltsReadout(col3 - 24, center3 - 7, 48, 14)
+  -- Read-only rolling-mean voltage. Right-justified inside its area
+  -- so the decimal column stays put as digits change.
+  local readout = libscope.ScopeVoltsReadout(0, 0, 40, 12)
   readout:follow(self.scopes[1])
+  readout:setCenter(col3, center3)
   self.subGraphic:addChild(readout)
   self.voltsReadout = readout
 
@@ -133,23 +120,28 @@ function ScopeView:init(args)
   self:applyGain()
 end
 
+local function sizeBoxToLabel(box, label, col, row)
+  -- fitToText sets the label's intrinsic size to its rendered text plus
+  -- padding. Mirror that into the box (slightly larger so the border
+  -- doesn't clip the glyphs) and re-center both at the column.
+  label:fitToText(4)
+  box:setSize(label.mWidth + 4, label.mHeight + 4)
+  box:setCenter(col, row)
+  label:setCenter(col, row)
+end
+
 function ScopeView:applyTime()
   local d = DECIMATION[self.timeIdx]
   for _, s in ipairs(self.scopes) do s:setDecimation(d) end
   self.timeLabel:setText(TIME_LABELS[self.timeIdx])
-  -- Re-fit + re-center so the box expands/shrinks around the new text
-  -- rather than clipping wider readouts ("0.25x", "16x") against the
-  -- fixed box from the initial fitToText.
-  self.timeLabel:fitToText(4)
-  self.timeLabel:setCenter(col1, center3)
+  sizeBoxToLabel(self.timeBox, self.timeLabel, col1, center3)
 end
 
 function ScopeView:applyGain()
   local g = GAIN_VALUES[self.gainIdx]
   for _, s in ipairs(self.scopes) do s:setGain(g) end
   self.gainLabel:setText(GAIN_LABELS[self.gainIdx])
-  self.gainLabel:fitToText(4)
-  self.gainLabel:setCenter(col2, center3)
+  sizeBoxToLabel(self.gainBox, self.gainLabel, col2, center3)
 end
 
 function ScopeView:bumpTime(delta)
@@ -173,13 +165,10 @@ function ScopeView:bumpGain(delta)
 end
 
 function ScopeView:refreshFocusVisual()
-  if self.focusedSlot == "gain" then
-    self.timeLabel:setBorder(0)
-    self.gainLabel:setBorder(1)
-  else
-    self.timeLabel:setBorder(1)
-    self.gainLabel:setBorder(0)
-  end
+  -- Solid border on the focused slot's box, dotted on the other two.
+  -- Volt is read-only so it always renders dotted.
+  self.timeBox:setFocused(self.focusedSlot == "time")
+  self.gainBox:setFocused(self.focusedSlot == "gain")
 end
 
 function ScopeView:subReleased(i, shifted)
@@ -211,8 +200,8 @@ function ScopeView:onCursorEnter(spot)
 end
 
 function ScopeView:onCursorLeave(spot)
-  self.timeLabel:setBorder(0)
-  self.gainLabel:setBorder(0)
+  self.timeBox:setFocused(false)
+  self.gainBox:setFocused(false)
   ViewControl.onCursorLeave(self, spot)
 end
 
