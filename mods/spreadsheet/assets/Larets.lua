@@ -43,10 +43,11 @@ end
 function Larets:onLoadGraph(channelCount)
   local op = self:addObject("op", libspreadsheet.Larets())
 
-  connect(self, "In1", op, "In")
-  connect(op, "Out", self, "Out1")
+  connect(self, "In1", op, "In L")
+  connect(op, "Out L", self, "Out1")
   if channelCount > 1 then
-    connect(op, "Out", self, "Out2")
+    connect(self, "In2", op, "In R")
+    connect(op, "Out R", self, "Out2")
   end
 
   local clock = self:addObject("clock", app.Comparator())

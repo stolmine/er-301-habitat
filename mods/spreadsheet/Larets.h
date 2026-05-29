@@ -17,11 +17,13 @@ namespace stolmine
 #ifndef SWIGLUA
     virtual void process();
 
-    od::Inlet mIn{"In"};
+    od::Inlet mInL{"In L"};
+    od::Inlet mInR{"In R"};
     od::Inlet mClock{"Clock"};
     od::Inlet mReset{"Reset"};
     od::Inlet mTransform{"Transform"};
-    od::Outlet mOut{"Out"};
+    od::Outlet mOutL{"Out L"};
+    od::Outlet mOutR{"Out R"};
 
     od::Parameter mStepCount{"StepCount", 8.0f};
     od::Parameter mSkew{"Skew", 0.0f};
@@ -80,7 +82,7 @@ namespace stolmine
     int mSamplesSinceLastClock = 0;
 
     void applyTransform();
-    float processEffect(float input, int type, float param, float stepProgress);
+    float processEffect(float input, Internal &s, int channel, int type, float param, float stepProgress);
 #endif
   };
 

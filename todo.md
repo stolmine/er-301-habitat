@@ -42,6 +42,7 @@
 ### Larets
 - [ ] Stutter vs shuffle viz distinction: both read similar at a glance. Stutter should show boxed loop window, shuffle should show rearranged fragment blocks.
 - [x] Playhead stuck past new bound on stepCount reduce. Same mStep modulo-wrap as Excel/Ballot, applied at top of audio block after stepCount refresh. Etcher audited: mActiveSegment is recomputed from input CV each sample, so no stale-playhead vector exists there.
+- [x] True stereo operation (spreadsheet dev 2.7.0.1). Internal-stereo C++ Object pattern rather than dual-instance: shared sequencer / step program / CPR detector / shuffle pick / viz, paired per-channel buffers + SVF state + pitch phase + crossfade. CPR detector linked via max-of-|L|,|R| → same gain reduction to both channels (no stereo-image smear under heavy comp). FX_SHUFFLE per-loop random pick lifted out of processEffect into the sequencer-advance section so L and R always play matching slices. xform randomization stays coherent because step data is shared in one instance. Lua wiring uses the standard conditional R-channel pattern. Plan: planning/larets-stereo.md.
 
 ### Step-list units (Excel, Ballot, Larets, Etcher)
 - [x] Count reduction below current cursor: graphic now clamps mSelectedStep to listLen-1 at top of draw() (viewport follows automatically). Lua controls reconcile currentStep on onCursorEnter so edit-buffer params track the clamped step.
