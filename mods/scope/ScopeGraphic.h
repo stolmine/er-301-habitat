@@ -102,13 +102,14 @@ namespace scope_unit
         calculate();
         mCalculateCount = 0;
       }
-      else if (mCalculateCount >= 0)
+      else
       {
         mCalculateCount++;
       }
 
       if (mCalculateCount < 0)
       {
+        // still in WarmUp; counter advances each draw until it reaches 0.
         return;
       }
 
