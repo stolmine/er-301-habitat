@@ -1,5 +1,5 @@
 PKGNAME ?= scope
-PKGVERSION ?= 1.2.0.1
+PKGVERSION ?= 1.2.0.2
 
 include scripts/env.mk
 

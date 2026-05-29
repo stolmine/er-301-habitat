@@ -59,8 +59,21 @@ namespace scope_unit
     void setDecimation(int d)
     {
       if (d < 1) d = 1;
+      if (d == mDecimation) return;
       mDecimation = d;
-      if (mpProbe) mpProbe->setDecimation(d);
+      if (mpProbe)
+      {
+        // FifoProbe::reset() drops the existing 8000-sample buffer so
+        // the visible window doesn't splice old-rate and new-rate
+        // samples while the FIFO rolls over (~10s at decimation=64).
+        // Re-enter warmup so the display blanks briefly until the
+        // probe is full of homogeneous-rate samples again, and reset
+        // the EWMA so the auto-trigger threshold re-acquires.
+        mpProbe->setDecimation(d);
+        mpProbe->reset();
+        mCalculateCount = -WarmUpTime;
+        mEWMA.setInitialState(0.0f);
+      }
     }
 
     void setGain(float g)
