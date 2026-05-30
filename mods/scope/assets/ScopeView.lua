@@ -95,13 +95,10 @@ function ScopeView:init(args)
   self.gainLabel:setForegroundColor(app.WHITE)
   self.subGraphic:addChild(self.gainLabel)
 
-  -- Volt: wider box because "-9.999" is the longest readout.
-  self.voltBox = libscope.ScopeControlBox(0, 0, 44, 16)
-  self.voltBox:setCenter(col3, center3)
-  self.subGraphic:addChild(self.voltBox)
-
-  -- Read-only rolling-mean voltage. Right-justified inside its area
-  -- so the decimal column stays put as digits change.
+  -- Read-only rolling-mean voltage. No box — selectable controls
+  -- are visually distinguished from this read-only readout by their
+  -- (dotted/solid) borders. Right-justified inside its area so the
+  -- decimal column stays put as digits change.
   local readout = libscope.ScopeVoltsReadout(0, 0, 40, 12)
   readout:follow(self.scopes[1])
   readout:setCenter(col3, center3)
