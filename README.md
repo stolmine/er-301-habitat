@@ -114,6 +114,26 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 
 ## Changelog
 
+### v2.5.1
+
+**Scope timebase/gain/voltmeter + Larets true stereo.** See [RELEASE-2.5.1.md](RELEASE-2.5.1.md) for full details. scope v1.1.0 -> v1.2.1; spreadsheet v2.7.0 -> v2.7.1; all other packages unchanged.
+
+**Scope** -- user-controllable timebase (1x-64x), Y-axis gain (0.25x-4x), and a built-in 3-decimal voltmeter readout in the sub-display. Header-only custom graphic aped from firmware MiniScope; no firmware changes. Sub-display uses dotted/solid border convention to distinguish read-only readouts from editable focused controls.
+
+**Larets** -- true stereo operation. Internal-stereo C++ Object pattern (single instance, paired per-channel state) with linked CPR compressor (`max(|L|,|R|)` -> one envelope -> same gain to both channels) and shared FX_SHUFFLE random pick so stereo image stays coherent under heavy effect chains. Replaces the prior mono-with-duplicated-output behavior.
+
+### v2.5.0
+
+**Two new units + NEON optimization pass + Cortex-A8 build defense.** See [RELEASE-2.5.0.md](RELEASE-2.5.0.md) for full details. spreadsheet v2.6.1 -> v2.7.0; mi v1.0.1 -> v1.0.4; catchall v0.3.0 -> v0.4.0.
+
+**Visadhara** -- new phase-modulation matrix voice in spreadsheet, 8 voices on NEON 4-lane bus, animated Corona viz.
+
+**Network** -- multi-tap glitch reverb (promoted from catchall to spreadsheet), gltch character macro with 8 mutually-exclusive modes (G1-G8), listener-relative stereo pan.
+
+**Optimization** -- Filterbank SoA SVF bank, Petrichor SoA + multi-tap weighted feedback, Impasto/Parfait NEON SoA + fast paths, Helicase polynomial sin/tanh, Rings modal kernel tighten.
+
+**Build defense** -- `-fno-tree-vectorize` for am335x across every mod.mk plus link-time NEON-hint lint, eliminating a class of "works in emu, crashes on hardware" bugs.
+
 ### v2.3.0
 
 **New unit + audio quality + CPU optimization.** See [RELEASE-2.3.0.md](RELEASE-2.3.0.md) for full details. spreadsheet v2.2.0 -> v2.3.1; biome v2.0.0 -> v2.1.0; all other packages unchanged.
