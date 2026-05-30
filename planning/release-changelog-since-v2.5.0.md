@@ -28,10 +28,13 @@ Commits between `v2.5.0` and `v2.5.1`, in reverse chronological order.
 
 - `183d68d` spreadsheet 2.7.1.1 (dev): bump above stale SD ceiling
 
-## biome (in-progress, unreleased)
+## biome (CloudSeed port relegated)
 
-- `6ed6308` biome / CloudSeed Phase B wind-down
-- `2190131` biome 2.2.0.1: vendor CloudSeedCore DSP (Phase A of CloudSeed port)
+- CloudSeed port attempt (commits `2190131` Phase A vendor, `6ed6308`
+  Phase B wind-down) preserved on branch `cloudseed-archive`. Scrubbed
+  from main pre-release after the first-frame DSP hang on Cortex-A8
+  was confirmed unfixable without root-causing the upstream issue.
+  Biome reverts to its v2.5.0 state (PKGVERSION 2.2.0).
 
 ## post-v2.5.0 editorial / tracking (carried into v2.5.1 history)
 

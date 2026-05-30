@@ -40,7 +40,7 @@ Larets uses the internal-stereo pattern rather than the dual-instance Lua mirror
 
 [b]Migration[/b]: Larets inlet / outlet name change (In/Out -> In L/In R/Out L/Out R) is the only breaking surface, and only for custom patch scripts. Menu-inserted patches reconnect automatically. No other breaking changes.
 
-[b]Known issues carried forward[/b]: D8 highlight bug (from v2.4.0) still present. Pecto Doppler slew-time exposure still deferred. Alembic Phase 6 serialization still deferred. Plaits 6-op FM still grainy at native 48 kHz. Biome at internal version 2.2.0.1 with vendor-only CloudSeed DSP scaffolding (no new biome units this release).
+[b]Known issues carried forward[/b]: D8 highlight bug (from v2.4.0) still present. Pecto Doppler slew-time exposure still deferred. Alembic Phase 6 serialization still deferred. Plaits 6-op FM still grainy at native 48 kHz.
 
 [b]Compatibility[/b]: built against firmware v0.7.0-stolmine.9.2.0 (same as v2.5.0). No firmware changes required for this release.
 

@@ -271,3 +271,75 @@ Compare hifi-mode CPU at heavy FM patch (#3) before/after. Expect
   and accuracy is preserved)
 - `planning/neon-opportunities.md` — Helicase entry will be
   updated post-ship
+
+---
+
+## Hifi OS-shell recon — 2026-05-15 (post-2.6.2.52)
+
+After 2.6.2.50/.51/.52 the hifi mode showed a consistent pattern:
+**body-level optimizations save real cycles in lofi but vanish into
+the noise floor in hifi**. User flagged this and asked for a thorough
+recon to confirm hifi is at the structural floor.
+
+### Disassembly check (Helicase.o, 2.6.2.52)
+
+Symbol table:
+- `_ZN8stolmineL8discFoldEfff` — 0x844 bytes (2116 bytes), out-of-line
+- All other helpers (`opl3Wave`, `opl3WaveMorph`, `opl3ShapeBranch`,
+  `foldShape`, `polyBlep`, polynomial primitives, the `evalShape`
+  lambda) inlined — no separate symbols
+
+So function-call overhead is just 1 call boundary per discFold
+invocation (`process() → discFold`) × 2 sub-iters = 2 calls/sample.
+~30 cycles overhead per sample = ~0.18% CPU. Not the bottleneck.
+
+### Inventory of remaining structural candidates
+
+| Candidate | Mechanism | Est. CPU | Verdict |
+|---|---|---|---|
+| Force-inline discFold (`__attribute__((always_inline))`) | Eliminates 2 call boundaries/sample | ~0.18% | Sub-threshold + bloats process() by 2KB (I-cache pressure risk) |
+| Pre-bake opl3WaveMorph shape int-math at block rate | modShapeF/carrierShapeF are block constants; hoist int cast + clamp + frac out of the per-sample call | ~0.15% | Sub-threshold |
+| NEON 2-lane parallel mod + carrier sine within a sub | Different-phase sines packed into 2-lane NEON quad | ~0.4% | Borderline; adds NEON intrinsic + hint surface, complexity not worth the win |
+| Fast wrap01_neg (replace libm `floorf`) | Negative-safe wrap (carrierPhase can transiently go negative under heavy linFM) | ~0.12% | Sub-threshold |
+| NEON 2-lane sub-iter parallelization | Process sub[0] and sub[1] as 2 NEON lanes | — | **Not viable**: sub[1]'s mod feedback uses `s.modFeedbackState` written by sub[0]. Hard serial dependency. |
+| Combined ceiling (everything stack-additive) | All sub-threshold items together | **~0.85%** | Below the ER-301 CPU meter's 1pp display resolution |
+
+### Material wins would require behavior changes
+
+These break the "preserve character" constraint and need user audition consent:
+
+- **Partial-OS** — oversample only the disc fold (where aliasing
+  actually originates) instead of the whole mod/carrier chain. Mod
+  and carrier shapes are bandlimited by the polynomial sine
+  approximation; aliasing risk is concentrated in the discFold's
+  hard shape branches. Could cut OS work by ~50%. Subtle character
+  shift since the half-band decimation currently happens AFTER all
+  the FM-and-shaper interactions.
+- **1× rate with selective polyBlep on shaper output** — equivalent
+  to lofi with anti-alias mitigations on discFold output only.
+  Closer to lofi character than current hifi.
+- **Reduce features in hifi mode** — not viable given character
+  constraint.
+
+### Verdict
+
+**Hifi is at the structural floor.** The 2× OS shell's per-sub
+fixed overhead (state updates, phase wraps, sync checks, FM
+calc, decimation, state-array storage) is amortized inside an
+already-tight loop. Cycle savings from point-optimizations
+inside the body are real but smaller than the meter resolves.
+
+"Hifi is opt-in" is the correct framing — accept the CPU cost as
+the price of the deluxe path. Don't pursue further hifi-specific
+optimization without a concrete user need.
+
+### Cross-reference for future heuristic
+
+This is a clean example of "**oversampling shell amortizes
+inner-loop cost**" — a general pattern worth knowing: any unit
+with an N× OS wrapper around a tight inner loop will plateau on
+inside-loop optimizations once the OS-shell fixed costs dominate.
+For such units, the next material gain requires either reducing
+OS rate (behavior change) or moving cost OUT of the OS loop
+entirely (block-rate hoist of work that doesn't need per-sub
+recomputation).

@@ -1,5 +1,5 @@
 PKGNAME ?= biome
-PKGVERSION ?= 2.2.0.1
+PKGVERSION ?= 2.2.0
 
 include scripts/env.mk
 
@@ -16,15 +16,7 @@ MOD_CPP = $(wildcard $(MOD_DIR)/*.cpp)
 # stmlib for Svf filter (used by Canals)
 STMLIB_CC = $(EURORACK)/stmlib/dsp/units.cc
 
-# CloudSeed reverb DSP (vendored from GhostNoteAudio/CloudSeedCore, MIT).
-# Headers live in mods/biome/cloudseed/{Parameters.h, DSP/*.h}; the 3 .cpp
-# files below need explicit listing since MOD_CPP only globs one level.
-CLOUDSEED_CPP = $(MOD_DIR)/cloudseed/Parameters.cpp \
-                $(MOD_DIR)/cloudseed/DSP/Biquad.cpp \
-                $(MOD_DIR)/cloudseed/DSP/RandomBuffer.cpp
-
 OBJECTS = $(addprefix $(OUT_DIR)/,$(MOD_CPP:%.cpp=%.o))
-OBJECTS += $(addprefix $(OUT_DIR)/,$(CLOUDSEED_CPP:%.cpp=%.o))
 OBJECTS += $(addprefix $(OUT_DIR)/,$(STMLIB_CC:%.cc=%.o))
 
 SWIG_SOURCE = $(MOD_DIR)/$(PKGNAME).cpp.swig

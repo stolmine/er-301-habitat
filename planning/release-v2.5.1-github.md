@@ -89,7 +89,6 @@ Larets wire name change is the only breaking surface, and only for custom patch 
 - Pecto Doppler slew-time exposure still deferred.
 - Alembic Phase 6 serialization still deferred.
 - Plaits 6-op FM still grainy at native 48 kHz.
-- Biome is at internal version 2.2.0.1 with vendor-only CloudSeed DSP scaffolding. No new biome units in this release.
 
 ## Compatibility
 

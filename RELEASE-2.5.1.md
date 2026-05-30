@@ -133,7 +133,6 @@ Inlet / outlet names changed: `In/Out` → `In L/In R/Out L/Out R`. Patches inse
 - Pecto Doppler slew-time exposure still deferred.
 - Alembic Phase 6 serialization still deferred.
 - Plaits 6-op FM still grainy at native 48 kHz (still cooking).
-- Biome is at internal version 2.2.0.1 with vendor-only CloudSeed DSP scaffolding (Phase A/B complete). No new biome units in this release; CloudSeed remains in progress.
 
 ## Compatibility
 
