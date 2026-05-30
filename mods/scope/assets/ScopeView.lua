@@ -166,10 +166,22 @@ function ScopeView:bumpGain(delta)
 end
 
 function ScopeView:refreshFocusVisual()
-  -- Solid border on the focused slot's box, dotted on the other two.
-  -- Volt is read-only so it always renders dotted.
-  self.timeBox:setFocused(self.focusedSlot == "time")
-  self.gainBox:setFocused(self.focusedSlot == "gain")
+  -- Solid border only when the user has actually grabbed encoder
+  -- focus on a sub-display slot (M1/M2). When the cursor is just
+  -- hovering on the main display (the scope graphic) with no
+  -- encoder grab, all boxes render dotted. Volt is read-only so it
+  -- always stays dotted.
+  local active = self.focused == true
+  self.timeBox:setFocused(active and self.focusedSlot == "time")
+  self.gainBox:setFocused(active and self.focusedSlot == "gain")
+end
+
+function ScopeView:onFocused()
+  self:refreshFocusVisual()
+end
+
+function ScopeView:onUnfocused()
+  self:refreshFocusVisual()
 end
 
 function ScopeView:subReleased(i, shifted)
