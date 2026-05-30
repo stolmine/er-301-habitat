@@ -1,0 +1,47 @@
+[b]er-301-habitat v2.5.1[/b] -- 2026-05-30
+Requires firmware: v0.7.0-stolmine.9.x
+
+Package updates: [b]scope 1.1.0 -> 1.2.1[/b], [b]spreadsheet 2.7.0 -> 2.7.1[/b]. biome, catchall, kryos, mi, peaks, porcelain unchanged.
+
+[b]Highlights[/b]
+Two daily-driver upgrades: Scope finally has a user-controllable timebase (1x-64x), Y-axis gain (0.25x-4x), and a built-in voltmeter readout. Larets now operates in true stereo with linked CPR compression and a shared FX_SHUFFLE pick.
+
+[b]Scope: timebase, gain, voltmeter (scope 1.2.1)[/b]
+[list]
+[*]Time (M1): 7 stepped FifoProbe decimation choices (1x..64x). Display window 83 ms at 1x up to 5.3 s at 64x. Default 2x matches firmware MiniScope behaviour
+[*]Gain (M2): 5 stepped Y-axis multipliers (0.25x..4x). Applied at display time only; audio passthrough unaffected
+[*]Volt: bare 3-decimal voltage readout in S3 sub-display column. Rolling mean of full probe buffer scaled to ER-301 ±10 V chain rail. Integration window scales with timebase (stable for DC + V/Oct, integrates to ~0 for AC). Right-justified so decimal column stays put as digits change
+[*]Probe reset + warmup re-enter on decimation change to avoid spliced-rate FIFO artifacts during the rollover
+[*]Sub-display dotted-vs-solid border convention distinguishes editable controls (dotted-when-idle, solid-when-encoder-grabbed) from read-only readouts (VOLT, bare numeric)
+[*]Box widths auto-expand to fit content so "0.25x" / "64x" don't clip against a smaller-text box
+[*]State round-trips across quicksave / reload
+[*]Header-only custom ScopeGraphic / ScopeControlBox / ScopeVoltsReadout in the package aped from firmware MiniScope. No firmware changes required.
+[/list]
+
+[b]Larets: true stereo (spreadsheet 2.7.1)[/b]
+[list]
+[*]Internal-stereo C++ Object pattern: single instance with paired ch[2] per-channel state. Shared sequencer / step program / linked CPR detector / shared FX_SHUFFLE random pick / single viz tap; paired audio buffer + SVF state + pitch phase + output crossfade
+[*]Linked CPR: max(|L|, |R|) drives one envelope follower, same gain reduction applied to both channels. No stereo image smearing under heavy compression
+[*]FX_SHUFFLE per-loop random offset lifted into sequencer-advance section, fired once per loop wrap so L and R always play matching slices of their buffers
+[*]Step program is shared across channels (single copy of type[] / param[] / ticks[]) so transform-gate randomization stays coherent
+[*]Wire names changed: In/Out -> In L/In R/Out L/Out R. Patches inserted via the menu reconnect automatically; only custom patch scripts referencing Larets inlets by name need updating
+[/list]
+
+[b]Pattern selection rationale[/b]
+Larets uses the internal-stereo pattern rather than the dual-instance Lua mirroring used by Pecto / Canals / Discont / Filterbank / Helicase. Pattern selection: dual-instance is fine for units with no cross-channel state that needs to stay coherent (independent SVF state on L vs R is OK). Internal-stereo is required when a shared sequencer / linked envelope / shared randomness would diverge between two independent C++ instances. Larets has all three (xform-gate randomizer, FX_SHUFFLE random pick, CPR envelope), so it requires internal-stereo. Two independent Larets instances would have produced compressor smear, drifting step programs after the first xform fire, and divergent shuffle slices.
+
+[b]Behaviour changes from v2.5.0[/b]
+[list]
+[*]Scope sub-display now populated with TIME / GAIN / VOLT readouts; was empty in v2.5.0
+[*]Scope now requires M1 / M2 to change timebase / gain. Default 2x / 1x reproduces the v2.5.0 fixed-rate appearance
+[*]Larets stereo image preserved through the effect chain on stereo chains. Patches relying on the prior mono-to-both-channels behaviour will hear independent L and R processing
+[*]Larets CPR under heavy compression on stereo material ducks both channels by the same amount
+[/list]
+
+[b]Migration[/b]: Larets inlet / outlet name change (In/Out -> In L/In R/Out L/Out R) is the only breaking surface, and only for custom patch scripts. Menu-inserted patches reconnect automatically. No other breaking changes.
+
+[b]Known issues carried forward[/b]: D8 highlight bug (from v2.4.0) still present. Pecto Doppler slew-time exposure still deferred. Alembic Phase 6 serialization still deferred. Plaits 6-op FM still grainy at native 48 kHz. Biome at internal version 2.2.0.1 with vendor-only CloudSeed DSP scaffolding (no new biome units this release).
+
+[b]Compatibility[/b]: built against firmware v0.7.0-stolmine.9.2.0 (same as v2.5.0). No firmware changes required for this release.
+
+Full notes + binaries: <github release URL>
