@@ -17,6 +17,7 @@ local ply = app.SECTION_PLY
 local center3 = app.GRID5_CENTER3
 local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
+local col3 = app.BUTTON3_CENTER
 
 local DECIMATION  = { 1, 2, 4, 8, 16, 32, 64 }
 local TIME_LABELS = { "1x", "2x", "4x", "8x", "16x", "32x", "64x" }
