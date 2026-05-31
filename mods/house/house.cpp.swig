@@ -3,5 +3,8 @@
 
 %{
 #undef SWIGLUA
+#include "Smoketest.h"
 #define SWIGLUA
 %}
+
+%include "Smoketest.h"
