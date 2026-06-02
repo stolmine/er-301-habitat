@@ -398,11 +398,28 @@ Defer to user decision post-Phase 6.
    **skip**. Cabinet is a utility reverb; the existing standard
    ply controls are sufficient.
 
-5. **Galactic + Galactic2 follow-on**: after Cabinet ships in
-   `house 0.1.0`, land Galactic + Galactic2 in `house 0.2.0`?
-   Or wait on user feedback before committing the slot count?
-   Default I'll assume: **land them sequentially in `house`**
-   once Cabinet is stable, since the porting harness amortizes.
+5. **Post-Cabinet port queue** (revised 2026-06-02 after handoff
+   integration — see
+   `planning/airwindows-reverb-research.md` addendum):
+   1. **WoodenBox** (replacing Galactic2 as next pick) — filed
+      under AW's "Tone Color" not Reverb, smaller and cheaper
+      than a k-verb, lowest-risk port in the catalog. Small
+      wooden tone-shaper rather than a real space.
+   2. **CreamCoat** — proves the divisor + Bezier mechanic in
+      isolation; Cabinet already implements this pattern via
+      kWoodRoom's outer Bezier, so CreamCoat is the canonical
+      reference.
+   3. **BrightAmbience3** — gated bright halo. **Use the "3",
+      not the original BrightAmbience** (the original is
+      genuinely CPU-hungry naive-prime-tap).
+   4. **Galactic** — fourth, the lush option.
+   5. **Verbity** — fifth, the feedforward-with-one-feedback
+      spanner (slapback through infinite tail on one knob).
+   6. Originals (XYZ engine, RotCoat) tracked in
+      `planning/xyz-engine-design.md` and
+      `planning/rotcoat-design.md`. RotCoat is the
+      stronger pick for first original — structurally
+      AM335x-friendly by construction.
 
 ## Related memories / docs
 
