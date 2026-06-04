@@ -1,13 +1,13 @@
-# Cabinet (kWoodRoom port) — port plan
+# kWoodRoom — port plan
 
-Status: planning. **Locked 2026-05-31**: unit name = **Cabinet**, package = **new `house` package**.
+Status: planning. **Locked 2026-05-31**: unit name = **kWoodRoom** (faithful AW port → keep upstream name), package = **new `house` package**. Renaming policy revisited 2026-06-03: AW faithful ports keep their AW names; recombined / original work gets habitat-native names. See `feedback_no_third_party_branding`.
 
 ## Goal
 
 Land a low-CPU "small wooden room" algorithmic reverb as the
 first unit in a new dedicated reverb package, ported from
 Airwindows kWoodRoom. Distinct aesthetic from Network in the
-spreadsheet package (heavy, glitch / spatial) — Cabinet is the
+spreadsheet package (heavy, glitch / spatial) — kWoodRoom is the
 natural-room, drum-booth, glue-and-color end of the spectrum.
 
 Selected over Galactic (the LOW-risk reference) because kWoodRoom
@@ -15,11 +15,11 @@ is the most aesthetically differentiated candidate in the
 Airwindows shortlist; if it ports cleanly it directly fills the
 "small wooden room" bucket that nothing else in the package
 currently covers. Galactic and Galactic2 are queued as follow-on
-units in the same `house` package once Cabinet ships — see
+units in the same `house` package once kWoodRoom ships — see
 `planning/airwindows-reverb-research.md`.
 
 The package name `house` plays on "housing structures" (rooms,
-spaces, cathedrals, etc.) and stays habitat-themed. Cabinet,
+spaces, cathedrals, etc.) and stays habitat-themed. kWoodRoom,
 Galactic-derived units, and any future room-sims naturally live
 here.
 
@@ -29,8 +29,10 @@ here.
 - Path: `Plugins/MacVST/kWoodRoom/source/{kWoodRoom.h, kWoodRoom.cpp, kWoodRoomProc.cpp}`
 - Sources cached at `/tmp/kwoodroom/` from research pass.
 - License: MIT (Airwindows is Chris Johnson, no per-function audit).
-- Per `feedback_no_third_party_branding`, the shipped unit gets a
-  habitat-native name (see Open Questions).
+- AW faithful port → ships under upstream name `kWoodRoom`. The
+  `feedback_no_third_party_branding` rule applies to recombined /
+  original work that just borrows AW mechanics; faithful ports
+  preserve the original name as attribution.
 
 ## Topology (verified from source)
 
@@ -220,7 +222,7 @@ package first.
    - `mods/house/assets/init.lua` — boilerplate `Library` subclass,
      identical shape to `mods/scope/assets/init.lua`.
    - `mods/house/assets/toc.lua` — `units = { }` initially empty;
-     fill in Cabinet entry in Phase 2.
+     fill in kWoodRoom entry in Phase 2.
    - `mods/house/house.cpp.swig` — `%module house_libhouse` skeleton
      mirroring `mods/scope/scope.cpp.swig`, no `%include` lines yet.
 2. Top-level `Makefile`: append `house` to `PROJECTS = mi kryos
@@ -230,7 +232,7 @@ package first.
    just the boilerplate `init.lua` + `toc.lua` + empty
    `libhouse.so`.
 4. README.md package table: add a `**house**` row mentioning
-   Cabinet as the first unit (or defer until Cabinet ships).
+   kWoodRoom as the first unit (or defer until kWoodRoom ships).
 5. `clean-sd-packages.sh` and `install-packages.sh` auto-discover
    packages from `testing/<arch>/*.pkg`, so no script edits needed.
 6. Per `feedback_release_asset_defaults`, the new `house` package
@@ -243,14 +245,14 @@ Per the CloudSeed lesson, we don't want to find out about a
 first-frame hang after building a full unit wrapper. Build a
 **minimal** harness inside the freshly-scaffolded house package:
 
-1. Stand up a bare `house::CabinetDSP` C++ class in
-   `mods/house/CabinetDSP.h` (header-only, scratch — easier to
+1. Stand up a bare `house::KWoodRoomDSP` C++ class in
+   `mods/house/KWoodRoomDSP.h` (header-only, scratch — easier to
    iterate than splitting now) with the kWoodRoom constructor +
    `process(float *inL, float *inR, float *outL, float *outR,
    int frameLen)` method.
 2. Create a minimal `house::Smoketest` `od::Object` subclass with
    a single `In`/`Out` and a `process()` that:
-   - On first call: constructs a `CabinetDSP` on the heap, runs
+   - On first call: constructs a `KWoodRoomDSP` on the heap, runs
      it for 100 blocks with random noise input, checks output is
      non-zero and finite at each step, logs pass/fail via
      `od::logInfo`, then deallocates.
@@ -266,8 +268,8 @@ state isolation.
 
 ### Phase 1 — Bare DSP class compiles + first-output
 
-- Promote `CabinetDSP.h` from the Phase-0 scratch into the
-  canonical `mods/house/CabinetDSP.{h,cpp}` split if the file's
+- Promote `KWoodRoomDSP.h` from the Phase-0 scratch into the
+  canonical `mods/house/KWoodRoomDSP.{h,cpp}` split if the file's
   grown unwieldy; otherwise leave header-only.
 - Drop VST host dependencies (`audioeffectx.h`, `<set>`, `<string>`).
 - Convert `processReplacing` body to a clean `process()` that
@@ -282,10 +284,10 @@ state isolation.
 
 ### Phase 2 — Minimal Lua wrapper
 
-- New unit: `Cabinet` in `mods/house/`.
-- C++ `od::Object` subclass `house::Cabinet : public od::Object`
-  in `mods/house/Cabinet.{h,cpp}`. The DSP itself lives in the
-  `CabinetDSP` helper from Phase 1; Cabinet's `process()` is a
+- New unit: `kWoodRoom` in `mods/house/`.
+- C++ `od::Object` subclass `house::KWoodRoom : public od::Object`
+  in `mods/house/KWoodRoom.{h,cpp}`. The DSP itself lives in the
+  `KWoodRoomDSP` helper from Phase 1; kWoodRoom's `process()` is a
   thin shim.
 - 2 inlets (`In L`, `In R`), 2 outlets (`Out L`, `Out R`), no
   parameters yet — DSP runs at defaults.
@@ -358,7 +360,7 @@ Defer to user decision post-Phase 6.
 - Hardware smoke test: insert / delete / quicksave / re-insert /
   param walk / extreme-edge automation.
 - Listen-test against reference Airwindows recordings if any.
-- Update README package table with the `house` row + Cabinet
+- Update README package table with the `house` row + kWoodRoom
   description.
 - Remove the Phase-0 Smoketest unit from toc.lua (keep the C++
   helper code dormant in the repo for the Galactic / Galactic2
@@ -383,7 +385,7 @@ Defer to user decision post-Phase 6.
 
 ## Locked decisions (2026-05-31)
 
-1. **Unit name: Cabinet**.
+1. **Unit name: kWoodRoom**.
 2. **Package home: new `house` package** (not spreadsheet). Plays
    on "housing structures" — rooms, halls, cathedrals — and gives
    the eventual Galactic / Galactic2 / kCathedral / kGuitarHall
@@ -395,10 +397,10 @@ Defer to user decision post-Phase 6.
 
 4. **Phase 7 viz**: skip entirely, or include a minimal
    delay-time / decay-tail indicator? Default I'll assume:
-   **skip**. Cabinet is a utility reverb; the existing standard
+   **skip**. kWoodRoom is a utility reverb; the existing standard
    ply controls are sufficient.
 
-5. **Post-Cabinet port queue** (revised 2026-06-02 after handoff
+5. **Post-kWoodRoom port queue** (revised 2026-06-02 after handoff
    integration — see
    `planning/airwindows-reverb-research.md` addendum):
    1. **WoodenBox** (replacing Galactic2 as next pick) — filed
@@ -406,7 +408,7 @@ Defer to user decision post-Phase 6.
       than a k-verb, lowest-risk port in the catalog. Small
       wooden tone-shaper rather than a real space.
    2. **CreamCoat** — proves the divisor + Bezier mechanic in
-      isolation; Cabinet already implements this pattern via
+      isolation; kWoodRoom already implements this pattern via
       kWoodRoom's outer Bezier, so CreamCoat is the canonical
       reference.
    3. **BrightAmbience3** — gated bright halo. **Use the "3",

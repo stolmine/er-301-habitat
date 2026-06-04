@@ -1,8 +1,8 @@
 # Reverb design philosophy (transferable primitives)
 
 Distilled from `planning/refs/airwindows-port-handoff.md` §2,
-checked against our existing port work on Cabinet (kWoodRoom)
-and Network (multi-tap glitch reverb).
+checked against our existing port work on kWoodRoom (in-progress
+AW port) and Network (multi-tap glitch reverb).
 
 The Airwindows algorithms are *simple*. A Householder feedback
 matrix, a pile of allpasses, a one-pole damper. Character comes
@@ -11,8 +11,8 @@ is reconstructed** — not algorithmic complexity. The most
 interesting combination move is not a parallel verb you crossfade
 between, it's a **process the first verb runs through or inside**.
 MV is allpasses *inside* PurestConsole. CreamCoat is ClearCoat
-*through* Bezier undersampling. Cabinet (kWoodRoom) is a 6×6 FDN
-*through* a Bezier-undersample shell.
+*through* Bezier undersampling. kWoodRoom is a 6×6 FDN *through*
+a Bezier-undersample shell.
 
 ## Primitives worth lifting
 
@@ -22,8 +22,8 @@ MV is allpasses *inside* PurestConsole. CreamCoat is ClearCoat
 sum(h[0..N-1])`. The shared `total` lets the per-line cost
 collapse from `N adds + 1 mul` to `1 fmsub` after one shared
 sum. O(N)/sample. NEON-friendly when N is padded to a vector
-boundary (6→8, etc.). Cabinet's 6×6 trellis uses this everywhere;
-the NEON-reduction win is queued for Cabinet Phase 4.
+boundary (6→8, etc.). kWoodRoom's 6×6 trellis uses this everywhere;
+the NEON-reduction win is queued for kWoodRoom Phase 4.
 
 ### Allpass bank — flat magnitude, scrambled phase → bloom/smear
 
@@ -36,7 +36,7 @@ older / more dramatic; pure-delay FDNs feel modern / clean.
 
 The ratio choice is the voice:
 - **Golden-ratio spacing** → seamless tail at any size (Chamber).
-- **Prime spacing** → density, no comb-coloration (Cabinet's
+- **Prime spacing** → density, no comb-coloration (kWoodRoom's
   6×6 line lengths are all primes 109..832).
 - **Equal spacing** → flutter, audible repeats.
 
@@ -49,7 +49,7 @@ range of "is this an echo or a room".
 ### One-pole damper in-loop, tuned to an air-absorption curve
 
 The simplest possible HF rolloff in the feedback path that
-correlates with room size. The Cabinet inner Bezier filter
+correlates with room size. The kWoodRoom inner Bezier filter
 serves this role; modern AW reverbs typically use an explicit
 one-pole with frequency tied to the size parameter.
 
@@ -73,7 +73,7 @@ a Bezier curve. **Sane divisor = lush + cheaper** (the cost
 reduction is real — buffer length and read rate both drop by N).
 **Extreme divisor = cursed-retro + pitch-swoopable**. Not an A/B
 fade — connective-tissue morph. Used in CreamCoat (sane regime)
-and CrunchCoat (extreme regime). Cabinet already implements this
+and CrunchCoat (extreme regime). kWoodRoom already implements this
 as its outer Bezier loop.
 
 The Bezier reconstruction is the boundary that interpolates back
@@ -111,7 +111,7 @@ governor (mechanic 1) to keep runaway musical.
 
 | Unit | Primary topology | Combination mechanics used |
 |---|---|---|
-| **Cabinet** (kWoodRoom, in progress) | 3×3 ER + 6×6 Householder FDN, prime-spaced | #2 (Bezier undersample, outer + inner) |
+| **kWoodRoom** (AW port, in progress) | 3×3 ER + 6×6 Householder FDN, prime-spaced | #2 (Bezier undersample, outer + inner) |
 | **Network** (spreadsheet, shipped v2.5.0) | Parallel multi-tap | Custom glitch macro (G1-G8) — character via the macro, not via these mechanics |
 | **CreamCoat** (port queued) | Bright ambience | #2 (Bezier undersample, sane regime) |
 | **MV/MV2** (port maybe-queued) | Allpass chain | #1 (Console wrapper as governor) |
@@ -125,7 +125,7 @@ When designing or porting a new reverb:
 
 1. **Start with the simplest topology that gives the character.**
    AW's lesson: most of the variety comes from tuning, not
-   complexity. A 6×6 Householder + Bezier shell (Cabinet) gives
+   complexity. A 6×6 Householder + Bezier shell (kWoodRoom) gives
    a fully credible room; don't add layers without a reason.
 2. **Pick where the nonlinearity sits.** Pre-loop (drive into
    the verb), in-loop (feedback governor, mechanic #1), or
@@ -133,7 +133,7 @@ When designing or porting a new reverb:
 3. **Use the reduced-rate domain as the primary CPU lever on
    AM335x.** Per `planning/airwindows-reverb-research.md`
    addendum, this is the structural way to fit a reverb on the
-   chip. Cabinet does this already.
+   chip. kWoodRoom does this already.
 4. **Denormal floor in every feedback path.** Low divisors mean
    fewer samples flush the lines between hits, so denormals
    accumulate faster than at host rate.
@@ -147,5 +147,5 @@ When designing or porting a new reverb:
 `planning/refs/airwindows-port-handoff.md` §2 (combination
 mechanics) + cross-referenced against
 `planning/airwindows-reverb-research.md` (source-read of the
-existing AW catalog) and the in-progress Cabinet port
+existing AW catalog) and the in-progress kWoodRoom port
 (`planning/kwoodroom-port-plan.md`).

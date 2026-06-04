@@ -1,6 +1,6 @@
--- Phase 0 smoke-test unit for CabinetDSP. Insert on hardware,
+-- Phase 0 smoke-test unit for KWoodRoomDSP. Insert on hardware,
 -- check the device log for [Smoketest] PASS / FAIL after a few
--- hundred ms of audio. Hard gate before Phase 1 (real Cabinet
+-- hundred ms of audio. Hard gate before Phase 1 (real kWoodRoom
 -- unit).
 --
 -- See planning/kwoodroom-port-plan.md for context.

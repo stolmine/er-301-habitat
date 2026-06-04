@@ -122,7 +122,7 @@ free sound.**
    less headroom to mask it.
 2. **Denormal floor in the feedback path** — low divisors mean
    fewer samples flush the lines between hits, so denormals
-   accumulate faster than at host rate. Already a Cabinet
+   accumulate faster than at host rate. Already a kWoodRoom
    discipline, applies everywhere here.
 
 ## AM335x verdict (per handoff §4.2)
@@ -161,7 +161,7 @@ numbers.)
 
 1. **FDN size** — handoff doesn't specify. 4×4 keeps per-sample
    cost low and matches CloudCoat / Chamber lineage; 6×6 matches
-   Cabinet. Recommend starting 4×4 for the lower per-sample
+   kWoodRoom. Recommend starting 4×4 for the lower per-sample
    cost (since World is already the headroom knob, the FDN
    should be lean too).
 2. **Crossover frequency** — fixed (e.g. 1.8 kHz) or
@@ -191,7 +191,7 @@ Downstream of the active AW port pipeline. Sketch only:
 
 - **Phase A**: prototype the reduced-rate FDN core at one fixed
   World setting (e.g. ÷4). No tape-rot, no band-recirc. Validate
-  the divisor + Bezier reconstruct math against Cabinet's
+  the divisor + Bezier reconstruct math against kWoodRoom's
   proven outer Bezier loop. Get the CPU profile on hardware.
 - **Phase B**: add per-line tape-rot (band-split → head-bump on
   low / noise-FM warble on high → recombine). Listen for the
@@ -206,7 +206,7 @@ Downstream of the active AW port pipeline. Sketch only:
 
 ## Where this fits in the pipeline
 
-- Active: Cabinet (kWoodRoom) port. Phase 0 (Smoketest harness)
+- Active: kWoodRoom port. Phase 0 (Smoketest harness)
   on hardware now.
 - Next: WoodenBox → CreamCoat → BrightAmbience3 → Galactic →
   Verbity (per `planning/airwindows-reverb-research.md`

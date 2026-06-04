@@ -1,8 +1,13 @@
-// house::CabinetDSP
+// house::KWoodRoomDSP
 //
 // Port of Airwindows kWoodRoom (Chris Johnson, MIT) to ER-301.
 // Plain DSP helper, not an od::Object subclass — owned by the
-// Cabinet od::Object (or by the Smoketest harness during Phase 0).
+// kWoodRoom od::Object (or by the Smoketest harness during Phase 0).
+//
+// Per-character work is unchanged from the AW reference, so we
+// ship under the upstream name. AW unit naming convention is
+// preserved across the port pipeline; recombined / original
+// units use habitat-native names.
 //
 // This is the Phase 0 faithful port:
 //   - VST host / std::set / std::string deps dropped
@@ -78,7 +83,7 @@ namespace house
     bez_total
   };
 
-  class CabinetDSP
+  class KWoodRoomDSP
   {
   public:
     // Public parameters. Caller sets these between blocks. Range
@@ -93,7 +98,7 @@ namespace house
     float E;
     float F;
 
-    CabinetDSP();
+    KWoodRoomDSP();
 
     // Per-block process. inL/inR are read, outL/outR are written.
     // sampleRate is passed in (rather than read from a global) so

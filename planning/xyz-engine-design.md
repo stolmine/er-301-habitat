@@ -138,7 +138,7 @@ numbers.)
 
 ## Open implementation questions
 
-1. **FDN size** — 6×6 (matches Cabinet) or smaller? Folded mode
+1. **FDN size** — 6×6 (matches kWoodRoom) or smaller? Folded mode
    makes the FDN do extra work per pass; smaller FDN keeps the
    per-pass cost down at the price of less density.
 2. **Y curve exact taper** — `Y^a` for sat and `Y^b` for
@@ -172,7 +172,7 @@ only:
 
 ## Where this fits in the pipeline
 
-- Active: Cabinet (kWoodRoom) port. Phase 0 (Smoketest harness)
+- Active: kWoodRoom port. Phase 0 (Smoketest harness)
   on hardware now.
 - Next: WoodenBox → CreamCoat → BrightAmbience3 → Galactic →
   Verbity (per `planning/airwindows-reverb-research.md`

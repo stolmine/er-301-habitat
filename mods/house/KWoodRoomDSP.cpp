@@ -1,14 +1,14 @@
-// house::CabinetDSP implementation.
+// house::KWoodRoomDSP implementation.
 //
 // Port of Airwindows kWoodRoom (Chris Johnson, MIT) to ER-301.
-// See CabinetDSP.h for design notes.
+// See KWoodRoomDSP.h for design notes.
 
-#include "CabinetDSP.h"
+#include "KWoodRoomDSP.h"
 
 namespace house
 {
 
-  CabinetDSP::CabinetDSP()
+  KWoodRoomDSP::KWoodRoomDSP()
   {
     // Default parameter values (verbatim from kWoodRoom.cpp:15-20)
     A = 0.5f;
@@ -97,9 +97,9 @@ namespace house
     bezF[bez_cycle] = 1.0;
   }
 
-  void CabinetDSP::process(const float *in1, const float *in2,
-                           float *out1, float *out2,
-                           int sampleFrames, float sampleRateHz)
+  void KWoodRoomDSP::process(const float *in1, const float *in2,
+                             float *out1, float *out2,
+                             int sampleFrames, float sampleRateHz)
   {
     double overallscale = 1.0;
     overallscale /= 44100.0;

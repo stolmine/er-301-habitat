@@ -1,23 +1,23 @@
 // house::Smoketest
 //
-// Phase 0 of the Cabinet port: stand up a CabinetDSP instance and
-// run it for ~50 audio blocks on the actual hardware, logging
+// Phase 0 of the kWoodRoom port: stand up a KWoodRoomDSP instance
+// and run it for ~50 audio blocks on the actual hardware, logging
 // entry / exit / pass / fail. The goal is to catch a CloudSeed-
-// style first-frame Cortex-A8 hang BEFORE we wrap CabinetDSP in
-// a real Cabinet unit. If the device hangs after "pre-process"
+// style first-frame Cortex-A8 hang BEFORE we wrap KWoodRoomDSP in
+// a real kWoodRoom unit. If the device hangs after "pre-process"
 // and never reaches "post-process", we know the DSP body itself
-// is the problem and can bisect inside CabinetDSP::process().
+// is the problem and can bisect inside KWoodRoomDSP::process().
 //
 // On all subsequent calls (after the test completes), Smoketest
 // behaves as a transparent passthrough.
 //
-// Audio thread allocates the CabinetDSP on the heap to avoid
+// Audio thread allocates the KWoodRoomDSP on the heap to avoid
 // the small audio-thread stack (~113 KB of state arrays would
 // blow it).
 
 #pragma once
 
-#include "CabinetDSP.h"
+#include "KWoodRoomDSP.h"
 #include <od/AudioThread.h>
 #include <od/config.h>
 #include <od/objects/Object.h>
@@ -66,8 +66,8 @@ namespace house
       if (mState == State::Idle)
       {
         logInfo("[Smoketest] pre-construct");
-        mpDSP = new CabinetDSP();
-        logInfo("[Smoketest] post-construct (state %d KB)", (int)(sizeof(CabinetDSP) / 1024));
+        mpDSP = new KWoodRoomDSP();
+        logInfo("[Smoketest] post-construct (state %d KB)", (int)(sizeof(KWoodRoomDSP) / 1024));
         mState = State::Running;
         mBlocksRun = 0;
         mAnyNonZero = false;
@@ -123,7 +123,7 @@ namespace house
   private:
     enum class State : int { Idle = 0, Running = 1, Done = 2 };
     State mState = State::Idle;
-    CabinetDSP *mpDSP = nullptr;
+    KWoodRoomDSP *mpDSP = nullptr;
     int mBlocksRun = 0;
     bool mAnyNonZero = false;
     bool mAnyNonFinite = false;
