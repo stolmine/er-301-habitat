@@ -9,6 +9,7 @@
 #include "atoms/BrightAmbience3.h"
 #include "atoms/Verbity.h"
 #include "atoms/Galactic.h"
+#include "atoms/RotCoat.h"
 #define SWIGLUA
 %}
 
@@ -18,3 +19,4 @@
 %include "atoms/BrightAmbience3.h"
 %include "atoms/Verbity.h"
 %include "atoms/Galactic.h"
+%include "atoms/RotCoat.h"
