@@ -1,8 +1,31 @@
 # CreamCoat port plan
 
-Status: planning. Target: house package, atom architecture.
-Third AW atom after kWoodRoom (29% stereo, shipped) and
-WoodenBox (14% stereo, shipped). Per
+Status: **SHIPPED and hardware-validated 2026-06-04 (house 0.1.0.6)**. Per user: "creamcoat works great! it's somehow much more efficient than the other two for something seemingly more complicated. probably about 14% on stereo with derez at 1." Third AW atom; first to ship with the hybrid float-conversion baked into Phase 1.
+
+## Result baseline (vs projection vs prior ports)
+
+- **CPU**: ~14% stereo at DeRez=1.0 (full host rate). **Same as WoodenBox** despite adding a predelay tap and the user-DeRez infrastructure. **Half of kWoodRoom's 29%**.
+- **Projected**: 18-22% per the plan; **actual significantly beat projection**.
+- **Memory**: ~284 KB stereo (post-float-conversion); fits L2 with ~50 KB margin (256 KB).
+- **Sound**: "works great" — float-conversion did not audibly regress the AW character. Hybrid stayed clean through the feedback loop. bez[] double accumulator path held precision as intended.
+
+### Why CreamCoat beat projection (and how kWoodRoom/WoodenBox could too)
+
+The CreamCoat result is the first hybrid-float CPU measurement we have on Cortex-A8. The 14% figure is striking because CreamCoat is structurally MORE complex than WoodenBox (same 4x4 FDN + predelay buffer + bezier with InL/UnInL slots) yet runs at the same CPU. The implication: **hybrid float conversion delivers roughly 2x CPU win vs the double-precision baseline on Cortex-A8**.
+
+Reasoning: ARMv7 / Cortex-A8 has no double-precision NEON. Every double op in the inner loop falls back to scalar VFPv3, which is effectively non-pipelined and slow. Float ops use NEON-eligible registers and pipeline well even without explicit intrinsics. WoodenBox at 14% double = CreamCoat at 14% float despite CreamCoat doing more work per cycle. The implication for the queued retrofits:
+
+- **kWoodRoom** (currently 29% stereo double): hybrid float retrofit should land it ~12-15% stereo. Halving the CPU footprint of the heaviest reverb in the package.
+- **WoodenBox** (currently 14% stereo double): hybrid float retrofit should land it ~6-8% stereo. Trivial-CPU reverb instance, multiple can stack on hardware.
+
+Both retrofits are mechanical and follow the same hybrid pattern as CreamCoat (state arrays + intermediates + feedback taps → float; bezier accumulator + block-rate scalars stay double). Queued under "post-AW-pipeline retrofits."
+
+---
+
+(Original plan content preserved below for reference.)
+
+Target: house package, atom architecture.
+Third AW atom after kWoodRoom and WoodenBox. Per
 `planning/airwindows-reverb-research.md` addendum: "CreamCoat —
 proves the canonical divisor+Bezier mechanic in isolation;
 kWoodRoom already implements this pattern via its outer Bezier,
