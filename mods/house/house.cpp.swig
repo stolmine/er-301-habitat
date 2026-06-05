@@ -4,7 +4,9 @@
 %{
 #undef SWIGLUA
 #include "atoms/KWoodRoom.h"
+#include "atoms/WoodenBox.h"
 #define SWIGLUA
 %}
 
 %include "atoms/KWoodRoom.h"
+%include "atoms/WoodenBox.h"
