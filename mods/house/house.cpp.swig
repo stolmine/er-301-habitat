@@ -5,8 +5,10 @@
 #undef SWIGLUA
 #include "atoms/KWoodRoom.h"
 #include "atoms/WoodenBox.h"
+#include "atoms/CreamCoat.h"
 #define SWIGLUA
 %}
 
 %include "atoms/KWoodRoom.h"
 %include "atoms/WoodenBox.h"
+%include "atoms/CreamCoat.h"
