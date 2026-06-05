@@ -1,6 +1,20 @@
 # WoodenBox port plan
 
-Status: planning. Target: house package, atom architecture.
+Status: **SHIPPED and hardware-validated 2026-06-04 (house 0.1.0.5)**. Per user: "wooden box works perfectly, selection transit sounds quite a bit smoother than i would have expected, about 14% cpu in stereo." Second AW atom in the house package after kWoodRoom; first port to exercise the "add second atom" wiring path through SWIG and toc.
+
+## Result baseline (for later optimization comparison)
+
+- **CPU**: ~14% stereo on Cortex-A8 (vs kWoodRoom's 29%, vs my estimate of 8-12%). The smaller FDN + single Bezier delivered roughly half the per-sample cost as predicted. Estimate underran slightly; actual is closer to ½ kWoodRoom than ⅓.
+- **Memory**: ~53 KB / instance (double-precision baseline)
+- **Sound**: "works perfectly", Select transitions "quite a bit smoother than i would have expected" — the AW state-reset on Select change doesn't audibly pop. No mitigation needed.
+- **Hardware-validated**: first insert, first audio, all 3 params responding, no hangs / glitches
+- **Phases 2+** (float-convert b4 arrays, NEON Householder reduction): deferred until a CPU regression actually bites.
+
+---
+
+(Original plan content preserved below for reference.)
+
+Target: house package, atom architecture.
 Per `feedback_aw_atom_port_template` (validated by kWoodRoom),
 this is a fill-in-the-template port. WoodenBox is the next
 catalogued port after kWoodRoom per
