@@ -18,9 +18,21 @@
 // pattern doesn't extend to mixed-rate chains; this is the
 // pragmatic compromise.
 //
-// PHASE 1 HYBRID FLOAT:
-//   - TapeFat circular buffers as `int` (AW fixed-point pattern;
-//     small enough that bit-precision matters for the tap-sum)
+// PHASE 1 HYBRID PRECISION (revised 0.1.0.23):
+//   - TapeFat circular buffers as `int` (AW fixed-point pattern,
+//     preserved verbatim). Int adds are ~1 cycle on Cortex-A8 — as
+//     cheap as float, and the int division is the ONLY expensive
+//     part of AW's pattern. Replacing JUST that with a precomputed
+//     `invFatnessAndScale` double-reciprocal multiply gets the
+//     CPU win without the float→double cast tax that 0.1.0.21
+//     accidentally introduced.
+//     History: 0.1.0.20 used int storage + int divide (slow
+//     divide). 0.1.0.21 converted to float storage + double sum
+//     (faster algorithm in theory, but the float→double casts on
+//     every tap read cost MORE than the int divide they replaced
+//     because A8 scalar VFPv3 doubles are non-pipelined). 0.1.0.23
+//     keeps int storage + int adds (AW-faithful and fast on A8)
+//     and ONLY replaces the int divide with a precomputed mul.
 //   - All other DSP math as `double` (precision-critical state
 //     filters + character processing)
 //   - I/O as `float` (od::Object buffer convention)
@@ -116,6 +128,7 @@ namespace house
 
       mPrevHostL = mPrevHostR = 0.0;
       mDecimateLPL = mDecimateLPR = 0.0;
+      mLowLpL = mLowLpR = 0.0;
 
       memset(mPL, 0, sizeof(mPL));
       memset(mPR, 0, sizeof(mPR));
@@ -174,8 +187,31 @@ namespace house
       int fatness = 3 + (int)(polishKnob * 29.0);      // [3, 32]
       if (fatness < 3) fatness = 3;
       if (fatness > 32) fatness = 32;
+      // Precompute combined reciprocal (1/fatness AND 1/8388608) so
+      // per-sample we do one int-to-double convert + one mul + one
+      // add. Replaces AW's int divide (slow on A8) AND the
+      // /8388608 double divide (also slow). Both folded into one
+      // multiply.
+      double invFatnessAndScale = (1.0 / (double)fatness) / 8388608.0;
       double tapeFatWet = 0.2 + polishKnob * 0.8;      // [0.2, 1.0]
       double tapeFatDry = 1.0 - tapeFatWet;
+
+      // Low-shelf compensation scaled by Cut. The downsample shell's
+      // linear-interp reconstruction acts like a triangle-waveform LP
+      // on the cycle-output stream, which biases the result toward
+      // mid-trajectory content and audibly eats lows as Cut increases.
+      // Compensation: one-pole LP at ~200 Hz of the wet signal, summed
+      // back into wet with gain that scales with Cut. Acts as a low-
+      // shelf boost (reciprocal of a HPF — gives back what the chain
+      // takes). At Cut=0 the boost is zero (no compensation needed).
+      // At Cut=1 the boost is +3.5 dB max — subtle, just enough to
+      // restore perceived low-end balance.
+      double lowBoost = cutKnob * 0.5;
+      // LP coefficient targeting ~200 Hz at host sample rate.
+      double lowLpAlpha = 2.0 * 3.141592653589793 * 200.0 /
+                         (double)globalConfig.sampleRate;
+      if (lowLpAlpha > 0.5) lowLpAlpha = 0.5;
+      if (lowLpAlpha < 0.001) lowLpAlpha = 0.001;
 
       // Mix: continuous (the only "always smooth" knob)
       double mix = (double)mMix.value();
@@ -275,12 +311,12 @@ namespace house
         mPrevHostR = shellOutR;
 
         double tapeFatOutAL, tapeFatOutAR;
-        runTapeFat(upSampleAL, upSampleAR, fatness, tapeFatWet, tapeFatDry,
-                   tapeFatOutAL, tapeFatOutAR);
+        runTapeFat(upSampleAL, upSampleAR, fatness, invFatnessAndScale,
+                   tapeFatWet, tapeFatDry, tapeFatOutAL, tapeFatOutAR);
 
         double tapeFatOutBL, tapeFatOutBR;
-        runTapeFat(upSampleBL, upSampleBR, fatness, tapeFatWet, tapeFatDry,
-                   tapeFatOutBL, tapeFatOutBR);
+        runTapeFat(upSampleBL, upSampleBR, fatness, invFatnessAndScale,
+                   tapeFatWet, tapeFatDry, tapeFatOutBL, tapeFatOutBR);
 
         // Decimation IIR LPF applied to BOTH upsampled outputs sequentially,
         // then sampled at the second position = host rate.
@@ -328,6 +364,13 @@ namespace house
         tempR = bracketOutR;
         bracketOutR = (bracketOutR + mConsoleBsAvgBR) * 0.5;
         mConsoleBsAvgBR = tempR;
+
+        // ===== Stage 4b: Low-shelf compensation (Cut-scaled) =====
+        // One-pole LP of wet signal, summed back to bump lows.
+        mLowLpL = mLowLpL * (1.0 - lowLpAlpha) + bracketOutL * lowLpAlpha;
+        mLowLpR = mLowLpR * (1.0 - lowLpAlpha) + bracketOutR * lowLpAlpha;
+        bracketOutL += mLowLpL * lowBoost;
+        bracketOutR += mLowLpR * lowBoost;
 
         // ===== Stage 5: ChainMix dry/wet =====
 
@@ -391,21 +434,33 @@ namespace house
       return output;
     }
 
-    // TapeFat single-sample (called twice per host sample inside the 2x
-    // bracket). Uses AW's int fixed-point arithmetic for the tap-sum
-    // (faster int adds, avoids float drift across the sum). Buffer is
-    // double-sized (256 entries) for ping-pong indexing without modulo
-    // math. fatness selects how many delay taps participate; the switch
-    // fall-through accumulates from chosen tap depth down to tap 1
-    // (verbatim from AW TapeFat source).
+    // TapeFat single-sample (called twice per host sample inside the
+    // 2x bracket). AW INT FIXED-POINT pattern preserved verbatim
+    // (multiply input by 8388608 to convert to int, sum ints, then
+    // ONE multiply by precomputed `invFatnessAndScale` at the end
+    // folds both /fatness AND /8388608 into a single fmul). Int adds
+    // are ~1 cycle each on Cortex-A8 and don't suffer the float→double
+    // cast tax that a float-stored version would on this CPU.
+    //
+    // Buffer is double-sized (256 entries) for ping-pong indexing
+    // without modulo. fatness drives the switch fall-through which
+    // accumulates from chosen tap depth down to tap 1 (verbatim cascade
+    // from AW). invFatnessAndScale is `(1/fatness) * (1/8388608)`
+    // precomputed once per block by the caller.
+    //
+    // DC bias: AW added +1 in the int domain → +1/8388608 ≈ 1.19e-7
+    // after scaling. Preserved as a literal constant (denormal
+    // prevention at the LSB level).
     inline void runTapeFat(double inL, double inR,
-                           int fatness, double wet, double dry,
+                           int fatness, double invFatnessAndScale,
+                           double wet, double dry,
                            double &outL, double &outR)
     {
       if (mGcount < 0 || mGcount > 128) mGcount = 128;
       int count = mGcount;
 
-      // Write to both halves of the ping-pong buffer
+      // Convert input to int (AW fixed-point) and write to both halves
+      // of the ping-pong buffer.
       int intInL = (int)(inL * 8388608.0);
       int intInR = (int)(inR * 8388608.0);
       mPL[count + 128] = mPL[count] = intInL;
@@ -414,8 +469,9 @@ namespace house
       int sumtotalL = intInL;
       int sumtotalR = intInR;
 
-      // Switch fall-through (verbatim from AW TapeFat — note NO break
-      // statements, intentional cascade through smaller tap depths)
+      // Switch fall-through cascade — same prime-tap pattern as AW
+      // TapeFat (NO break statements, intentional). Int adds, ~1 cycle
+      // each on Cortex-A8.
       switch (fatness)
       {
         case 32: sumtotalL += mPL[count+127]; sumtotalR += mPR[count+127];
@@ -452,19 +508,17 @@ namespace house
         case 1:  sumtotalL += mPL[count+1];   sumtotalR += mPR[count+1];
       }
 
-      // AW source: /(fatness) then +1 then back to float via /8388608
-      // (the +1 is a tiny DC bias to prevent denormal accumulation in
-      // the int domain; preserved verbatim).
-      double floatTotalL = (double)((sumtotalL / fatness) + 1);
-      double floatTotalR = (double)((sumtotalR / fatness) + 1);
-      floatTotalL /= 8388608.0;
-      floatTotalR /= 8388608.0;
+      // Single int-to-double convert + one mul (combined fatness +
+      // 8388608 reciprocal) + one add (DC bias). Replaces AW's int
+      // divide AND the /8388608 double divide with one mul.
+      static const double kTapeFatDcBias = 1.19209289550781e-7;
+      double floatTotalL = (double)sumtotalL * invFatnessAndScale + kTapeFatDcBias;
+      double floatTotalR = (double)sumtotalR * invFatnessAndScale + kTapeFatDcBias;
       floatTotalL *= wet;
       floatTotalR *= wet;
 
       // Always in "fat" (positive leanfat) direction per Lacquer's
-      // design — never the "lean" / highpass mode. Blend input with
-      // averaged signal weighted by (1-wet) and wet respectively.
+      // design — blend input with averaged signal.
       outL = inL * dry + floatTotalL;
       outR = inR * dry + floatTotalR;
 
@@ -493,9 +547,19 @@ namespace house
     double mPrevHostL, mPrevHostR;   // previous host-rate input for midpoint interp
     double mDecimateLPL, mDecimateLPR; // one-pole IIR state for decimation LPF
 
+    // Low-shelf compensation state (one-pole LP at ~200 Hz for the
+    // Cut-scaled low-end bump that compensates linear-interp's
+    // mid-bias).
+    double mLowLpL, mLowLpR;
+
     // TapeFat circular delay buffers (ping-pong duplicated — 128 unique
     // entries, mirrored to indices 128..255 for wrap-free indexing).
-    // AW fixed-point pattern: int summation, scale by 8388608.
+    // AW INT FIXED-POINT pattern preserved (verbatim from upstream).
+    // Int adds are ~1 cycle on Cortex-A8 — as cheap as float adds, no
+    // float→double cast tax in the inner loop. The int divide that AW
+    // used at the end is replaced by a single multiply by
+    // precomputed `invFatnessAndScale` reciprocal (folds /fatness AND
+    // /8388608 into one mul).
     int mPL[256], mPR[256];
     int mGcount;
 #endif
