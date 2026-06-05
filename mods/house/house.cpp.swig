@@ -3,8 +3,8 @@
 
 %{
 #undef SWIGLUA
-#include "Smoketest.h"
+#include "atoms/KWoodRoom.h"
 #define SWIGLUA
 %}
 
-%include "Smoketest.h"
+%include "atoms/KWoodRoom.h"

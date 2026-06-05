@@ -4,6 +4,6 @@ return {
   name = "house",
   keyword = "reverb, room, hall, space, ambience, spatial",
   units = {
-    { title = "Smoketest", moduleName = "Smoketest", category = "House", keywords = "smoketest, debug, dev, kwoodroom" }
+    { title = "kWoodRoom", moduleName = "KWoodRoom", category = "House", keywords = "reverb, room, wood, small, kwoodroom, airwindows" }
   }
 }
