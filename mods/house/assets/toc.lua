@@ -11,5 +11,8 @@ return {
     { title = "Verbity", moduleName = "Verbity", category = "House", keywords = "reverb, hall, plate, fdn, thunder, submix, verbity, airwindows" },
     { title = "Galactic", moduleName = "Galactic", category = "House", keywords = "reverb, hall, lush, big, modulated, vibrato, detune, predelay, galactic, airwindows" },
     { title = "RotCoat", moduleName = "RotCoat", category = "House", keywords = "reverb, rot, tape, cursed, undersample, divisor, world, drift, mulch, rotcoat, original" }
+    -- XYZ parked 2026-06-05: too sin-heavy for Cortex-A8.
+    -- Header + Lua + plan preserved on disk; revive when rpi
+    -- successor lands.
   }
 }

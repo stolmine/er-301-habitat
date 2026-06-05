@@ -47,5 +47,31 @@ namespace house
     return (x > 0.0) ? (s / densityA) : -(s / densityA);
   }
 
+  // Fast variant: same curve as spiralSaturate but uses a 5th-
+  // order Taylor approximation of sin() on the bounded [0, pi/2]
+  // domain instead of a libm sin() call. Cost is ~10 cycles
+  // vs ~200 cycles for scalar libm sin on Cortex-A8 (which has
+  // no DP NEON), a ~20x speedup. Max error at pi/2 is 0.45%
+  // which is inaudible for a saturator.
+  //
+  // Use this in tight per-sample / per-cycle paths where the
+  // exact AW sin shape isn't sonically critical. ChromeOxide's
+  // high-band sat and Spiral as a standalone unit (if it ever
+  // becomes one) should stick with the libm version for AW
+  // fidelity; XYZ's per-line governors / per-cycle sat use this
+  // fast version since they're called many times per sample.
+  //
+  // Polynomial: sin(x) ≈ x * (1 + x² * (c1 + x² * c2))
+  // where c1 = -1/6, c2 = 1/120. Horner form, 3 muls + 2 adds.
+  static inline double spiralFastSaturate(double x, double densityA)
+  {
+    double absX = fabs(x) * densityA;
+    if (absX > 1.5707963267948966) absX = 1.5707963267948966;
+    double x2 = absX * absX;
+    double s = absX * (1.0 + x2 * (-0.16666666666666666
+                                   + x2 * 0.008333333333333333));
+    return (x > 0.0) ? (s / densityA) : -(s / densityA);
+  }
+
 } // namespace house
 #endif // !SWIGLUA
