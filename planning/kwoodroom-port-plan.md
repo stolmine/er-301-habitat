@@ -1,6 +1,16 @@
 # kWoodRoom — port plan
 
-Status: planning. **Locked 2026-05-31**: unit name = **kWoodRoom** (faithful AW port → keep upstream name), package = **new `house` package**. Renaming policy revisited 2026-06-03: AW faithful ports keep their AW names; recombined / original work gets habitat-native names. See `feedback_no_third_party_branding`.
+Status: **Phase 0 + Phase 1 SHIPPED, validated on hardware 2026-06-04 (house 0.1.0.4)**. Per user: "it works and it sounds absolutely wonderful. CPU 29% idle in stereo. we'll come back for optimization later." Phases 4+ (NEON optimization, float-conversion of 3×3 trellis) deferred until a CPU regression bites.
+
+**Locked 2026-05-31**: unit name = **kWoodRoom** (faithful AW port → keep upstream name), package = **new `house` package**. Renaming policy revisited 2026-06-03: AW faithful ports keep their AW names; recombined / original work gets habitat-native names. See `feedback_no_third_party_branding`.
+
+## Result baseline (for later optimization comparison)
+
+- **CPU**: 29% stereo at default params on Cortex-A8 (single instance)
+- **Memory**: ~113 KB / instance (double-precision state arrays, per the original port plan)
+- **Sound**: "absolutely wonderful" — user audition confirms the AW character ported faithfully
+- **Hardware-validated**: first insert, first audio, no hang, no glitch
+- **CPU headroom available**: per Phase 4 plan, NEON Householder reduction (`3*hX - total` identity) should drop the 6×6 portion ~4× → target ~12-15% stereo. Defer until needed.
 
 ## Goal
 
