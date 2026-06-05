@@ -7,6 +7,8 @@
 #include "atoms/WoodenBox.h"
 #include "atoms/CreamCoat.h"
 #include "atoms/BrightAmbience3.h"
+#include "atoms/Verbity.h"
+#include "atoms/Galactic.h"
 #define SWIGLUA
 %}
 
@@ -14,3 +16,5 @@
 %include "atoms/WoodenBox.h"
 %include "atoms/CreamCoat.h"
 %include "atoms/BrightAmbience3.h"
+%include "atoms/Verbity.h"
+%include "atoms/Galactic.h"
