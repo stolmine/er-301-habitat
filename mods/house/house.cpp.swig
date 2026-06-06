@@ -26,6 +26,13 @@
 // downsample shell + Cojones + 2x upsample bracket + TapeFat +
 // ChainMix into a single Object.
 #include "atoms/Lacquer.h"
+// Capacitor2: signal-voltage-modulated LP filter component
+// (Mono helper + standalone Object wrapper). Consumed by Filament
+// as the filter atom.
+#include "atoms/Capacitor2.h"
+// Filament: third chain-as-unit. Console0-wrapped Capacitor2 LP
+// with signal-FM cutoff. First filter-character unit in the package.
+#include "atoms/Filament.h"
 #define SWIGLUA
 %}
 
@@ -42,3 +49,5 @@
 %include "atoms/ChromeOxide.h"
 %include "atoms/ChainMix.h"
 %include "atoms/Lacquer.h"
+%include "atoms/Capacitor2.h"
+%include "atoms/Filament.h"

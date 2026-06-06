@@ -15,6 +15,7 @@ return {
     -- Header + Lua + plan preserved on disk; revive when rpi
     -- successor lands.
     { title = "TickerTape", moduleName = "TickerTape", category = "House", keywords = "tape, saturate, console, drive, lo-fi, color, character, glue, tickertape" },
-    { title = "Lacquer", moduleName = "Lacquer", category = "House", keywords = "lacquer, vinyl, tape, saturate, lo-fi, polished, downsample, oversample, cut, polish, character" }
+    { title = "Lacquer", moduleName = "Lacquer", category = "House", keywords = "lacquer, vinyl, tape, saturate, lo-fi, polished, downsample, oversample, cut, polish, character" },
+    { title = "Filament", moduleName = "Filament", category = "House", keywords = "filter, lowpass, lp, fm, voltage, breathe, bow, vocal, capacitor, filament" }
   }
 }
