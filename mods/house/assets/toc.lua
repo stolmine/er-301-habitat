@@ -16,6 +16,7 @@ return {
     -- successor lands.
     { title = "TickerTape", moduleName = "TickerTape", category = "House", keywords = "tape, saturate, console, drive, lo-fi, color, character, glue, tickertape" },
     { title = "Lacquer", moduleName = "Lacquer", category = "House", keywords = "lacquer, vinyl, tape, saturate, lo-fi, polished, downsample, oversample, cut, polish, character" },
-    { title = "Filament", moduleName = "Filament", category = "House", keywords = "filter, lowpass, lp, fm, voltage, breathe, bow, vocal, capacitor, filament" }
+    { title = "Filament", moduleName = "Filament", category = "House", keywords = "filter, lowpass, lp, fm, voltage, breathe, bow, vocal, capacitor, filament" },
+    { title = "Carriage", moduleName = "Carriage", category = "House", keywords = "dynamics, transient, compressor, inverse, engagement, point, distance, air, carriage" }
   }
 }

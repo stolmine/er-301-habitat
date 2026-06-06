@@ -33,6 +33,15 @@
 // Filament: third chain-as-unit. Console0-wrapped Capacitor2 LP
 // with signal-FM cutoff. First filter-character unit in the package.
 #include "atoms/Filament.h"
+// Point: AW transient designer component (Mono helper, no Object).
+// Consumed by Carriage as the transient-injection element.
+#include "atoms/Point.h"
+// Distance2: AW air absorption + slew cascade component (Mono helper).
+// Consumed by Carriage as the orthogonal-tone element.
+#include "atoms/Distance2.h"
+// Carriage: fourth chain-as-unit, first dynamics-character unit.
+// Inverse-threshold engagement detector drives Point + Distance2.
+#include "atoms/Carriage.h"
 #define SWIGLUA
 %}
 
@@ -51,3 +60,6 @@
 %include "atoms/Lacquer.h"
 %include "atoms/Capacitor2.h"
 %include "atoms/Filament.h"
+%include "atoms/Point.h"
+%include "atoms/Distance2.h"
+%include "atoms/Carriage.h"
