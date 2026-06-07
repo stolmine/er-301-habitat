@@ -43,6 +43,10 @@
 #include "VisadharaCoronaGraphic.h"
 #include "Network.h"
 #include "NetworkOverviewGraphic.h"
+// Canals: ZDF SVF Three Sisters port (carbon-copied from biome 2026-06-07,
+// to be iteratively refined per planning/canals-spreadsheet-redesign.md).
+// Uses stmlib::SemitonesToRatio.
+#include "Canals.h"
 #define SWIGLUA
 %}
 
@@ -86,3 +90,4 @@
 %include "VisadharaCoronaGraphic.h"
 %include "Network.h"
 %include "NetworkOverviewGraphic.h"
+%include "Canals.h"
