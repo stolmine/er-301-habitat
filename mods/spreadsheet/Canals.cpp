@@ -78,6 +78,9 @@ namespace stolmine
     float *in = mIn.buffer();
     float *voct = mVOct.buffer();
     float *out = mOut.buffer();
+    float *outLow = mOutLow.buffer();
+    float *outCentre = mOutCentre.buffer();
+    float *outHigh = mOutHigh.buffer();
 
     float fundamental = mFundamental.value();
     float span = CLAMP(0.0f, 1.0f, mSpan.value());
@@ -200,33 +203,46 @@ namespace stolmine
       }
     }
 
-    // Output crossfade: LOW -> CENTRE -> HIGH -> ALL
+    // Output crossfade for Out 1 (chain auto-wire): LOW -> CENTRE -> HIGH -> ALL.
+    // Out 2/3/4 always carry the unmixed per-block taps (multi-output).
     float pos = outputPos;
+    float wL, wC, wH;
+    if (pos <= 1.0f)
+    {
+      wL = 1.0f - pos;
+      wC = pos;
+      wH = 0.0f;
+    }
+    else if (pos <= 2.0f)
+    {
+      wL = 0.0f;
+      wC = 2.0f - pos;
+      wH = pos - 1.0f;
+    }
+    else
+    {
+      float t = pos - 2.0f;
+      wL = t * 0.333f;
+      wC = t * 0.333f;
+      wH = (1.0f - t) + t * 0.333f;
+    }
+
     for (int i = 0; i < FRAMELENGTH; i++)
     {
-      float wL, wC, wH;
-      if (pos <= 1.0f)
-      {
-        wL = 1.0f - pos;
-        wC = pos;
-        wH = 0.0f;
-      }
-      else if (pos <= 2.0f)
-      {
-        wL = 0.0f;
-        wC = 2.0f - pos;
-        wH = pos - 1.0f;
-      }
-      else
-      {
-        float t = pos - 2.0f;
-        wL = t * 0.333f;
-        wC = t * 0.333f;
-        wH = (1.0f - t) + t * 0.333f;
-      }
-      float v = lowOut[i] * wL + ctrOut[i] * wC + hiOut[i] * wH;
-      if (v != v || v > 10.0f || v < -10.0f) v = 0.0f;
-      out[i] = v;
+      // Per-block taps always live (multi-output sub-outs 2-4).
+      // Clamp NaN/extreme values defensively (the existing biome
+      // pattern; keeps faulty math from leaking out).
+      float vL = lowOut[i];
+      float vC = ctrOut[i];
+      float vH = hiOut[i];
+      if (vL != vL || vL > 10.0f || vL < -10.0f) vL = 0.0f;
+      if (vC != vC || vC > 10.0f || vC < -10.0f) vC = 0.0f;
+      if (vH != vH || vH > 10.0f || vH < -10.0f) vH = 0.0f;
+      outLow[i] = vL;
+      outCentre[i] = vC;
+      outHigh[i] = vH;
+      // Sub-out 1: fader-selected morph (auto-wire to chain).
+      out[i] = vL * wL + vC * wC + vH * wH;
     }
   }
 
