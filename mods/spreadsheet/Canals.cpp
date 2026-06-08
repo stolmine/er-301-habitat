@@ -110,8 +110,13 @@ namespace stolmine
     }
     else
     {
+      // Top decile: damping ramps from r≈0.02 (q≈50) through 0 into
+      // -0.15. Calibrated for the pseudoSaturate curve (sharper knee,
+      // larger limit cycles at given damping) — produces CTR self-osc
+      // amplitude ~1.12 matching hardware while keeping 3rd harmonic
+      // at -33 dB (vs hardware -31 dB).
       float t = (quality - 0.9f) * 10.0f;
-      damping = 0.02f * (1.0f - t) + (-0.5f) * t;
+      damping = 0.02f * (1.0f - t) + (-0.15f) * t;
     }
 
     float antiRes = (quality < 0.0f) ? -quality : 0.0f;
@@ -137,8 +142,14 @@ namespace stolmine
     }
 
     const float kButterDamp = 1.0f / 0.7071f;
-    const float kLowGain = 2.0f;
-    const float kHighGain = 1.8f;
+    // Post-gain calibrated for the pseudoSaturate in-loop curve.
+    // Pseudo's larger asymptote (K=2.5) and sharper knee produce
+    // larger raw limit cycles than the prior Padé K=1.5 curve —
+    // post-gain is now ATTENUATING (was amplifying) to land each
+    // per-block output at hardware-measured amplitudes (LOW=0.68,
+    // CTR=1.12, HIGH=0.65).
+    const float kLowGain = 0.45f;
+    const float kHighGain = 0.48f;
     // Internal rate is 96 kHz (= 2× host rate). All SVF cutoffs are
     // normalized against this rate, so g = tan(π·f/96k).
     const float kInvSR_OS = 1.0f / 96000.0f;

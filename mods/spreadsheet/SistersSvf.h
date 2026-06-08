@@ -68,23 +68,18 @@ namespace stolmine
       float bp = g * hp + s1;
       float lp = g * bp + s2;
 
-      // In-loop K-stretched tanh on s1: K * fastTanh(x / K).
-      // Same shape as Padé[3/2] tanh but asymptotes at K * 1.73
-      // instead of 1.73 alone. K=1.5 calibrated against hardware
-      // internal self-osc captures (planning/refs/three-sisters-
-      // hardware/internal/) — gets the summed ALL output close to
-      // the rail-clip threshold so the rail-clip character actually
-      // engages. Without the stretch the limit cycle is too small
-      // to ever trigger the output saturation.
+      // In-loop "pseudo p=4" saturation: x / (1 + (|x|/K)^4)^(1/4).
+      // Asymptotes at ±K = ±2.5 with a sharper knee than Padé tanh.
+      // Calibrated against hardware self-osc captures: produces
+      // ~-33 dB 3rd harmonic on CENTRE (hardware ≈ -31 dB; our
+      // prior Padé K=1.5 was -22 dB, ~10 dB too rich). The sharper
+      // knee means the curve stays nearly linear until amplitude
+      // approaches K, then bends fast — fewer harmonics produced
+      // at the operating point of self-osc limit cycles.
       //
-      // This is a deliberate approximation of the hardware's OTA
-      // voltage-rail saturation (which is amplitude-bounded rather
-      // than state-bounded) using the validated ZDF + tanh-on-state
-      // mechanism. Not strictly faithful to the ZDF reference but
-      // closer to the audible behavior.
-      const float kTanhStretch = 1.5f;
-      const float kInvTanhStretch = 1.0f / 1.5f;
-      s1 = kTanhStretch * fastTanh((g * hp + bp) * kInvTanhStretch);
+      // Cost: ~45 cycles vs Padé's ~10. Worth it for character
+      // match across the resonance band.
+      s1 = pseudoSaturate(g * hp + bp);
       s2 = g * bp + lp;
 
       return {lp, bp, hp};
@@ -98,11 +93,31 @@ namespace stolmine
 
     // Padé[3/2] tanh approximation: x * (27 + x²) / (27 + 9x²)
     // 4 multiplies + 1 divide ≈ ~35 cycles on Cortex-A8.
-    // Accurate to ~0.5% for |x| < 3; smoothly saturates beyond.
+    // Used for the output rail-clip on Canals' Out 1 (rail-sum sat).
+    // The in-loop SVF saturation uses pseudoSaturate below.
     static inline float fastTanh(float x)
     {
       float x2 = x * x;
       return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+    }
+
+    // "Pseudo p=4" saturation curve: x / (1 + (|x|/K)^4)^(1/4).
+    // K=2.5 asymptote. Sharper knee than Padé tanh → fewer
+    // harmonics at moderate drive levels (the operating point of
+    // self-osc limit cycles in Canals). Calibrated against
+    // hardware self-osc captures; produces ~-33 dB 3rd harmonic
+    // on CENTRE vs hardware's -31 dB. Cost ~45 cycles on Cortex-A8
+    // (2 sqrtf + 1 divide + 4 muls).
+    static inline float pseudoSaturate(float x)
+    {
+      const float kInvK = 1.0f / 2.5f;  // 1/K, K=2.5
+      float ax = (x >= 0.0f) ? x : -x;
+      float xK = ax * kInvK;
+      float xK2 = xK * xK;
+      float xK4 = xK2 * xK2;
+      // denom = (1 + (|x|/K)^4)^(1/4) = sqrt(sqrt(1 + (|x|/K)^4))
+      float denom = sqrtf(sqrtf(1.0f + xK4));
+      return x / denom;
     }
   };
 
