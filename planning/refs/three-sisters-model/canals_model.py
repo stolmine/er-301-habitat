@@ -48,8 +48,10 @@ class CanalsSvf:
         hp = (x - self.r * self.s1 - self.g * self.s1 - self.s2) * self.h
         bp = self.g * hp + self.s1
         lp = self.g * bp + self.s2
-        # In-loop tanh on s1 (bp state), s2 unclipped — per C++
-        self.s1 = fast_tanh(self.g * hp + bp)
+        # In-loop K-stretched tanh: K * fastTanh(x/K). K=1.5 calibrated
+        # to allow larger limit cycles that trigger rail-clip on ALL.
+        K = 1.5
+        self.s1 = K * fast_tanh((self.g * hp + bp) / K)
         self.s2 = self.g * bp + lp
         return lp, bp, hp
 
@@ -68,10 +70,12 @@ def quality_to_damping(quality):
         q_mag = 0.7071 + t * t * t * 49.3
         return 1.0 / q_mag
     else:
-        # Calibrated -0.075 at full CW to match hardware Test 24
-        # self-osc amplitude (~0.22 peak, -13 dBFS on CENTRE).
+        # Calibrated -0.5 at full CW after internal ER-301 captures
+        # (not MOTU-attenuated). Hardware self-osc is much louder than
+        # the earlier -0.075 produced. See planning/refs/three-sisters-
+        # hardware/internal/.
         t = (quality - 0.9) * 10.0
-        return 0.02 * (1.0 - t) + (-0.075) * t
+        return 0.02 * (1.0 - t) + (-0.5) * t
 
 
 def semis_to_ratio(semis):
@@ -113,18 +117,23 @@ def configure(state, mode, fundamental, span, quality, voct=0.0):
     anti_res = max(0.0, -quality)
     low_f, ctr_f, high_f = derive_cutoffs(fundamental, span, voct)
     butter_damp = 1.0 / 0.7071
+    # FIDELITY FIX: SVF2 Butterworth on ALL three blocks (LOW,
+    # CENTRE, HIGH). Hardware spectrum shows CENTRE self-osc has a
+    # SINGLE peak at lowF (matches LOW's frequency), not the dual
+    # peaks the model author's "both resonant" claim would predict.
+    # SVF2 must be non-resonant on CENTRE too.
     if mode == 'XOVER':
         state.low1.set_freq(low_f, damping)
         state.low2.set_freq(low_f, butter_damp)
         state.ctr1.set_freq(low_f, damping)
-        state.ctr2.set_freq(high_f, damping)
+        state.ctr2.set_freq(high_f, butter_damp)
         state.hi1.set_freq(high_f, damping)
         state.hi2.set_freq(high_f, butter_damp)
     else:  # FORMANT
         state.low1.set_freq(low_f, damping)
         state.low2.set_freq(low_f, butter_damp)
         state.ctr1.set_freq(ctr_f, damping)
-        state.ctr2.set_freq(ctr_f, damping)
+        state.ctr2.set_freq(ctr_f, butter_damp)
         state.hi1.set_freq(high_f, damping)
         state.hi2.set_freq(high_f, butter_damp)
     return anti_res

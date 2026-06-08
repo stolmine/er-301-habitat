@@ -123,14 +123,18 @@ namespace stolmine
       else
       {
         // Top decile: damping ramps from r≈0.02 (q≈50) through 0 into
-        // -0.075. Self-oscillation regime sits in roughly the top 8%
+        // -0.5. Self-oscillation regime sits in roughly the top 8%
         // (damping crosses zero at quality ≈ 0.917). At full CW the
-        // negative damping is matched to hardware-observed limit-cycle
-        // amplitude (~0.22 peak on CENTRE at noon FREQ, ≈ -13 dBFS) —
-        // see planning/canals-phase0c-findings + canals_model.py
-        // damping sweep that calibrated this value.
+        // negative damping drives self-osc to amplitudes where the
+        // summed ALL output reaches the rail-clip region.
+        //
+        // Re-calibrated from -0.075 to -0.5 after capturing self-osc
+        // internally on the ER-301 (not via MOTU input) — the original
+        // calibration was based on MOTU-attenuated levels and produced
+        // self-osc ~18 dB too quiet vs real hardware. See
+        // planning/refs/three-sisters-hardware/internal/.
         float t = (quality - 0.9f) * 10.0f;  // 0..1 in [0.9, 1.0]
-        damping = 0.02f * (1.0f - t) + (-0.075f) * t;
+        damping = 0.02f * (1.0f - t) + (-0.5f) * t;
       }
 
       float totalSemitones = v * 120.0f + fundamental;
@@ -147,34 +151,47 @@ namespace stolmine
       float highF = clampNorm(highHz);
       float ctrF = clampNorm(freqHz);
 
-      // Issue #2 (Q placement): real Three Sisters has resonance on
-      // SVF1 only for LOW/HIGH; SVF2 is a fixed non-resonant Butterworth
-      // 2-pole. CENTRE keeps Q on BOTH stages (dual-resonance — the
-      // defining behavior of CENTRE).
+      // Resonance placement: SVF1 resonant, SVF2 Butterworth on ALL
+      // three blocks (LOW, CENTRE, HIGH).
       //
-      // Note: using setFreq(freq, damping) directly here rather than
-      // setFreqQ so the resonant stages can receive negative damping
-      // in the top-decile self-oscillation regime.
+      // The earlier findings doc claimed CENTRE was dual-resonant on
+      // hardware, but spectral analysis of internal self-osc captures
+      // (planning/refs/three-sisters-hardware/internal/) shows CENTRE
+      // produces ONE peak at lowF — same frequency as LOW. If CENTRE
+      // SVF2 were resonant, we'd see a second peak at the SVF2 cutoff.
+      // We don't. Therefore CENTRE SVF2 is also Butterworth.
+      //
+      // Topology summary:
+      //   LOW:    SVF1 lp(res @ lowF)  → SVF2 lp(Butter @ lowF)
+      //   CENTRE: SVF1 hp(res @ lowF)  → SVF2 lp(Butter @ highF)  [XOVER]
+      //                                 → SVF2 lp(Butter @ ctrF)  [FORMANT]
+      //   HIGH:   SVF1 hp(res @ highF) → SVF2 hp(Butter @ highF)
+      //
+      // Using setFreq(freq, damping) directly rather than setFreqQ so
+      // the resonant stages can receive negative damping in the
+      // top-decile self-oscillation regime.
       const float kButterDamp = 1.0f / 0.7071f;  // ~1.414 (Butterworth)
       if (mode == 0)
       {
-        // Crossover: LOW at lowF, CENTRE spans lowF->highF, HIGH at highF
+        // Crossover: CENTRE SVF1 at lowF (matches LOW's resonant cutoff
+        // — hence the spectral peak alignment on hardware).
         s.low1.setFreq(lowF, damping);
-        s.low2.setFreq(lowF, kButterDamp);   // FIXED: was q
+        s.low2.setFreq(lowF, kButterDamp);
         s.ctr1.setFreq(lowF, damping);
-        s.ctr2.setFreq(highF, damping);       // CENTRE dual-resonance stays
+        s.ctr2.setFreq(highF, kButterDamp);   // FIXED: was resonant; now Butter
         s.hi1.setFreq(highF, damping);
-        s.hi2.setFreq(highF, kButterDamp);   // FIXED: was q
+        s.hi2.setFreq(highF, kButterDamp);
       }
       else
       {
-        // Formant: each block converges to its own FREQ
+        // Formant: blocks converge to their own FREQ. CENTRE both
+        // stages at ctrF; only SVF1 resonant.
         s.low1.setFreq(lowF, damping);
-        s.low2.setFreq(lowF, kButterDamp);   // FIXED
+        s.low2.setFreq(lowF, kButterDamp);
         s.ctr1.setFreq(ctrF, damping);
-        s.ctr2.setFreq(ctrF, damping);        // CENTRE dual-resonance stays
+        s.ctr2.setFreq(ctrF, kButterDamp);    // FIXED: was resonant; now Butter
         s.hi1.setFreq(highF, damping);
-        s.hi2.setFreq(highF, kButterDamp);   // FIXED
+        s.hi2.setFreq(highF, kButterDamp);
       }
 
       s.prevFundamental = fundamental;

@@ -68,14 +68,23 @@ namespace stolmine
       float bp = g * hp + s1;
       float lp = g * bp + s2;
 
-      // In-loop tanh on the bp integrator state. At low Q this is
-      // near-linear (Padé Tanh accurate <0.5% for |x| < 3). At high
-      // Q the resonant state would otherwise grow unboundedly; tanh
-      // bounds it to a stable limit cycle, producing self-oscillation
-      // with near-sinusoidal character. s2 stays unclipped per the
-      // reference model (clipping both states damages stability and
-      // tone).
-      s1 = fastTanh(g * hp + bp);
+      // In-loop K-stretched tanh on s1: K * fastTanh(x / K).
+      // Same shape as Padé[3/2] tanh but asymptotes at K * 1.73
+      // instead of 1.73 alone. K=1.5 calibrated against hardware
+      // internal self-osc captures (planning/refs/three-sisters-
+      // hardware/internal/) — gets the summed ALL output close to
+      // the rail-clip threshold so the rail-clip character actually
+      // engages. Without the stretch the limit cycle is too small
+      // to ever trigger the output saturation.
+      //
+      // This is a deliberate approximation of the hardware's OTA
+      // voltage-rail saturation (which is amplitude-bounded rather
+      // than state-bounded) using the validated ZDF + tanh-on-state
+      // mechanism. Not strictly faithful to the ZDF reference but
+      // closer to the audible behavior.
+      const float kTanhStretch = 1.5f;
+      const float kInvTanhStretch = 1.0f / 1.5f;
+      s1 = kTanhStretch * fastTanh((g * hp + bp) * kInvTanhStretch);
       s2 = g * bp + lp;
 
       return {lp, bp, hp};
