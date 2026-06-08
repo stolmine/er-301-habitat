@@ -207,6 +207,21 @@ namespace stolmine
     float *ctrOut = s.ctrOut;
     float *hiOut = s.hiOut;
 
+    // Denormal flush as self-osc seed source. Without this, a perfectly
+    // silent input + zero integrator states stays at exact zero forever
+    // (negative damping has nothing to amplify). Replacing sub-denormal
+    // values with a small fixed seed gives the resonant stages perpetual
+    // noise to bootstrap into self-oscillation. Matches the AW house-
+    // atom pattern. Seed level (1.18e-17) is ~-340 dBFS — inaudible
+    // but well above any FTZ threshold.
+    {
+      float *src = in;
+      for (int i = 0; i < FRAMELENGTH; i++)
+      {
+        if (fabsf(src[i]) < 1.18e-23f) src[i] = 1.18e-17f;
+      }
+    }
+
     // Per-sample SVF processing + topology-correct anti-resonance.
     //
     // Issue #5 fix: anti-res taps the genuine complementary SVF output
