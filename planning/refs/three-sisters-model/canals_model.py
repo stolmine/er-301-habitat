@@ -117,24 +117,28 @@ def configure(state, mode, fundamental, span, quality, voct=0.0):
     anti_res = max(0.0, -quality)
     low_f, ctr_f, high_f = derive_cutoffs(fundamental, span, voct)
     butter_damp = 1.0 / 0.7071
-    # FIDELITY FIX: SVF2 Butterworth on ALL three blocks (LOW,
-    # CENTRE, HIGH). Hardware spectrum shows CENTRE self-osc has a
-    # SINGLE peak at lowF (matches LOW's frequency), not the dual
-    # peaks the model author's "both resonant" claim would predict.
-    # SVF2 must be non-resonant on CENTRE too.
+    # FIDELITY FIX 1: SVF2 Butterworth on ALL three blocks.
+    # FIDELITY FIX 2: Frequency-compensated damping per resonant
+    #   stage frequency, with f_ref = ctr_f. Compensates for the
+    #   SVF's frequency-dependent self-osc amplitude scaling. Brings
+    #   per-block self-osc amplitudes to hardware-matching pattern
+    #   (CTR > LOW ≈ HIGH).
+    def comp(f):
+        ratio = ctr_f / max(f, 0.001)
+        return damping * min(ratio, 4.0)
     if mode == 'XOVER':
-        state.low1.set_freq(low_f, damping)
+        state.low1.set_freq(low_f, comp(low_f))
         state.low2.set_freq(low_f, butter_damp)
-        state.ctr1.set_freq(low_f, damping)
+        state.ctr1.set_freq(low_f, comp(low_f))    # CENTRE SVF1 at lowF
         state.ctr2.set_freq(high_f, butter_damp)
-        state.hi1.set_freq(high_f, damping)
+        state.hi1.set_freq(high_f, comp(high_f))
         state.hi2.set_freq(high_f, butter_damp)
     else:  # FORMANT
-        state.low1.set_freq(low_f, damping)
+        state.low1.set_freq(low_f, comp(low_f))
         state.low2.set_freq(low_f, butter_damp)
-        state.ctr1.set_freq(ctr_f, damping)
+        state.ctr1.set_freq(ctr_f, comp(ctr_f))    # = damping (no comp)
         state.ctr2.set_freq(ctr_f, butter_damp)
-        state.hi1.set_freq(high_f, damping)
+        state.hi1.set_freq(high_f, comp(high_f))
         state.hi2.set_freq(high_f, butter_damp)
     return anti_res
 
@@ -146,12 +150,18 @@ def process_block(state, mode, x_array, anti_res):
     ctr_out = np.zeros(N)
     hi_out = np.zeros(N)
 
+    # Per-block POST-GAIN compensation (LOW × 2.0, HIGH × 1.8)
+    # offsets the dual-LP / dual-HP cascade attenuation (~6 dB at fc)
+    # that CTR's HP→LP doesn't suffer. Calibrated to hardware.
+    LOW_GAIN = 2.0
+    HIGH_GAIN = 1.8
+
     if mode == 'XOVER':
         for i in range(N):
             x = x_array[i]
             lo1_lp, _, lo1_hp = state.low1.process(x)
             lo2_lp, _, _ = state.low2.process(lo1_lp)
-            low_out[i] = lo2_lp + anti_res * lo1_hp
+            low_out[i] = (lo2_lp + anti_res * lo1_hp) * LOW_GAIN
 
             ct1_lp, _, ct1_hp = state.ctr1.process(x)
             ct2_lp, _, ct2_hp = state.ctr2.process(ct1_hp)
@@ -159,13 +169,13 @@ def process_block(state, mode, x_array, anti_res):
 
             hi1_lp, _, hi1_hp = state.hi1.process(x)
             _, _, hi2_hp = state.hi2.process(hi1_hp)
-            hi_out[i] = hi2_hp + anti_res * hi1_lp
+            hi_out[i] = (hi2_hp + anti_res * hi1_lp) * HIGH_GAIN
     else:  # FORMANT (HIGH stage order swapped per Issue #8)
         for i in range(N):
             x = x_array[i]
             lo1_lp, _, lo1_hp = state.low1.process(x)
             _, _, lo2_hp = state.low2.process(lo1_lp)
-            low_out[i] = lo2_hp + anti_res * lo1_hp
+            low_out[i] = (lo2_hp + anti_res * lo1_hp) * LOW_GAIN
 
             ct1_lp, _, ct1_hp = state.ctr1.process(x)
             ct2_lp, _, ct2_hp = state.ctr2.process(ct1_hp)
@@ -173,7 +183,7 @@ def process_block(state, mode, x_array, anti_res):
 
             hi1_lp, _, hi1_hp = state.hi1.process(x)
             hi2_lp, _, _ = state.hi2.process(hi1_hp)
-            hi_out[i] = hi2_lp + anti_res * hi1_lp
+            hi_out[i] = (hi2_lp + anti_res * hi1_lp) * HIGH_GAIN
 
     return low_out, ctr_out, hi_out
 
