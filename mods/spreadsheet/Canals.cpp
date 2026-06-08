@@ -48,6 +48,9 @@ namespace stolmine
     addInput(mIn);
     addInput(mVOct);
     addOutput(mOut);
+    addOutput(mOutLow);     // FIXED: was missing — sub-out picker silently failed
+    addOutput(mOutCentre);  // FIXED
+    addOutput(mOutHigh);    // FIXED
     addParameter(mFundamental);
     addParameter(mSpan);
     addParameter(mQuality);
@@ -307,7 +310,7 @@ namespace stolmine
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
-      // Per-block taps always live (multi-output sub-outs 2-4).
+      // Per-block taps always live (multi-output sub-outs 3-5).
       // Clamp NaN/extreme values defensively.
       float vL = lowOut[i];
       float vC = ctrOut[i];
@@ -320,10 +323,6 @@ namespace stolmine
       outHigh[i] = vH;
       // Sub-out 1: fader-morphed sum, soft-clipped via fastTanh
       // (rail-sum saturation emulating hardware ALL output character).
-      // At low fader positions (single-block content) the input is
-      // bounded ≤1 and tanh is near-transparent. At pos=3 (3× sum)
-      // tanh asymptotes near ±1.73, producing the characteristic
-      // rail distortion.
       float mix = vL * wL + vC * wC + vH * wH;
       out[i] = SistersSvf::fastTanh(mix);
     }
