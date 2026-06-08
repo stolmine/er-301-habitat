@@ -44,64 +44,82 @@ Canals:include(Unit)
 function Canals:init(args)
   args.title = "Canals"
   args.mnemonic = "Ca"
-  -- Multi-output. Sub-out 1 = "Out" (fader-selected morph, chain
-  -- auto-wire primary). Sub-outs 2-4 = LOW / CENTRE / HIGH direct
-  -- per-block taps selectable from downstream local pickers via M6.
-  -- Per docs/multi-output-units-author-guide.md.
-  args.channelCount = 4
-  args.subOutLabels = { "Out", "LOW", "CENTRE", "HIGH" }
+  -- 5 sub-outs:
+  --   1: Out    — fader-selected mix (stereo L on stereo chains, mono on mono)
+  --   2: Out R  — stereo R, silent on mono chains
+  --   3: LOW    — parallel L-side tap (mono regardless of chain stereo)
+  --   4: CENTRE — parallel L-side tap
+  --   5: HIGH   — parallel L-side tap
+  --
+  -- Stereo via dual mono instances (Three Sisters hardware is mono;
+  -- "proper stereo" = parallel placement in rack). Per-block parallel
+  -- taps are derived from the L instance; if user needs R-side LOW
+  -- separately, parallel-place a second Canals on an R-only chain.
+  args.channelCount = 5
+  args.subOutLabels = { "Out", "Out R", "LOW", "CENTRE", "HIGH" }
   Unit.init(self, args)
 end
 
 function Canals:onLoadGraph(channelCount)
+  -- L instance: full set of outputs (drives Out1 + LOW/CENTRE/HIGH taps)
   local op = self:addObject("op", libspreadsheet.Canals())
-
-  -- Main input feeds the unit. Three Sisters is mono; for stereo,
-  -- parallel placement of two Canals units.
   connect(self, "In1", op, "In")
+  connect(op, "Out",    self, "Out1")  -- primary: fader morph (L side)
+  connect(op, "Low",    self, "Out3")
+  connect(op, "Centre", self, "Out4")
+  connect(op, "High",   self, "Out5")
 
-  -- 4 sub-outs (matches args.channelCount).
-  connect(op, "Out",    self, "Out1")  -- primary: fader morph
-  connect(op, "Low",    self, "Out2")
-  connect(op, "Centre", self, "Out3")
-  connect(op, "High",   self, "Out4")
+  -- R instance: created only on stereo chains. Only its main Out is
+  -- wired (to Out2). Its per-block outputs are unused — sub-outs
+  -- 3-5 stay L-instance taps for picker simplicity.
+  local opR = nil
+  if channelCount > 1 then
+    opR = self:addObject("opR", libspreadsheet.Canals())
+    connect(self, "In2", opR, "In")
+    connect(opR, "Out", self, "Out2")
+  end
 
-  -- V/Oct
+  -- V/Oct (shared CV; both instances track the same pitch)
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
   connect(tune, "Out", tuneRange, "In")
   connect(tune, "Out", op, "V/Oct")
+  if opR then connect(tune, "Out", opR, "V/Oct") end
   self:addMonoBranch("tune", tune, "In", tune, "Out")
 
-  -- Fundamental
+  -- Fundamental (shared)
   local fundamental = self:addObject("fundamental", app.ParameterAdapter())
   fundamental:hardSet("Bias", 0.0)
   tie(op, "Fundamental", fundamental, "Out")
+  if opR then tie(opR, "Fundamental", fundamental, "Out") end
   self:addMonoBranch("fundamental", fundamental, "In", fundamental, "Out")
 
-  -- Span
+  -- Span (shared)
   local span = self:addObject("span", app.ParameterAdapter())
   span:hardSet("Bias", 0.25)
   tie(op, "Span", span, "Out")
+  if opR then tie(opR, "Span", span, "Out") end
   self:addMonoBranch("span", span, "In", span, "Out")
 
-  -- Quality
+  -- Quality (shared)
   local quality = self:addObject("quality", app.ParameterAdapter())
   quality:hardSet("Bias", 0.0)
   tie(op, "Quality", quality, "Out")
+  if opR then tie(opR, "Quality", quality, "Out") end
   self:addMonoBranch("quality", quality, "In", quality, "Out")
 
-  -- Output fader (controls sub-out 1 content; sub-outs 2-4 always
-  -- carry the dedicated per-block taps regardless of fader position).
+  -- Output fader (shared; controls Out / Out R morph content)
   local output = self:addObject("output", app.ParameterAdapter())
   output:hardSet("Bias", 0.0)
   tie(op, "Output", output, "Out")
+  if opR then tie(opR, "Output", output, "Out") end
   self:addMonoBranch("output", output, "In", output, "Out")
 
-  -- Mode
+  -- Mode (shared)
   local mode = self:addObject("mode", app.ParameterAdapter())
   mode:hardSet("Bias", 0)
   tie(op, "Mode", mode, "Out")
+  if opR then tie(opR, "Mode", mode, "Out") end
   self:addMonoBranch("mode", mode, "In", mode, "Out")
 end
 

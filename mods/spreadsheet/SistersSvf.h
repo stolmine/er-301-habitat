@@ -36,17 +36,30 @@ namespace stolmine
       float lp, bp, hp;
     };
 
-    inline void setFreqQ(float normalizedFreq, float q)
+    inline void setFreq(float normalizedFreq, float damping)
     {
       // g = tan(π * f) via π-corrected Taylor expansion.
       // Series: tan(x) ≈ x + x³/3 + 2x⁵/15 + ... — we keep x + x³/3
       // (the 'dirty' stmlib form). Valid for normalized f up to ~0.4
       // (~19 kHz at 48k), accurate to <1% in audio range.
+      //
+      // damping (k = 1/Q): positive for normal filter, ~0 for self-osc
+      // edge, slightly negative for sustained self-oscillation. The
+      // in-loop tanh on s1 bounds growth into a stable limit cycle.
       const float pi = 3.14159265358979f;
       float pif = pi * normalizedFreq;
       g = pif * (1.0f + pif * pif * 0.333333f);
-      r = 1.0f / q;
+      r = damping;
       h = 1.0f / (1.0f + r * g + g * g);
+    }
+
+    inline void setFreqQ(float normalizedFreq, float q)
+    {
+      // Backwards-compat wrapper. Cannot reach self-osc this way
+      // (q > 0 means damping > 0). Callers wanting self-osc edge
+      // should use setFreq() directly with a damping value that can
+      // go negative.
+      setFreq(normalizedFreq, 1.0f / q);
     }
 
     inline Output process(float input)

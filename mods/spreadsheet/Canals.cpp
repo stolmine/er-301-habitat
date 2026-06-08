@@ -95,13 +95,37 @@ namespace stolmine
         quality != s.prevQuality || mode != s.prevMode ||
         (v > s.prevVoct + 0.001f || v < s.prevVoct - 0.001f))
     {
-      // Q mapping: 0.5 at quality=0, up to 100 at quality=1
-      // Cubic curve for gentle low end, aggressive high end
-      float q = 0.5f;
-      if (quality >= 0.0f)
+      // Quality knob → damping (k = 1/Q). Two regimes:
+      //
+      //   quality ∈ [0.0, 0.9]: cubic ramp from Butterworth (q≈0.7)
+      //   up to strong resonance (q≈50). Damping stays positive.
+      //
+      //   quality ∈ [0.9, 1.0]: linearly cross damping through zero
+      //   into slight negative (-0.0008). At negative damping the
+      //   filter self-oscillates; the in-loop tanh on s1 bounds the
+      //   growth into a stable limit cycle (Issue #3). The crossover
+      //   at quality=0.9 corresponds to ~3 o'clock on the knob,
+      //   matching the hardware where Q ≈ 14-20 lives.
+      //
+      // Anti-resonance (quality < 0) handled via antiRes scalar below;
+      // main q stays at Butterworth for the resonance path.
+      float damping;
+      if (quality < 0.0f)
       {
-        float t = quality * quality * quality;
-        q = 0.5f + t * 99.5f;
+        damping = 1.0f / 0.7071f;  // Butterworth (anti-res does the spectral shaping)
+      }
+      else if (quality < 0.9f)
+      {
+        float t = quality * (1.0f / 0.9f);  // normalize to [0, 1]
+        float qMag = 0.7071f + t * t * t * 49.3f;  // q ∈ [0.7071, 50]
+        damping = 1.0f / qMag;
+      }
+      else
+      {
+        // Top decile: damping ramps from r≈0.02 (q≈50) through 0 into
+        // -0.0008. Self-oscillation regime sits in roughly the top 5%.
+        float t = (quality - 0.9f) * 10.0f;  // 0..1 in [0.9, 1.0]
+        damping = 0.02f * (1.0f - t) + (-0.0008f) * t;
       }
 
       float totalSemitones = v * 120.0f + fundamental;
@@ -122,26 +146,30 @@ namespace stolmine
       // SVF1 only for LOW/HIGH; SVF2 is a fixed non-resonant Butterworth
       // 2-pole. CENTRE keeps Q on BOTH stages (dual-resonance — the
       // defining behavior of CENTRE).
-      const float kButterQ = 0.7071f;
+      //
+      // Note: using setFreq(freq, damping) directly here rather than
+      // setFreqQ so the resonant stages can receive negative damping
+      // in the top-decile self-oscillation regime.
+      const float kButterDamp = 1.0f / 0.7071f;  // ~1.414 (Butterworth)
       if (mode == 0)
       {
         // Crossover: LOW at lowF, CENTRE spans lowF->highF, HIGH at highF
-        s.low1.setFreqQ(lowF, q);
-        s.low2.setFreqQ(lowF, kButterQ);   // FIXED: was q
-        s.ctr1.setFreqQ(lowF, q);
-        s.ctr2.setFreqQ(highF, q);          // CENTRE dual-resonance stays
-        s.hi1.setFreqQ(highF, q);
-        s.hi2.setFreqQ(highF, kButterQ);    // FIXED: was q
+        s.low1.setFreq(lowF, damping);
+        s.low2.setFreq(lowF, kButterDamp);   // FIXED: was q
+        s.ctr1.setFreq(lowF, damping);
+        s.ctr2.setFreq(highF, damping);       // CENTRE dual-resonance stays
+        s.hi1.setFreq(highF, damping);
+        s.hi2.setFreq(highF, kButterDamp);   // FIXED: was q
       }
       else
       {
         // Formant: each block converges to its own FREQ
-        s.low1.setFreqQ(lowF, q);
-        s.low2.setFreqQ(lowF, kButterQ);    // FIXED
-        s.ctr1.setFreqQ(ctrF, q);
-        s.ctr2.setFreqQ(ctrF, q);            // CENTRE dual-resonance stays
-        s.hi1.setFreqQ(highF, q);
-        s.hi2.setFreqQ(highF, kButterQ);    // FIXED
+        s.low1.setFreq(lowF, damping);
+        s.low2.setFreq(lowF, kButterDamp);   // FIXED
+        s.ctr1.setFreq(ctrF, damping);
+        s.ctr2.setFreq(ctrF, damping);        // CENTRE dual-resonance stays
+        s.hi1.setFreq(highF, damping);
+        s.hi2.setFreq(highF, kButterDamp);   // FIXED
       }
 
       s.prevFundamental = fundamental;
