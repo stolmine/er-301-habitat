@@ -118,25 +118,30 @@ namespace stolmine
       float highF = clampNorm(highHz);
       float ctrF = clampNorm(freqHz);
 
+      // Issue #2 (Q placement): real Three Sisters has resonance on
+      // SVF1 only for LOW/HIGH; SVF2 is a fixed non-resonant Butterworth
+      // 2-pole. CENTRE keeps Q on BOTH stages (dual-resonance — the
+      // defining behavior of CENTRE).
+      const float kButterQ = 0.7071f;
       if (mode == 0)
       {
         // Crossover: LOW at lowF, CENTRE spans lowF->highF, HIGH at highF
         s.low1.setFreqQ(lowF, q);
-        s.low2.setFreqQ(lowF, q);
+        s.low2.setFreqQ(lowF, kButterQ);   // FIXED: was q
         s.ctr1.setFreqQ(lowF, q);
-        s.ctr2.setFreqQ(highF, q);
+        s.ctr2.setFreqQ(highF, q);          // CENTRE dual-resonance stays
         s.hi1.setFreqQ(highF, q);
-        s.hi2.setFreqQ(highF, q);
+        s.hi2.setFreqQ(highF, kButterQ);    // FIXED: was q
       }
       else
       {
-        // Formant: each at its own frequency
+        // Formant: each block converges to its own FREQ
         s.low1.setFreqQ(lowF, q);
-        s.low2.setFreqQ(lowF, q);
+        s.low2.setFreqQ(lowF, kButterQ);    // FIXED
         s.ctr1.setFreqQ(ctrF, q);
-        s.ctr2.setFreqQ(ctrF, q);
+        s.ctr2.setFreqQ(ctrF, q);            // CENTRE dual-resonance stays
         s.hi1.setFreqQ(highF, q);
-        s.hi2.setFreqQ(highF, q);
+        s.hi2.setFreqQ(highF, kButterQ);    // FIXED
       }
 
       s.prevFundamental = fundamental;
@@ -152,54 +157,53 @@ namespace stolmine
     float *ctrOut = s.ctrOut;
     float *hiOut = s.hiOut;
 
-    // Per-sample processing with cascaded SVFs
+    // Per-sample SVF processing + topology-correct anti-resonance.
+    //
+    // Issue #5 fix: anti-res taps the genuine complementary SVF output
+    // (LOW = SVF1.hp, HIGH = SVF1.lp, CENTRE = SVF1.lp + SVF2.hp) and
+    // mixes additively against the main output. The old generic
+    // dry-minus-out approximation produced wrong notch phase + depth.
+    //
+    // Issue #8 fix (FORMANT HIGH): SVF1 stays HP-first (was LP→HP);
+    // SVF2 then takes LP for the formant output. Mirrors real Three
+    // Sisters HP-first cascade convention.
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float x = in[i];
 
       if (mode == 0)
       {
-        // Crossover: LP->LP, HP->LP, HP->HP
+        // Crossover: LOW = SVF1.lp→SVF2.lp; CENTRE = SVF1.hp→SVF2.lp;
+        // HIGH = SVF1.hp→SVF2.hp.
         auto lo1 = s.low1.process(x);
         auto lo2 = s.low2.process(lo1.lp);
+        lowOut[i] = lo2.lp + antiRes * lo1.hp;
 
         auto ct1 = s.ctr1.process(x);
         auto ct2 = s.ctr2.process(ct1.hp);
+        ctrOut[i] = ct2.lp + antiRes * (ct1.lp + ct2.hp);
 
         auto hi1 = s.hi1.process(x);
         auto hi2 = s.hi2.process(hi1.hp);
-
-        lowOut[i] = lo2.lp;
-        ctrOut[i] = ct2.lp;
-        hiOut[i] = hi2.hp;
+        hiOut[i] = hi2.hp + antiRes * hi1.lp;
       }
       else
       {
-        // Formant: all bandpass (LP->HP, HP->LP, LP->HP)
+        // Formant: LOW = SVF1.lp→SVF2.lp then take hp for the upper-
+        // formant slope (kept same as biome — Issue #8 only flagged
+        // HIGH formant); CENTRE same routing as XOVER; HIGH = SVF1.hp
+        // (FIXED) → SVF2.lp.
         auto lo1 = s.low1.process(x);
         auto lo2 = s.low2.process(lo1.lp);
+        lowOut[i] = lo2.hp + antiRes * lo1.hp;
 
         auto ct1 = s.ctr1.process(x);
         auto ct2 = s.ctr2.process(ct1.hp);
+        ctrOut[i] = ct2.lp + antiRes * (ct1.lp + ct2.hp);
 
         auto hi1 = s.hi1.process(x);
-        auto hi2 = s.hi2.process(hi1.lp);
-
-        lowOut[i] = lo2.hp;
-        ctrOut[i] = ct2.lp;
-        hiOut[i] = hi2.hp;
-      }
-    }
-
-    // Anti-resonance: notch by mixing complementary signal
-    if (antiRes > 0.0f)
-    {
-      for (int i = 0; i < FRAMELENGTH; i++)
-      {
-        float dry = in[i];
-        lowOut[i] = lowOut[i] * (1.0f - antiRes) + (dry - lowOut[i]) * antiRes;
-        ctrOut[i] = ctrOut[i] * (1.0f - antiRes) + (dry - ctrOut[i]) * antiRes;
-        hiOut[i] = hiOut[i] * (1.0f - antiRes) + (dry - hiOut[i]) * antiRes;
+        auto hi2 = s.hi2.process(hi1.hp);   // FIXED: was hi1.lp
+        hiOut[i] = hi2.lp + antiRes * hi1.lp;
       }
     }
 
