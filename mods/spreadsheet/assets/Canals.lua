@@ -69,14 +69,22 @@ function Canals:onLoadGraph(channelCount)
   connect(op, "Centre", self, "Out4")
   connect(op, "High",   self, "Out5")
 
-  -- R instance: created only on stereo chains. Only its main Out is
-  -- wired (to Out2). Its per-block outputs are unused — sub-outs
-  -- 3-5 stay L-instance taps for picker simplicity.
+  -- R instance: created on stereo chains. Its main Out drives Out2.
+  -- Per-block outputs are unused — sub-outs 3-5 stay L-instance taps.
+  --
+  -- On mono chains we still wire Out2 (to L's Out, mono-duplicated)
+  -- so the sub-out picker has a valid source for slot 2. Matches
+  -- the JF pattern (Mix wired to both Out1+Out2). Otherwise unwired
+  -- sub-outs may not produce audio when downstream pickers select
+  -- them.
   local opR = nil
   if channelCount > 1 then
     opR = self:addObject("opR", libspreadsheet.Canals())
     connect(self, "In2", opR, "In")
     connect(opR, "Out", self, "Out2")
+  else
+    -- Mono chain: duplicate primary into Out2 slot
+    connect(op, "Out", self, "Out2")
   end
 
   -- V/Oct (shared CV; both instances track the same pitch)
