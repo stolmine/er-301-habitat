@@ -61,73 +61,59 @@ function Canals:init(args)
 end
 
 function Canals:onLoadGraph(channelCount)
-  -- L instance: full set of outputs (drives Out1 + LOW/CENTRE/HIGH taps)
+  -- SINGLE INSTANCE — matches JF's working multi-out pattern. The
+  -- prior dual-instance (op + opR on stereo) pattern broke the
+  -- sub-out picker subscription somehow; JF uses one Object and
+  -- duplicates Mix to both Out1+Out2, which is what we mirror.
+  --
+  -- Three Sisters hardware is mono, so this isn't a regression —
+  -- both stereo chain channels get the same mono signal. For
+  -- "true stereo" Canals, parallel-place two units (one per side).
   local op = self:addObject("op", libspreadsheet.Canals())
   connect(self, "In1", op, "In")
-  connect(op, "Out",    self, "Out1")  -- primary: fader morph (L side)
+
+  connect(op, "Out",    self, "Out1")  -- primary: fader morph
+  connect(op, "Out",    self, "Out2")  -- duplicated to stereo R slot
   connect(op, "Low",    self, "Out3")
   connect(op, "Centre", self, "Out4")
   connect(op, "High",   self, "Out5")
 
-  -- R instance: created on stereo chains. Its main Out drives Out2.
-  -- Per-block outputs are unused — sub-outs 3-5 stay L-instance taps.
-  --
-  -- On mono chains we still wire Out2 (to L's Out, mono-duplicated)
-  -- so the sub-out picker has a valid source for slot 2. Matches
-  -- the JF pattern (Mix wired to both Out1+Out2). Otherwise unwired
-  -- sub-outs may not produce audio when downstream pickers select
-  -- them.
-  local opR = nil
-  if channelCount > 1 then
-    opR = self:addObject("opR", libspreadsheet.Canals())
-    connect(self, "In2", opR, "In")
-    connect(opR, "Out", self, "Out2")
-  else
-    -- Mono chain: duplicate primary into Out2 slot
-    connect(op, "Out", self, "Out2")
-  end
-
-  -- V/Oct (shared CV; both instances track the same pitch)
+  -- V/Oct
   local tune = self:addObject("tune", app.ConstantOffset())
   local tuneRange = self:addObject("tuneRange", app.MinMax())
   connect(tune, "Out", tuneRange, "In")
   connect(tune, "Out", op, "V/Oct")
-  if opR then connect(tune, "Out", opR, "V/Oct") end
   self:addMonoBranch("tune", tune, "In", tune, "Out")
 
-  -- Fundamental (shared)
+  -- Fundamental
   local fundamental = self:addObject("fundamental", app.ParameterAdapter())
   fundamental:hardSet("Bias", 0.0)
   tie(op, "Fundamental", fundamental, "Out")
-  if opR then tie(opR, "Fundamental", fundamental, "Out") end
   self:addMonoBranch("fundamental", fundamental, "In", fundamental, "Out")
 
-  -- Span (shared)
+  -- Span
   local span = self:addObject("span", app.ParameterAdapter())
   span:hardSet("Bias", 0.25)
   tie(op, "Span", span, "Out")
-  if opR then tie(opR, "Span", span, "Out") end
   self:addMonoBranch("span", span, "In", span, "Out")
 
-  -- Quality (shared)
+  -- Quality
   local quality = self:addObject("quality", app.ParameterAdapter())
   quality:hardSet("Bias", 0.0)
   tie(op, "Quality", quality, "Out")
-  if opR then tie(opR, "Quality", quality, "Out") end
   self:addMonoBranch("quality", quality, "In", quality, "Out")
 
-  -- Output fader (shared; controls Out / Out R morph content)
+  -- Output fader (drives sub-out 1+2 morph content; sub-outs 3-5
+  -- always carry direct per-block taps regardless of fader position).
   local output = self:addObject("output", app.ParameterAdapter())
   output:hardSet("Bias", 0.0)
   tie(op, "Output", output, "Out")
-  if opR then tie(opR, "Output", output, "Out") end
   self:addMonoBranch("output", output, "In", output, "Out")
 
-  -- Mode (shared)
+  -- Mode
   local mode = self:addObject("mode", app.ParameterAdapter())
   mode:hardSet("Bias", 0)
   tie(op, "Mode", mode, "Out")
-  if opR then tie(opR, "Mode", mode, "Out") end
   self:addMonoBranch("mode", mode, "In", mode, "Out")
 end
 
