@@ -61,22 +61,11 @@ function Canals:init(args)
 end
 
 function Canals:onLoadGraph(channelCount)
-  -- SINGLE INSTANCE — matches JF's working multi-out pattern. The
-  -- prior dual-instance (op + opR on stereo) pattern broke the
-  -- sub-out picker subscription somehow; JF uses one Object and
-  -- duplicates Mix to both Out1+Out2, which is what we mirror.
-  --
-  -- Three Sisters hardware is mono, so this isn't a regression —
-  -- both stereo chain channels get the same mono signal. For
-  -- "true stereo" Canals, parallel-place two units (one per side).
+  -- Single instance — Three Sisters is mono hardware. Both stereo
+  -- chain channels see the same signal; for true stereo Canals,
+  -- parallel-place two units.
   local op = self:addObject("op", libspreadsheet.Canals())
   connect(self, "In1", op, "In")
-
-  connect(op, "Out",    self, "Out1")  -- primary: fader morph
-  connect(op, "Out",    self, "Out2")  -- duplicated to stereo R slot
-  connect(op, "Low",    self, "Out3")
-  connect(op, "Centre", self, "Out4")
-  connect(op, "High",   self, "Out5")
 
   -- V/Oct
   local tune = self:addObject("tune", app.ConstantOffset())
@@ -115,6 +104,18 @@ function Canals:onLoadGraph(channelCount)
   mode:hardSet("Bias", 0)
   tie(op, "Mode", mode, "Out")
   self:addMonoBranch("mode", mode, "In", mode, "Out")
+
+  -- Wire 5 framework outlets LAST — matches JF's pattern (output
+  -- connects after all params/branches set up). Prior placement
+  -- (connects immediately after addObject) appeared to silently
+  -- break sub-out picker subscriptions for non-primary sub-outs
+  -- (Out3-5) while leaving the scope viewer working. Reordering
+  -- mirrors the only known-working multi-out unit in the package.
+  connect(op, "Out",    self, "Out1") -- primary: fader morph
+  connect(op, "Out",    self, "Out2") -- stereo R duplicate of primary
+  connect(op, "Low",    self, "Out3")
+  connect(op, "Centre", self, "Out4")
+  connect(op, "High",   self, "Out5")
 end
 
 function Canals:onLoadViews()
