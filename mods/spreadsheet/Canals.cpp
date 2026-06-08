@@ -123,9 +123,14 @@ namespace stolmine
       else
       {
         // Top decile: damping ramps from r≈0.02 (q≈50) through 0 into
-        // -0.0008. Self-oscillation regime sits in roughly the top 5%.
+        // -0.075. Self-oscillation regime sits in roughly the top 8%
+        // (damping crosses zero at quality ≈ 0.917). At full CW the
+        // negative damping is matched to hardware-observed limit-cycle
+        // amplitude (~0.22 peak on CENTRE at noon FREQ, ≈ -13 dBFS) —
+        // see planning/canals-phase0c-findings + canals_model.py
+        // damping sweep that calibrated this value.
         float t = (quality - 0.9f) * 10.0f;  // 0..1 in [0.9, 1.0]
-        damping = 0.02f * (1.0f - t) + (-0.0008f) * t;
+        damping = 0.02f * (1.0f - t) + (-0.075f) * t;
       }
 
       float totalSemitones = v * 120.0f + fundamental;
@@ -235,8 +240,16 @@ namespace stolmine
       }
     }
 
-    // Output crossfade for Out 1 (chain auto-wire): LOW -> CENTRE -> HIGH -> ALL.
-    // Out 2/3/4 always carry the unmixed per-block taps (multi-output).
+    // Output crossfade for Out 1 (chain auto-wire): LOW → CENTRE →
+    // HIGH → ALL. Out 2/3/4 always carry the unmixed per-block taps
+    // (multi-output).
+    //
+    // pos ∈ [2, 3] morphs HIGH (alone) → full ALL (= LOW+CENTRE+HIGH
+    // unweighted sum, the hardware-accurate rail-sum). At pos=3 the
+    // sum can reach 3× per-block peak; we apply fastTanh on the
+    // mixed output to emulate the hardware ALL output's rail-clip
+    // distortion character (the model-author's "rail-sum, not core"
+    // note in three_sisters_svf.c).
     float pos = outputPos;
     float wL, wC, wH;
     if (pos <= 1.0f)
@@ -253,17 +266,17 @@ namespace stolmine
     }
     else
     {
+      // HIGH stays at unity; LOW+CENTRE fade in to reach full ALL sum.
       float t = pos - 2.0f;
-      wL = t * 0.333f;
-      wC = t * 0.333f;
-      wH = (1.0f - t) + t * 0.333f;
+      wL = t;
+      wC = t;
+      wH = 1.0f;
     }
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       // Per-block taps always live (multi-output sub-outs 2-4).
-      // Clamp NaN/extreme values defensively (the existing biome
-      // pattern; keeps faulty math from leaking out).
+      // Clamp NaN/extreme values defensively.
       float vL = lowOut[i];
       float vC = ctrOut[i];
       float vH = hiOut[i];
@@ -273,8 +286,14 @@ namespace stolmine
       outLow[i] = vL;
       outCentre[i] = vC;
       outHigh[i] = vH;
-      // Sub-out 1: fader-selected morph (auto-wire to chain).
-      out[i] = vL * wL + vC * wC + vH * wH;
+      // Sub-out 1: fader-morphed sum, soft-clipped via fastTanh
+      // (rail-sum saturation emulating hardware ALL output character).
+      // At low fader positions (single-block content) the input is
+      // bounded ≤1 and tanh is near-transparent. At pos=3 (3× sum)
+      // tanh asymptotes near ±1.73, producing the characteristic
+      // rail distortion.
+      float mix = vL * wL + vC * wC + vH * wH;
+      out[i] = SistersSvf::fastTanh(mix);
     }
   }
 
