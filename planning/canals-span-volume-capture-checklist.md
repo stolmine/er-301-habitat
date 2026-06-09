@@ -19,6 +19,22 @@ Two excitation sources used:
   not present) — for SPAN profiling
 - **pink.wav** — NEW; generate fresh, see Pre-flight below
 
+## Calibration first (5 min)
+
+Per `planning/canals-internal-external-calibration.md`, run the
+internal-vs-external calibration capture pair BEFORE the rest of
+the session. Captures B-via-MOTU and C-via-MOTU below need the
+attenuation factor to be normalized onto the internal scale.
+
+If the entire session stays on the internal record path (3S →
+ER-301 chain → File Recorder, no MOTU touched), skip calibration
+— all captures will already be on the internal scale.
+
+- [ ] `cal_internal.wav` recorded via File Recorder
+- [ ] `cal_external.wav` recorded via MOTU (if any session captures
+      will go via MOTU)
+- [ ] Attenuation factor computed and noted
+
 ## Pre-flight
 
 - [ ] Three Sisters patched as before: ER-301 chain output → 3S
