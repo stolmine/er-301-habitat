@@ -64,6 +64,38 @@ namespace stolmine
     return midR + halfR * squished;
   }
 
+  // Stereo phase offset (Δφ) derived from the Sync Threshold knob.
+  // At Fibonacci lock anchors (knob = 0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+  // Δφ = 0 → L = R, mono center image. At chaos midpoints (0.1, 0.3,
+  // 0.5, 0.7, 0.9) Δφ = 0.25 envelope cycles (= π/2 in carrier
+  // terms), the maximum stereo width. Smoothstep shape gives sticky
+  // anchor zones (slope = 0 at lock) and smooth chaos transitions.
+  // Result: stereo width is the chaos axis — width audibly collapses
+  // back to mono as the knob finds the next lock.
+  static inline float stereoOffsetFromSyncKnob(float k)
+  {
+    if (k < 0.0f) k = 0.0f;
+    if (k > 1.0f) k = 1.0f;
+
+    // Nearest anchor at multiples of 0.2.
+    int seg = (int)(k * 5.0f + 0.5f);
+    if (seg > 5) seg = 5;
+    if (seg < 0) seg = 0;
+    float anchorK = (float)seg * 0.2f;
+
+    // Distance from nearest anchor, normalized so midpoint = 1.
+    float dist = (k > anchorK) ? (k - anchorK) : (anchorK - k);
+    float t = dist * 10.0f;  // 0.1 segment half-width × 10 → t in [0, 1]
+    if (t > 1.0f) t = 1.0f;
+
+    // Smoothstep — zero slope at anchor AND at midpoint, max slope
+    // in between. Sticky locks + smooth chaos transitions.
+    float shaped = t * t * (3.0f - 2.0f * t);
+
+    // Max offset = 0.25 envelope cycles (matches original π/2 design).
+    return shaped * 0.25f;
+  }
+
   // Cheap Padé tanh (matches Helicase / Parfait pattern). Used by
   // the MirrorBlock pre-saturation stage.
   static inline float mirror_fast_tanh(float x)
@@ -350,7 +382,15 @@ namespace stolmine
     // Envelope phase (wavetable formant). Advances at formant rate;
     // wraps to >= 1 at end of envelope cycle; sync retrigger sets it
     // back to 0 when envelope has completed.
+    //
+    // Stereo: L and R pipelines run in parallel with independent
+    // envelope phase + Mirror state + feedback state. At sync edge,
+    // L resets to 0 and R resets to stereoOffset (derived from Sync
+    // Threshold knob) — so at lock zones L = R (mono center image)
+    // and at chaos midpoints R is offset by 0.25 envelope cycles
+    // (max stereo width). Stereo width IS the chaos axis.
     float envPhase;
+    float envPhaseR;
 
     // Previous-sample Mirror output, used as the feedback signal
     // for self-modulation on the envelope phase advance. The
@@ -358,15 +398,18 @@ namespace stolmine
     // form (Mirror output -> envInc -> wavetable lookup ->
     // Mirror tick -> Mirror output).
     float prevMirrorFeedback;
+    float prevMirrorFeedbackR;
 
     MirrorBlock mirror;
+    MirrorBlock mirrorR;
 
     // DC blocker state (one-pole HPF, 20 Hz, engaged only above 1 Hz).
     // Main Out has its own state pair; Clean / Drive / Held sub-outs
     // each get their own pair so the filters evolve independently
     // (each tap point has different content and shouldn't share
     // filter state).
-    float dcX1, dcY1;        // Main Out
+    float dcX1, dcY1;        // Main Out (L)
+    float dcX1R, dcY1R;      // Main Out R
     float cleanX1, cleanY1;
     float driveX1, driveY1;
     float heldX1, heldY1;
@@ -393,11 +436,14 @@ namespace stolmine
       modPhase = 0.0f;
       lastModPhase = 0.0f;
       lastCarrierPhase = 0.0f;
-      envPhase = 1.0f;  // start completed -> first sync starts a fresh envelope
-      prevMirrorFeedback = 0.0f;
+      envPhase  = 1.0f;  // start completed -> first sync starts a fresh envelope
+      envPhaseR = 1.0f;
+      prevMirrorFeedback  = 0.0f;
+      prevMirrorFeedbackR = 0.0f;
       mirror.Init();
-      dcX1 = 0.0f;
-      dcY1 = 0.0f;
+      mirrorR.Init();
+      dcX1  = 0.0f; dcY1  = 0.0f;
+      dcX1R = 0.0f; dcY1R = 0.0f;
       cleanX1 = 0.0f; cleanY1 = 0.0f;
       driveX1 = 0.0f; driveY1 = 0.0f;
       heldX1  = 0.0f; heldY1  = 0.0f;
@@ -421,6 +467,7 @@ namespace stolmine
     addInput(mFM);
 
     addOutput(mOut);
+    addOutput(mOutR);
     addOutput(mClean);
     addOutput(mDrive);
     addOutput(mHeldOut);
@@ -472,6 +519,7 @@ namespace stolmine
     float *voct  = mVOct.buffer();
     float *fm    = mFM.buffer();
     float *outBuf    = mOut.buffer();
+    float *outRBuf   = mOutR.buffer();
     float *cleanBuf  = mClean.buffer();
     float *driveBuf  = mDrive.buffer();
     float *heldBuf   = mHeldOut.buffer();
@@ -500,9 +548,16 @@ namespace stolmine
 
     // Mirror knob drives all four stages of the MirrorBlock crusher
     // (pre-sat, divisor, bit-depth, Nyquist-flip). Block-rate update
-    // so the per-sample tick stays cheap.
+    // so the per-sample tick stays cheap. L and R crushers run
+    // identical settings — stereo differentiation comes from the
+    // envelope phase offset, not from per-side crusher differences.
     s.mirror.setKnob(mirrorKnob);
+    s.mirrorR.setKnob(mirrorKnob);
     s.curMirrorDivisor = s.mirror.divisor;
+
+    // Stereo envelope phase offset (Δφ) — 0 at lock zones (mono),
+    // up to 0.25 envelope cycles at chaos midpoints (wide).
+    float stereoOffset = stereoOffsetFromSyncKnob(syncKnob);
 
     // V/Oct: Lua wraps with 10x ConstantGain so the buffer carries
     // 1.0-per-octave (Plaits convention, mirrors Helicase).
@@ -571,11 +626,15 @@ namespace stolmine
 
       // Sync edge: mod phase wrap. Internal-mod-driven sync = no
       // external sync input. Reset carrier phase (and optionally
-      // Mirror counter) on every mod wrap.
+      // Mirror counters) on every mod wrap. Mirror reset applies
+      // to BOTH L and R sides — same crusher, same reset cadence.
       bool syncEdge = modWrapped;
       if (syncEdge) {
         s.carrierPhase = 0.0f;
-        if (mirrorResetOn) s.mirror.resetCounter();
+        if (mirrorResetOn) {
+          s.mirror.resetCounter();
+          s.mirrorR.resetCounter();
+        }
         s.syncGateOut = 1.0f;
       } else {
         s.syncGateOut = 0.0f;
@@ -595,59 +654,85 @@ namespace stolmine
       // Envelope phase advance with audio-rate FM from mod sine and
       // self-modulation from previous-sample Mirror output.
       //
-      // Mod scale: exponential ±3 octaves at depth=1 (sine source).
+      // Mod scale: exponential ±3 octaves at depth=1 (sine source,
+      // shared between L and R).
       // Feedback scale: exponential ±2 octaves at depth=1 (Mirror
       // source — already broader spectrum than sine, so slightly
-      // less aggressive multiplier). The 1-sample delay on
-      // prevMirrorFeedback breaks the would-be algebraic loop.
-      float modScale = expf(modOut * modDepth * 3.0f);
-      float fbScale  = expf(s.prevMirrorFeedback * feedback * 2.0f);
-      float envInc   = formantFreqTarget * invSr * modScale * fbScale;
-      s.envPhase += envInc;
+      // less aggressive multiplier). Per-side feedback because L
+      // and R have independent Mirror states. The 1-sample delay
+      // on prevMirrorFeedback breaks the would-be algebraic loop.
+      float modScale  = expf(modOut * modDepth * 3.0f);
+      float fbScaleL  = expf(s.prevMirrorFeedback  * feedback * 2.0f);
+      float fbScaleR  = expf(s.prevMirrorFeedbackR * feedback * 2.0f);
+      float envIncBase = formantFreqTarget * invSr * modScale;
+      s.envPhase  += envIncBase * fbScaleL;
+      s.envPhaseR += envIncBase * fbScaleR;
 
       // Sync retrigger: when sync edge arrives (mod wrap), restart
-      // envelope ONLY IF the previous envelope has completed (envPhase
-      // >= 1). If envelope is still active, the sync is absorbed -
+      // each envelope ONLY IF its previous cycle has completed
+      // (envPhase >= 1). If still active, the sync is absorbed -
       // this is what produces the undertone series naturally when
       // formant rate < sync rate.
-      if (syncEdge && s.envPhase >= 1.0f) {
-        s.envPhase = 0.0f;
+      //
+      // L resets to 0; R resets to stereoOffset (Δφ derived from
+      // Sync Threshold). At lock zones stereoOffset = 0 so L = R
+      // (mono); at chaos midpoints R is offset by up to 0.25
+      // envelope cycles (wide stereo). Width audibly collapses as
+      // the knob finds each next lock.
+      if (syncEdge) {
+        if (s.envPhase  >= 1.0f) s.envPhase  = 0.0f;
+        if (s.envPhaseR >= 1.0f) s.envPhaseR = stereoOffset;
       }
 
-      // Wavetable lookup. Returns 0 when envelope has completed.
-      float clean = wavetableLookup(s.envPhase, shape);
+      // Wavetable lookup (per side). Returns 0 when envelope completed.
+      float cleanL = wavetableLookup(s.envPhase,  shape);
+      float cleanR = wavetableLookup(s.envPhaseR, shape);
 
-      // Mirror block: 4-stage destructive aliasing crusher.
-      float folded = s.mirror.tick(clean);
+      // Mirror block: 4-stage destructive aliasing crusher (per side).
+      float foldedL = s.mirror.tick(cleanL);
+      float foldedR = s.mirrorR.tick(cleanR);
 
-      // Store for next sample's feedback loop into envelope rate.
-      s.prevMirrorFeedback = folded;
+      // Store for next sample's feedback loop into envelope rate
+      // (per side — feedback evolves independently per channel).
+      s.prevMirrorFeedback  = foldedL;
+      s.prevMirrorFeedbackR = foldedR;
 
-      // Fold = alias residual (Mirror output minus bandlimited clean).
-      float foldOnly = folded - clean;
+      // L-channel signals fed forward through the rest of the
+      // pipeline (sub-outs are L taps only).
+      float clean   = cleanL;
+      float folded  = foldedL;
+      float foldOnly = foldedL - cleanL;
 
-      // Main: take the Mirror output. DC HPF on the main path.
-      float mainSig = folded;
-      float dcOut = mainSig - s.dcX1 + dcR * s.dcY1;
-      s.dcX1 = mainSig;
-      s.dcY1 = dcOut;
-      float hp = dcEnable ? dcOut : mainSig;
-      float finalOut = hp * level;
+      // Main L: Mirror output → DC HPF → Level → soft clip.
+      float dcOutL = folded - s.dcX1 + dcR * s.dcY1;
+      s.dcX1 = folded; s.dcY1 = dcOutL;
+      float hpL = dcEnable ? dcOutL : folded;
+      float finalOut = hpL * level;
 
-      // Soft clip at the rails so wild Push + Source territory can't
-      // peg the DAC. Use the smooth pseudo-saturate pattern (no
-      // discontinuity at threshold like the old Parfait clamp).
-      // f(x) = x / sqrt(sqrt(1 + (|x|/1.5)^4))
+      // Main R: same pipeline with independent DC state.
+      float dcOutR = foldedR - s.dcX1R + dcR * s.dcY1R;
+      s.dcX1R = foldedR; s.dcY1R = dcOutR;
+      float hpR = dcEnable ? dcOutR : foldedR;
+      float finalOutR = hpR * level;
+
+      // Soft clip at the rails (pseudo-saturate K=1.5, p=4) on
+      // both channels independently — wild Push + Source territory
+      // can't peg the DAC. Smooth transition, no discontinuity.
       {
         const float invK = 1.0f / 1.5f;
-        float ax = (finalOut >= 0.0f) ? finalOut : -finalOut;
-        float xk = ax * invK;
-        float xk2 = xk * xk;
-        float xk4 = xk2 * xk2;
-        finalOut = finalOut / sqrtf(sqrtf(1.0f + xk4));
+        float axL = (finalOut >= 0.0f) ? finalOut : -finalOut;
+        float xkL  = axL * invK;
+        float xk4L = (xkL * xkL) * (xkL * xkL);
+        finalOut = finalOut / sqrtf(sqrtf(1.0f + xk4L));
+
+        float axR = (finalOutR >= 0.0f) ? finalOutR : -finalOutR;
+        float xkR  = axR * invK;
+        float xk4R = (xkR * xkR) * (xkR * xkR);
+        finalOutR = finalOutR / sqrtf(sqrtf(1.0f + xk4R));
       }
 
-      outBuf[i]   = finalOut;
+      outBuf[i]  = finalOut;
+      outRBuf[i] = finalOutR;
 
       // DC-block Clean / Drive / Held sub-outs so they're symmetric
       // around 0 for downstream patch consumers (the wavetable

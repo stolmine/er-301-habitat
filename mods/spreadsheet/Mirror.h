@@ -50,6 +50,7 @@ namespace stolmine
     od::Inlet mFM{"FM"};
 
     od::Outlet mOut{"Out"};
+    od::Outlet mOutR{"OutR"};     // stereo R main output (independent pipeline, sync-threshold-derived phase offset from L)
     od::Outlet mClean{"Clean"};
     od::Outlet mDrive{"Drive"};   // Mirror pre-sat output (tanh-driven, pre-S&H)
     od::Outlet mHeldOut{"Held"};  // Mirror post-quantize value (stair-step, pre-reconstruction)

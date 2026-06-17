@@ -31,16 +31,18 @@ Mirror:include(Unit)
 function Mirror:init(args)
   args.title = "Mirror"
   args.mnemonic = "Mr"
-  -- 7 sub-outs covering distinct pipeline points for self-patching:
-  --   1: Out    -- final output (post-Mirror, post-DC, post-level)
-  --   2: Clean  -- bandlimited wavetable envelope (pre-Mirror)
-  --   3: Drive  -- post-pre-sat (tanh-driven, pre-S&H/quantize)
-  --   4: Held   -- post-quantize stair-step value (pre-reconstruction)
-  --   5: Fold   -- alias residual (Mirror output minus Clean)
-  --   6: Sync   -- gate firing on internal sync edges (mod phase wrap)
-  --   7: Mod    -- raw internal modulator sine
-  args.channelCount = 7
-  args.subOutLabels = { "Out", "Clean", "Drive", "Held", "Fold", "Sync", "Mod" }
+  -- 8 sub-outs covering distinct pipeline points for self-patching:
+  --   1: Out    -- main output L (post-Mirror, post-DC, post-level)
+  --   2: Out R  -- main output R (independent envelope phase + Mirror,
+  --              sync-threshold-derived stereo offset from L)
+  --   3: Clean  -- bandlimited wavetable envelope L (pre-Mirror)
+  --   4: Drive  -- post-pre-sat L (tanh-driven, pre-S&H/quantize)
+  --   5: Held   -- post-quantize stair-step value L (pre-reconstruction)
+  --   6: Fold   -- alias residual L (Mirror output minus Clean)
+  --   7: Sync   -- gate firing on internal sync edges (mod phase wrap)
+  --   8: Mod    -- raw internal modulator sine
+  args.channelCount = 8
+  args.subOutLabels = { "Out", "Out R", "Clean", "Drive", "Held", "Fold", "Sync", "Mod" }
   Unit.init(self, args)
 end
 
@@ -124,16 +126,17 @@ function Mirror:onLoadGraph(channelCount)
   tie(op, "Level", level, "Out")
   self:addMonoBranch("level", level, "In", level, "Out")
 
-  -- Wire the 7 framework outlets LAST (per Canals/JF pattern, sub-out
+  -- Wire the 8 framework outlets LAST (per Canals/JF pattern, sub-out
   -- subscriptions break silently if connects happen before all
   -- params/branches are set up).
   connect(op, "Out",   self, "Out1")
-  connect(op, "Clean", self, "Out2")
-  connect(op, "Drive", self, "Out3")
-  connect(op, "Held",  self, "Out4")
-  connect(op, "Fold",  self, "Out5")
-  connect(op, "Sync",  self, "Out6")
-  connect(op, "Mod",   self, "Out7")
+  connect(op, "OutR",  self, "Out2")
+  connect(op, "Clean", self, "Out3")
+  connect(op, "Drive", self, "Out4")
+  connect(op, "Held",  self, "Out5")
+  connect(op, "Fold",  self, "Out6")
+  connect(op, "Sync",  self, "Out7")
+  connect(op, "Mod",   self, "Out8")
 end
 
 function Mirror:onLoadViews()
