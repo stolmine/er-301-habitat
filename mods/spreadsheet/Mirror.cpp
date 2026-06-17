@@ -20,8 +20,14 @@ namespace stolmine
   // ---------------------------------------------------------------
 
   // Sync Threshold knob (0..1) -> carrier/mod lock ratio.
-  // Anchors at integer ratios: 1.0, 1.5, 2.0, 2.5, 3.0 at knob
-  // positions 0.0, 0.25, 0.5, 0.75, 1.0 respectively.
+  // Anchors at Fibonacci ratios: 1, 2, 3, 5, 8, 13 at knob positions
+  // 0.0, 0.2, 0.4, 0.6, 0.8, 1.0 respectively.
+  //
+  // The high upper end (13x) is the key to producing dramatic alias
+  // content at LOW F0: the carrier oscillator runs at F_mod x ratio,
+  // so at F_mod = 110 Hz the carrier hits 1430 Hz, generating
+  // harmonics that cross Nyquist boundaries regardless of perceived
+  // pitch.
   //
   // Within each segment, a cubic squish makes lock zones near the
   // anchors sticky (d(ratio)/d(knob) -> 0 at anchors) and chaos
@@ -33,13 +39,14 @@ namespace stolmine
     if (k < 0.0f) k = 0.0f;
     if (k > 1.0f) k = 1.0f;
     int seg;
-    if (k >= 0.75f) seg = 3;
-    else if (k >= 0.5f) seg = 2;
-    else if (k >= 0.25f) seg = 1;
-    else seg = 0;
+    if (k >= 0.8f)      seg = 4;
+    else if (k >= 0.6f) seg = 3;
+    else if (k >= 0.4f) seg = 2;
+    else if (k >= 0.2f) seg = 1;
+    else                seg = 0;
 
-    static const float kK[5] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
-    static const float kR[5] = {1.0f, 1.5f, 2.0f, 2.5f, 3.0f};
+    static const float kK[6] = {0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f};
+    static const float kR[6] = {1.0f, 2.0f, 3.0f, 5.0f, 8.0f, 13.0f};
 
     float k0 = kK[seg],  k1 = kK[seg + 1];
     float r0 = kR[seg],  r1 = kR[seg + 1];
@@ -116,12 +123,24 @@ namespace stolmine
     if (driven < -1.0f) driven = -1.0f;
     float sb = 4.0f * driven * driven * driven - 3.0f * driven;
 
-    // Shape C: 2-op self-FM at 2x rate, FM index = push.
-    float modSig = neon_math::sine_poly_hq((2.0f * p) - floorf(2.0f * p));
-    float fmPh = p + push * 0.5f * modSig;
-    fmPh = fmPh - floorf(fmPh);
-    if (fmPh < 0.0f) fmPh += 1.0f;
-    float sc = neon_math::sine_poly_hq(fmPh);
+    // Shape C: iterated triangle wavefolder. Drive amplifies the sine
+    // beyond [-1, 1]; each fold reflects content back into range,
+    // producing slope discontinuities that DOUBLE harmonic content per
+    // fold. At push=1, ~6 folds happen per cycle, generating content
+    // well into the Nyquist region even at low F0 (the whole point —
+    // this is the bandwidth-multiplier shape that gives Mirror
+    // something to fold at any perceived pitch).
+    //
+    // Bounded iteration count (16) is comfortably above the max folds
+    // needed (drive at push=1 is 6, so ~6 folds converge).
+    float drive = 1.0f + push * 5.0f;
+    float folded = s * drive;
+    for (int j = 0; j < 16; j++) {
+      if (folded > 1.0f)       folded = 2.0f - folded;
+      else if (folded < -1.0f) folded = -2.0f - folded;
+      else                     break;
+    }
+    float sc = folded;
 
     // Two-segment lerp between three shapes.
     if (morph <= 0.5f) {
