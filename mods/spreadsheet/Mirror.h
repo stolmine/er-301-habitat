@@ -51,6 +51,8 @@ namespace stolmine
 
     od::Outlet mOut{"Out"};
     od::Outlet mClean{"Clean"};
+    od::Outlet mDrive{"Drive"};   // Mirror pre-sat output (tanh-driven, pre-S&H)
+    od::Outlet mHeldOut{"Held"};  // Mirror post-quantize value (stair-step, pre-reconstruction)
     od::Outlet mFold{"Fold"};
     od::Outlet mSync{"Sync"};
     od::Outlet mModOut{"Mod"};
@@ -62,6 +64,7 @@ namespace stolmine
     od::Parameter mModDepth{"ModDepth", 0.5f};
     od::Parameter mSyncThreshold{"SyncThreshold", 0.0f};
     od::Parameter mMirror{"Mirror", 0.0f};
+    od::Parameter mFeedback{"Feedback", 0.0f}; // Mirror -> envelope phase (v1: single destination)
     od::Parameter mLevel{"Level", 0.5f};
 
     od::Option mMirrorReset{"MirrorReset", 1}; // 1 = ON (locked, default), 2 = OFF (free)

@@ -252,6 +252,7 @@ namespace stolmine
     float held;
     float driveAmount;
     float flipAmount;
+    float lastDriven;      // exposed for the Drive sub-out (pre-sat output captured each sample)
 
     inline void Init() {
       divisor      = 1;
@@ -262,6 +263,7 @@ namespace stolmine
       held         = 0.0f;
       driveAmount  = 0.0f;
       flipAmount   = 0.0f;
+      lastDriven   = 0.0f;
     }
 
     // Recompute all stage parameters from the single knob value.
@@ -309,6 +311,7 @@ namespace stolmine
       float driven = (driveAmount > 0.01f)
         ? mirror_fast_tanh(in * (1.0f + driveAmount)) * (1.0f + driveAmount * 0.5f)
         : in;
+      lastDriven = driven;  // captured for the Drive sub-out
 
       // Stage 2: cycle counter (on-cycle == counter rolls over to 0).
       bool onCycle = (counter == 0);
@@ -349,11 +352,24 @@ namespace stolmine
     // back to 0 when envelope has completed.
     float envPhase;
 
+    // Previous-sample Mirror output, used as the feedback signal
+    // for self-modulation on the envelope phase advance. The
+    // 1-sample delay breaks the algebraic loop that would otherwise
+    // form (Mirror output -> envInc -> wavetable lookup ->
+    // Mirror tick -> Mirror output).
+    float prevMirrorFeedback;
+
     MirrorBlock mirror;
 
     // DC blocker state (one-pole HPF, 20 Hz, engaged only above 1 Hz).
-    float dcX1;
-    float dcY1;
+    // Main Out has its own state pair; Clean / Drive / Held sub-outs
+    // each get their own pair so the filters evolve independently
+    // (each tap point has different content and shouldn't share
+    // filter state).
+    float dcX1, dcY1;        // Main Out
+    float cleanX1, cleanY1;
+    float driveX1, driveY1;
+    float heldX1, heldY1;
 
     // Ring buffers for viz (decimated capture).
     float outputRing[256];
@@ -378,9 +394,13 @@ namespace stolmine
       lastModPhase = 0.0f;
       lastCarrierPhase = 0.0f;
       envPhase = 1.0f;  // start completed -> first sync starts a fresh envelope
+      prevMirrorFeedback = 0.0f;
       mirror.Init();
       dcX1 = 0.0f;
       dcY1 = 0.0f;
+      cleanX1 = 0.0f; cleanY1 = 0.0f;
+      driveX1 = 0.0f; driveY1 = 0.0f;
+      heldX1  = 0.0f; heldY1  = 0.0f;
       memset(outputRing, 0, sizeof(outputRing));
       memset(modRing, 0, sizeof(modRing));
       ringPos = 0;
@@ -402,6 +422,8 @@ namespace stolmine
 
     addOutput(mOut);
     addOutput(mClean);
+    addOutput(mDrive);
+    addOutput(mHeldOut);
     addOutput(mFold);
     addOutput(mSync);
     addOutput(mModOut);
@@ -413,6 +435,7 @@ namespace stolmine
     addParameter(mModDepth);
     addParameter(mSyncThreshold);
     addParameter(mMirror);
+    addParameter(mFeedback);
     addParameter(mLevel);
 
     addOption(mMirrorReset);
@@ -448,11 +471,13 @@ namespace stolmine
 
     float *voct  = mVOct.buffer();
     float *fm    = mFM.buffer();
-    float *outBuf   = mOut.buffer();
-    float *cleanBuf = mClean.buffer();
-    float *foldBuf  = mFold.buffer();
-    float *syncBuf  = mSync.buffer();
-    float *modBuf   = mModOut.buffer();
+    float *outBuf    = mOut.buffer();
+    float *cleanBuf  = mClean.buffer();
+    float *driveBuf  = mDrive.buffer();
+    float *heldBuf   = mHeldOut.buffer();
+    float *foldBuf   = mFold.buffer();
+    float *syncBuf   = mSync.buffer();
+    float *modBuf    = mModOut.buffer();
 
     float sr = globalConfig.sampleRate;
     float invSr = 1.0f / sr;
@@ -465,6 +490,7 @@ namespace stolmine
     float modDepth = CLAMP(0.0f, 1.0f, mModDepth.value());
     float syncKnob = CLAMP(0.0f, 1.0f, mSyncThreshold.value());
     float mirrorKnob = CLAMP(0.0f, 1.0f, mMirror.value());
+    float feedback = CLAMP(0.0f, 1.0f, mFeedback.value());
     float level    = CLAMP(0.0f, 1.0f, mLevel.value());
     bool  mirrorResetOn = (mMirrorReset.value() == 1);
 
@@ -566,14 +592,17 @@ namespace stolmine
       if (s.carrierPhase >= 1.0f) s.carrierPhase -= floorf(s.carrierPhase);
       if (s.carrierPhase < 0.0f)  s.carrierPhase -= floorf(s.carrierPhase);
 
-      // Envelope phase advance with audio-rate FM from mod sine.
-      // Exponential scaling: envInc *= 2^(modOut × modDepth × 3.0)
-      // → at depth=1, rate sweeps ±3 octaves around nominal each mod
-      // cycle. Strong broadband FM character on the formant; gives
-      // Mirror substantial above-Nyquist content to fold even at low
-      // base formant rates. Always positive (exp can't go negative).
+      // Envelope phase advance with audio-rate FM from mod sine and
+      // self-modulation from previous-sample Mirror output.
+      //
+      // Mod scale: exponential ±3 octaves at depth=1 (sine source).
+      // Feedback scale: exponential ±2 octaves at depth=1 (Mirror
+      // source — already broader spectrum than sine, so slightly
+      // less aggressive multiplier). The 1-sample delay on
+      // prevMirrorFeedback breaks the would-be algebraic loop.
       float modScale = expf(modOut * modDepth * 3.0f);
-      float envInc = formantFreqTarget * invSr * modScale;
+      float fbScale  = expf(s.prevMirrorFeedback * feedback * 2.0f);
+      float envInc   = formantFreqTarget * invSr * modScale * fbScale;
       s.envPhase += envInc;
 
       // Sync retrigger: when sync edge arrives (mod wrap), restart
@@ -588,8 +617,11 @@ namespace stolmine
       // Wavetable lookup. Returns 0 when envelope has completed.
       float clean = wavetableLookup(s.envPhase, shape);
 
-      // Mirror block: divider-clocked S&H. No AA either side.
+      // Mirror block: 4-stage destructive aliasing crusher.
       float folded = s.mirror.tick(clean);
+
+      // Store for next sample's feedback loop into envelope rate.
+      s.prevMirrorFeedback = folded;
 
       // Fold = alias residual (Mirror output minus bandlimited clean).
       float foldOnly = folded - clean;
@@ -616,7 +648,32 @@ namespace stolmine
       }
 
       outBuf[i]   = finalOut;
-      cleanBuf[i] = clean;
+
+      // DC-block Clean / Drive / Held sub-outs so they're symmetric
+      // around 0 for downstream patch consumers (the wavetable
+      // envelope shapes are positive-only, so without HPF the raw
+      // tap values carry strong DC). Same 20 Hz one-pole as the
+      // main Out, same LFO-mode bypass.
+      if (dcEnable) {
+        float cleanHp = clean - s.cleanX1 + dcR * s.cleanY1;
+        s.cleanX1 = clean; s.cleanY1 = cleanHp;
+        cleanBuf[i] = cleanHp;
+
+        float driveIn = s.mirror.lastDriven;
+        float driveHp = driveIn - s.driveX1 + dcR * s.driveY1;
+        s.driveX1 = driveIn; s.driveY1 = driveHp;
+        driveBuf[i] = driveHp;
+
+        float heldIn = s.mirror.held;
+        float heldHp = heldIn - s.heldX1 + dcR * s.heldY1;
+        s.heldX1 = heldIn; s.heldY1 = heldHp;
+        heldBuf[i] = heldHp;
+      } else {
+        cleanBuf[i] = clean;
+        driveBuf[i] = s.mirror.lastDriven;
+        heldBuf[i]  = s.mirror.held;
+      }
+
       foldBuf[i]  = foldOnly;
       syncBuf[i]  = s.syncGateOut;
       modBuf[i]   = modOut;

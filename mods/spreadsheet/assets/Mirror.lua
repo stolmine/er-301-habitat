@@ -31,14 +31,16 @@ Mirror:include(Unit)
 function Mirror:init(args)
   args.title = "Mirror"
   args.mnemonic = "Mr"
-  -- Mono phase 2: 5 sub-outs.
-  --   1: Out   -- main output
-  --   2: Clean -- bandlimited carrier reference (pre-Mirror)
-  --   3: Fold  -- alias residual (Mirror output minus Clean)
-  --   4: Sync  -- gate firing on internal sync edges (mod phase wrap)
-  --   5: Mod   -- raw internal modulator sine
-  args.channelCount = 5
-  args.subOutLabels = { "Out", "Clean", "Fold", "Sync", "Mod" }
+  -- 7 sub-outs covering distinct pipeline points for self-patching:
+  --   1: Out    -- final output (post-Mirror, post-DC, post-level)
+  --   2: Clean  -- bandlimited wavetable envelope (pre-Mirror)
+  --   3: Drive  -- post-pre-sat (tanh-driven, pre-S&H/quantize)
+  --   4: Held   -- post-quantize stair-step value (pre-reconstruction)
+  --   5: Fold   -- alias residual (Mirror output minus Clean)
+  --   6: Sync   -- gate firing on internal sync edges (mod phase wrap)
+  --   7: Mod    -- raw internal modulator sine
+  args.channelCount = 7
+  args.subOutLabels = { "Out", "Clean", "Drive", "Held", "Fold", "Sync", "Mod" }
   Unit.init(self, args)
 end
 
@@ -110,20 +112,28 @@ function Mirror:onLoadGraph(channelCount)
   tie(op, "Mirror", mirror, "Out")
   self:addMonoBranch("mirror", mirror, "In", mirror, "Out")
 
+  -- Feedback (Mirror output -> envelope phase FM).
+  local feedback = self:addObject("feedback", app.ParameterAdapter())
+  feedback:hardSet("Bias", 0.0)
+  tie(op, "Feedback", feedback, "Out")
+  self:addMonoBranch("feedback", feedback, "In", feedback, "Out")
+
   -- Level (output gain).
   local level = self:addObject("level", app.ParameterAdapter())
   level:hardSet("Bias", 0.5)
   tie(op, "Level", level, "Out")
   self:addMonoBranch("level", level, "In", level, "Out")
 
-  -- Wire the 5 framework outlets LAST (per Canals/JF pattern, sub-out
+  -- Wire the 7 framework outlets LAST (per Canals/JF pattern, sub-out
   -- subscriptions break silently if connects happen before all
   -- params/branches are set up).
   connect(op, "Out",   self, "Out1")
   connect(op, "Clean", self, "Out2")
-  connect(op, "Fold",  self, "Out3")
-  connect(op, "Sync",  self, "Out4")
-  connect(op, "Mod",   self, "Out5")
+  connect(op, "Drive", self, "Out3")
+  connect(op, "Held",  self, "Out4")
+  connect(op, "Fold",  self, "Out5")
+  connect(op, "Sync",  self, "Out6")
+  connect(op, "Mod",   self, "Out7")
 end
 
 function Mirror:onLoadViews()
@@ -208,6 +218,16 @@ function Mirror:onLoadViews()
       biasPrecision = 2,
       initialBias   = 0.0
     },
+    feedback = GainBias {
+      button        = "fbck",
+      description   = "Feedback",
+      branch        = self.branches.feedback,
+      gainbias      = self.objects.feedback,
+      range         = self.objects.feedback,
+      biasMap       = zeroToOneMap,
+      biasPrecision = 2,
+      initialBias   = 0.0
+    },
     level = GainBias {
       button        = "lvl",
       description   = "Level",
@@ -230,7 +250,7 @@ function Mirror:onLoadViews()
       initialBias   = 0.0
     }
   }, {
-    expanded  = { "tune", "f0", "shape", "formant", "modDepth", "syncThreshold", "mirror", "level" },
+    expanded  = { "tune", "f0", "shape", "formant", "modDepth", "syncThreshold", "mirror", "feedback", "level" },
     collapsed = {}
   }
 end
