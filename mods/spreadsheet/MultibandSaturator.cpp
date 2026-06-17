@@ -47,6 +47,21 @@ namespace stolmine
     return x * (27.0f + x2) / (27.0f + 9.0f * x2);
   }
 
+  // C∞ soft clip with asymptote ±1.5. Replaces a discontinuous if-clamp
+  // (linear-then-tanh) that emitted a ~0.36-magnitude step at threshold
+  // crossings; the resulting wideband splatter aliased and surfaced as
+  // "more distortion as Mix is brought down."
+  static inline float pseudoSaturate15(float x)
+  {
+    const float kInvK = 1.0f / 1.5f;
+    float ax = (x >= 0.0f) ? x : -x;
+    float xK = ax * kInvK;
+    float xK2 = xK * xK;
+    float xK4 = xK2 * xK2;
+    float denom = sqrtf(sqrtf(1.0f + xK4));
+    return x / denom;
+  }
+
   // --- Waveshapers (stateless, ported from Discont) ---
 
   static inline float fold2(float x)
@@ -746,9 +761,9 @@ namespace stolmine
       s.dcState += (wet - s.dcState) * (5.0f / sr);
       wet -= s.dcState;
 
-      // Safety limiter (~1.5x soft clip -- transparent at normal levels)
-      if (wet > 1.5f || wet < -1.5f)
-        wet = fast_tanh(wet * 0.67f) * 1.5f;
+      // Safety limiter, ±1.5 asymptote, C∞ continuous (no spectral
+      // splatter on threshold crossings).
+      wet = pseudoSaturate15(wet);
 
       // FFT ring buffer (capture post-sum signal)
       s.ringBuf[s.ringPos] = wet;
