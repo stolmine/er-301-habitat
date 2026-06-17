@@ -64,20 +64,14 @@ namespace stolmine
     return midR + halfR * squished;
   }
 
-  // Mirror knob (0..1) -> integer divisor in [1, MIRROR_DIVISOR_MAX].
-  // Exponential mapping so the low end stays close to 1x (subtle
-  // fold) and the high end opens to heavy fold density.
-  static const int MIRROR_DIVISOR_MAX = 16;
-  static inline int mirrorDivisorFromKnob(float k)
+  // Cheap Padé tanh (matches Helicase / Parfait pattern). Used by
+  // the MirrorBlock pre-saturation stage.
+  static inline float mirror_fast_tanh(float x)
   {
-    if (k < 0.0f) k = 0.0f;
-    if (k > 1.0f) k = 1.0f;
-    const float maxLog = 2.77258872f;  // ln(16)
-    float divf = expf(k * maxLog);
-    int d = (int)(divf + 0.5f);
-    if (d < 1) d = 1;
-    if (d > MIRROR_DIVISOR_MAX) d = MIRROR_DIVISOR_MAX;
-    return d;
+    if (x < -4.0f) return -1.0f;
+    if (x >  4.0f) return  1.0f;
+    float x2 = x * x;
+    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
   }
 
   // ---------------------------------------------------------------
@@ -100,78 +94,240 @@ namespace stolmine
   }
 
   // ---------------------------------------------------------------
-  // Source shape: 3-shape morph (sine -> Chebyshev T3 -> 2-op self-FM).
-  // Push drives nonlinearity within each shape.
+  // Wavetable formant envelope source — 16 frames x 256 samples, each
+  // frame a one-shot envelope shape. Envelope phase advances at a
+  // user-controlled rate independent of the carrier; sync (mod-wrap)
+  // retriggers a fresh envelope when the prior one has completed. When
+  // envelope rate < sync rate, retriggers are skipped during active
+  // envelopes -> undertone series (pitch division) emerges naturally.
+  //
+  // Frames are ordered roughly simple -> exotic. Adjacent frames are
+  // musically related so the Shape knob is a smooth timbral axis;
+  // distant frames sound very different.
   // ---------------------------------------------------------------
-  static inline float sourceShape(float phase01, float morph, float push)
+  static const int   MIRROR_WT_FRAMES = 16;
+  static const int   MIRROR_WT_LEN    = 256;
+  static const float MIRROR_WT_LENF   = (float)(MIRROR_WT_LEN - 1);
+  static const float MIRROR_WT_FRAMESF = (float)(MIRROR_WT_FRAMES - 1);
+
+  static float gMirrorWavetable[MIRROR_WT_FRAMES][MIRROR_WT_LEN];
+
+  static inline void precomputeMirrorWavetable()
   {
-    if (morph < 0.0f) morph = 0.0f;
-    if (morph > 1.0f) morph = 1.0f;
-    if (push < 0.0f) push = 0.0f;
-    if (push > 1.0f) push = 1.0f;
+    for (int i = 0; i < MIRROR_WT_LEN; i++) {
+      float t = (float)i / MIRROR_WT_LENF;  // [0, 1]
 
-    // Wrapped phase. neon_math::sine_poly_hq expects [0, 1).
-    float p = phase01 - floorf(phase01);
-    float s = neon_math::sine_poly_hq(p);
+      // 0: Square gate (const 1.0).
+      gMirrorWavetable[0][i] = 1.0f;
 
-    // Shape A: sine.
-    float sa = s;
+      // 1: Saw down (1 -> 0, linear fall).
+      gMirrorWavetable[1][i] = 1.0f - t;
 
-    // Shape B: Chebyshev T3 (4x^3 - 3x), pre-driven by push.
-    float driven = s * (1.0f + push * 0.5f);
-    if (driven > 1.0f) driven = 1.0f;
-    if (driven < -1.0f) driven = -1.0f;
-    float sb = 4.0f * driven * driven * driven - 3.0f * driven;
+      // 2: Symmetric triangle (peak at 0.5).
+      gMirrorWavetable[2][i] = (t < 0.5f) ? (t * 2.0f) : ((1.0f - t) * 2.0f);
 
-    // Shape C: iterated triangle wavefolder. Drive amplifies the sine
-    // beyond [-1, 1]; each fold reflects content back into range,
-    // producing slope discontinuities that DOUBLE harmonic content per
-    // fold. At push=1, ~6 folds happen per cycle, generating content
-    // well into the Nyquist region even at low F0 (the whole point —
-    // this is the bandwidth-multiplier shape that gives Mirror
-    // something to fold at any perceived pitch).
-    //
-    // Bounded iteration count (16) is comfortably above the max folds
-    // needed (drive at push=1 is 6, so ~6 folds converge).
-    float drive = 1.0f + push * 5.0f;
-    float folded = s * drive;
-    for (int j = 0; j < 16; j++) {
-      if (folded > 1.0f)       folded = 2.0f - folded;
-      else if (folded < -1.0f) folded = -2.0f - folded;
-      else                     break;
-    }
-    float sc = folded;
+      // 3: Exponential decay (1 -> ~0.05).
+      gMirrorWavetable[3][i] = expf(-3.0f * t);
 
-    // Two-segment lerp between three shapes.
-    if (morph <= 0.5f) {
-      float t = morph * 2.0f;
-      return sa + (sb - sa) * t;
-    } else {
-      float t = (morph - 0.5f) * 2.0f;
-      return sb + (sc - sb) * t;
+      // 4: Half-sine bell.
+      gMirrorWavetable[4][i] = sinf(kPi * t);
+
+      // 5: Gaussian peaked at 0.5.
+      {
+        float d = (t - 0.5f) / 0.15f;
+        gMirrorWavetable[5][i] = expf(-d * d);
+      }
+
+      // 6: Asymmetric pluck (fast rise at 0.1, linear fall).
+      gMirrorWavetable[6][i] = (t < 0.1f)
+        ? t * 10.0f
+        : 1.0f - (t - 0.1f) / 0.9f;
+
+      // 7: Anti-pluck (linear rise, fast fall at 0.9).
+      gMirrorWavetable[7][i] = (t < 0.9f)
+        ? t / 0.9f
+        : 1.0f - (t - 0.9f) * 10.0f;
+
+      // 8: Two-peak lobed (envelope-shaped two-formant).
+      gMirrorWavetable[8][i] = fabsf(sinf(kPi * 2.0f * t)) * sinf(kPi * t);
+
+      // 9: Three-peak lobed.
+      gMirrorWavetable[9][i] = fabsf(sinf(kPi * 3.0f * t)) * sinf(kPi * t);
+
+      // 10: Damped sine (bipolar with decay, multi-cycle oscillation).
+      gMirrorWavetable[10][i] = sinf(kPi * 6.0f * t) * expf(-3.0f * t);
+
+      // 11: Inverse exp (slow start, fast end).
+      gMirrorWavetable[11][i] = expf(3.0f * (t - 1.0f));
+
+      // 12: Full sine cycle (bipolar, one period).
+      gMirrorWavetable[12][i] = sinf(kPi * 2.0f * t);
+
+      // 13: Damped square wave (several half-cycles with decay).
+      {
+        int   step = (int)(t * 6.0f);
+        float sq   = (step & 1) ? -1.0f : 1.0f;
+        gMirrorWavetable[13][i] = sq * expf(-2.0f * t);
+      }
+
+      // 14: Sinc-shaped (central peak with symmetric side lobes).
+      {
+        float x = (t - 0.5f) * 8.0f;
+        gMirrorWavetable[14][i] = (fabsf(x) < 0.001f)
+          ? 1.0f
+          : sinf(kPi * x) / (kPi * x);
+      }
+
+      // 15: Triple-impulse (three narrow gaussian peaks).
+      {
+        float p1 = expf(-((t - 0.2f) * 25.0f) * ((t - 0.2f) * 25.0f));
+        float p2 = expf(-((t - 0.5f) * 25.0f) * ((t - 0.5f) * 25.0f));
+        float p3 = expf(-((t - 0.8f) * 25.0f) * ((t - 0.8f) * 25.0f));
+        gMirrorWavetable[15][i] = p1 + p2 + p3;
+      }
     }
   }
 
+  // Static initializer: precompute the wavetable once at module load,
+  // before any unit constructor runs.
+  struct MirrorWavetableInit { MirrorWavetableInit() { precomputeMirrorWavetable(); } };
+  static MirrorWavetableInit gMirrorWtInit;
+
+  // Wavetable lookup with bi-linear interpolation across (sampleIdx,
+  // frameIdx). Returns 0 when envelope phase has completed.
+  static inline float wavetableLookup(float envPhase, float shape)
+  {
+    if (envPhase >= 1.0f) return 0.0f;
+    if (envPhase < 0.0f)  envPhase = 0.0f;
+    if (shape < 0.0f)     shape = 0.0f;
+    if (shape > 1.0f)     shape = 1.0f;
+
+    float sampleIdx = envPhase * MIRROR_WT_LENF;
+    int   i0 = (int)sampleIdx;
+    if (i0 >= MIRROR_WT_LEN - 1) i0 = MIRROR_WT_LEN - 2;
+    float ifrac = sampleIdx - (float)i0;
+
+    float frameIdx = shape * MIRROR_WT_FRAMESF;
+    int   f0 = (int)frameIdx;
+    if (f0 >= MIRROR_WT_FRAMES - 1) f0 = MIRROR_WT_FRAMES - 2;
+    float ffrac = frameIdx - (float)f0;
+    int   f1 = f0 + 1;
+
+    float a0 = gMirrorWavetable[f0][i0];
+    float a1 = gMirrorWavetable[f0][i0 + 1];
+    float b0 = gMirrorWavetable[f1][i0];
+    float b1 = gMirrorWavetable[f1][i0 + 1];
+
+    float fa = a0 + (a1 - a0) * ifrac;
+    float fb = b0 + (b1 - b0) * ifrac;
+    return fa + (fb - fa) * ffrac;
+  }
+
   // ---------------------------------------------------------------
-  // MirrorBlock — divider-clocked S&H with NO anti-aliasing on either
-  // side. The paradigm-defining stage.
+  // MirrorBlock — destructive aliasing crusher driven by a single
+  // knob. Four compound stages from one position:
+  //
+  //   1. Pre-saturation (tanh-driven harmonic generation) — pushes
+  //      input bandwidth above the new Nyquist before sampling
+  //   2. Divider-clocked sample-and-hold — undersamples without an
+  //      anti-alias filter, folds above-Nyquist content back into
+  //      band
+  //   3. Bit-depth quantization on the held value — creates
+  //      harmonics from any input including DC and smooth content
+  //   4. Reconstruction blend — zero-order hold (alias-preserving)
+  //      blended with Nyquist polarity flip (synthesizes content
+  //      at SR/2 itself) for the brutal end of the knob travel
+  //
+  // Architectural framing follows the Airwindows undersample cycle-
+  // counter pattern, but with reconstruction choices INVERTED —
+  // AW smooths to avoid aliasing, Mirror does the opposite. See
+  // planning/mirror-block-aw-refactor-plan.md.
   // ---------------------------------------------------------------
   struct MirrorBlock {
-    int divisor;
-    int counter;
+    int   divisor;
+    int   counter;
+    int   bitLevels;
+    float bitScale;        // bitLevels * 0.5
+    float bitInvScale;     // 1 / bitScale
     float held;
+    float driveAmount;
+    float flipAmount;
 
     inline void Init() {
-      divisor = 1;
-      counter = 0;
-      held = 0.0f;
+      divisor      = 1;
+      counter      = 0;
+      bitLevels    = 65536;
+      bitScale     = 32768.0f;
+      bitInvScale  = 1.0f / 32768.0f;
+      held         = 0.0f;
+      driveAmount  = 0.0f;
+      flipAmount   = 0.0f;
+    }
+
+    // Recompute all stage parameters from the single knob value.
+    // Called at block rate to keep per-sample cost trivial.
+    inline void setKnob(float k) {
+      if (k < 0.0f) k = 0.0f;
+      if (k > 1.0f) k = 1.0f;
+
+      // Stage 2: divisor — log to 64.
+      float divf = expf(k * 4.158883f);  // ln(64)
+      int d = (int)(divf + 0.5f);
+      if (d < 1)  d = 1;
+      if (d > 64) d = 64;
+      if (d != divisor) {
+        divisor = d;
+        if (counter >= divisor) counter = 0;
+      }
+
+      // Stage 3: bit levels — log down from 65536 to 4 (16-bit to 2-bit).
+      // ln(65536/4) = 9.704061
+      float bitsf = expf(9.704061f * (1.0f - k));
+      int b = (int)(bitsf + 0.5f);
+      if (b < 4)     b = 4;
+      if (b > 65536) b = 65536;
+      bitLevels   = b;
+      bitScale    = (float)b * 0.5f;
+      bitInvScale = 1.0f / bitScale;
+
+      // Stage 1: pre-saturation drive — linear ramp.
+      driveAmount = k * 6.0f;
+
+      // Stage 4: Nyquist-flip amount — 0 below 0.85, smoothstep to
+      // 1 at k=1.0. Reserves the top 15% of knob travel for the
+      // brutal Nyquist ring-mod character.
+      if (k < 0.85f) {
+        flipAmount = 0.0f;
+      } else {
+        float t = (k - 0.85f) * (1.0f / 0.15f);
+        flipAmount = t * t * (3.0f - 2.0f * t);  // smoothstep
+      }
     }
 
     inline float tick(float in) {
-      if (counter == 0) held = in;
+      // Stage 1: pre-saturation.
+      float driven = (driveAmount > 0.01f)
+        ? mirror_fast_tanh(in * (1.0f + driveAmount)) * (1.0f + driveAmount * 0.5f)
+        : in;
+
+      // Stage 2: cycle counter (on-cycle == counter rolls over to 0).
+      bool onCycle = (counter == 0);
       counter++;
       if (counter >= divisor) counter = 0;
-      return held;
+
+      // Stage 3: bit quantize + hold (on-cycle samples only).
+      if (onCycle) {
+        float scaled = driven * bitScale;
+        held = floorf(scaled + 0.5f) * bitInvScale;
+      }
+
+      // Stage 4: reconstruction. ZOH only at low knob (fast path).
+      if (flipAmount < 0.001f) return held;
+
+      // ZOH blended with Nyquist-polarity-flip at high knob.
+      float sign    = (counter & 1) ? -1.0f : 1.0f;
+      float flipped = held * sign;
+      return held + (flipped - held) * flipAmount;
     }
 
     inline void resetCounter() {
@@ -187,6 +343,11 @@ namespace stolmine
     float modPhase;
     float lastModPhase;        // for wrap detection
     float lastCarrierPhase;    // for polyBLEP dt estimation on sync edge
+
+    // Envelope phase (wavetable formant). Advances at formant rate;
+    // wraps to >= 1 at end of envelope cycle; sync retrigger sets it
+    // back to 0 when envelope has completed.
+    float envPhase;
 
     MirrorBlock mirror;
 
@@ -216,6 +377,7 @@ namespace stolmine
       modPhase = 0.0f;
       lastModPhase = 0.0f;
       lastCarrierPhase = 0.0f;
+      envPhase = 1.0f;  // start completed -> first sync starts a fresh envelope
       mirror.Init();
       dcX1 = 0.0f;
       dcY1 = 0.0f;
@@ -246,8 +408,8 @@ namespace stolmine
 
     addParameter(mFundamental);
     addParameter(mFine);
-    addParameter(mSource);
-    addParameter(mPush);
+    addParameter(mShape);
+    addParameter(mFormant);
     addParameter(mModDepth);
     addParameter(mSyncThreshold);
     addParameter(mMirror);
@@ -298,8 +460,8 @@ namespace stolmine
     // Block-rate parameter snapshots.
     float f0       = CLAMP(0.1f, sr * 0.49f, mFundamental.value());
     float fine     = CLAMP(-100.0f, 100.0f, mFine.value());
-    float source   = CLAMP(0.0f, 1.0f, mSource.value());
-    float push     = CLAMP(0.0f, 1.0f, mPush.value());
+    float shape    = CLAMP(0.0f, 1.0f, mShape.value());
+    float formant0 = CLAMP(0.1f, sr * 0.49f, mFormant.value());
     float modDepth = CLAMP(0.0f, 1.0f, mModDepth.value());
     float syncKnob = CLAMP(0.0f, 1.0f, mSyncThreshold.value());
     float mirrorKnob = CLAMP(0.0f, 1.0f, mMirror.value());
@@ -310,16 +472,11 @@ namespace stolmine
     float lockRatio = lockRatioFromKnob(syncKnob);
     s.curLockRatio = lockRatio;
 
-    // Mirror divisor (block-rate snapshot; changes only between
-    // blocks so the S&H counter doesn't get reseated mid-stream).
-    int divisor = mirrorDivisorFromKnob(mirrorKnob);
-    if (divisor != s.mirror.divisor) {
-      s.mirror.divisor = divisor;
-      // Don't reset counter here -- let it continue from where it
-      // was, modulo the new divisor (avoids click).
-      if (s.mirror.counter >= divisor) s.mirror.counter = 0;
-    }
-    s.curMirrorDivisor = divisor;
+    // Mirror knob drives all four stages of the MirrorBlock crusher
+    // (pre-sat, divisor, bit-depth, Nyquist-flip). Block-rate update
+    // so the per-sample tick stays cheap.
+    s.mirror.setKnob(mirrorKnob);
+    s.curMirrorDivisor = s.mirror.divisor;
 
     // V/Oct: Lua wraps with 10x ConstantGain so the buffer carries
     // 1.0-per-octave (Plaits convention, mirrors Helicase).
@@ -334,6 +491,23 @@ namespace stolmine
     // inharmonic content. Perceived pitch tracks mod rate = V/Oct.
     float carrierFreqTarget = modFreqTarget * lockRatio;
     if (carrierFreqTarget > sr * 0.49f) carrierFreqTarget = sr * 0.49f;
+
+    // Formant (envelope) rate. FIXED-style tracking: Formant in Hz
+    // at V/Oct = 0, scaled by the same 2^V/Oct factor as f0. Means
+    // the envelope rate tracks pitch by default; user dials Formant
+    // in Hz to set the absolute character at the V/Oct = 0
+    // reference point.
+    //
+    // Sync Threshold knob scales the envelope rate via lockRatio
+    // (cubic-around-Fibonacci anchors {1, 2, 3, 5, 8, 13}). At anchor
+    // 1: envelope rate = Formant. At anchor 13: 13x faster envelopes.
+    // This is the chaos/lock axis: integer ratios produce clean
+    // harmonic-formant series; non-integer chaos zones produce
+    // inharmonic formant landings. Drives Mirror dramatic when the
+    // sharp wavetable shapes hit it at high effective formant rates.
+    float formantFreqTarget = formant0 * powf(2.0f, pitch + fineCents) * lockRatio;
+    if (formantFreqTarget > sr * 0.49f) formantFreqTarget = sr * 0.49f;
+    if (formantFreqTarget < 0.1f)       formantFreqTarget = 0.1f;
 
     // DC HPF coefficient (one-pole, 20 Hz, engaged only when modFreq
     // > 1 Hz so Mirror-as-LFO keeps legit sub-Hz content).
@@ -381,24 +555,38 @@ namespace stolmine
         s.syncGateOut = 0.0f;
       }
 
-      // Carrier phase advance with FM from mod (Mod Depth = FM index
-      // weighting).
+      // Carrier phase advance with FM from mod. Carrier phase now
+      // tracks SYNC TIMING only — the actual audio comes from the
+      // wavetable envelope. Keeping carrier phase live makes the
+      // existing Sync Threshold + Mirror Reset machinery continue to
+      // work; carrier wrap is still the sync edge.
       float fmShift = modOut * modDepth * carrierInc;
       s.lastCarrierPhase = s.carrierPhase;
       s.carrierPhase += carrierInc + fmShift;
       if (s.carrierPhase >= 1.0f) s.carrierPhase -= floorf(s.carrierPhase);
       if (s.carrierPhase < 0.0f)  s.carrierPhase -= floorf(s.carrierPhase);
 
-      // Source shape (sine -> poly3 -> self-FM morph).
-      float clean = sourceShape(s.carrierPhase, source, push);
+      // Envelope phase advance with audio-rate FM from mod sine.
+      // Exponential scaling: envInc *= 2^(modOut × modDepth × 3.0)
+      // → at depth=1, rate sweeps ±3 octaves around nominal each mod
+      // cycle. Strong broadband FM character on the formant; gives
+      // Mirror substantial above-Nyquist content to fold even at low
+      // base formant rates. Always positive (exp can't go negative).
+      float modScale = expf(modOut * modDepth * 3.0f);
+      float envInc = formantFreqTarget * invSr * modScale;
+      s.envPhase += envInc;
 
-      // polyBLEP on sync edge to bandlimit the carrier phase reset
-      // discontinuity. Without this, every sync edge emits broadband
-      // splatter that aliases as inharmonic noise floor.
-      float blepDt = carrierInc + fabsf(fmShift);
-      if (blepDt > 0.5f) blepDt = 0.5f;
-      if (blepDt < 1e-6f) blepDt = 1e-6f;
-      clean -= polyBlep(s.carrierPhase, blepDt);
+      // Sync retrigger: when sync edge arrives (mod wrap), restart
+      // envelope ONLY IF the previous envelope has completed (envPhase
+      // >= 1). If envelope is still active, the sync is absorbed -
+      // this is what produces the undertone series naturally when
+      // formant rate < sync rate.
+      if (syncEdge && s.envPhase >= 1.0f) {
+        s.envPhase = 0.0f;
+      }
+
+      // Wavetable lookup. Returns 0 when envelope has completed.
+      float clean = wavetableLookup(s.envPhase, shape);
 
       // Mirror block: divider-clocked S&H. No AA either side.
       float folded = s.mirror.tick(clean);

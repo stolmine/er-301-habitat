@@ -80,17 +80,17 @@ function Mirror:onLoadGraph(channelCount)
   tie(op, "Fine", fine, "Out")
   self:addMonoBranch("fine", fine, "In", fine, "Out")
 
-  -- Source morph (sine -> poly3 -> self-FM).
-  local source = self:addObject("source", app.ParameterAdapter())
-  source:hardSet("Bias", 0.0)
-  tie(op, "Source", source, "Out")
-  self:addMonoBranch("source", source, "In", source, "Out")
+  -- Shape (wavetable position 0..1 -> frame 0..15).
+  local shape = self:addObject("shape", app.ParameterAdapter())
+  shape:hardSet("Bias", 0.13)
+  tie(op, "Shape", shape, "Out")
+  self:addMonoBranch("shape", shape, "In", shape, "Out")
 
-  -- Push (drive into shaper).
-  local push = self:addObject("push", app.ParameterAdapter())
-  push:hardSet("Bias", 0.3)
-  tie(op, "Push", push, "Out")
-  self:addMonoBranch("push", push, "In", push, "Out")
+  -- Formant (envelope rate in Hz, tracks V/Oct by default).
+  local formant = self:addObject("formant", app.ParameterAdapter())
+  formant:hardSet("Bias", 110.0)
+  tie(op, "Formant", formant, "Out")
+  self:addMonoBranch("formant", formant, "In", formant, "Out")
 
   -- Mod Depth (FM index from internal modulator into carrier).
   local modDepth = self:addObject("modDepth", app.ParameterAdapter())
@@ -157,25 +157,26 @@ function Mirror:onLoadViews()
       biasPrecision = 1,
       initialBias   = 0.0
     },
-    source = GainBias {
-      button        = "src",
-      description   = "Source",
-      branch        = self.branches.source,
-      gainbias      = self.objects.source,
-      range         = self.objects.source,
+    shape = GainBias {
+      button        = "shape",
+      description   = "Shape",
+      branch        = self.branches.shape,
+      gainbias      = self.objects.shape,
+      range         = self.objects.shape,
       biasMap       = zeroToOneMap,
       biasPrecision = 2,
-      initialBias   = 0.0
+      initialBias   = 0.13
     },
-    push = GainBias {
-      button        = "push",
-      description   = "Push",
-      branch        = self.branches.push,
-      gainbias      = self.objects.push,
-      range         = self.objects.push,
-      biasMap       = zeroToOneMap,
-      biasPrecision = 2,
-      initialBias   = 0.3
+    formant = GainBias {
+      button        = "form",
+      description   = "Formant",
+      branch        = self.branches.formant,
+      gainbias      = self.objects.formant,
+      range         = self.objects.formant,
+      biasMap       = f0Map,
+      biasUnits     = app.unitHertz,
+      biasPrecision = 1,
+      initialBias   = 110.0
     },
     modDepth = GainBias {
       button        = "mod",
@@ -229,7 +230,7 @@ function Mirror:onLoadViews()
       initialBias   = 0.0
     }
   }, {
-    expanded  = { "tune", "f0", "source", "push", "modDepth", "syncThreshold", "mirror", "level" },
+    expanded  = { "tune", "f0", "shape", "formant", "modDepth", "syncThreshold", "mirror", "level" },
     collapsed = {}
   }
 end
