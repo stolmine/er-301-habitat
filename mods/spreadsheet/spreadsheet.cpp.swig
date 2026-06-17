@@ -47,6 +47,9 @@
 // to be iteratively refined per planning/canals-spreadsheet-redesign.md).
 // Uses stmlib::SemitonesToRatio.
 #include "Canals.h"
+// Mirror: aliasing-paradigm complex osc (Helicase chassis fork).
+// See planning/mirror-unit-design.md.
+#include "Mirror.h"
 #define SWIGLUA
 %}
 
@@ -91,3 +94,4 @@
 %include "Network.h"
 %include "NetworkOverviewGraphic.h"
 %include "Canals.h"
+%include "Mirror.h"
