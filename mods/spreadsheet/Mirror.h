@@ -42,6 +42,7 @@ namespace stolmine
     float getModPhase();
     float getLockRatio();
     int getMirrorDivisor();
+    float getMirrorKnob();
 
 #ifndef SWIGLUA
     virtual void process();

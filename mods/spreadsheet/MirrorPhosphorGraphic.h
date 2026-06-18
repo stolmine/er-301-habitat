@@ -110,13 +110,25 @@ namespace stolmine
         }
         float invRange = 1.0f / range;
 
-        // Plot 254 consecutive sample pairs as 2D phase space.
-        // For each (s0, s1), light up (px, py) AND its Y-axis
-        // reflection ((w-1)-px, py). Image is left-right symmetric
-        // about the vertical centerline — the mirror.
-        for (int i = 0; i < 255; i++) {
+        // Phase space delay tied inversely to Mirror knob: smooth
+        // wavetable content at low knob needs decorrelation (delay
+        // 16) to avoid X-shape degeneracy; high knob has crusher
+        // discontinuities already and works best with tight delay
+        // (1). Sampled once per draw to keep all plots in one frame
+        // visually coherent.
+        float k = mpMirror->getMirrorKnob();
+        int delay = (int)(16.0f * (1.0f - k) + 0.5f);
+        if (delay < 1)  delay = 1;
+        if (delay > 16) delay = 16;
+        int plotN = 256 - delay;
+
+        // Plot consecutive sample pairs as 2D phase space. For each
+        // (s0, s1), light up (px, py) AND its Y-axis reflection
+        // ((w-1)-px, py). Image is left-right symmetric about the
+        // vertical centerline — the mirror.
+        for (int i = 0; i < plotN; i++) {
           float s0 = mpMirror->getOutputSample(i);
-          float s1 = mpMirror->getOutputSample(i + 1);
+          float s1 = mpMirror->getOutputSample(i + delay);
           if (!(s0 == s0) || !(s1 == s1)) continue;
 
           float nx = (s0 - mScaleMin) * invRange;

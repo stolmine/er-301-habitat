@@ -509,6 +509,7 @@ namespace stolmine
   float Mirror::getModPhase()        { return mpInternal->curModPhase; }
   float Mirror::getLockRatio()       { return mpInternal->curLockRatio; }
   int   Mirror::getMirrorDivisor()   { return mpInternal->curMirrorDivisor; }
+  float Mirror::getMirrorKnob()      { return CLAMP(0.0f, 1.0f, mMirror.value()); }
 
   // ---------------------------------------------------------------
   void Mirror::process()
