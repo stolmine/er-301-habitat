@@ -50,6 +50,7 @@
 // Mirror: aliasing-paradigm complex osc (Helicase chassis fork).
 // See planning/mirror-unit-design.md.
 #include "Mirror.h"
+#include "MirrorPhosphorGraphic.h"
 #define SWIGLUA
 %}
 
@@ -95,3 +96,4 @@
 %include "NetworkOverviewGraphic.h"
 %include "Canals.h"
 %include "Mirror.h"
+%include "MirrorPhosphorGraphic.h"

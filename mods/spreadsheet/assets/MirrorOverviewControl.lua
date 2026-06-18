@@ -14,6 +14,7 @@
 -- bias-bound sub1 controls declare it).
 
 local app = app
+local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
@@ -32,7 +33,20 @@ MirrorOverviewControl:include(GainBias)
 function MirrorOverviewControl:init(args)
   GainBias.init(self, args)
 
-  self.paramMode = false
+  -- Phosphor phase-space viz replaces the standard fader in the
+  -- control's main graphic. follows the C++ Mirror op's output ring
+  -- buffer. See planning/mirror-phosphor-viz-plan.md.
+  local phosphor = libspreadsheet.MirrorPhosphorGraphic(0, 0, ply, 64)
+  phosphor:follow(args.mirror)
+  local container = app.Graphic(0, 0, ply, 64)
+  container:addChild(phosphor)
+  self:setMainCursorController(phosphor)
+  self:setControlGraphic(container)
+
+  -- Grandfather paramMode = true. The custom view (overview readouts +
+  -- phosphor scope) IS the headline UI; shift-toggle reveals the
+  -- stock fader / level subGraphic when the user wants precise Shape.
+  self.paramMode = true
   self.shiftHeld = false
   self.shiftUsed = false
   self.normalSubGraphic = self.subGraphic

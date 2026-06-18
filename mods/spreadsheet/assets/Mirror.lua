@@ -146,9 +146,42 @@ function Mirror:onLoadViews()
       biasMap       = zeroToOneMap,
       biasPrecision = 2,
       initialBias   = 0.13,
+      mirror        = self.objects.op,
       fundamental   = self.objects.f0:getParameter("Bias"),
       formant       = self.objects.formant:getParameter("Bias"),
       feedback      = self.objects.feedback:getParameter("Bias")
+    },
+    f0 = GainBias {
+      button        = "freq",
+      description   = "Fundamental",
+      branch        = self.branches.f0,
+      gainbias      = self.objects.f0,
+      range         = self.objects.f0,
+      biasMap       = f0Map,
+      biasUnits     = app.unitHertz,
+      biasPrecision = 1,
+      initialBias   = 110.0
+    },
+    formant = GainBias {
+      button        = "form",
+      description   = "Formant",
+      branch        = self.branches.formant,
+      gainbias      = self.objects.formant,
+      range         = self.objects.formant,
+      biasMap       = f0Map,
+      biasUnits     = app.unitHertz,
+      biasPrecision = 1,
+      initialBias   = 110.0
+    },
+    feedback = GainBias {
+      button        = "fbck",
+      description   = "Feedback",
+      branch        = self.branches.feedback,
+      gainbias      = self.objects.feedback,
+      range         = self.objects.feedback,
+      biasMap       = zeroToOneMap,
+      biasPrecision = 2,
+      initialBias   = 0.0
     },
     modDepth = GainBias {
       button        = "mod",
@@ -192,7 +225,13 @@ function Mirror:onLoadViews()
     },
   }, {
     expanded  = { "tune", "shape", "modDepth", "syncThreshold", "mirror", "level" },
-    collapsed = {}
+    collapsed = {},
+    -- Hitting Enter on the shape ply opens the expansion: Shape's
+    -- custom graphic stays in slot 1 (per feedback_expansion_custom_graphic
+    -- — first key must be the original control), with the three
+    -- secondary frequency/modulation knobs exposed as their own full
+    -- GainBias faders.
+    shape = { "shape", "f0", "formant", "feedback" }
   }
 end
 
