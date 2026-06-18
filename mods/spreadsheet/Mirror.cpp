@@ -476,7 +476,6 @@ namespace stolmine
     addOutput(mModOut);
 
     addParameter(mFundamental);
-    addParameter(mFine);
     addParameter(mShape);
     addParameter(mFormant);
     addParameter(mModDepth);
@@ -532,7 +531,6 @@ namespace stolmine
 
     // Block-rate parameter snapshots.
     float f0       = CLAMP(0.1f, sr * 0.49f, mFundamental.value());
-    float fine     = CLAMP(-100.0f, 100.0f, mFine.value());
     float shape    = CLAMP(0.0f, 1.0f, mShape.value());
     float formant0 = CLAMP(0.1f, sr * 0.49f, mFormant.value());
     float modDepth = CLAMP(0.0f, 1.0f, mModDepth.value());
@@ -562,8 +560,7 @@ namespace stolmine
     // V/Oct: Lua wraps with 10x ConstantGain so the buffer carries
     // 1.0-per-octave (Plaits convention, mirrors Helicase).
     float pitch = voct[0];
-    float fineCents = fine / 1200.0f;
-    float modFreqTarget = f0 * powf(2.0f, pitch + fineCents);
+    float modFreqTarget = f0 * powf(2.0f, pitch);
     if (modFreqTarget > sr * 0.49f) modFreqTarget = sr * 0.49f;
 
     // Carrier rate is mod rate × lock ratio. At integer lock ratios
@@ -586,7 +583,7 @@ namespace stolmine
     // harmonic-formant series; non-integer chaos zones produce
     // inharmonic formant landings. Drives Mirror dramatic when the
     // sharp wavetable shapes hit it at high effective formant rates.
-    float formantFreqTarget = formant0 * powf(2.0f, pitch + fineCents) * lockRatio;
+    float formantFreqTarget = formant0 * powf(2.0f, pitch) * lockRatio;
     if (formantFreqTarget > sr * 0.49f) formantFreqTarget = sr * 0.49f;
     if (formantFreqTarget < 0.1f)       formantFreqTarget = 0.1f;
 

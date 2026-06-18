@@ -4,18 +4,13 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local Pitch = require "Unit.ViewControl.Pitch"
 local GainBias = require "Unit.ViewControl.GainBias"
+local MirrorOverviewControl = require "spreadsheet.MirrorOverviewControl"
 local Encoder = require "Encoder"
 
 -- Maps
 local f0Map = (function()
   local m = app.LinearDialMap(0.1, 2000)
   m:setSteps(100, 10, 1, 0.1)
-  return m
-end)()
-
-local fineMap = (function()
-  local m = app.LinearDialMap(-100, 100)
-  m:setSteps(10, 1, 0.1, 0.01)
   return m
 end)()
 
@@ -65,11 +60,11 @@ function Mirror:onLoadGraph(channelCount)
   connect(tune, "Out", tuneRange, "In")
   self:addMonoBranch("tune", tune, "In", tune, "Out")
 
-  -- FM input (audio-rate).
-  local fm = self:addObject("fm", app.GainBias())
-  local fmRange = self:addObject("fmRange", app.MinMax())
+  -- FM input (audio-rate). No UI control — branch is exposed for
+  -- patching via the input picker only.
+  local fm = self:addObject("fm", app.ConstantOffset())
+  fm:hardSet("Offset", 0.0)
   connect(fm, "Out", op, "FM")
-  connect(fm, "Out", fmRange, "In")
   self:addMonoBranch("fm", fm, "In", fm, "Out")
 
   -- Fundamental (base pitch).
@@ -77,12 +72,6 @@ function Mirror:onLoadGraph(channelCount)
   f0:hardSet("Bias", 110.0)
   tie(op, "Fundamental", f0, "Out")
   self:addMonoBranch("f0", f0, "In", f0, "Out")
-
-  -- Fine (cents offset).
-  local fine = self:addObject("fine", app.ParameterAdapter())
-  fine:hardSet("Bias", 0.0)
-  tie(op, "Fine", fine, "Out")
-  self:addMonoBranch("fine", fine, "In", fine, "Out")
 
   -- Shape (wavetable position 0..1 -> frame 0..15).
   local shape = self:addObject("shape", app.ParameterAdapter())
@@ -148,48 +137,18 @@ function Mirror:onLoadViews()
       offset      = self.objects.tune,
       range       = self.objects.tuneRange
     },
-    f0 = GainBias {
-      button        = "freq",
-      description   = "Fundamental",
-      branch        = self.branches.f0,
-      gainbias      = self.objects.f0,
-      range         = self.objects.f0,
-      biasMap       = f0Map,
-      biasUnits     = app.unitHertz,
-      biasPrecision = 1,
-      initialBias   = 110.0
-    },
-    fine = GainBias {
-      button        = "fine",
-      description   = "Fine",
-      branch        = self.branches.fine,
-      gainbias      = self.objects.fine,
-      range         = self.objects.fine,
-      biasMap       = fineMap,
-      biasUnits     = app.unitCents,
-      biasPrecision = 1,
-      initialBias   = 0.0
-    },
-    shape = GainBias {
+    shape = MirrorOverviewControl {
       button        = "shape",
-      description   = "Shape",
+      description   = "Shape (overview)",
       branch        = self.branches.shape,
       gainbias      = self.objects.shape,
       range         = self.objects.shape,
       biasMap       = zeroToOneMap,
       biasPrecision = 2,
-      initialBias   = 0.13
-    },
-    formant = GainBias {
-      button        = "form",
-      description   = "Formant",
-      branch        = self.branches.formant,
-      gainbias      = self.objects.formant,
-      range         = self.objects.formant,
-      biasMap       = f0Map,
-      biasUnits     = app.unitHertz,
-      biasPrecision = 1,
-      initialBias   = 110.0
+      initialBias   = 0.13,
+      fundamental   = self.objects.f0:getParameter("Bias"),
+      formant       = self.objects.formant:getParameter("Bias"),
+      feedback      = self.objects.feedback:getParameter("Bias")
     },
     modDepth = GainBias {
       button        = "mod",
@@ -221,16 +180,6 @@ function Mirror:onLoadViews()
       biasPrecision = 2,
       initialBias   = 0.0
     },
-    feedback = GainBias {
-      button        = "fbck",
-      description   = "Feedback",
-      branch        = self.branches.feedback,
-      gainbias      = self.objects.feedback,
-      range         = self.objects.feedback,
-      biasMap       = zeroToOneMap,
-      biasPrecision = 2,
-      initialBias   = 0.0
-    },
     level = GainBias {
       button        = "lvl",
       description   = "Level",
@@ -241,19 +190,8 @@ function Mirror:onLoadViews()
       biasPrecision = 2,
       initialBias   = 0.5
     },
-    fm = GainBias {
-      button        = "FM",
-      branch        = self.branches.fm,
-      description   = "FM",
-      gainbias      = self.objects.fm,
-      range         = self.objects.fmRange,
-      biasMap       = Encoder.getMap("[-1,1]"),
-      biasUnits     = app.unitNone,
-      biasPrecision = 2,
-      initialBias   = 0.0
-    }
   }, {
-    expanded  = { "tune", "f0", "shape", "formant", "modDepth", "syncThreshold", "mirror", "feedback", "level" },
+    expanded  = { "tune", "shape", "modDepth", "syncThreshold", "mirror", "level" },
     collapsed = {}
   }
 end

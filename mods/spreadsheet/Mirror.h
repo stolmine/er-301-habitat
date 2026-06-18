@@ -59,7 +59,6 @@ namespace stolmine
     od::Outlet mModOut{"Mod"};
 
     od::Parameter mFundamental{"Fundamental", 110.0f};
-    od::Parameter mFine{"Fine", 0.0f};
     od::Parameter mShape{"Shape", 0.13f};       // 0..1 -> wavetable frame 0..15. default ~frame 2 (symmetric triangle)
     od::Parameter mFormant{"Formant", 110.0f};  // envelope rate in Hz at V/Oct = 0 (FIXED tracking)
     od::Parameter mModDepth{"ModDepth", 0.5f};
