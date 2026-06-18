@@ -433,6 +433,56 @@ Spreadsheet paradigm: N voices with per-voice params.
 - [ ] Investigate how SDK builtin filters handle audio-rate modulation cleanly (parameter interpolation? per-sample coefficient update?)
 - [ ] Bench CPU cost on hardware; NEON vectorize if needed
 
+## Mirror (aliasing-paradigm complex osc)
+
+In-dev unit, currently shipping at spreadsheet `2.7.1.35`. Sound-design
+locked per user (2026-06-18). Architecture: wavetable formant engine
+with envelope-as-carrier + Helicase-style mod sync + 4-stage AW-pattern
+destructive aliasing crusher + true stereo via sync-threshold-derived
+phase offset. 6-ply main view with overview ply (Shape) bundling
+Fundamental / Formant / Feedback on shift-sub + expansion view. See
+`planning/mirror-unit-design.md`, `planning/mirror-research-notes.md`,
+`planning/mirror-block-aw-refactor-plan.md`, `planning/mirror-feedback-plan.md`.
+
+- [ ] **Tune fine/coarse/super increments on all sub controls.** Currently
+  every fader uses default step values from `setSteps`. The overview-ply
+  sub-readouts (Fundamental Hz, Formant Hz, Feedback 0..1) and the main
+  plies (Shape, Mod Depth, Sync, Mirror, Level) need an audit pass:
+  - confirm coarse / fine / super / extra-fine steps match musical
+    granularity at each precision level
+  - Hz controls: coarse should jump octaves or half-octaves, fine should
+    land on cents-equivalent steps, super-fine should be sub-Hz
+  - 0..1 controls: coarse 0.1, fine 0.01, super 0.001 is current pattern
+    — verify each feels right under encoder rotation; some (like Sync
+    Threshold near lock anchors) may want different curves
+  - Mirror knob: its log-mapped divisor + bit depth interact non-linearly
+    with knob travel — verify step sizes give comfortable approach to the
+    Nyquist-flip region (top 15%) without overshoot
+  - Pair with the repo-wide fader response audit in Controls Audit
+    section (todo.md:182) once final naming is chosen
+- [ ] **Custom viz for the overview ply.** Sound is locked, visual is
+  the next major piece. Candidates from `planning/mirror-unit-design.md`
+  viz section: concentric wheels of fire (carrier/mod phase relationship,
+  lock zones visualized as wheel alignment), rubber-band-ball sphere
+  (wavetable wrap modulated by Mirror divisor), Lissajous of L vs R
+  (stereo width visualization that collapses to line at lock zones),
+  or some combined view. Per `feedback_no_out_of_line_virtuals`,
+  `feedback_framebuffer_blend_vs_set`, `feedback_package_trig_lut`,
+  `feedback_viz_encoder_capture_architectural` — known constraints
+  inherited.
+- [ ] **Final habitat name.** Mirror is the working codename per the
+  design doc. Pick a non-third-party-branded name before promoting
+  the unit out of dev. Candidates: paradigm-descriptive (Fold, Refract,
+  Mirage, Lattice, Spectrum) vs habitat-abstract (one-word, evocative,
+  matches Pecto / Larets / Etcher / Canals style).
+- [ ] **Voss-McCartney 1/f drift** still queued per
+  `planning/mirror-feedback-plan.md` and the research scratchpad as the
+  native motion source. After viz + naming, decide whether to land
+  before promotion.
+- [ ] **Audition wavetable frame inventory** before promotion. 16 frames
+  ordered simple → exotic; some may want swapping or reordering based on
+  perceptual closeness across the morph axis.
+
 ## Filterbank (FFB)
 
 Spreadsheet-style parallel fixed filter bank. Mono and stereo.
