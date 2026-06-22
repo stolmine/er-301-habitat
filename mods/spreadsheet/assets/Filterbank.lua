@@ -160,8 +160,14 @@ function Filterbank:loadUserScales(op)
   for _, filename in ipairs(files) do
     if slot >= 64 then break end
     local fullPath = Path.join(root, filename)
-    local data = Scala.load(fullPath)
-    if data and data.tunings and #data.tunings > 0 then
+    -- pcall the parser: core's Scala.load raises on malformed .scl
+    -- entries (e.g., ratio lines that split unevenly so tonumber()
+    -- returns nil and arithmetic fails). Without this guard, a
+    -- single bad file in the user's /scales dir kills the entire
+    -- Filterbank construction. Reported by users on 2.7.1 +
+    -- stolmine 9.5.1.
+    local loadOk, data = pcall(Scala.load, fullPath)
+    if loadOk and data and data.tunings and #data.tunings > 0 then
       local function loadInto(target)
         target:beginCustomScale(slot)
         for _, cents in ipairs(data.tunings) do
