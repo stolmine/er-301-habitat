@@ -423,15 +423,48 @@ Spreadsheet paradigm: N voices with per-voice params.
 
 ## Canals Improvements (Three Sisters fidelity)
 
+Shipping in spreadsheet 2.8.1. Major architecture work landed:
+hardware-matched self-osc, 2× OS, pseudo-saturate in-loop curve,
+multi-output picker, 4-input + normalling topology with custom
+overview ply + routing-state viz. Remaining items are tuning
+polish, not blocking the release.
+
 - [x] Custom SistersSvf primitive with soft-clip saturating integrators
   - Multi-output per sample (LP/BP/HP simultaneously)
   - Threshold-based soft clip: linear below |2|, compressed above
 - [x] Per-sample processing with cascaded filter topology
-- [ ] Q tuning: longer resonant decay with less gain boost. Want musical ping without volume spike.
-- [ ] Gain compensation at high Q: attenuate input or output proportional to resonance
+- [x] Per-block input + ALL normalling topology (spreadsheet 2.8.1)
+- [x] Custom overview ply with sub-button branch dives + routing viz
+- [ ] **SPAN curve tuning**. Audition feedback (2026-06-22): the SPAN
+  control "feels measurably different" from hardware. Capture battery
+  already designed at `planning/canals-span-volume-capture-checklist.md`
+  (Set A: CENTRE-out captures at five SPAN positions with sweep input).
+  Analysis pending — write `compare_span_volume.py` to derive the
+  hardware knob → octave-separation curve, then update the C++ linear
+  `span * 48` formula to match. Reference data in
+  `planning/refs/three-sisters-hardware/`.
+- [ ] **Audio-rate parameter modulation tuning**. Phase 2 added 2×
+  oversampling which covered most gurgle, but extreme FM rates still
+  produce residual artifacts. Options: 4× OS, sharper decimator FIR
+  (half-band instead of 2-tap average), or per-sample anti-alias on the
+  modulation source. Capture and analyze the residual region before
+  committing to one.
+- [ ] Volume modulation across cutoff sweep. Python sim shows ~6× swing
+  in LOW; hardware reportedly flatter. Capture battery designed (Set B
+  in same checklist).
+- [ ] Low-band retention at high Q. Python sim has resonance peak
+  dominating; hardware retains low band more cleanly. Capture battery
+  designed (Set C).
+- [ ] Q tuning: longer resonant decay with less gain boost. Want musical
+  ping without volume spike.
+- [ ] Gain compensation at high Q: attenuate input or output
+  proportional to resonance.
 - [ ] Tune soft clip threshold and curve for best saturation character
-- [ ] Investigate how SDK builtin filters handle audio-rate modulation cleanly (parameter interpolation? per-sample coefficient update?)
-- [ ] Bench CPU cost on hardware; NEON vectorize if needed
+  (carry-forward from earlier audit; partial work done in 2.7.1.20
+  pseudo-saturate landing).
+- [ ] Investigate how SDK builtin filters handle audio-rate modulation
+  cleanly (parameter interpolation? per-sample coefficient update?).
+- [ ] Bench CPU cost on hardware; NEON vectorize if needed.
 
 ## Mirror (aliasing-paradigm complex osc)
 
