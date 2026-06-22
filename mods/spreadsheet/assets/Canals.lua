@@ -6,6 +6,8 @@ local GainBias = require "Unit.ViewControl.GainBias"
 local Pitch = require "Unit.ViewControl.Pitch"
 local ModeSelector = require "spreadsheet.ModeSelector"
 local Encoder = require "Encoder"
+local MenuHeader = require "Unit.MenuControl.Header"
+local OptionMenu = require "Unit.MenuControl.OptionControl"
 
 local freqMap = (function()
   local map = app.LinearDialMap(-48, 48)
@@ -66,6 +68,34 @@ function Canals:onLoadGraph(channelCount)
   -- parallel-place two units.
   local op = self:addObject("op", libspreadsheet.Canals())
   connect(self, "In1", op, "In")
+
+  -- Per-block input branches (LOW / CENTRE / HIGH). Each is a
+  -- normalling jack: when nothing is patched, the block sources
+  -- from the main In (ALL). Patching into one of these overrides
+  -- ALL for that block.
+  --
+  -- Phase 2: GainBias objects + standard GainBias view (visible
+  -- level fader, default unity gain / zero bias). Phase 3 will
+  -- replace the view with a custom no-fader sub-button control on
+  -- the consolidated overview ply. Phase 4 adds auto-polling of
+  -- branch-chain unit count to drive the Patched flags.
+  local lowIn = self:addObject("lowIn", app.GainBias())
+  local lowInRange = self:addObject("lowInRange", app.MinMax())
+  connect(lowIn, "Out", lowInRange, "In")
+  connect(lowIn, "Out", op, "Low In")
+  self:addMonoBranch("lowIn", lowIn, "In", lowIn, "Out")
+
+  local centreIn = self:addObject("centreIn", app.GainBias())
+  local centreInRange = self:addObject("centreInRange", app.MinMax())
+  connect(centreIn, "Out", centreInRange, "In")
+  connect(centreIn, "Out", op, "Centre In")
+  self:addMonoBranch("centreIn", centreIn, "In", centreIn, "Out")
+
+  local highIn = self:addObject("highIn", app.GainBias())
+  local highInRange = self:addObject("highInRange", app.MinMax())
+  connect(highIn, "Out", highInRange, "In")
+  connect(highIn, "Out", op, "High In")
+  self:addMonoBranch("highIn", highIn, "In", highIn, "Out")
 
   -- V/Oct
   local tune = self:addObject("tune", app.ConstantOffset())
@@ -180,11 +210,87 @@ function Canals:onLoadViews()
       biasPrecision = 0,
       initialBias   = 0,
       modeNames     = modeNames
+    },
+    -- Per-block input branches. Phase 2 placeholder — standard
+    -- GainBias view with a level fader (will be replaced in Phase 3
+    -- by a custom no-fader sub-button control on the consolidated
+    -- overview ply).
+    lowIn = GainBias {
+      button        = "lo",
+      description   = "Low In",
+      branch        = self.branches.lowIn,
+      gainbias      = self.objects.lowIn,
+      range         = self.objects.lowInRange,
+      biasMap       = Encoder.getMap("[-1,1]"),
+      biasUnits     = app.unitNone,
+      biasPrecision = 2,
+      initialBias   = 0.0
+    },
+    centreIn = GainBias {
+      button        = "ctr",
+      description   = "Centre In",
+      branch        = self.branches.centreIn,
+      gainbias      = self.objects.centreIn,
+      range         = self.objects.centreInRange,
+      biasMap       = Encoder.getMap("[-1,1]"),
+      biasUnits     = app.unitNone,
+      biasPrecision = 2,
+      initialBias   = 0.0
+    },
+    highIn = GainBias {
+      button        = "hi",
+      description   = "High In",
+      branch        = self.branches.highIn,
+      gainbias      = self.objects.highIn,
+      range         = self.objects.highInRange,
+      biasMap       = Encoder.getMap("[-1,1]"),
+      biasUnits     = app.unitNone,
+      biasPrecision = 2,
+      initialBias   = 0.0
     }
   }, {
-    expanded  = { "mode", "tune", "fundamental", "span", "quality", "output" },
+    expanded  = { "mode", "tune", "fundamental", "span", "quality", "output",
+                  "lowIn", "centreIn", "highIn" },
     collapsed = {}
   }
+end
+
+-- Menu options.
+-- AllEnabled (menu-level toggle) is the user-facing global "ignore
+-- main In" switch — kept out of the normal ply surface since it's
+-- a rare-touch config decision.
+--
+-- LowPatched/CentrePatched/HighPatched are EXPOSED IN MENU FOR
+-- VALIDATION ONLY in Phase 2. Phase 4 will replace these manual
+-- toggles with Lua-side polling of the branch's chain unit count
+-- so patched state is auto-detected, and the menu items will move
+-- to the C++ side as pure routing flags (not user-toggleable). For
+-- now they're here so the override routing can be exercised
+-- without requiring the polling logic to land first.
+function Canals:onShowMenu(objects, branches)
+  return {
+    routingHeader = MenuHeader { description = "Routing" },
+    allEnabled = OptionMenu {
+      description = "ALL Input",
+      option = objects.op:getOption("AllEnabled"),
+      choices = { "enabled", "disabled" }
+    },
+    lowPatched = OptionMenu {
+      description = "Low Patched (test)",
+      option = objects.op:getOption("LowPatched"),
+      choices = { "off (use ALL)", "on (override)" }
+    },
+    centrePatched = OptionMenu {
+      description = "Centre Patched (test)",
+      option = objects.op:getOption("CentrePatched"),
+      choices = { "off (use ALL)", "on (override)" }
+    },
+    highPatched = OptionMenu {
+      description = "High Patched (test)",
+      option = objects.op:getOption("HighPatched"),
+      choices = { "off (use ALL)", "on (override)" }
+    }
+  }, { "routingHeader", "allEnabled", "lowPatched", "centrePatched", "highPatched" }
 end
 
 return Canals

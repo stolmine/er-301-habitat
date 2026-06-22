@@ -20,9 +20,13 @@ namespace stolmine
 
     // 2× oversampling state: last V/Oct and input sample from the
     // previous frame, used to linear-interpolate the midpoint sample
-    // for the upper internal step.
+    // for the upper internal step. lastIn split into per-block
+    // copies so cross-frame interpolation remains coherent when the
+    // per-block routing routes different signals into each block.
     float lastVoct;
-    float lastIn;
+    float lastInLow;
+    float lastInCentre;
+    float lastInHigh;
 
     void Init()
     {
@@ -30,13 +34,18 @@ namespace stolmine
       ctr1.reset(); ctr2.reset();
       hi1.reset();  hi2.reset();
       lastVoct = 0.0f;
-      lastIn = 0.0f;
+      lastInLow = 0.0f;
+      lastInCentre = 0.0f;
+      lastInHigh = 0.0f;
     }
   };
 
   Canals::Canals()
   {
     addInput(mIn);
+    addInput(mLowIn);
+    addInput(mCentreIn);
+    addInput(mHighIn);
     addInput(mVOct);
     addOutput(mOut);
     addOutput(mOutLow);     // FIXED: was missing — sub-out picker silently failed
@@ -47,6 +56,17 @@ namespace stolmine
     addParameter(mQuality);
     addParameter(mOutput);
     addParameter(mMode);
+    // Routing options driven by Lua-side branch-state polling.
+    // enableSerialization so quicksave round-trips the patched state
+    // + the AllEnabled toggle.
+    addOption(mAllEnabled);
+    addOption(mLowPatched);
+    addOption(mCentrePatched);
+    addOption(mHighPatched);
+    mAllEnabled.enableSerialization();
+    mLowPatched.enableSerialization();
+    mCentrePatched.enableSerialization();
+    mHighPatched.enableSerialization();
 
     mpInternal = new Internal();
     mpInternal->Init();
@@ -82,12 +102,22 @@ namespace stolmine
 
     Internal &s = *mpInternal;
 
-    float *in = mIn.buffer();
-    float *voct = mVOct.buffer();
-    float *out = mOut.buffer();
-    float *outLow = mOutLow.buffer();
+    float *in       = mIn.buffer();
+    float *lowIn    = mLowIn.buffer();
+    float *centreIn = mCentreIn.buffer();
+    float *highIn   = mHighIn.buffer();
+    float *voct     = mVOct.buffer();
+    float *out       = mOut.buffer();
+    float *outLow    = mOutLow.buffer();
     float *outCentre = mOutCentre.buffer();
-    float *outHigh = mOutHigh.buffer();
+    float *outHigh   = mOutHigh.buffer();
+
+    // Per-block input routing (driven by Lua-side branch-state polling
+    // + the AllEnabled global toggle). Block-rate snapshot of Options.
+    bool allEn      = (mAllEnabled.value()    == 1);
+    bool lowPatched = (mLowPatched.value()    == 2);
+    bool ctrPatched = (mCentrePatched.value() == 2);
+    bool hiPatched  = (mHighPatched.value()   == 2);
 
     // === Block-rate parameter sampling ===
     float fundamental = mFundamental.value();
@@ -157,13 +187,16 @@ namespace stolmine
     // Linear-interpolation upsample state — carry the last V/Oct
     // and input sample from the prior frame so the first output
     // sample can interpolate a midpoint between them.
-    float prevV = s.lastVoct;
-    float prevX = s.lastIn;
+    float prevV  = s.lastVoct;
+    float prevXL = s.lastInLow;
+    float prevXC = s.lastInCentre;
+    float prevXH = s.lastInHigh;
 
     // Internal-step helper: takes (v, x) at the internal sample
     // time, configures all 6 SVFs, processes, returns raw vL/vC/vH
     // pre-NaN-clamp. Run twice per output sample (midpoint + current).
-    auto innerStep = [&](float v, float x,
+    auto innerStep = [&](float v,
+                         float xL, float xC, float xH,
                          float &vL, float &vC, float &vH)
     {
       // Cutoff derivation at this internal sample time
@@ -204,11 +237,11 @@ namespace stolmine
         s.hi1.setFreq(highF, dampHighF);
         s.hi2.setFreq(highF, kButterDamp);
 
-        lo1 = s.low1.process(x);
+        lo1 = s.low1.process(xL);
         lo2 = s.low2.process(lo1.lp);
-        ct1 = s.ctr1.process(x);
+        ct1 = s.ctr1.process(xC);
         ct2 = s.ctr2.process(ct1.hp);
-        hi1 = s.hi1.process(x);
+        hi1 = s.hi1.process(xH);
         hi2 = s.hi2.process(hi1.hp);
 
         vL = (lo2.lp + antiRes * lo1.hp) * kLowGain;
@@ -224,11 +257,11 @@ namespace stolmine
         s.hi1.setFreq(highF, dampHighF);
         s.hi2.setFreq(highF, kButterDamp);
 
-        lo1 = s.low1.process(x);
+        lo1 = s.low1.process(xL);
         lo2 = s.low2.process(lo1.lp);
-        ct1 = s.ctr1.process(x);
+        ct1 = s.ctr1.process(xC);
         ct2 = s.ctr2.process(ct1.hp);
-        hi1 = s.hi1.process(x);
+        hi1 = s.hi1.process(xH);
         hi2 = s.hi2.process(hi1.hp);
 
         vL = (lo2.hp + antiRes * lo1.hp) * kLowGain;
@@ -240,22 +273,40 @@ namespace stolmine
     // === Per-output-sample loop (2 internal steps each) ===
     for (int i = 0; i < FRAMELENGTH; i++)
     {
-      float xCurr = in[i];
-      if (fabsf(xCurr) < 1.18e-23f) xCurr = 1.18e-17f;
+      // Per-block input selection (normalling).
+      //   patched  → use per-block input directly
+      //   else     → use ALL (if enabled) or silence
+      float xAll = in[i];
+      float xCurrL = lowPatched ? lowIn[i]    : (allEn ? xAll : 0.0f);
+      float xCurrC = ctrPatched ? centreIn[i] : (allEn ? xAll : 0.0f);
+      float xCurrH = hiPatched  ? highIn[i]   : (allEn ? xAll : 0.0f);
+
+      // Denormal seed (per-block — keeps self-osc bootable on any
+      // block whose input is genuinely silent).
+      if (fabsf(xCurrL) < 1.18e-23f) xCurrL = 1.18e-17f;
+      if (fabsf(xCurrC) < 1.18e-23f) xCurrC = 1.18e-17f;
+      if (fabsf(xCurrH) < 1.18e-23f) xCurrH = 1.18e-17f;
+
       float vCurr = voct[i];
 
       // Internal sample A: midpoint between prev and current
-      // (linear interp at the upsampled 96 kHz timeline)
+      // (linear interp at the upsampled 96 kHz timeline). Per-block
+      // interpolation keeps each block's continuity coherent even
+      // as routing changes between blocks.
       float vMid = (prevV + vCurr) * 0.5f;
-      float xMid = (prevX + xCurr) * 0.5f;
-      if (fabsf(xMid) < 1.18e-23f) xMid = 1.18e-17f;
+      float xMidL = (prevXL + xCurrL) * 0.5f;
+      float xMidC = (prevXC + xCurrC) * 0.5f;
+      float xMidH = (prevXH + xCurrH) * 0.5f;
+      if (fabsf(xMidL) < 1.18e-23f) xMidL = 1.18e-17f;
+      if (fabsf(xMidC) < 1.18e-23f) xMidC = 1.18e-17f;
+      if (fabsf(xMidH) < 1.18e-23f) xMidH = 1.18e-17f;
 
       float vL_a, vC_a, vH_a;
-      innerStep(vMid, xMid, vL_a, vC_a, vH_a);
+      innerStep(vMid, xMidL, xMidC, xMidH, vL_a, vC_a, vH_a);
 
       // Internal sample B: current sample
       float vL_b, vC_b, vH_b;
-      innerStep(vCurr, xCurr, vL_b, vC_b, vH_b);
+      innerStep(vCurr, xCurrL, xCurrC, xCurrH, vL_b, vC_b, vH_b);
 
       // Decimation: simple [1/2, 1/2] kernel = average of pair.
       // -3 dB at host-rate Fs/4 (= 12 kHz at 48k host). A sharper
@@ -278,14 +329,18 @@ namespace stolmine
       float mix = vL * wL + vC * wC + vH * wH;
       out[i] = SistersSvf::fastTanh(mix);
 
-      prevV = vCurr;
-      prevX = xCurr;
+      prevV  = vCurr;
+      prevXL = xCurrL;
+      prevXC = xCurrC;
+      prevXH = xCurrH;
     }
 
     // Carry the last samples to the next frame so the first sample's
     // midpoint interpolation has a valid history.
-    s.lastVoct = prevV;
-    s.lastIn = prevX;
+    s.lastVoct      = prevV;
+    s.lastInLow     = prevXL;
+    s.lastInCentre  = prevXC;
+    s.lastInHigh    = prevXH;
   }
 
 } // namespace stolmine
