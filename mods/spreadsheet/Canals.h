@@ -11,6 +11,11 @@ namespace stolmine
     Canals();
     virtual ~Canals();
 
+    // SWIG-visible — routing viz support.
+    // block index: 0=LOW, 1=CENTRE, 2=HIGH.
+    float getBlockInputSample(int block, int idx);
+    bool  isBlockUsingAll(int block);
+
 #ifndef SWIGLUA
     virtual void process();
 

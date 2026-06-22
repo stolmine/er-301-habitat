@@ -28,6 +28,19 @@ namespace stolmine
     float lastInCentre;
     float lastInHigh;
 
+    // Per-block post-routing input ring buffer for the overview ply
+    // viz. Stored at decimated rate (one sample per ~8 cycles
+    // captured in 256 entries) so the viz sees a meaningful waveform
+    // at any pitch.
+    static const int kInputRingSize = 256;
+    float inputRing[3][kInputRingSize];
+    int inputRingPos;
+    int inputRingDecimCounter;
+    int inputRingDecimRate;
+    // true when the block is sourcing from ALL fallback (no per-block
+    // patched signal). Drives the "ALL" overlay in the viz.
+    bool curUsingAll[3];
+
     void Init()
     {
       low1.reset(); low2.reset();
@@ -37,6 +50,13 @@ namespace stolmine
       lastInLow = 0.0f;
       lastInCentre = 0.0f;
       lastInHigh = 0.0f;
+      memset(inputRing, 0, sizeof(inputRing));
+      inputRingPos = 0;
+      inputRingDecimCounter = 0;
+      inputRingDecimRate = 8;
+      curUsingAll[0] = true;
+      curUsingAll[1] = true;
+      curUsingAll[2] = true;
     }
   };
 
@@ -70,6 +90,19 @@ namespace stolmine
 
     mpInternal = new Internal();
     mpInternal->Init();
+  }
+
+  float Canals::getBlockInputSample(int block, int idx)
+  {
+    if (block < 0 || block > 2) return 0.0f;
+    if (idx < 0 || idx >= 256)  return 0.0f;
+    return mpInternal->inputRing[block][(mpInternal->inputRingPos + idx) & 255];
+  }
+
+  bool Canals::isBlockUsingAll(int block)
+  {
+    if (block < 0 || block > 2) return false;
+    return mpInternal->curUsingAll[block];
   }
 
   Canals::~Canals()
@@ -118,6 +151,14 @@ namespace stolmine
     bool lowPatched = (mLowPatched.value()    == 2);
     bool ctrPatched = (mCentrePatched.value() == 2);
     bool hiPatched  = (mHighPatched.value()   == 2);
+
+    // Routing-state mirror for the overview ply viz. A block is
+    // "using ALL" when it's not patched and ALL is enabled; the
+    // viz overlays the word "ALL" on the input scope in that case.
+    Internal &sBlockState = *mpInternal;
+    sBlockState.curUsingAll[0] = !lowPatched && allEn;
+    sBlockState.curUsingAll[1] = !ctrPatched && allEn;
+    sBlockState.curUsingAll[2] = !hiPatched && allEn;
 
     // === Block-rate parameter sampling ===
     float fundamental = mFundamental.value();
@@ -191,6 +232,13 @@ namespace stolmine
     float prevXL = s.lastInLow;
     float prevXC = s.lastInCentre;
     float prevXH = s.lastInHigh;
+
+    // Input ring-buffer decimation rate — hardcoded so the scope
+    // timebase doesn't track Fundamental. User preference: keep the
+    // ~10.7 ms scope window (matches what the adaptive rate produced
+    // at Fundamental ≈ +16 semitones). At 48 kHz / decim 2, 256 ring
+    // entries = 512 audio samples ≈ 10.7 ms.
+    s.inputRingDecimRate = 2;
 
     // Internal-step helper: takes (v, x) at the internal sample
     // time, configures all 6 SVFs, processes, returns raw vL/vC/vH
@@ -280,6 +328,18 @@ namespace stolmine
       float xCurrL = lowPatched ? lowIn[i]    : (allEn ? xAll : 0.0f);
       float xCurrC = ctrPatched ? centreIn[i] : (allEn ? xAll : 0.0f);
       float xCurrH = hiPatched  ? highIn[i]   : (allEn ? xAll : 0.0f);
+
+      // Decimated capture of post-routing per-block input for the
+      // overview ply viz. Stored BEFORE denormal seeding so the
+      // viz sees genuine silence rather than the tiny seed value.
+      s.inputRingDecimCounter++;
+      if (s.inputRingDecimCounter >= s.inputRingDecimRate) {
+        s.inputRingDecimCounter = 0;
+        s.inputRing[0][s.inputRingPos] = xCurrL;
+        s.inputRing[1][s.inputRingPos] = xCurrC;
+        s.inputRing[2][s.inputRingPos] = xCurrH;
+        s.inputRingPos = (s.inputRingPos + 1) & 255;
+      }
 
       // Denormal seed (per-block — keeps self-osc bootable on any
       // block whose input is genuinely silent).

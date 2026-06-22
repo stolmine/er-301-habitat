@@ -17,6 +17,7 @@
 -- inside the corresponding subchain.
 
 local app = app
+local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local ViewControl = require "Unit.ViewControl"
 
@@ -36,15 +37,18 @@ function CanalsOverviewControl:init(args)
   self.lowBranch    = args.lowBranch    or app.logError("%s.init: lowBranch missing.", self)
   self.centreBranch = args.centreBranch or app.logError("%s.init: centreBranch missing.", self)
   self.highBranch   = args.highBranch   or app.logError("%s.init: highBranch missing.", self)
+  -- C++ op needed to follow per-block routing state for the viz.
+  local canalsOp = args.canalsOp or
+                     app.logError("%s.init: canalsOp missing.", self)
 
-  -- Main graphic — single-ply placeholder. Phase 6 will replace
-  -- with routing-state visualization (per-block icons showing where
-  -- each block is sourced from + AllEnabled indicator).
+  -- Main graphic — routing visualization. Three horizontal stripes
+  -- (LOW / CENTRE / HIGH), each a small post-routing input scope
+  -- with an "ALL" overlay when the block is using fallback and a
+  -- L/C/H corner signifier. See CanalsRoutingGraphic.h.
+  self.routingGraphic = libspreadsheet.CanalsRoutingGraphic(0, 0, ply, 64)
+  self.routingGraphic:follow(canalsOp)
   local main = app.Graphic(0, 0, ply, 64)
-  local label = app.Label(button, 12)
-  label:fitToText(3)
-  label:setCenter(ply // 2, 32)
-  main:addChild(label)
+  main:addChild(self.routingGraphic)
   self:setMainCursorController(main)
   self:setControlGraphic(main)
 

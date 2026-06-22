@@ -47,6 +47,7 @@
 // to be iteratively refined per planning/canals-spreadsheet-redesign.md).
 // Uses stmlib::SemitonesToRatio.
 #include "Canals.h"
+#include "CanalsRoutingGraphic.h"
 // Mirror: aliasing-paradigm complex osc (Helicase chassis fork).
 // See planning/mirror-unit-design.md.
 #include "Mirror.h"
@@ -95,5 +96,6 @@
 %include "Network.h"
 %include "NetworkOverviewGraphic.h"
 %include "Canals.h"
+%include "CanalsRoutingGraphic.h"
 %include "Mirror.h"
 %include "MirrorPhosphorGraphic.h"

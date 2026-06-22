@@ -293,7 +293,8 @@ function Canals:onLoadViews()
       button       = "in",
       lowBranch    = self.branches.lowIn,
       centreBranch = self.branches.centreIn,
-      highBranch   = self.branches.highIn
+      highBranch   = self.branches.highIn,
+      canalsOp     = self.objects.op
     }
   }, {
     expanded  = { "overview", "mode", "tune", "fundamental", "span", "quality", "output" },
