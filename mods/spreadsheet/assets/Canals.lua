@@ -80,18 +80,24 @@ function Canals:onLoadGraph(channelCount)
   -- the consolidated overview ply. Phase 4 adds auto-polling of
   -- branch-chain unit count to drive the Patched flags.
   local lowIn = self:addObject("lowIn", app.GainBias())
+  lowIn:hardSet("Gain", 1.0)   -- unity passthrough by default
+  lowIn:hardSet("Bias", 0.0)
   local lowInRange = self:addObject("lowInRange", app.MinMax())
   connect(lowIn, "Out", lowInRange, "In")
   connect(lowIn, "Out", op, "Low In")
   self:addMonoBranch("lowIn", lowIn, "In", lowIn, "Out")
 
   local centreIn = self:addObject("centreIn", app.GainBias())
+  centreIn:hardSet("Gain", 1.0)
+  centreIn:hardSet("Bias", 0.0)
   local centreInRange = self:addObject("centreInRange", app.MinMax())
   connect(centreIn, "Out", centreInRange, "In")
   connect(centreIn, "Out", op, "Centre In")
   self:addMonoBranch("centreIn", centreIn, "In", centreIn, "Out")
 
   local highIn = self:addObject("highIn", app.GainBias())
+  highIn:hardSet("Gain", 1.0)
+  highIn:hardSet("Bias", 0.0)
   local highInRange = self:addObject("highInRange", app.MinMax())
   connect(highIn, "Out", highInRange, "In")
   connect(highIn, "Out", op, "High In")
