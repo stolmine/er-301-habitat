@@ -7,7 +7,6 @@ return {
     { title = "NR",                moduleName = "NR",                    category = "Biome", keywords = "rhythm, gate, sequencer, trigger" },
     { title = "94 Discont",        moduleName = "Discont",               category = "Biome", keywords = "waveshaper, saturation, distortion, effect" },
     { title = "Latch Filter",      moduleName = "LatchFilter",           category = "Biome", keywords = "filter, latch, digital, effect" },
-    { title = "Canals",            moduleName = "Canals",                category = "Biome", keywords = "filter, resonant, crossover, formant, three sisters" },
     { title = "Gesture",           moduleName = "GestureSeq",            category = "Biome", keywords = "sequencer, gesture, recorder, looper, CV" },
     { title = "Gated Slew",       moduleName = "GatedSlewLimiter",      category = "Biome", keywords = "slew, gate, utility, filter, envelope" },
     { title = "Tilt EQ",          moduleName = "TiltEQ",                category = "Biome", keywords = "eq, tilt, tone, filter, effect" },
