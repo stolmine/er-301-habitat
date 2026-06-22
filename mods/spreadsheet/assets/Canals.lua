@@ -9,6 +9,7 @@ local ModeSelector = require "spreadsheet.ModeSelector"
 local Encoder = require "Encoder"
 local MenuHeader = require "Unit.MenuControl.Header"
 local OptionMenu = require "Unit.MenuControl.OptionControl"
+local Signal = require "Signal"
 
 local freqMap = (function()
   local map = app.LinearDialMap(-48, 48)
@@ -153,6 +154,73 @@ function Canals:onLoadGraph(channelCount)
   connect(op, "Low",    self, "Out3")
   connect(op, "Centre", self, "Out4")
   connect(op, "High",   self, "Out5")
+
+  -- Phase 4: auto-poll per-block branch state at the display
+  -- frame rate (55 Hz). When a branch has at least one unit
+  -- assigned, flip its Patched Option to 2 (use per-block input);
+  -- when empty, back to 1 (fall through to ALL or silence). State
+  -- changes propagate to C++ at the next block boundary.
+  --
+  -- last* initialized to nil (impossible Option value) so the very
+  -- first poll fires set() unconditionally. This guarantees the C++
+  -- Options match the actual branch state regardless of what value
+  -- they had at unit-init time (e.g., 0 = CHOICE_UNKNOWN after a
+  -- stale deserialize, or a serialized override from a previous
+  -- session). Without this priming, a single first-frame mismatch
+  -- could leave the unit stuck routing per-block-silence instead of
+  -- ALL fallback.
+  self.lastLowPatched    = nil
+  self.lastCentrePatched = nil
+  self.lastHighPatched   = nil
+  self.frameCallback = function() self:pollBranchState() end
+  Signal.register("onDisplayFrame", self.frameCallback)
+  -- Prime once at init so initial routing is correct without waiting
+  -- for the first display frame.
+  self:pollBranchState()
+end
+
+-- "Patched" = either has units assigned inside the subchain OR
+-- has an external source subscribed to its input (the chain-input
+-- picker mechanism). Both routes are valid ways for signal to flow
+-- into the per-block input; both should override ALL.
+local function isBranchPatched(branch)
+  return next(branch.units) ~= nil
+      or branch.leftInputSource ~= nil
+end
+
+function Canals:pollBranchState()
+  local op = self.objects.op
+  if not op then return end
+
+  -- Branch:include(Chain), so branch.units is the Chain.units
+  -- table + branch.leftInputSource is set when the input is
+  -- subscribed to an external source.
+  local lowVal    = isBranchPatched(self.branches.lowIn)    and 2 or 1
+  local centreVal = isBranchPatched(self.branches.centreIn) and 2 or 1
+  local highVal   = isBranchPatched(self.branches.highIn)   and 2 or 1
+
+  -- Write only on change. Option:set fires a notification chain
+  -- that's worth avoiding on every frame for unchanged values.
+  if self.lastLowPatched ~= lowVal then
+    op:getOption("LowPatched"):set(lowVal)
+    self.lastLowPatched = lowVal
+  end
+  if self.lastCentrePatched ~= centreVal then
+    op:getOption("CentrePatched"):set(centreVal)
+    self.lastCentrePatched = centreVal
+  end
+  if self.lastHighPatched ~= highVal then
+    op:getOption("HighPatched"):set(highVal)
+    self.lastHighPatched = highVal
+  end
+end
+
+function Canals:onRemove()
+  if self.frameCallback then
+    Signal.remove("onDisplayFrame", self.frameCallback)
+    self.frameCallback = nil
+  end
+  Unit.onRemove(self)
 end
 
 function Canals:onLoadViews()
@@ -233,18 +301,12 @@ function Canals:onLoadViews()
   }
 end
 
--- Menu options.
--- AllEnabled (menu-level toggle) is the user-facing global "ignore
--- main In" switch — kept out of the normal ply surface since it's
--- a rare-touch config decision.
---
--- LowPatched/CentrePatched/HighPatched are EXPOSED IN MENU FOR
--- VALIDATION ONLY in Phase 2. Phase 4 will replace these manual
--- toggles with Lua-side polling of the branch's chain unit count
--- so patched state is auto-detected, and the menu items will move
--- to the C++ side as pure routing flags (not user-toggleable). For
--- now they're here so the override routing can be exercised
--- without requiring the polling logic to land first.
+-- Menu options. AllEnabled is the user-facing global "ignore main In"
+-- toggle — kept off the normal ply surface since it's a rare-touch
+-- config decision. The Patched options are driven entirely by the
+-- onDisplayFrame branch-state polling (see Canals:pollBranchState)
+-- and are intentionally NOT exposed in the menu — the user just
+-- patches into the corresponding subchain and routing happens.
 function Canals:onShowMenu(objects, branches)
   return {
     routingHeader = MenuHeader { description = "Routing" },
@@ -252,23 +314,8 @@ function Canals:onShowMenu(objects, branches)
       description = "ALL Input",
       option = objects.op:getOption("AllEnabled"),
       choices = { "enabled", "disabled" }
-    },
-    lowPatched = OptionMenu {
-      description = "Low Patched (test)",
-      option = objects.op:getOption("LowPatched"),
-      choices = { "off (use ALL)", "on (override)" }
-    },
-    centrePatched = OptionMenu {
-      description = "Centre Patched (test)",
-      option = objects.op:getOption("CentrePatched"),
-      choices = { "off (use ALL)", "on (override)" }
-    },
-    highPatched = OptionMenu {
-      description = "High Patched (test)",
-      option = objects.op:getOption("HighPatched"),
-      choices = { "off (use ALL)", "on (override)" }
     }
-  }, { "routingHeader", "allEnabled", "lowPatched", "centrePatched", "highPatched" }
+  }, { "routingHeader", "allEnabled" }
 end
 
 return Canals
