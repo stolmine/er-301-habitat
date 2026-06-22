@@ -4,6 +4,7 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Pitch = require "Unit.ViewControl.Pitch"
+local CanalsOverviewControl = require "spreadsheet.CanalsOverviewControl"
 local ModeSelector = require "spreadsheet.ModeSelector"
 local Encoder = require "Encoder"
 local MenuHeader = require "Unit.MenuControl.Header"
@@ -217,46 +218,17 @@ function Canals:onLoadViews()
       initialBias   = 0,
       modeNames     = modeNames
     },
-    -- Per-block input branches. Phase 2 placeholder — standard
-    -- GainBias view with a level fader (will be replaced in Phase 3
-    -- by a custom no-fader sub-button control on the consolidated
-    -- overview ply).
-    lowIn = GainBias {
-      button        = "lo",
-      description   = "Low In",
-      branch        = self.branches.lowIn,
-      gainbias      = self.objects.lowIn,
-      range         = self.objects.lowInRange,
-      biasMap       = Encoder.getMap("[-1,1]"),
-      biasUnits     = app.unitNone,
-      biasPrecision = 2,
-      initialBias   = 0.0
-    },
-    centreIn = GainBias {
-      button        = "ctr",
-      description   = "Centre In",
-      branch        = self.branches.centreIn,
-      gainbias      = self.objects.centreIn,
-      range         = self.objects.centreInRange,
-      biasMap       = Encoder.getMap("[-1,1]"),
-      biasUnits     = app.unitNone,
-      biasPrecision = 2,
-      initialBias   = 0.0
-    },
-    highIn = GainBias {
-      button        = "hi",
-      description   = "High In",
-      branch        = self.branches.highIn,
-      gainbias      = self.objects.highIn,
-      range         = self.objects.highInRange,
-      biasMap       = Encoder.getMap("[-1,1]"),
-      biasUnits     = app.unitNone,
-      biasPrecision = 2,
-      initialBias   = 0.0
+    -- Overview ply consolidates the three per-block input branches
+    -- under one sub-display with MiniScope previews + sub-button
+    -- dives. No level/bias visible — backend unity passthrough.
+    overview = CanalsOverviewControl {
+      button       = "in",
+      lowBranch    = self.branches.lowIn,
+      centreBranch = self.branches.centreIn,
+      highBranch   = self.branches.highIn
     }
   }, {
-    expanded  = { "mode", "tune", "fundamental", "span", "quality", "output",
-                  "lowIn", "centreIn", "highIn" },
+    expanded  = { "overview", "mode", "tune", "fundamental", "span", "quality", "output" },
     collapsed = {}
   }
 end
