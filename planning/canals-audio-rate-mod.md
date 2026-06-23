@@ -339,11 +339,11 @@ aware of hint surface traps on Cortex-A8.
    v1: skip — audio-rate V/Oct gives most of the use cases.
    Revisit if user wants index-style FM control.
 
-2. **Should Span and Q be audio-rate too?** Currently both
-   are ParameterAdapters with `block-rate` CV input. Could
-   move to audio-rate sampling. v1: leave block-rate — V/Oct
-   is the primary FM destination on hardware. Audio-rate Q
-   sweeps are possible but exotic; defer.
+2. **Should Span and Q be audio-rate too?** ~~Currently both
+   are ParameterAdapters with `block-rate` CV input. v1: leave
+   block-rate.~~ **RESOLVED 2026-06-22 → YES, audio-rate.** This
+   deferral is the source of the "flappy" character the user
+   reports when modulating Span/Quality. See **Phase 5** below.
 
 3. **Should we add coefficient smoothing?** At very high
    audio-rate FM rates (~5+ kHz), the cutoff sweep produces
@@ -387,3 +387,395 @@ Move all SVF coefficient computation from frame-rate
 (change-gated) to per-sample (always-recompute), reading
 V/Oct per-sample so audio-rate FM works and the user's
 self-patching scenarios sound musical.
+
+---
+
+# Phase 5 — Span + Quality (+ Fundamental) audio-rate via Inlet promotion
+
+Added 2026-06-22. Resolves Open Q #2. Brings the remaining tone
+controls up to the same audio-rate fidelity V/Oct already has, so
+Canals "takes audio modulation at every input" like the original
+Three Sisters instead of sounding flappy under Span/Quality mod.
+
+## Root cause of the flap (evidence)
+
+The lesson is borrowed verbatim from the native ER-301 Sine Osc
+(`er-301/mods/core/objects/oscillators/SineOscillator.{h,cpp}`):
+**a modulatable target is an `Inlet` (audio buffer summed/read
+per-sample), never a `Parameter` (block-rate scalar).** In the
+sine osc every modulatable input — `mFundamental`, `mVoltPerOctave`,
+`mPhase`, `mFeedback` — is an `Inlet`; the only `Parameter` is
+internal phase state. That per-sample buffer read at line 84 is why
+its PM sidebands are exact.
+
+Canals already gets this right for ONE input and wrong for the rest,
+in the same file:
+
+| Input | C++ decl (`Canals.h`) | Lua wiring (`Canals.lua`) | Read rate | Result |
+|---|---|---|---|---|
+| V/Oct | `Inlet mVOct` (h:26) | `connect(tune,"Out",op,"V/Oct")` (lua:112) | `voct[i]` per-sample, 2× OS (cpp:350) | audio-rate ✓ |
+| Span | `Parameter mSpan` (h:32) | `ParameterAdapter`+`tie` (lua:122-124) | `mSpan.value()` once/block (cpp:165) | block-rate → flap |
+| Quality | `Parameter mQuality` (h:33) | `ParameterAdapter`+`tie` (lua:128-130) | `mQuality.value()` once/block (cpp:166) | block-rate → flap |
+| Fundamental | `Parameter mFundamental` (h:31) | `ParameterAdapter`+`tie` (lua:116-118) | `mFundamental.value()` once/block (cpp:164) | block-rate (knob — OK, but see below) |
+
+`ParameterAdapter` + `tie()` **is** the block-rate bridge: it samples
+the CV and exposes a single scalar the DSP reads once per 64-sample
+frame. The derived constants that depend on Span/Quality — `damping`
+(cpp:170-191), `antiRes` (cpp:193), `spanMult`/`invSpanMult`
+(cpp:195-197) — are likewise computed once per block, so resonance and
+bandwidth literally cannot move within a frame. On a high-Q resonant
+filter that 750 Hz stair-step reads as a "flap." `connect`→`Inlet`→
+per-sample read is the only fix.
+
+## Scope decision
+
+- **DECISION 2026-06-22: Span + Quality only this pass.** Fundamental
+  stays a block-rate `Parameter` knob — V/Oct already provides audio-rate
+  freq FM, so Fundamental promotion is deferred to a trivial follow-up.
+  The Fundamental notes below are retained for that follow-up. In this
+  pass `innerStep` keeps `fundamental` as a block-rate closed-over local
+  and takes only `span`/`quality` per-sample.
+- **Core (must-do): Span + Quality → Inlet.** This is the flap fix.
+- **Companion (DEFERRED): Fundamental → Inlet.** Same
+  pattern; gives a second audio-rate freq-CV input alongside V/Oct.
+  Note the scaling asymmetry: V/Oct is `v*120` semitones (≈±10 oct
+  for a ±1 signal — the strong/coarse FM input), whereas a GainBias
+  Fundamental adds in raw semitone units (≈±1 semitone for a ±1
+  signal at gain 1 — a fine/vernier FM input). Complementary, not
+  redundant. Include it unless CPU forces a trim.
+- **Stays block-rate: Output (fader morph), Mode (option).** Not part
+  of the "freq/quality/span" modulation surface; audio-rate output
+  morphing is a separate future idea.
+
+## CPU — correcting the original projection
+
+The original doc feared a 7.5× CPU jump. That fear was about going
+from change-gated to per-sample, which **already shipped** (V/Oct is
+per-sample at 2× OS). The expensive per-output-sample work is already
+paid: `innerStep` runs twice (2× OS), each pass doing 6×`setFreq`
+(~20 cyc each incl. a divide) + 6×`process` (each `pseudoSaturate`
+~45 cyc + SVF math) ≈ ~1000 cyc/output-sample today.
+
+Span/Quality promotion adds, per internal step: one extra
+`SemitonesToRatio` LUT call for `spanMult` (~15 cyc) + the Quality→
+`damping` piecewise curve (~10 cyc). ×2 OS ≈ +50 cyc/output-sample on
+top of ~1000 → **~+5%**, not 7.5×. Fundamental adds nothing measurable
+(it's already inside `totalSemis`). Net: roughly **~4% mono / ~8%
+stereo**, a small bump. Profile on hardware; sub-block-of-2 remains the
+reserved escape hatch.
+
+## C++ changes — `Canals.h`
+
+Replace the three `Parameter` decls with `Inlet`s (keep display names
+so the Lua `connect(...,"Span")` etc. resolve):
+
+```cpp
+// REMOVE:
+//   od::Parameter mFundamental{"Fundamental", 0.0f};
+//   od::Parameter mSpan{"Span", 0.25f};
+//   od::Parameter mQuality{"Quality", 0.0f};
+// ADD (group with the other inlets, above the outlets is fine):
+od::Inlet mFundamental{"Fundamental"};
+od::Inlet mSpan{"Span"};
+od::Inlet mQuality{"Quality"};
+```
+
+`mOutput` and `mMode` stay `Parameter`. No serialization change: the
+persisted value lives in the Lua `GainBias`/`ParameterAdapter` object's
+Bias (framework-serialized as part of the unit graph), not in the C++
+Parameter — which was only ever a `tie` mirror. Inlets hold no state.
+
+## C++ changes — `Canals.cpp`
+
+1. **Constructor (cpp:63-93):** swap the three `addParameter` calls for
+   `addInput`:
+   ```cpp
+   // was: addParameter(mFundamental); addParameter(mSpan); addParameter(mQuality);
+   addInput(mFundamental);
+   addInput(mSpan);
+   addInput(mQuality);
+   ```
+   Keep `addParameter(mOutput); addParameter(mMode);`. Inlet/outlet
+   ordering doesn't matter for Lua name lookup, but add the three new
+   inlets near `mVOct` for readability.
+
+2. **Grab the buffers (cpp:138-146 block):**
+   ```cpp
+   float *fundBuf = mFundamental.buffer();
+   float *spanBuf = mSpan.buffer();
+   float *qualBuf = mQuality.buffer();
+   ```
+
+3. **Delete the block-rate samples + derived constants** (cpp:164-197):
+   remove `fundamental = mFundamental.value()`, `span = ...`,
+   `quality = ...`, and the whole `damping`/`antiRes`/`spanMult`/
+   `invSpanMult` derivation. They move into `innerStep`. Keep
+   `outputPos`, `mode`, the fader weights `wL/wC/wH`, `kButterDamp`,
+   `kLowGain/kHighGain`, `kInvSR_OS` — those stay block-rate.
+
+4. **Extend `innerStep` signature** to take per-sample fund/span/quality
+   and compute the derived constants inside:
+   ```cpp
+   auto innerStep = [&](float v, float fund, float span, float quality,
+                        float xL, float xC, float xH,
+                        float &vL, float &vC, float &vH)
+   {
+     // Quality → damping (piecewise, lifted verbatim from cpp:170-191)
+     float damping;
+     if (quality < 0.0f)            damping = 1.0f / 0.7071f;
+     else if (quality < 0.9f)     { float t = quality*(1.0f/0.9f);
+                                    float qMag = 0.7071f + t*t*t*49.3f;
+                                    damping = 1.0f / qMag; }
+     else                         { float t = (quality-0.9f)*10.0f;
+                                    damping = 0.02f*(1.0f-t) + (-0.15f)*t; }
+     float antiRes  = (quality < 0.0f) ? -quality : 0.0f;
+     float spanMult = stmlib::SemitonesToRatio(span * 48.0f);
+     float invSpanMult = 1.0f / spanMult;
+
+     float totalSemis = v * 120.0f + fund;   // was: + fundamental
+     // ... rest of innerStep UNCHANGED (freqHz, lowHz/highHz, lowF/
+     //     ctrF/highF clamps, ratio damping, the mode 0/1 SVF chains,
+     //     vL/vC/vH writes) ...
+   };
+   ```
+   Clamp the per-sample values at read (mirror the old CLAMPs):
+   `span` to [0,1], `quality` to [-1,1] — do this where they're read
+   in the loop (step 6), not inside innerStep, so the midpoint interp
+   sees clamped endpoints.
+
+5. **2× OS carry state** — add to `Internal` and `Init()`:
+   ```cpp
+   float lastFund;     // init 0.0f
+   float lastSpan;     // init 0.25f
+   float lastQuality;  // init 0.0f
+   ```
+   And locals before the loop, beside `prevV`:
+   ```cpp
+   float prevFund = s.lastFund;
+   float prevSpan = s.lastSpan;
+   float prevQual = s.lastQuality;
+   ```
+
+6. **Per-output-sample loop (cpp:322-396):** read + clamp the three new
+   buffers, interpolate midpoints exactly like V/Oct, pass to both
+   inner steps:
+   ```cpp
+   float fundCurr = fundBuf[i];
+   float spanCurr = CLAMP(0.0f, 1.0f, spanBuf[i]);
+   float qualCurr = CLAMP(-1.0f, 1.0f, qualBuf[i]);
+
+   float fundMid = (prevFund + fundCurr) * 0.5f;
+   float spanMid = (prevSpan + spanCurr) * 0.5f;
+   float qualMid = (prevQual + qualCurr) * 0.5f;
+
+   innerStep(vMid,  fundMid,  spanMid,  qualMid,  xMidL, xMidC, xMidH,  vL_a,vC_a,vH_a);
+   innerStep(vCurr, fundCurr, spanCurr, qualCurr, xCurrL,xCurrC,xCurrH, vL_b,vC_b,vH_b);
+   // ... decimate / NaN-clamp / write unchanged ...
+   prevFund = fundCurr; prevSpan = spanCurr; prevQual = qualCurr;  // beside prevV = vCurr
+   ```
+
+7. **Frame-end carry (cpp:398-403):**
+   ```cpp
+   s.lastFund     = prevFund;
+   s.lastSpan     = prevSpan;
+   s.lastQuality  = prevQual;
+   ```
+
+`stmlib/dsp/units.h` is already included (cpp:10) so `SemitonesToRatio`
+is available inside innerStep.
+
+## Lua changes — `Canals.lua`
+
+For each of fundamental / span / quality, swap `ParameterAdapter`+`tie`
+for `GainBias`+`connect`+`MinMax`, mirroring the existing `lowIn` block
+(lua:84-90). Span example:
+
+```lua
+-- Span (audio-rate: GainBias Out -> Inlet, per-sample)
+local span = self:addObject("span", app.GainBias())
+span:hardSet("Gain", 1.0)
+span:hardSet("Bias", 0.25)
+local spanRange = self:addObject("spanRange", app.MinMax())
+connect(span, "Out", spanRange, "In")
+connect(span, "Out", op, "Span")          -- was: tie(op,"Span",span,"Out")
+self:addMonoBranch("span", span, "In", span, "Out")
+```
+
+Fundamental: `Bias 0.0`, range obj `fundamentalRange`, `connect(...,"Fundamental")`.
+Quality: `Bias 0.0`, range obj `qualityRange`, `connect(...,"Quality")`.
+
+In `onLoadViews` (lua:235-264) point each view's `range` at the new
+MinMax object; the `gainbias` field already points at the renamed
+object, and `biasMap`/`biasPrecision`/`initialBias` stay as-is. The
+`GainBias` ViewControl drives `app.GainBias` natively (it's the intended
+pairing — more correct than the prior ParameterAdapter pairing).
+
+`Output` (ModeSelector) and `Mode` keep `ParameterAdapter`+`tie` — they
+stay block-rate.
+
+## Risks / watch-items
+
+- **CV scaling feel.** GainBias adds CV in the control's native units
+  (span 0..1, quality -1..1). A full-scale audio signal sweeps the
+  whole range at gain 1 — expected. The user can trim with the gain.
+  Confirm in audition it isn't too hot/cold; adjust default gain if so.
+- **Self-osc boot.** Quality at/above the top-decile self-osc edge must
+  still boot from the denormal seed. Per-sample quality doesn't change
+  the seed path (cpp:344-348) — verify high-Q self-osc still sings.
+- **am335x NEON.** No new stack NEON arrays; `-fno-tree-vectorize` is
+  set for am335x (mod.mk:89-91). `innerStep` stays scalar. Run the
+  objdump `vld1...[:64]` hint check on `Canals.o` per the build script
+  (mod.mk:107 `neon_hint_check`).
+- **SWIG.** Editing `Canals.h` (Parameter→Inlet) changes class layout;
+  `SWIG_HEADER_DEPS` (mod.mk:39) force-regens the wrapper — the
+  `feedback_swig_header_dep` heap-corruption trap is auto-handled. Do a
+  clean-ish rebuild to be safe.
+- **Freq-comp damping under fast mod.** Now that damping is per-sample
+  AND span is per-sample, the `ratioLow/ratioHigh` compensation
+  (cpp:271-276) tracks live. Re-audition per-block amplitude balance
+  (hardware targets LOW 0.68 / CTR 1.12 / HIGH 0.65) under fast
+  Span/Quality sweeps; this is the Phase 3 tuning carried forward.
+
+## Build / version
+
+- Bump `PKGVERSION 2.8.1 → 2.8.1.1` in `mods/spreadsheet/mod.mk`
+  (4th-digit dev iteration per `feedback_dev_digit_during_iteration`;
+  required for the device to re-extract per `feedback_package_version_bump`).
+- Build BOTH arches (`feedback_always_build_both_arches`):
+  `make spreadsheet ARCH=linux` and `make spreadsheet ARCH=am335x`.
+- Auto-install linux to emu (`feedback_linux_build_auto_install`):
+  `cp testing/linux/spreadsheet*.pkg ~/.od/rear/` (confirm exact path).
+- Verify `Canals.h` edit actually landed before building
+  (`feedback_verify_edit_landed_for_silent_failures`) — Parameter→Inlet
+  is exactly the kind of layout change where a silent stale build bites.
+
+## Test checklist
+
+- [ ] linux + am335x build clean; `Canals.o` 0 NEON hints
+- [ ] Insert on chain → control-rate Span/Quality knobs still behave
+- [ ] Slow LFO → Span: smooth, no zipper/step
+- [ ] Audio-rate signal → Span: smooth bandwidth FM, no flap
+- [ ] Audio-rate signal → Quality: smooth resonance FM, no flap
+- [ ] High-Q self-osc still boots + sings (denormal seed path intact)
+- [ ] Per-block amplitude balance unchanged at rest (LOW/CTR/HIGH)
+- [ ] Fundamental-CV (if included): fine FM, complementary to V/Oct
+- [ ] Quicksave/reload round-trips Span/Quality/Fundamental bias values
+- [ ] Hardware audition: matches Three Sisters "takes mod everywhere"
+
+## One-sentence identity
+
+Promote Span, Quality, and Fundamental from block-rate `Parameter`s to
+audio-rate `Inlet`s (GainBias→connect, per-sample read, derived coeffs
+computed inside the 2×-OS innerStep) so Canals stops flapping and takes
+audio modulation at every input like the original Three Sisters.
+
+---
+
+## Phase 5b — residual "quantized/floppy" audit vs native Sine Osc (2026-06-22)
+
+After 5 shipped (audio-rate Span/Quality), user reported it still sounds
+"a bit quantized or floppy" and asked if we're pulling punches vs the
+Sine Osc. Honest accounting:
+
+**Fixed:**
+1. Block-rate Span/Quality → per-sample Inlet (the flap). [Phase 5]
+2. **Truncated `SemitonesToRatio` LUT → interpolated.** stmlib's
+   `SemitonesToRatio` (units.h:41) indexes the fractional table with a
+   *truncating* cast (`static_cast<int32_t>(frac*256)`) — 256 hard steps
+   per semitone, no interp. Under audio-rate FM the cutoff/spanMult walks
+   that staircase → audible quantization. The native Sine Osc derives
+   freq via smooth polynomial `simd_exp` (SineOscillator.cpp:59), no
+   table. Fixed with `semisToRatioSmooth()` (Canals.cpp) — linearly
+   interpolates stmlib's low table, keeps exact node values (preserves
+   hardware self-osc freq calibration), index-clamped vs OOB. Shipped
+   2.8.1.2.
+3. Span/Quality GainBias Gain default 1.0 → 0.0 (CV opt-in). [2.8.1.2]
+
+**Still pulled (candidates if residual floppiness persists), ranked:**
+- **Crude [½,½] 2-tap decimator** (cpp ~line 392). -3 dB at 12 kHz; leaves
+  internal-rate imaging/aliasing from the in-loop pseudoSaturate + self-
+  osc. Sine Osc has no decimator (exact at base rate). A halfband FIR
+  decimator is the next concrete lever for "grit/rough." Moderate cost.
+- **Linear-interp upsampling** of V/Oct/span/quality to the 2× midpoint —
+  mild LP, slightly softens fast mod. Minor.
+- **2-term Taylor `tan()`** for SVF g (`g=pif(1+pif²/3)`) — <1% in band,
+  diverges toward Nyquist → high cutoffs slightly warped. Minor.
+
+**Intrinsic (NOT a punch — physics of resonant-filter FM):** a 6-pole
+resonant SVF cascade has state/memory, so fast cutoff/Q modulation
+interacts with the resonant ringing (can't track instantaneously) and
+the freq-compensated damping moves with cutoff → some amplitude wobble.
+The memoryless exact PM of a sine will always be cleaner. The analog
+Three Sisters has the same memory but truly continuous coefficients;
+we approach but can't perfectly match analog continuity. Some residual
+"floppy" under aggressive modulation is the filter being a filter.
+
+### Phase 5c — Span slew (pop fix), 2.8.1.3
+
+After 5b, user: "sounds quite good… span now produces pops as it moves
+along its travel." Mechanism (confirmed against od source): `GainBias`
+ramps a knob change over only one block (~1.3 ms, `FrameOfLinearRamp`),
+and the old `ParameterAdapter` actually `hardSet` its value (no ramp).
+So the delta isn't smoothing — it's that Span's knob has **4-octave
+exponential leverage** (`span*48` semitones → both band cutoffs via
+`semisToRatioSmooth`), so each encoder detent lands as an abrupt cutoff
+jump that pops the resonant bands. Now audible because 5b removed the
+quantization that masked it. Quality doesn't pop (maps to damping
+additively, no leverage).
+
+Fix: one-pole LP slew on the [0,1] Span value BEFORE the exponential
+(`s.spanSlew += (target - s.spanSlew) * kSpanSlew`), `kSpanSlewMs = 5`
+(corner ~32 Hz). Replaces Span's 2× OS midpoint interp (slew is already
+smooth). Lightly bandlimits Span CV — span audio-rate FM is exotic, knob
+smoothness wins. `kSpanSlewMs` is a one-line tunable. Quality keeps its
+per-sample midpoint interp (no slew).
+
+### Phase 5d — soft-knee the clamps (the real seam fix), 2.8.1.5
+
+User after 5c: slew made it "even more poppy… more seams it is audibly
+crossing," and asked how the builtins handle it. Decisive finding from
+`er-301/mods/core/objects/filters/LadderFilter.cpp` (+ Stereo variants):
+native ladder filters derive cutoff with smooth `simd_exp` (not a LUT),
+apply it per-sample with NO slew, and have **no in-band hard clamps** —
+the only clamp is the cutoff rail `[minNormF, 0.9999]` (≈ DC / Nyquist),
+which normal playing never reaches.
+
+Canals, by contrast, had a CASCADE of hard clamps — `freqHz`/`lowHz`/
+`highHz` to [20,20000], `lowF`/`ctrF`/`highF` to [0.001,0.499], and the
+damping ratio to `>4→4`. Because Span spreads the bands ±4 octaves, a
+normal Span sweep drives the LOW band into the ~96 Hz floor, the HIGH
+band into the 20 kHz ceiling, and the ratios into 4 — and each hard
+`if(x>lim)x=lim` is a C1 derivative break = a seam. The 5c slew made it
+WORSE because a slow continuous sweep crosses each seam audibly instead
+of blowing past. (Verified the 5b interpolated LUT is continuous across
+semitone boundaries — NOT the seam source.)
+
+Fix (user picked "soft-knee all the clamps"): C1 `softCeil`/`softFloor`
+quadratic-ease helpers (identity until within `knee` of the limit, then
+a quadratic meeting it with matched value+slope). Consolidated the
+redundant Hz+normalized cascade into ONE `softClampF` per band into
+[0.001, 0.2083] (= [96 Hz, 20 kHz], the exact old effective range),
+matching the native ladder's single-rail posture. Damping ratios get
+`softCeil(.,4,1)`. Slew reverted (5c undone). Self-osc calibration
+unaffected at default (no clamp engaged mid-range; soft-knees only act
+near the rails / extreme Span) — re-verify amplitudes at extreme Span.
+Knees (`fKneeLo/fKneeHi`, ratio knee) are tunable constants.
+
+### Phase 5e — seam-safe Span slew (control-step transients), 2.8.1.6
+
+After 5d, user: "still popping, less so… pops at all Q levels, much more
+apparent at higher cutoffs." Diagnosis: "all Q + worse at higher cutoff"
+rules out resonance-sensitivity and points at control-step transients —
+each Span knob detent is GainBias-ramped over only ~1.3 ms, and Span's
+exponential mapping makes that a much bigger Hz jump at high cutoffs, so
+the resonant bands click harder up top at any Q. Soft-knees (5d) removed
+the rail-seam half; this is the other half.
+
+Fix: re-introduced the one-pole Span slew (the 5c tool) — now seam-safe
+because 5d made the clamps soft, so the slew no longer drags Span
+through hard-clamp seams (the actual cause of 5c sounding worse).
+kSpanSlewMs = 8 ms; slewing [0,1] = slewing log-cutoff = constant oct/s,
+so it equalizes across the range (directly targets "worse at higher
+cutoff"). Tunable. If a steady high-cutoff BUZZ (not movement-tied pops)
+remains after this, that's 2× OS decimator aliasing → the deferred
+halfband-FIR decimator is the next lever.

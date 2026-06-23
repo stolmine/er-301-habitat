@@ -118,16 +118,25 @@ function Canals:onLoadGraph(channelCount)
   tie(op, "Fundamental", fundamental, "Out")
   self:addMonoBranch("fundamental", fundamental, "In", fundamental, "Out")
 
-  -- Span
-  local span = self:addObject("span", app.ParameterAdapter())
+  -- Span (audio-rate: GainBias Out -> Inlet, read per-sample in C++).
+  -- Was ParameterAdapter+tie (block-rate) — the source of the "flappy"
+  -- character under audio-rate Span modulation. See
+  -- planning/canals-audio-rate-mod.md Phase 5.
+  local span = self:addObject("span", app.GainBias())
+  span:hardSet("Gain", 0.0)   -- CV opt-in: no modulation depth until dialed up
   span:hardSet("Bias", 0.25)
-  tie(op, "Span", span, "Out")
+  local spanRange = self:addObject("spanRange", app.MinMax())
+  connect(span, "Out", spanRange, "In")
+  connect(span, "Out", op, "Span")
   self:addMonoBranch("span", span, "In", span, "Out")
 
-  -- Quality
-  local quality = self:addObject("quality", app.ParameterAdapter())
+  -- Quality (audio-rate: GainBias Out -> Inlet, read per-sample in C++).
+  local quality = self:addObject("quality", app.GainBias())
+  quality:hardSet("Gain", 0.0)   -- CV opt-in: no modulation depth until dialed up
   quality:hardSet("Bias", 0.0)
-  tie(op, "Quality", quality, "Out")
+  local qualityRange = self:addObject("qualityRange", app.MinMax())
+  connect(quality, "Out", qualityRange, "In")
+  connect(quality, "Out", op, "Quality")
   self:addMonoBranch("quality", quality, "In", quality, "Out")
 
   -- Output fader (drives sub-out 1+2 morph content; sub-outs 3-5
@@ -247,7 +256,7 @@ function Canals:onLoadViews()
       description   = "Span",
       branch        = self.branches.span,
       gainbias      = self.objects.span,
-      range         = self.objects.span,
+      range         = self.objects.spanRange,
       biasMap       = Encoder.getMap("[0,1]"),
       biasPrecision = 2,
       initialBias   = 0.25
@@ -257,7 +266,7 @@ function Canals:onLoadViews()
       description   = "Quality",
       branch        = self.branches.quality,
       gainbias      = self.objects.quality,
-      range         = self.objects.quality,
+      range         = self.objects.qualityRange,
       biasMap       = Encoder.getMap("[-1,1]"),
       biasPrecision = 2,
       initialBias   = 0.0

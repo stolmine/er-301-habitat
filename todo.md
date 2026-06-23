@@ -449,6 +449,33 @@ polish, not blocking the release.
   (half-band instead of 2-tap average), or per-sample anti-alias on the
   modulation source. Capture and analyze the residual region before
   committing to one.
+- [ ] **🔬 RESEARCH: high-frequency Span-sweep aliasing → halfband
+  decimator.** Shipped at spreadsheet 2.8.1.6 (Phases 5–5e in
+  `planning/canals-audio-rate-mod.md`): Span+Quality promoted from
+  block-rate `Parameter`s to per-sample audio-rate `Inlet`s; interpolated
+  semitone→ratio (de-quantized the truncated stmlib LUT); hard clamp
+  cascade → C1 soft-knees (`softCeil`/`softFloor`/`softClampF`); seam-safe
+  one-pole Span slew (~8 ms). That progression killed the flap, the
+  quantization, the rail seams, and the control-step pops in turn.
+  **Remaining (user audition 2026-06-22): pops persist when sweeping Span
+  with FREQ PARKED HIGH — confirmed aliasing**, not control motion (the
+  slew handled motion). Mechanism: at high cutoff the resonant peak + the
+  in-loop `pseudoSaturate` harmonics land near/above the host Nyquist and
+  fold through the crude 2-tap `[½,½]` 2× decimator (Canals.cpp, ~−3 dB at
+  12 kHz, weak stopband). Fix needs design+research, not a quick patch:
+  - **Halfband-FIR decimator** for the 2× OS — replace the 2-tap average.
+    Needs the per-output loop restructured to keep a short per-band
+    history of the 96 kHz internal-rate stream and convolve a linear-phase
+    halfband (e.g. 7–11 tap, even taps zero → cheap). Watch group delay
+    and am335x cost (Canals.o must stay scalar / 0 NEON hints).
+  - Alternatives to weigh first: 4× OS (2-stage decimation, ~2× CPU);
+    lower the HIGH-band soft ceiling (`fHi`, currently 20 kHz) so bands
+    stay further from Nyquist (cheap, costs top brightness); gentle
+    post-decimation one-pole LP per band (cheap, dulls).
+  - Capture the residual at high-freq + Span-sweep before committing, per
+    the existing analysis discipline. Deferred-but-related: Fundamental→
+    Inlet promotion (the one remaining block-rate tone control; same
+    pattern as Span; would also smooth freq-knob steps).
 - [ ] Volume modulation across cutoff sweep. Python sim shows ~6× swing
   in LOW; hardware reportedly flatter. Capture battery designed (Set B
   in same checklist).
@@ -462,8 +489,16 @@ polish, not blocking the release.
 - [ ] Tune soft clip threshold and curve for best saturation character
   (carry-forward from earlier audit; partial work done in 2.7.1.20
   pseudo-saturate landing).
-- [ ] Investigate how SDK builtin filters handle audio-rate modulation
+- [x] Investigate how SDK builtin filters handle audio-rate modulation
   cleanly (parameter interpolation? per-sample coefficient update?).
+  *(2026-06-22. Native ladder filters — `er-301/mods/core/objects/
+  filters/LadderFilter.cpp` + Stereo variants — derive cutoff with smooth
+  `simd_exp` (NOT a LUT), apply it raw per-sample with NO slew, and have
+  NO in-band hard clamps (only a single cutoff rail at [minNormF,
+  0.9999]). The native Sine Osc is the same story: Phase/V-Oct/Fundamental
+  are all `Inlet`s summed per-sample, freq via `simd_exp`. Captured as
+  memory `feedback_inlet_vs_parameter_audio_rate_mod` + applied to Canals
+  Span/Quality, planning/canals-audio-rate-mod.md Phases 5–5e.)*
 - [ ] Bench CPU cost on hardware; NEON vectorize if needed.
 
 ## Mirror (aliasing-paradigm complex osc)
@@ -1267,6 +1302,37 @@ Evaluate these once the framework is live. Each one has semantic output coupling
 - [ ] **Multi-segment envelope/LFO** (Stages-style): shared phase accumulator with author-declared segment-boundary outputs (segment-start gates, segment-active gates, segment-complete gates). Segment boundaries are internal state. Primary = shaped CV, sub-outs = segment gates in time order.
 - [ ] **Coupled-oscillator pair with internal FM** (complex oscillator family): main + modulator outs where the modulator state is influenced by the carrier via shared FM bus. Cannot be reconstructed without the same cross-coupling topology. Primary = carrier, sub-out = modulator.
 - [ ] **Dual-stream random sampler** (Marbles t+X analogue): shared deja-vu buffer driving a gate stream and a CV stream that reference the same internal RNG state. Primary = CV, sub-out = gate (or vice versa); the coupling is the shared loop buffer.
+
+## NLC Chaotic Modulation Sources (clean-room from published circuits)
+
+Andrew Fitch / Nonlinear Circuits publishes the schematics for his chaos modules openly; the underlying systems are published analog chaotic oscillators (ODEs / iterated maps) and aren't copyrightable. Port the *math* — clean-room from the circuit topology, same approach as the "Algorithm reference only (clean-room)" GPL bucket below. Reference NLC + the circuit names here as the engineering source only; **shipped units get generic functional names** per `feedback_no_third_party_branding` (drift / crawl / writhe / tangle / scroll — decide at ship time). These are the hardware-pedigreed expansion of the abstract **Coupled chaos generator** entry above (Multi-Output Units §) — each circuit's node voltages ARE the semantic siblings, so they ride the multi-output framework (M6 picker, primary + sub-outs) exactly as that entry specs. Rauschen already proves the integration plumbing on am335x (Lorenz sub-stepping, Henon, Logistic — Rauschen "11 algorithms" above).
+
+Candidate circuits, ranked by musical distinctiveness × portability:
+
+- [ ] **Sloth family (Torpor / Apathy / Inertia)** — Fitch's signature: a 3rd-order autonomous "jerk"/Sprott chaotic oscillator, three variants distinguished only by time constant (Torpor ~seconds, Apathy slower, Inertia drifts over *minutes-to-hours*). Smooth, never-repeating wandering CV with a strong slow component — the canonical "slowly evolving patch" modulator. Implementation: 3 state vars, explicit sub-stepped integration (Rauschen Lorenz pattern), float, divergence guard (`isfinite` reset + soft clamp, cf. Pecto IIR reset). Expose the integration rate as a wide log-mapped "speed" macro so one unit covers all three sloths. Multi-out: the 2–3 node voltages as siblings. **Start here** — lowest math, highest musical payoff, directly the "slow generative drift" use case.
+- [ ] **Statues (Chua's circuit)** — the canonical double-scroll strange attractor (3 ODEs + the Chua piecewise-linear nonlinearity). Richest phase-space portrait (the figure-8 double scroll); X/Y/Z node voltages are three correlated-but-distinct mod sources → textbook multi-out. The PWL diode nonlinearity is cheap (a couple of clamps). Belongs in the same picker family as Lorenz/Rossler from the Coupled-chaos-generator entry.
+- [ ] **Hyperchaos Deluxe** — 4D *hyper*chaotic system (two positive Lyapunov exponents → denser, less predictable than a 3D attractor). More turbulent/"alive" modulation. 4 state vars, 4 sibling outs. Stability is touchier (4D integration diverges more readily) — needs the divergence guard + conservative sub-step; audition step size against budget.
+- [ ] **Squid Axon** — discrete-time chaotic *map* (modified neuron / Hodgkin-Huxley hysteretic map), advanced on a **clock edge**, not free-running. A clocked chaotic CV/sequence generator → fits the Excel/Ballot clocked-sequencer lineage rather than the ODE-integration lineage. Comparator gate-in (threshold `> 0.5f`, cf. `feedback_comparator_gate_threshold`), step the map per rising edge, hold between edges. Complements the smooth Sloth/Chua sources with a steppy/strange-sequencer character; good companion to Larets/Ballot.
+- [ ] (lower priority) **Let's Splosh / Bin Array / 8-Bit Cipher** — Splosh = dual coupled-chaos cores; Bin Array / Cipher = Bernoulli-shift / bit-rotation digital chaos (glitchy, steppy). Evaluate after the four above; the bit-chaos ones overlap Rauschen's territory.
+
+Open scoping decisions (resolve in `planning/nlc-chaos-modulation.md` before first code):
+- **One unit per circuit, or one "chaos" unit with a model picker?** Sloth + Chua + Hyperchaos are all ODE integrators sharing the same shell (state vector, sub-step, multi-out), differing only in the derivative function + dimensionality — a single unit with a model Option + adaptive sub-out count is tempting (mirrors Rauschen's 11-algorithm picker). Squid Axon's clocked-map nature argues for a separate clocked unit. Lean: one "continuous chaos" multi-out unit (Sloth/Chua/Hyperchaos/Lorenz/Rossler models) + one "clocked chaos" unit (Squid Axon + Henon). Watch the sub-out-count-varies-by-model wrinkle (`feedback_unit_output_names_table`, `feedback_addoutput_required_for_multiout`).
+- **Audio-rate or control-rate?** Control-rate (block-rate state update, smoothed to audio) covers the classic slow-modulation use. But the **alias-synthesis active-interest stream** (`project_alias_synthesis_paradigm`) wants chaos pushed to *audio rate* as a sound source — which is exactly what the framework-modulation research below must land first. Build control-rate first; leave the audio-rate door open.
+- Package: `spreadsheet` (alongside Rauschen, the existing chaos/noise home) unless these grow into a family worth their own. Multi-out → confirm against `docs/multi-output-units-author-guide.md` + QuadLFO ref.
+
+## Audio-Rate Parameter Modulation — framework investigation (informs NLC + alias-synthesis)
+
+Deep-dive into **how the ER-301 firmware's native units accept clean, coherent audio-rate modulation of their parameters** — why modulating a stock Sine Osc's V/oct or a Ladder Filter's cutoff from an audio-rate source stays artifact-free where a naive per-block `param:hardSet()` zippers. **Primarily a codebase investigation of the `er-301` framework source** (the submodule / `xroot`), not a web search — the answer is in `od::Parameter` / `od::GainBias` / `od::ParameterAdapter` / the Inlet-buffer summation path, not in a paper. Deliverable: `planning/audio-rate-parameter-modulation.md` codifying the mechanism + a "how habitat units should do it" checklist.
+
+Mechanisms to confirm by reading the source (hypotheses — verify each, `feedback_no_assertions_without_code_evidence`):
+- [ ] **Modulatable param = full audio-rate buffer sum, not a smoothed scalar.** Suspected: a modulatable parameter reads its modulation inlet as a per-sample `float*` buffer summed into a base offset every sample (sample-accurate → zero zipper), whereas an encoder-set scalar is a different object. Map the two paths: `od::GainBias` (base + audio-rate bias buffer?) vs `od::Constant`/`od::Parameter` (scalar). Pin down exactly where the per-sample sum happens.
+- [ ] **Scalar→signal smoothing primitives.** When a parameter *is* a smoothed scalar (encoder turns), what ramps it — `LinearRamp`? `SlewLimiter`? one-pole? Default ramp length, and is it per-frame target-chasing (the `target`/`hardSet` split we already use — `feedback_serialize_deserialize_pattern`, `feedback_gainbias_dual_mode_focus`, `feedback_subcursor_inheritance`)?
+- [ ] **Block-rate coefficient recompute vs per-sample modulation.** Clean audio-rate filter FM implies the *coefficients* recompute cheaply per-sample (or per-sub-block) from a per-sample cutoff, NOT held across a 64-sample block. Confirm how native filters thread the modulation buffer into the per-sample coefficient update — the crux for clean Canals/Three-Sisters audio-rate FM (`reference_three_sisters_model` flagged audio-rate FM as issue #5).
+- [ ] **ParameterAdapter contract.** We lean on `od::ParameterAdapter` (target/hardSet) all over habitat — document precisely what it does to the underlying buffer, and when it smooths vs jumps.
+- [ ] **Our prior zipper fixes are the negative space.** Pecto V/oct + comb-size zipper (`feedback_doppler_basedelay_smoother`, `feedback_multitap_idx_wrap_ulp`) was us re-deriving the framework's smoothing by hand inside a multitap. The investigation should say which native mechanism we *should* have reached for, and why the SDK's two-read crossfade (which doubles NEON register pressure on Cortex-A8) exists.
+- [ ] **Output side: do native LFO/Env units pre-smooth their CV?** For NLC chaos sources to drive params cleanly, their *outputs* must be coherent audio-rate buffers. Check how native Sine LFO / ADSR fill their output buffer (per-sample vs interpolated-from-block-endpoints) so chaos outputs match.
+
+Why this is queued *with* the NLC ports: the chaos sources are modulation *producers*; this research is the modulation *transport*. Landing the transport knowledge first means the NLC units (and the audio-rate-chaos ambition) produce/consume modulation the way the framework intends, instead of re-deriving anti-zipper smoothing per-unit as we did in Pecto.
 
 ## Port Candidates
 
