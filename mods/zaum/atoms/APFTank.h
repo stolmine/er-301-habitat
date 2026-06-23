@@ -10,12 +10,12 @@
 // Plan: planning/fabula-design.md (DSP architecture, delay tables,
 // modulation, governor). Roadmap: planning/zaum-roadmap.md §"Phase 1".
 //
-// BUILD SUB-PHASE 0.1.0.5 — HF damping + Decay/RT60 + Size scaling +
-// DC blocker.
+// BUILD SUB-PHASE 0.1.0.6 — Diffusion wired; all 8 params now live.
 //
-//   This sub-phase wires three previously inert parameters and adds a DC
-//   blocker to the recirculating path. After this, Diffusion is the only
-//   inert parameter.
+//   This sub-phase wires the last inert parameter: Diffusion. All six
+//   fixed allpass coefficients (4 input diffusers + 2 tank APs, both
+//   L and R loops) are now functions of Diffusion instead of compile-
+//   time constants.
 //
 //   A. DAMP — one-pole HF low-pass in each loop's D1 feedback path.
 //
@@ -145,9 +145,8 @@
 //      still allow DC from diffIn to accumulate for one round trip. Either
 //      placement is stable; tankIn is cleaner.
 //
-// INERT parameters this sub-phase (declared, Lua-tied, DSP-unused):
-//   Diffusion.
-// Wired parameters: Predelay, Mix, Mod, ModRate, Damp, Decay, Size.
+// All 8 parameters are now wired.
+// Wired parameters: Predelay, Mix, Mod, ModRate, Damp, Decay, Size, Diffusion.
 //
 // Tank allpass convention (plain Schroeder, provably unity-gain):
 //   vDelayed = buf[read N samples behind write head]   // v[n-N]
@@ -308,6 +307,51 @@ namespace zaum
   static const double kSizeMax = 1.5;
 
   // ---------------------------------------------------------------------------
+  // Diffusion → allpass coefficient tuning constants.
+  //
+  // All six allpass coefficients (4 input diffusers + 2 tank APs, shared
+  // between L and R loops) are derived from the Diffusion parameter via a
+  // per-coefficient linear offset around each stage's baseline:
+  //
+  //   coeff = clamp(base + (Diffusion - 0.6) * kDiffSlope, kDiffLo, kDiffHi)
+  //
+  // INVARIANT: at Diffusion=0.6 (default), each coefficient equals its
+  // historical fixed value exactly (no change to the approved sound):
+  //   gID12 baseline = 0.75   (input diffusers ID1, ID2)
+  //   gID34 baseline = 0.625  (input diffusers ID3, ID4)
+  //   gTA1  baseline = 0.70   (tank AP1, both loops)
+  //   gTA2  baseline = 0.50   (tank AP2, both loops)
+  //
+  // The slope kDiffSlope = 0.25 (per unit of Diffusion) is shared across
+  // all four coefficient families, preserving their relative spacing while
+  // scaling together:
+  //
+  //   Diffusion=0.0: gID12=0.600, gID34=0.475, gTA1=0.550, gTA2=0.350
+  //   Diffusion=0.6: gID12=0.750, gID34=0.625, gTA1=0.700, gTA2=0.500  ← default
+  //   Diffusion=1.0: gID12=0.850, gID34=0.725, gTA1=0.800, gTA2=0.600
+  //
+  // Stability proof: kDiffHi = 0.85 < 1.0 unconditionally (hard clamp
+  // applied after mapping). kDiffLo = 0.30 keeps coefficients positive
+  // and well within unity-gain allpass range at all parameter values.
+  // All Schroeder allpasses remain unity-gain for any |g| < 1.
+  //
+  // PRIMARY TUNING KNOBS:
+  //   kDiffSlope — increase to widen the Diffusion sweep range
+  //   kDiffLo    — floor coefficient (raise to prevent very open/thin sound)
+  //   kDiffHi    — ceiling coefficient (MUST stay < 1.0 for stability)
+  // ---------------------------------------------------------------------------
+  static const double kDiffSlope = 0.25;   // per unit of Diffusion
+  static const double kDiffLo    = 0.30;   // floor: allpass stays positive
+  static const double kDiffHi    = 0.85;   // ceiling: strictly < 1.0
+
+  // Per-coefficient baselines at Diffusion=0.6.
+  // Changing these shifts the entire family up/down; kDiffSlope handles spread.
+  static const double kDiffBaseID12 = 0.75;
+  static const double kDiffBaseID34 = 0.625;
+  static const double kDiffBaseTA1  = 0.70;
+  static const double kDiffBaseTA2  = 0.50;
+
+  // ---------------------------------------------------------------------------
   // DC blocker coefficient.
   // Form: y[n] = x[n] - x[n-1] + kDCBlockR * y[n-1]
   // fc ≈ (1-R)*sr/(2π) ≈ 3.8 Hz at 48 kHz — inaudible in reverb tail.
@@ -441,22 +485,24 @@ namespace zaum
 
       // ------------------------------------------------------------------
       // Read parameters (block rate).
-      // Predelay: 0..1 maps to 0..(kPD-1) samples. Integer tap.
-      // Mix:      0..1 linear crossfade.
-      // Mod:      0..1 → excursion in samples (kMinExcursion..kMaxExcursion).
-      // ModRate:  0..1 → walk step_size per sample (kMinStep..kMaxStep).
-      // Damp:     0..1 → one-pole LP coeff for HF damping.
-      // Decay:    0..1 → g_d via power-curve map.
-      // Size:     0..1 → sizeFactor → scaled delay lengths (block rate).
-      // Diffusion: INERT this sub-phase (wired in 0.1.0.7).
+      // Predelay:  0..1 maps to 0..(kPD-1) samples. Integer tap.
+      // Mix:       0..1 linear crossfade.
+      // Mod:       0..1 → excursion in samples (kMinExcursion..kMaxExcursion).
+      // ModRate:   0..1 → walk step_size per sample (kMinStep..kMaxStep).
+      // Damp:      0..1 → one-pole LP coeff for HF damping.
+      // Decay:     0..1 → g_d via power-curve map.
+      // Size:      0..1 → sizeFactor → scaled delay lengths (block rate).
+      // Diffusion: 0..1 → scales all 6 allpass coefficients around baselines.
+      //            Default 0.6 reproduces the historical fixed values exactly.
       // ------------------------------------------------------------------
-      const float predelayParam = mPredelay.value();  // 0..1
-      const float mix           = mMix.value();       // 0..1
-      const float modParam      = mMod.value();       // 0..1
-      const float modRateParam  = mModRate.value();   // 0..1
-      const float dampParam     = mDamp.value();      // 0..1
-      const float decayParam    = mDecay.value();     // 0..1
-      const float sizeParam     = mSize.value();      // 0..1
+      const float predelayParam  = mPredelay.value();   // 0..1
+      const float mix            = mMix.value();        // 0..1
+      const float modParam       = mMod.value();        // 0..1
+      const float modRateParam   = mModRate.value();    // 0..1
+      const float dampParam      = mDamp.value();       // 0..1
+      const float decayParam     = mDecay.value();      // 0..1
+      const float sizeParam      = mSize.value();       // 0..1
+      const float diffusionParam = mDiffusion.value();  // 0..1
 
       // Max tap = kPD - 1 (keep at least 1-sample separation from write head)
       const int predelayTap = (int)(predelayParam * (float)(kPD - 1));
@@ -479,13 +525,27 @@ namespace zaum
       if (dampD > 1.0) dampD = 1.0;
       const double dampCoeff = 1.0 - dampD * (1.0 - kMinDampCoeff);
 
-      // Input diffusion coefficients (Diffusion param wired in 0.1.0.7).
-      const double gID12 = 0.75;
-      const double gID34 = 0.625;
+      // Diffusion → allpass coefficients.
+      // Linear offset from each baseline: coeff = base + (D - 0.6) * kDiffSlope.
+      // Clamped to [kDiffLo, kDiffHi] = [0.30, 0.85] — all values strictly < 1.
+      // At Diffusion=0.6 (default): diffDelta=0 → each coeff equals its
+      // historical fixed value exactly (approved sound preserved).
+      // Higher Diffusion → denser smearing; lower → more open/transient-clear.
+      double diffD = (double)diffusionParam;
+      if (diffD < 0.0) diffD = 0.0;
+      if (diffD > 1.0) diffD = 1.0;
+      const double diffDelta = (diffD - 0.6) * kDiffSlope;
 
-      // Tank AP coefficients (plain Schroeder allpass, unity-gain by construction).
-      const double gTA1 = 0.70;
-      const double gTA2 = 0.50;
+      // Helper: clamp a mapped coefficient to the stable allpass range.
+      // Inline expansion — no function call overhead in the hot path.
+      #define DIFFCLAMP(v) ((v) < kDiffLo ? kDiffLo : ((v) > kDiffHi ? kDiffHi : (v)))
+
+      const double gID12 = DIFFCLAMP(kDiffBaseID12 + diffDelta);
+      const double gID34 = DIFFCLAMP(kDiffBaseID34 + diffDelta);
+      const double gTA1  = DIFFCLAMP(kDiffBaseTA1  + diffDelta);
+      const double gTA2  = DIFFCLAMP(kDiffBaseTA2  + diffDelta);
+
+      #undef DIFFCLAMP
 
       // Size → scaled delay lengths (block rate, only recompute when changed).
       // Clamped to [kSizeMin, kSizeMax] so sizeFactor is always in bounds.
