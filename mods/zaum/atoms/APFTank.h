@@ -10,32 +10,82 @@
 // Plan: planning/fabula-design.md (DSP architecture, delay tables,
 // modulation, governor). Roadmap: planning/zaum-roadmap.md §"Phase 1".
 //
-// BUILD SUB-PHASE 0.1.0.3 — stereo figure-8 cross-coupling.
-//   Full R tank loop added alongside L loop. Asymmetric R delay lines
-//   (D1_R=6803, D2_R=6343 vs L's D1_L=7187, D2_L=5101) ensure
-//   per-channel decorrelation — all four lengths are mutually prime.
-//   Input diffusion remains SHARED/mono (sum L+R → predelay → 4 stages
-//   → diffIn feeds BOTH tank loops). Per-channel diffusion deferred as
-//   a listen-decision; §9 explicitly permits shared diffusion this phase.
-//   Figure-8 cross-feed: L's D2 output × g_d → mFeedback_R (feeds R
-//   next sample); R's D2 output × g_d → mFeedback_L (feeds L next
-//   sample). Coupling coefficient 1.0 per Dattorro/§5. Spiral governor
-//   applied independently to each loop's recirculating feedback.
-//   Wet taps: wetL=0.5*(d1Read_L+d2Read_L), wetR=0.5*(d1Read_R+d2Read_R).
-//   True stereo output replaces the previous mono-duplicated output.
+// BUILD SUB-PHASE 0.1.0.4 — Brownian delay-line modulation.
+//   Four independent Brownian LFOs, one per tank delay line (D1_L,
+//   D2_L, D1_R, D2_R). Each uses a fast xorshift64 PRNG (never libc
+//   rand() on the audio thread) with distinct compile-time seeds so the
+//   four lines are decorrelated from sample 0. L-line seeds and R-line
+//   seeds are distinct per fabula-design.md §5.
+//
+//   Each tank delay read is now MODULATED via linear (two-point)
+//   interpolation: the walk accumulator is a double, so the read
+//   position is fractional; we split into integer offset + fraction and
+//   interpolate between buf[i0] and buf[i0+1]. This pulls forward the
+//   §3 "upgrade path" deliberately because:
+//     1. Integer-step zipper at low Mod would confound the depth/rate
+//        calibration audition (§3 rationale + §9 0.1.0.4 note).
+//     2. Cost is minimal (2 multiplies + 1 add + 1 floor per line per
+//        sample) and the math is already in place for the walk double.
+//
+//   No one-pole position smoother added: the walk is already a smooth
+//   integrator (noise → accumulate → clamp), and linear interp handles
+//   sub-sample continuity. Adding a smoother on top of that would only
+//   reduce the achieved modulation depth vs the intended excursion. If
+//   audition reveals the walk still steps too coarsely at high ModRate,
+//   add a one-pole with α≈0.9995 per line as a post-walk smoother.
+//
+//   MODULATION PARAMETER MAPPINGS (easy to retune by ear):
+//
+//   Mod 0..1 → excursion in samples:
+//     excursion = 9.0 + mod * 63.0   (range: 9..72 samples = 0.19..1.5 ms)
+//     Default Mod=0.3 → excursion = 9 + 0.3*63 = 27.9 samples (≈0.58 ms)
+//
+//   ModRate 0..1 → walk step_size per sample (exponential-feeling taper):
+//     step_size = 0.0002 + modRate * 0.0998   (range: 0.0002..0.1)
+//     (linear; the logarithmic feel comes from Brownian diffusion itself)
+//     Default ModRate=0.2 → step_size = 0.0002 + 0.2*0.0998 ≈ 0.020 per sample
+//
+//   CALIBRATION CONTEXT for §11 gate:
+//     At Mod=0, ModRate=0: no walk → static reads → slightly metallic tail.
+//     At Mod=0.3 (excursion≈28), ModRate=0.2 (step≈0.020): the walk
+//       covers ±28 samples slowly (diffusion time to reach ±28 from 0 at
+//       step 0.020: N≈(28/0.020)²=1.96M samples≈40s, so in practice the
+//       walk is always within a modest fraction of max excursion, drifting
+//       slowly). This is the intended sweet spot.
+//     At Mod=1.0 (excursion=72), ModRate=1.0 (step=0.1): walks reach
+//       ±72 and wander faster — audible pitch wander at extremes.
+//     PRIMARY TUNING KNOBS: kMaxExcursion (72→lower if too warbly),
+//       kMinExcursion (9→lower for a drier minimum), kMaxStep (0.1→
+//       lower if ModRate=1 is too fast, higher if sluggish).
+//
+//   BUFFER BOUNDS SAFETY:
+//     Max excursion = 72 samples. Linear interp reads buf[i0] and buf[i0+1].
+//     Worst-case additional reach = 72 + 1 = 73 samples. Headroom = 128.
+//     73 < 128 — safe with margin of 55 samples on each side.
+//     Wrap arithmetic: readPos = wrHead - base_delay + walk (double).
+//       Integer part offset = (int)floor(readPos). We add size and take
+//       modulo to handle any negative result before splitting into i0/i1.
+//       Both i0 and i0+1 are taken mod size, so i1 wraps correctly when
+//       i0 == size-1. Walk is clamped strictly to [-excursion, +excursion]
+//       before any index arithmetic, bounding the deviation from center.
+//
+//   STABILITY CONFIRMATION:
+//     Modulating read position on a delay line does NOT affect loop gain:
+//     the allpass stages remain unity-gain (|H|=1 for all ω, regardless of
+//     reading offset). Decay gain g_d=0.85 is fixed. The 2×2 cross-coupling
+//     eigenvalues remain ±0.85 < 1. Spiral governors remain in place.
+//     Varying the read offset introduces a mild pitch smear (the desired
+//     lushness effect) but does not change the energy-recirculation gain.
+//     No new runaway path exists.
 //
 // INERT parameters this sub-phase (declared, Lua-tied, DSP-unused):
-//   Size, Decay, Damp, Diffusion, Mod, ModRate.
-// Wired parameters: Predelay, Mix.
-//
-// Modulation headroom reserved on all four tank delay buffers
-// (base + 128 samples each side) so 0.1.0.4 can add Brownian reads
-// without resizing. Reads are static (center of headroom) this phase.
+//   Size, Decay, Damp, Diffusion.
+// Wired parameters: Predelay, Mix, Mod, ModRate.
 //
 // Tank allpass convention (plain Schroeder, provably unity-gain):
 //   vDelayed = buf[read N samples behind write head]   // v[n-N]
-//   vNew     = x + g * vDelayed
-//   yOut     = -g * vNew + vDelayed
+//   vNew     = x + g * v[n-N]
+//   yOut     = -g * vNew + v[n-N]
 //   buf[w]   = vNew; advance w
 // Gardner nesting (inner 367/491) deferred per fabula-design.md §6;
 // plain Schroeder allpass used for guaranteed unity-gain stability.
@@ -95,7 +145,7 @@ namespace zaum
   // Tank delay lines with modulation headroom — L loop.
   // D1_L: base 7187 + 128 head slack each end = 7187 + 256 = 7443.
   // D2_L: base 5101 + 128 head slack each end = 5101 + 256 = 5357.
-  // Static reads this sub-phase use the center offset (base + 128).
+  // Modulated reads stay within [center-72, center+73] — 73 < 128 headroom.
   static const int kD1_L          = 7187;
   static const int kD1_headroom   = 128;
   static const int kD1_L_size     = kD1_L + 2 * kD1_headroom;   // 7443
@@ -117,6 +167,35 @@ namespace zaum
 
   static const int kD2_R          = 6343;
   static const int kD2_R_size     = kD2_R + 2 * kD2_headroom;   // 6599
+
+  // ---------------------------------------------------------------------------
+  // Modulation tuning constants — adjust these by ear at the 0.1.0.4 gate.
+  // ---------------------------------------------------------------------------
+
+  // Excursion mapping: Mod 0..1 → kMinExcursion..kMaxExcursion samples.
+  // At 48 kHz: 9 samples ≈ 0.19 ms, 72 samples ≈ 1.5 ms.
+  // Max excursion 72 + 1 interp neighbor = 73 < 128 headroom — safe.
+  static const double kMinExcursion = 9.0;
+  static const double kMaxExcursion = 72.0;
+
+  // Step size mapping: ModRate 0..1 → kMinStep..kMaxStep per sample.
+  // This is the per-sample walk increment applied to the integrated noise.
+  // Range chosen so ModRate=0.2 (default) gives slow pleasant drift and
+  // ModRate=1.0 gives faster but still somewhat gentle wander.
+  static const double kMinStep = 0.0002;
+  static const double kMaxStep = 0.1;
+
+  // ---------------------------------------------------------------------------
+  // xorshift64 PRNG — fast, period 2^64-1, audio-thread safe (no libc).
+  // From Marsaglia (2003). NEVER pass seed=0 (degenerate fixed point).
+  // ---------------------------------------------------------------------------
+  static inline uint64_t xorshift64(uint64_t s)
+  {
+    s ^= s << 13;
+    s ^= s >> 7;
+    s ^= s << 17;
+    return s;
+  }
 
   class APFTank : public od::Object
   {
@@ -163,6 +242,22 @@ namespace zaum
 
       mFeedback_L = 0.0;
       mFeedback_R = 0.0;
+
+      // Brownian LFO seeds — four DISTINCT non-zero compile-time constants.
+      // L-line seeds (D1_L, D2_L) and R-line seeds (D1_R, D2_R) are in
+      // separate numeric neighborhoods to guarantee decorrelation from
+      // sample 0 (per fabula-design.md §5). Never use 0 (xorshift64 fixed
+      // point). Values chosen to be far apart in the 64-bit state space.
+      mSeed_D1_L = UINT64_C(0x9E3779B97F4A7C15);  // golden-ratio constant
+      mSeed_D2_L = UINT64_C(0x6C62272E07BB0142);  // pi bits
+      mSeed_D1_R = UINT64_C(0xBF58476D1CE4E5B9);  // splitmix64 constant
+      mSeed_D2_R = UINT64_C(0x94D049BB133111EB);  // splitmix64 constant 2
+
+      // Walk accumulators start at 0 (center of headroom window).
+      mWalk_D1_L = 0.0;
+      mWalk_D2_L = 0.0;
+      mWalk_D1_R = 0.0;
+      mWalk_D2_R = 0.0;
     }
 
     virtual ~APFTank() {}
@@ -191,11 +286,15 @@ namespace zaum
       // ------------------------------------------------------------------
       // Read parameters (block rate).
       // Predelay: 0..1 maps to 0..(kPD-1) samples. Integer tap.
-      // Mix: 0..1 linear crossfade.
+      // Mix:      0..1 linear crossfade.
+      // Mod:      0..1 → excursion in samples (kMinExcursion..kMaxExcursion).
+      // ModRate:  0..1 → walk step_size per sample (kMinStep..kMaxStep).
       // All other params INERT this sub-phase.
       // ------------------------------------------------------------------
       const float predelayParam = mPredelay.value();  // 0..1
       const float mix           = mMix.value();       // 0..1
+      const float modParam      = mMod.value();       // 0..1
+      const float modRateParam  = mModRate.value();   // 0..1
 
       // Max tap = kPD - 1 (keep at least 1-sample separation from write head)
       const int predelayTap = (int)(predelayParam * (float)(kPD - 1));
@@ -208,10 +307,28 @@ namespace zaum
       const double gID34 = 0.625;
 
       // Tank AP coefficients (plain Schroeder allpass, unity-gain by construction).
-      // AP1 uses the outer (TA1) coefficient from fabula-design.md §2 table.
-      // AP2 uses the outer (TA2) coefficient. Inner g values unused this phase.
       const double gTA1 = 0.70;
       const double gTA2 = 0.50;
+
+      // Modulation parameters — computed once per block.
+      // excursion: how far the walk can stray from center, in samples.
+      // step_size: per-sample walk increment multiplied by noise ∈ [-0.5, 0.5].
+      // TUNING: to shift the sweet spot, adjust kMinExcursion/kMaxExcursion
+      //   and kMinStep/kMaxStep at the top of this file.
+      const double excursion = kMinExcursion + (double)modParam * (kMaxExcursion - kMinExcursion);
+      const double step_size = kMinStep + (double)modRateParam * (kMaxStep - kMinStep);
+
+      // Copy walk accumulators and seeds into local variables for the inner
+      // loop. Propagate back to members at end of block.
+      double walk_D1_L = mWalk_D1_L;
+      double walk_D2_L = mWalk_D2_L;
+      double walk_D1_R = mWalk_D1_R;
+      double walk_D2_R = mWalk_D2_R;
+
+      uint64_t seed_D1_L = mSeed_D1_L;
+      uint64_t seed_D2_L = mSeed_D2_L;
+      uint64_t seed_D1_R = mSeed_D1_R;
+      uint64_t seed_D2_R = mSeed_D2_R;
 
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
@@ -289,6 +406,40 @@ namespace zaum
         // ----------------------------------------------------------------
         // 4. Figure-8 tank — L loop and R loop, stereo cross-coupled.
         //
+        // MODULATION: each tank delay line is read at a fractional offset
+        // that drifts via a per-line Brownian walk. The walk is driven by
+        // xorshift64 noise integrated into a clamped accumulator. Linear
+        // interpolation (two-point) resolves the fractional position so
+        // there are no integer-step zippers.
+        //
+        // READ MECHANICS for each modulated delay line:
+        //   1. Advance PRNG: seed = xorshift64(seed)
+        //   2. Derive noise ∈ [-0.5, 0.5]: n = (seed & 0xFFFF)/65535.0 - 0.5
+        //   3. Integrate:  walk += n * step_size
+        //   4. Clamp:      walk = clamp(walk, -excursion, +excursion)
+        //   5. Compute fractional read position:
+        //        readPos = wrHead - base_delay + walk   (double)
+        //        offset  = (int)floor(readPos)
+        //        frac    = readPos - (double)offset
+        //   6. Wrap to valid buffer indices (add size, mod size):
+        //        i0 = ((wrHead + offset + bufSize) % bufSize + bufSize) % bufSize
+        //        i1 = (i0 + 1) % bufSize
+        //        NOTE: wrHead - base_delay is typically negative relative to
+        //        wrHead, so (wrHead - base_delay + walk) in absolute coords
+        //        is wrHead - (base_delay - walk). We fold this into the
+        //        modular arithmetic. Adding bufSize twice ensures no negative
+        //        result even if offset is deeply negative after floating mod.
+        //   7. Interpolate: out = (1-frac)*buf[i0] + frac*buf[i1]
+        //
+        // BOUNDS PROOF:
+        //   walk clamped to [-72, +72].
+        //   Fractional part frac ∈ [0, 1).
+        //   So i1 = i0+1 mod bufSize — always valid (mod handles wrap).
+        //   The integer offset from center is at most 72; i0 always lands
+        //   somewhere in [wrHead-base_delay-72 .. wrHead-base_delay+72]
+        //   mod bufSize — all of which are in [0, bufSize), since the
+        //   headroom is 128 samples each side and 72 < 128.
+        //
         // ORDERING DISCIPLINE (critical for correct cross-coupling):
         //   Each loop's tankIn is formed from diffIn + last sample's
         //   mFeedback_X (already set). Both loops advance completely
@@ -307,14 +458,6 @@ namespace zaum
         // Eigenvalues are ±g_d = ±0.85, magnitude 0.85 < 1. Both
         // allpass stages are unity-gain (|H|=1 for all ω). Per-loop
         // Spiral governors are the additional hard safety net.
-        //
-        // Plain Schroeder APF (unity-gain by construction):
-        //   vDelayed = buf[w]  (oldest slot, buffer is exactly N deep)
-        //   vNew     = x + g * vDelayed
-        //   yOut     = -g * vNew + vDelayed
-        //   buf[w]   = vNew; w = (w+1) % N
-        // Modulation headroom: D reads are base_N samples behind write
-        // head, centered in the ±128-sample headroom window.
         // ----------------------------------------------------------------
 
         // -- L LOOP --
@@ -334,13 +477,33 @@ namespace zaum
           ap1Out_L = yOut;
         }
 
-        // D1_L: 7187 samples base, ±128 headroom; static center read.
+        // D1_L: Brownian-modulated read with linear interpolation.
         double d1Read_L;
         {
+          // Write current sample to buffer.
           mD1_L[mWrD1_L] = (float)ap1Out_L;
-          int rD1 = mWrD1_L - kD1_L;
-          if (rD1 < 0) rD1 += kD1_L_size;
-          d1Read_L = (double)mD1_L[rD1];
+
+          // Advance PRNG and update walk.
+          seed_D1_L = xorshift64(seed_D1_L);
+          double noise = (double)(seed_D1_L & 0xFFFF) / 65535.0 - 0.5;
+          walk_D1_L += noise * step_size;
+          if (walk_D1_L >  excursion) walk_D1_L =  excursion;
+          if (walk_D1_L < -excursion) walk_D1_L = -excursion;
+
+          // Fractional read position relative to write head.
+          // (mWrD1_L - kD1_L) is the integer center; walk offsets it.
+          double readPos = (double)(mWrD1_L - kD1_L) + walk_D1_L;
+          int    offset  = (int)floor(readPos);
+          double frac    = readPos - (double)offset;
+
+          // Map offset to valid buffer indices [0, kD1_L_size).
+          // The expression (offset % size + size) % size handles negative
+          // values correctly without UB (offset is always far from INT_MIN).
+          int i0 = ((offset % kD1_L_size) + kD1_L_size) % kD1_L_size;
+          int i1 = (i0 + 1) % kD1_L_size;
+
+          d1Read_L = (1.0 - frac) * (double)mD1_L[i0] + frac * (double)mD1_L[i1];
+
           mWrD1_L++;
           if (mWrD1_L >= kD1_L_size) mWrD1_L = 0;
         }
@@ -360,13 +523,26 @@ namespace zaum
           ap2Out_L = yOut;
         }
 
-        // D2_L: 5101 samples base, ±128 headroom; static center read.
+        // D2_L: Brownian-modulated read with linear interpolation.
         double d2Read_L;
         {
           mD2_L[mWrD2_L] = (float)ap2Out_L;
-          int rD2 = mWrD2_L - kD2_L;
-          if (rD2 < 0) rD2 += kD2_L_size;
-          d2Read_L = (double)mD2_L[rD2];
+
+          seed_D2_L = xorshift64(seed_D2_L);
+          double noise = (double)(seed_D2_L & 0xFFFF) / 65535.0 - 0.5;
+          walk_D2_L += noise * step_size;
+          if (walk_D2_L >  excursion) walk_D2_L =  excursion;
+          if (walk_D2_L < -excursion) walk_D2_L = -excursion;
+
+          double readPos = (double)(mWrD2_L - kD2_L) + walk_D2_L;
+          int    offset  = (int)floor(readPos);
+          double frac    = readPos - (double)offset;
+
+          int i0 = ((offset % kD2_L_size) + kD2_L_size) % kD2_L_size;
+          int i1 = (i0 + 1) % kD2_L_size;
+
+          d2Read_L = (1.0 - frac) * (double)mD2_L[i0] + frac * (double)mD2_L[i1];
+
           mWrD2_L++;
           if (mWrD2_L >= kD2_L_size) mWrD2_L = 0;
         }
@@ -389,13 +565,26 @@ namespace zaum
           ap1Out_R = yOut;
         }
 
-        // D1_R: 6803 samples base (ASYMMETRIC vs L's 7187), ±128 headroom.
+        // D1_R: Brownian-modulated read, ASYMMETRIC base (6803), R-specific seed.
         double d1Read_R;
         {
           mD1_R[mWrD1_R] = (float)ap1Out_R;
-          int rD1 = mWrD1_R - kD1_R;
-          if (rD1 < 0) rD1 += kD1_R_size;
-          d1Read_R = (double)mD1_R[rD1];
+
+          seed_D1_R = xorshift64(seed_D1_R);
+          double noise = (double)(seed_D1_R & 0xFFFF) / 65535.0 - 0.5;
+          walk_D1_R += noise * step_size;
+          if (walk_D1_R >  excursion) walk_D1_R =  excursion;
+          if (walk_D1_R < -excursion) walk_D1_R = -excursion;
+
+          double readPos = (double)(mWrD1_R - kD1_R) + walk_D1_R;
+          int    offset  = (int)floor(readPos);
+          double frac    = readPos - (double)offset;
+
+          int i0 = ((offset % kD1_R_size) + kD1_R_size) % kD1_R_size;
+          int i1 = (i0 + 1) % kD1_R_size;
+
+          d1Read_R = (1.0 - frac) * (double)mD1_R[i0] + frac * (double)mD1_R[i1];
+
           mWrD1_R++;
           if (mWrD1_R >= kD1_R_size) mWrD1_R = 0;
         }
@@ -415,13 +604,26 @@ namespace zaum
           ap2Out_R = yOut;
         }
 
-        // D2_R: 6343 samples base (ASYMMETRIC vs L's 5101), ±128 headroom.
+        // D2_R: Brownian-modulated read, ASYMMETRIC base (6343), R-specific seed.
         double d2Read_R;
         {
           mD2_R[mWrD2_R] = (float)ap2Out_R;
-          int rD2 = mWrD2_R - kD2_R;
-          if (rD2 < 0) rD2 += kD2_R_size;
-          d2Read_R = (double)mD2_R[rD2];
+
+          seed_D2_R = xorshift64(seed_D2_R);
+          double noise = (double)(seed_D2_R & 0xFFFF) / 65535.0 - 0.5;
+          walk_D2_R += noise * step_size;
+          if (walk_D2_R >  excursion) walk_D2_R =  excursion;
+          if (walk_D2_R < -excursion) walk_D2_R = -excursion;
+
+          double readPos = (double)(mWrD2_R - kD2_R) + walk_D2_R;
+          int    offset  = (int)floor(readPos);
+          double frac    = readPos - (double)offset;
+
+          int i0 = ((offset % kD2_R_size) + kD2_R_size) % kD2_R_size;
+          int i1 = (i0 + 1) % kD2_R_size;
+
+          d2Read_R = (1.0 - frac) * (double)mD2_R[i0] + frac * (double)mD2_R[i1];
+
           mWrD2_R++;
           if (mWrD2_R >= kD2_R_size) mWrD2_R = 0;
         }
@@ -459,6 +661,17 @@ namespace zaum
         *out2 = (float)outR;
         in1++; in2++; out1++; out2++;
       }
+
+      // Propagate local walk + seed state back to members.
+      mWalk_D1_L = walk_D1_L;
+      mWalk_D2_L = walk_D2_L;
+      mWalk_D1_R = walk_D1_R;
+      mWalk_D2_R = walk_D2_R;
+
+      mSeed_D1_L = seed_D1_L;
+      mSeed_D2_L = seed_D2_L;
+      mSeed_D1_R = seed_D1_R;
+      mSeed_D2_R = seed_D2_R;
     }
 
   private:
@@ -501,6 +714,22 @@ namespace zaum
     //                mFeedback_R is written from d2Read_L×g_d (L feeds R).
     double mFeedback_L;
     double mFeedback_R;
+
+    // Brownian LFO state — four independent xorshift64 PRNGs + walk accumulators.
+    // Seeds initialized to distinct non-zero constants in constructor.
+    // L-line seeds are in a different numeric neighborhood from R-line seeds
+    // to guarantee decorrelation from sample 0 (fabula-design.md §5).
+    uint64_t mSeed_D1_L;
+    uint64_t mSeed_D2_L;
+    uint64_t mSeed_D1_R;
+    uint64_t mSeed_D2_R;
+
+    // Walk accumulators (double, fractional) — each stays in [-excursion, +excursion].
+    // Initialized to 0.0 (center of headroom window) in constructor.
+    double mWalk_D1_L;
+    double mWalk_D2_L;
+    double mWalk_D1_R;
+    double mWalk_D2_R;
 
 #endif
   };
