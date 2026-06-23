@@ -10,18 +10,25 @@
 // Plan: planning/fabula-design.md (DSP architecture, delay tables,
 // modulation, governor). Roadmap: planning/zaum-roadmap.md §"Phase 1".
 //
-// BUILD SUB-PHASE 0.1.0.2 — input diffusion + mono figure-8 tank.
-//   Mono sum → predelay → 4-stage input diffusion → single L-loop
-//   figure-8 tank with static delay reads (no modulation). Decay
-//   hard-coded to g_d=0.85. HF damp disabled. No L↔R cross-couple
-//   yet. Wet mono tap duplicated to Out L and Out R so the tail is
-//   audible in stereo. DSP per sub-phase plan in fabula-design.md §9.
+// BUILD SUB-PHASE 0.1.0.3 — stereo figure-8 cross-coupling.
+//   Full R tank loop added alongside L loop. Asymmetric R delay lines
+//   (D1_R=6803, D2_R=6343 vs L's D1_L=7187, D2_L=5101) ensure
+//   per-channel decorrelation — all four lengths are mutually prime.
+//   Input diffusion remains SHARED/mono (sum L+R → predelay → 4 stages
+//   → diffIn feeds BOTH tank loops). Per-channel diffusion deferred as
+//   a listen-decision; §9 explicitly permits shared diffusion this phase.
+//   Figure-8 cross-feed: L's D2 output × g_d → mFeedback_R (feeds R
+//   next sample); R's D2 output × g_d → mFeedback_L (feeds L next
+//   sample). Coupling coefficient 1.0 per Dattorro/§5. Spiral governor
+//   applied independently to each loop's recirculating feedback.
+//   Wet taps: wetL=0.5*(d1Read_L+d2Read_L), wetR=0.5*(d1Read_R+d2Read_R).
+//   True stereo output replaces the previous mono-duplicated output.
 //
 // INERT parameters this sub-phase (declared, Lua-tied, DSP-unused):
 //   Size, Decay, Damp, Diffusion, Mod, ModRate.
 // Wired parameters: Predelay, Mix.
 //
-// Modulation headroom already reserved on D1 and D2 delay buffers
+// Modulation headroom reserved on all four tank delay buffers
 // (base + 128 samples each side) so 0.1.0.4 can add Brownian reads
 // without resizing. Reads are static (center of headroom) this phase.
 //
@@ -36,10 +43,15 @@
 // enhancement if the tail sounds thin.
 //
 // Spiral feedback governor (fabula-design.md §4) applied once per
-// round trip on the recirculating feedback value. With densityA=1.0
+// round trip on each loop's recirculating feedback. With densityA=1.0
 // the output is bounded to [-1, +1]. Under normal use with g_d<1.0
 // the saturator is inactive; it acts only as a hard wall against
 // transient overloads or parameter edge cases.
+//
+// NOTE — mono-input gain: the Lua wrapper only connects In2 when
+// channelCount>1. For mono patches In R reads zeros, so monoIn=0.5*inL
+// (~6 dB drop). Both loops still receive diffIn and cross-feed produces
+// stereo spread. Mono gain compensation deferred post-audition.
 
 #pragma once
 
@@ -68,27 +80,43 @@ namespace zaum
   static const int kID3  = 613;
   static const int kID4  = 449;
 
-  // Tank allpass buffers (plain Schroeder APF, L-loop only this sub-phase).
+  // Tank allpass buffers (plain Schroeder APF, BOTH L and R loops).
   // AP1: delay N=1087, g=0.70. AP2: delay N=1471, g=0.50.
+  // L and R loops share the SAME delay lengths and coefficients but use
+  // SEPARATE buffers (mTA1_L/mTA1_R, mTA2_L/mTA2_R) and write indices.
   // Each buffer is exactly N samples; write head wraps at N.
   // Gardner inner delays kTA1i/kTA2i are reserved for future nesting
   // (deferred per fabula-design.md §6 — requires separate inner buffers).
-  static const int kTA1  = 1087;   // AP1 delay (= buffer size)
+  static const int kTA1  = 1087;   // AP1 delay (= buffer size), both loops
   static const int kTA1i = 367;    // AP1 Gardner inner delay (UNUSED this phase)
-  static const int kTA2  = 1471;   // AP2 delay (= buffer size)
+  static const int kTA2  = 1471;   // AP2 delay (= buffer size), both loops
   static const int kTA2i = 491;    // AP2 Gardner inner delay (UNUSED this phase)
 
-  // Tank delay lines with modulation headroom.
-  // D1: base 7187 + 128 head slack each end = 7187 + 256 = 7443.
-  // D2: base 5101 + 128 head slack each end = 5101 + 256 = 5357.
+  // Tank delay lines with modulation headroom — L loop.
+  // D1_L: base 7187 + 128 head slack each end = 7187 + 256 = 7443.
+  // D2_L: base 5101 + 128 head slack each end = 5101 + 256 = 5357.
   // Static reads this sub-phase use the center offset (base + 128).
-  static const int kD1          = 7187;
-  static const int kD1_headroom = 128;
-  static const int kD1_size     = kD1 + 2 * kD1_headroom;   // 7443
+  static const int kD1_L          = 7187;
+  static const int kD1_headroom   = 128;
+  static const int kD1_L_size     = kD1_L + 2 * kD1_headroom;   // 7443
 
-  static const int kD2          = 5101;
-  static const int kD2_headroom = 128;
-  static const int kD2_size     = kD2 + 2 * kD2_headroom;   // 5357
+  static const int kD2_L          = 5101;
+  static const int kD2_headroom   = 128;
+  static const int kD2_L_size     = kD2_L + 2 * kD2_headroom;   // 5357
+
+  // Tank delay lines with modulation headroom — R loop (ASYMMETRIC).
+  // Asymmetry (6803 vs 7187, 6343 vs 5101) decorrelates L from R.
+  // All four lengths (7187, 5101, 6803, 6343) are mutually prime:
+  //   gcd(7187,5101)=1, gcd(7187,6803)=1, gcd(7187,6343)=1,
+  //   gcd(5101,6803)=1, gcd(5101,6343)=1, gcd(6803,6343)=1.
+  // Mutual primality suppresses shared modal reinforcement in the
+  // coupled feedback system; the eigen-frequency distribution is
+  // incoherent → smooth dense tail instead of flutter/ring.
+  static const int kD1_R          = 6803;
+  static const int kD1_R_size     = kD1_R + 2 * kD1_headroom;   // 7059
+
+  static const int kD2_R          = 6343;
+  static const int kD2_R_size     = kD2_R + 2 * kD2_headroom;   // 6599
 
   class APFTank : public od::Object
   {
@@ -108,22 +136,33 @@ namespace zaum
       addParameter(mPredelay);
       addParameter(mMix);
 
-      memset(mPD,  0, sizeof(mPD));
-      memset(mID1, 0, sizeof(mID1));
-      memset(mID2, 0, sizeof(mID2));
-      memset(mID3, 0, sizeof(mID3));
-      memset(mID4, 0, sizeof(mID4));
-      memset(mTA1, 0, sizeof(mTA1));
-      memset(mTA2, 0, sizeof(mTA2));
-      memset(mD1,  0, sizeof(mD1));
-      memset(mD2,  0, sizeof(mD2));
+      memset(mPD,     0, sizeof(mPD));
+      memset(mID1,    0, sizeof(mID1));
+      memset(mID2,    0, sizeof(mID2));
+      memset(mID3,    0, sizeof(mID3));
+      memset(mID4,    0, sizeof(mID4));
+      // L-loop allpass + delay buffers
+      memset(mTA1_L,  0, sizeof(mTA1_L));
+      memset(mTA2_L,  0, sizeof(mTA2_L));
+      memset(mD1_L,   0, sizeof(mD1_L));
+      memset(mD2_L,   0, sizeof(mD2_L));
+      // R-loop allpass + delay buffers
+      memset(mTA1_R,  0, sizeof(mTA1_R));
+      memset(mTA2_R,  0, sizeof(mTA2_R));
+      memset(mD1_R,   0, sizeof(mD1_R));
+      memset(mD2_R,   0, sizeof(mD2_R));
 
       mWrPD  = 0;
       mWrID1 = 0; mWrID2 = 0; mWrID3 = 0; mWrID4 = 0;
-      mWrTA1 = 0; mWrTA2 = 0;
-      mWrD1  = 0; mWrD2  = 0;
+      // L-loop write heads
+      mWrTA1_L = 0; mWrTA2_L = 0;
+      mWrD1_L  = 0; mWrD2_L  = 0;
+      // R-loop write heads
+      mWrTA1_R = 0; mWrTA2_R = 0;
+      mWrD1_R  = 0; mWrD2_R  = 0;
 
-      mFeedback = 0.0;
+      mFeedback_L = 0.0;
+      mFeedback_R = 0.0;
     }
 
     virtual ~APFTank() {}
@@ -248,108 +287,173 @@ namespace zaum
         }
 
         // ----------------------------------------------------------------
-        // 4. L-loop: mono figure-8 tank (no cross-couple this sub-phase).
+        // 4. Figure-8 tank — L loop and R loop, stereo cross-coupled.
         //
-        //    tankIn accumulates diffused input + decayed feedback.
-        //    Signal path: tankIn → AP1 → D1 → AP2 → D2 → ×g_d → mFeedback.
+        // ORDERING DISCIPLINE (critical for correct cross-coupling):
+        //   Each loop's tankIn is formed from diffIn + last sample's
+        //   mFeedback_X (already set). Both loops advance completely
+        //   (producing d2Read_L and d2Read_R) for THIS sample. Then
+        //   mFeedback_L/R are updated from the cross outputs for NEXT
+        //   sample. This matches the existing single-loop convention:
+        //   mFeedback is set at end of sample for use on next sample.
+        //   No loop consumes the other's same-sample D2 read before
+        //   it is computed.
         //
-        //    Plain Schroeder allpass (unity-gain by construction):
-        //      vDelayed = buf[w - N]        // read BEFORE write
-        //      vNew     = x + g * vDelayed
-        //      yOut     = -g * vNew + vDelayed
-        //      buf[w]   = vNew ; w = (w+1) % N
-        //    Magnitude response |H(e^jw)| = 1 for all w when |g| < 1.
-        //    This is provably unity-gain; the previously attempted Gardner
-        //    nested form had mismatched tap/coefficient pairing that produced
-        //    feedback-comb peak gain 1/(1-g_inner)=2 at inner resonances,
-        //    pushing loop gain well above 1 with g_d=0.85.
+        // Cross-couple wiring (coupling coefficient = 1.0, Dattorro §5):
+        //   mFeedback_L = spiralFastSaturate(d2Read_R * g_d, 1.0)
+        //   mFeedback_R = spiralFastSaturate(d2Read_L * g_d, 1.0)
         //
-        //    Modulation headroom: D1 base read is kD1 samples behind write
-        //    head, centered in the headroom window. Same for D2.
+        // 2×2 stability: the coupling matrix is [[0, g_d],[g_d, 0]].
+        // Eigenvalues are ±g_d = ±0.85, magnitude 0.85 < 1. Both
+        // allpass stages are unity-gain (|H|=1 for all ω). Per-loop
+        // Spiral governors are the additional hard safety net.
+        //
+        // Plain Schroeder APF (unity-gain by construction):
+        //   vDelayed = buf[w]  (oldest slot, buffer is exactly N deep)
+        //   vNew     = x + g * vDelayed
+        //   yOut     = -g * vNew + vDelayed
+        //   buf[w]   = vNew; w = (w+1) % N
+        // Modulation headroom: D reads are base_N samples behind write
+        // head, centered in the ±128-sample headroom window.
         // ----------------------------------------------------------------
 
-        // Accumulate: new diffusion input + previous round-trip feedback.
-        double tankIn = diffIn + mFeedback;
+        // -- L LOOP --
 
-        // -- AP1: plain Schroeder allpass, delay=kTA1=1087, g=gTA1=0.70 --
-        double ap1Out;
+        // Accumulate: diffusion output + previous-sample cross-feed from R.
+        double tankIn_L = diffIn + mFeedback_L;
+
+        // AP1_L: plain Schroeder allpass, delay=kTA1=1087, g=0.70
+        double ap1Out_L;
         {
-          // Read kTA1 samples behind write head (= oldest slot, buffer is
-          // exactly kTA1 deep). Reading BEFORE the write is mandatory for
-          // correct Schroeder form; the (w - kTA1 + kTA1) % kTA1 = w case
-          // means rD wraps to mWrTA1 itself — that slot holds the sample
-          // written kTA1 iterations ago, i.e. v[n-kTA1]. Correct.
-          double vD = (double)mTA1[mWrTA1];   // buf[w] is oldest; same as (w - N + N) % N
+          double vD = (double)mTA1_L[mWrTA1_L];
           double vNew, yOut;
-          house::allpassNestedStep(tankIn, vD, gTA1, vNew, yOut);
-          mTA1[mWrTA1] = (float)vNew;
-          mWrTA1++;
-          if (mWrTA1 >= kTA1) mWrTA1 = 0;
-          ap1Out = yOut;
+          house::allpassNestedStep(tankIn_L, vD, gTA1, vNew, yOut);
+          mTA1_L[mWrTA1_L] = (float)vNew;
+          mWrTA1_L++;
+          if (mWrTA1_L >= kTA1) mWrTA1_L = 0;
+          ap1Out_L = yOut;
         }
 
-        // -- D1: tank delay line (7187 samples base, +128 headroom each side) --
-        // Static center read this sub-phase: kD1 samples behind write head.
-        double d1Read;
+        // D1_L: 7187 samples base, ±128 headroom; static center read.
+        double d1Read_L;
         {
-          mD1[mWrD1] = (float)ap1Out;
-          int rD1 = mWrD1 - kD1;
-          if (rD1 < 0) rD1 += kD1_size;
-          d1Read = (double)mD1[rD1];
-          mWrD1++;
-          if (mWrD1 >= kD1_size) mWrD1 = 0;
+          mD1_L[mWrD1_L] = (float)ap1Out_L;
+          int rD1 = mWrD1_L - kD1_L;
+          if (rD1 < 0) rD1 += kD1_L_size;
+          d1Read_L = (double)mD1_L[rD1];
+          mWrD1_L++;
+          if (mWrD1_L >= kD1_L_size) mWrD1_L = 0;
         }
 
-        // HF damp: DISABLED this sub-phase. Pass d1Read through unchanged.
-        double dampedD1 = d1Read;
+        // HF damp: DISABLED this sub-phase.
+        double dampedD1_L = d1Read_L;
 
-        // -- AP2: plain Schroeder allpass, delay=kTA2=1471, g=gTA2=0.50 --
-        double ap2Out;
+        // AP2_L: plain Schroeder allpass, delay=kTA2=1471, g=0.50
+        double ap2Out_L;
         {
-          double vD = (double)mTA2[mWrTA2];   // oldest slot = v[n-kTA2]
+          double vD = (double)mTA2_L[mWrTA2_L];
           double vNew, yOut;
-          house::allpassNestedStep(dampedD1, vD, gTA2, vNew, yOut);
-          mTA2[mWrTA2] = (float)vNew;
-          mWrTA2++;
-          if (mWrTA2 >= kTA2) mWrTA2 = 0;
-          ap2Out = yOut;
+          house::allpassNestedStep(dampedD1_L, vD, gTA2, vNew, yOut);
+          mTA2_L[mWrTA2_L] = (float)vNew;
+          mWrTA2_L++;
+          if (mWrTA2_L >= kTA2) mWrTA2_L = 0;
+          ap2Out_L = yOut;
         }
 
-        // -- D2: tank delay line (5101 samples base, +128 headroom each side) --
-        double d2Read;
+        // D2_L: 5101 samples base, ±128 headroom; static center read.
+        double d2Read_L;
         {
-          mD2[mWrD2] = (float)ap2Out;
-          int rD2 = mWrD2 - kD2;
-          if (rD2 < 0) rD2 += kD2_size;
-          d2Read = (double)mD2[rD2];
-          mWrD2++;
-          if (mWrD2 >= kD2_size) mWrD2 = 0;
+          mD2_L[mWrD2_L] = (float)ap2Out_L;
+          int rD2 = mWrD2_L - kD2_L;
+          if (rD2 < 0) rD2 += kD2_L_size;
+          d2Read_L = (double)mD2_L[rD2];
+          mWrD2_L++;
+          if (mWrD2_L >= kD2_L_size) mWrD2_L = 0;
         }
 
-        // Apply decay gain once per round trip, then pass through the Spiral
-        // feedback governor (fabula-design.md §4, pulled forward from 0.1.0.6).
-        // With densityA=1.0 the output is bounded to [-1, +1]. For a clean room
-        // with g_d=0.85 the saturator is never active under normal use — the
-        // true Schroeder allpasses in AP1/AP2 guarantee passive stability and
-        // the governor only engages as a hard wall against transient overloads
-        // or future high-regen parameter settings. No coloration in clean use.
-        mFeedback = house::spiralFastSaturate(d2Read * g_d, 1.0);
+        // -- R LOOP --
+
+        // Accumulate: diffusion output + previous-sample cross-feed from L.
+        double tankIn_R = diffIn + mFeedback_R;
+
+        // AP1_R: plain Schroeder allpass, delay=kTA1=1087, g=0.70
+        // Same coefficients as L; separate buffer for independent state.
+        double ap1Out_R;
+        {
+          double vD = (double)mTA1_R[mWrTA1_R];
+          double vNew, yOut;
+          house::allpassNestedStep(tankIn_R, vD, gTA1, vNew, yOut);
+          mTA1_R[mWrTA1_R] = (float)vNew;
+          mWrTA1_R++;
+          if (mWrTA1_R >= kTA1) mWrTA1_R = 0;
+          ap1Out_R = yOut;
+        }
+
+        // D1_R: 6803 samples base (ASYMMETRIC vs L's 7187), ±128 headroom.
+        double d1Read_R;
+        {
+          mD1_R[mWrD1_R] = (float)ap1Out_R;
+          int rD1 = mWrD1_R - kD1_R;
+          if (rD1 < 0) rD1 += kD1_R_size;
+          d1Read_R = (double)mD1_R[rD1];
+          mWrD1_R++;
+          if (mWrD1_R >= kD1_R_size) mWrD1_R = 0;
+        }
+
+        // HF damp: DISABLED this sub-phase.
+        double dampedD1_R = d1Read_R;
+
+        // AP2_R: plain Schroeder allpass, delay=kTA2=1471, g=0.50
+        double ap2Out_R;
+        {
+          double vD = (double)mTA2_R[mWrTA2_R];
+          double vNew, yOut;
+          house::allpassNestedStep(dampedD1_R, vD, gTA2, vNew, yOut);
+          mTA2_R[mWrTA2_R] = (float)vNew;
+          mWrTA2_R++;
+          if (mWrTA2_R >= kTA2) mWrTA2_R = 0;
+          ap2Out_R = yOut;
+        }
+
+        // D2_R: 6343 samples base (ASYMMETRIC vs L's 5101), ±128 headroom.
+        double d2Read_R;
+        {
+          mD2_R[mWrD2_R] = (float)ap2Out_R;
+          int rD2 = mWrD2_R - kD2_R;
+          if (rD2 < 0) rD2 += kD2_R_size;
+          d2Read_R = (double)mD2_R[rD2];
+          mWrD2_R++;
+          if (mWrD2_R >= kD2_R_size) mWrD2_R = 0;
+        }
+
+        // -- CROSS-FEED UPDATE (for next sample) --
+        // R's D2 output × g_d feeds L's next-sample accumulator, and
+        // vice versa. Spiral governor bounds each independently.
+        // Both d2Read_L and d2Read_R are fully computed above before
+        // either feedback value is updated — no same-sample causality leak.
+        mFeedback_L = house::spiralFastSaturate(d2Read_R * g_d, 1.0);
+        mFeedback_R = house::spiralFastSaturate(d2Read_L * g_d, 1.0);
 
         // ----------------------------------------------------------------
-        // 5. Wet tap: sum of D1 and D2 reads, scaled to unit range.
-        //    Both taps carry decorrelated versions of the tank signal;
-        //    summing and halving keeps the wet level comparable to dry.
+        // 5. Stereo wet taps.
+        //    wetL draws from L-loop delay lines; wetR from R-loop.
+        //    Summing D1+D2 per channel and halving keeps the wet level
+        //    comparable to dry and blends the two tap points for density.
         // ----------------------------------------------------------------
-        double wet = (d1Read + d2Read) * 0.5;
+        double wetL = (d1Read_L + d2Read_L) * 0.5;
+        double wetR = (d1Read_R + d2Read_R) * 0.5;
 
         // ----------------------------------------------------------------
-        // 6. Dry/wet mix. Mono wet duplicated to L and R outputs so the
-        //    tail is audible in stereo (cross-couple arrives in 0.1.0.3).
+        // 6. Dry/wet mix — true stereo.
+        //    Each channel's dry is preserved; each channel's wet is drawn
+        //    from its own loop's delay taps. Cross-coupling has already
+        //    mixed information between the loops via the figure-8 feedback,
+        //    so wetL and wetR are decorrelated even from a mono source.
         // ----------------------------------------------------------------
         double dryMix  = (double)(1.0f - mix);
         double wetMix  = (double)mix;
-        double outL = drySampleL * dryMix + wet * wetMix;
-        double outR = drySampleR * dryMix + wet * wetMix;
+        double outL = drySampleL * dryMix + wetL * wetMix;
+        double outR = drySampleR * dryMix + wetR * wetMix;
 
         *out1 = (float)outL;
         *out2 = (float)outR;
@@ -362,28 +466,41 @@ namespace zaum
     float mPD[kPD];
     int   mWrPD;
 
-    // Input diffusion allpass buffers (4 series, mono)
+    // Input diffusion allpass buffers (4 series, shared mono path)
     float mID1[kID1];
     float mID2[kID2];
     float mID3[kID3];
     float mID4[kID4];
     int   mWrID1, mWrID2, mWrID3, mWrID4;
 
-    // Tank allpass buffers (L-loop, AP1 and AP2; plain Schroeder APF,
-    // each buffer is exactly N samples deep, write head wraps at N)
-    float mTA1[kTA1];
-    float mTA2[kTA2];
-    int   mWrTA1, mWrTA2;
+    // Tank allpass buffers — L loop (plain Schroeder APF,
+    // each buffer exactly N samples deep, write head wraps at N)
+    float mTA1_L[kTA1];
+    float mTA2_L[kTA2];
+    int   mWrTA1_L, mWrTA2_L;
 
-    // Tank delay lines with modulation headroom
-    float mD1[kD1_size];
-    float mD2[kD2_size];
-    int   mWrD1, mWrD2;
+    // Tank delay lines — L loop (with modulation headroom)
+    float mD1_L[kD1_L_size];
+    float mD2_L[kD2_L_size];
+    int   mWrD1_L, mWrD2_L;
 
-    // Recirculating feedback accumulator (double precision: this value
-    // traverses the full round-trip path each sample; precision matters
-    // for long-decay tails where accumulated rounding would drift pitch)
-    double mFeedback;
+    // Tank allpass buffers — R loop (same lengths as L, separate state)
+    float mTA1_R[kTA1];
+    float mTA2_R[kTA2];
+    int   mWrTA1_R, mWrTA2_R;
+
+    // Tank delay lines — R loop (ASYMMETRIC: D1_R=6803, D2_R=6343)
+    float mD1_R[kD1_R_size];
+    float mD2_R[kD2_R_size];
+    int   mWrD1_R, mWrD2_R;
+
+    // Recirculating feedback accumulators (double precision: these values
+    // traverse the full round-trip path each sample; precision matters
+    // for long-decay tails where accumulated rounding would drift pitch).
+    // Cross-coupled: mFeedback_L is written from d2Read_R×g_d (R feeds L),
+    //                mFeedback_R is written from d2Read_L×g_d (L feeds R).
+    double mFeedback_L;
+    double mFeedback_R;
 
 #endif
   };
