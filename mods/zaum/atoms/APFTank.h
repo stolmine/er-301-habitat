@@ -10,77 +10,144 @@
 // Plan: planning/fabula-design.md (DSP architecture, delay tables,
 // modulation, governor). Roadmap: planning/zaum-roadmap.md §"Phase 1".
 //
-// BUILD SUB-PHASE 0.1.0.4 — Brownian delay-line modulation.
-//   Four independent Brownian LFOs, one per tank delay line (D1_L,
-//   D2_L, D1_R, D2_R). Each uses a fast xorshift64 PRNG (never libc
-//   rand() on the audio thread) with distinct compile-time seeds so the
-//   four lines are decorrelated from sample 0. L-line seeds and R-line
-//   seeds are distinct per fabula-design.md §5.
+// BUILD SUB-PHASE 0.1.0.5 — HF damping + Decay/RT60 + Size scaling +
+// DC blocker.
 //
-//   Each tank delay read is now MODULATED via linear (two-point)
-//   interpolation: the walk accumulator is a double, so the read
-//   position is fractional; we split into integer offset + fraction and
-//   interpolate between buf[i0] and buf[i0+1]. This pulls forward the
-//   §3 "upgrade path" deliberately because:
-//     1. Integer-step zipper at low Mod would confound the depth/rate
-//        calibration audition (§3 rationale + §9 0.1.0.4 note).
-//     2. Cost is minimal (2 multiplies + 1 add + 1 floor per line per
-//        sample) and the math is already in place for the walk double.
+//   This sub-phase wires three previously inert parameters and adds a DC
+//   blocker to the recirculating path. After this, Diffusion is the only
+//   inert parameter.
 //
-//   No one-pole position smoother added: the walk is already a smooth
-//   integrator (noise → accumulate → clamp), and linear interp handles
-//   sub-sample continuity. Adding a smoother on top of that would only
-//   reduce the achieved modulation depth vs the intended excursion. If
-//   audition reveals the walk still steps too coarsely at high ModRate,
-//   add a one-pole with α≈0.9995 per line as a post-walk smoother.
+//   A. DAMP — one-pole HF low-pass in each loop's D1 feedback path.
 //
-//   MODULATION PARAMETER MAPPINGS (easy to retune by ear):
+//      Form: y += coeff * (x - y)   (one-pole LP, "leaky integrator")
+//      State: mDampL, mDampR (double, init 0).
 //
-//   Mod 0..1 → excursion in samples:
-//     excursion = 9.0 + mod * 63.0   (range: 9..72 samples = 0.19..1.5 ms)
-//     Default Mod=0.3 → excursion = 9 + 0.3*63 = 27.9 samples (≈0.58 ms)
+//      Damp=0  → coeff=1.0 → unity (open, no damping)
+//      Damp=1  → coeff=kMinDampCoeff → maximum rolloff (dark)
 //
-//   ModRate 0..1 → walk step_size per sample (exponential-feeling taper):
-//     step_size = 0.0002 + modRate * 0.0998   (range: 0.0002..0.1)
-//     (linear; the logarithmic feel comes from Brownian diffusion itself)
-//     Default ModRate=0.2 → step_size = 0.0002 + 0.2*0.0998 ≈ 0.020 per sample
+//      Mapping (linear in coeff space, easy to retune):
+//        coeff = 1.0 - Damp * (1.0 - kMinDampCoeff)
+//        kMinDampCoeff = 0.08  (corner ~600 Hz at 48 kHz)
+//        kMaxDampCoeff = 1.0   (open, Damp=0)
 //
-//   CALIBRATION CONTEXT for §11 gate:
-//     At Mod=0, ModRate=0: no walk → static reads → slightly metallic tail.
-//     At Mod=0.3 (excursion≈28), ModRate=0.2 (step≈0.020): the walk
-//       covers ±28 samples slowly (diffusion time to reach ±28 from 0 at
-//       step 0.020: N≈(28/0.020)²=1.96M samples≈40s, so in practice the
-//       walk is always within a modest fraction of max excursion, drifting
-//       slowly). This is the intended sweet spot.
-//     At Mod=1.0 (excursion=72), ModRate=1.0 (step=0.1): walks reach
-//       ±72 and wander faster — audible pitch wander at extremes.
-//     PRIMARY TUNING KNOBS: kMaxExcursion (72→lower if too warbly),
-//       kMinExcursion (9→lower for a drier minimum), kMaxStep (0.1→
-//       lower if ModRate=1 is too fast, higher if sluggish).
+//      Perceptual calibration at 48 kHz:
+//        Damp=0.00 (default 0.25 → coeff≈0.77): very mild 5+ kHz shelf
+//        Damp=0.50 → coeff≈0.54: noticeable HF roll (~1.5 kHz corner)
+//        Damp=1.00 → coeff=0.08: heavy (~600 Hz corner), very dark
 //
-//   BUFFER BOUNDS SAFETY:
-//     Max excursion = 72 samples. Linear interp reads buf[i0] and buf[i0+1].
-//     Worst-case additional reach = 72 + 1 = 73 samples. Headroom = 128.
-//     73 < 128 — safe with margin of 55 samples on each side.
-//     Wrap arithmetic: readPos = wrHead - base_delay + walk (double).
-//       Integer part offset = (int)floor(readPos). We add size and take
-//       modulo to handle any negative result before splitting into i0/i1.
-//       Both i0 and i0+1 are taken mod size, so i1 wraps correctly when
-//       i0 == size-1. Walk is clamped strictly to [-excursion, +excursion]
-//       before any index arithmetic, bounding the deviation from center.
+//      The coeff is SR-independent by intention: the perceptual target is
+//      a smooth tonal shift, not a specific Hz corner. SR-accurate mapping
+//      (coeff = 2π·fc/sr) is an upgrade path if exact cutoffs matter.
+//      PRIMARY TUNING KNOB: kMinDampCoeff (lower = darker maximum).
 //
-//   STABILITY CONFIRMATION:
-//     Modulating read position on a delay line does NOT affect loop gain:
-//     the allpass stages remain unity-gain (|H|=1 for all ω, regardless of
-//     reading offset). Decay gain g_d=0.85 is fixed. The 2×2 cross-coupling
-//     eigenvalues remain ±0.85 < 1. Spiral governors remain in place.
-//     Varying the read offset introduces a mild pitch smear (the desired
-//     lushness effect) but does not change the energy-recirculation gain.
-//     No new runaway path exists.
+//      Placement: after D1 read (before AP2), inside the recirculating
+//      path — the Schroeder/Jot HF-damping-in-feedback form per
+//      fabula-design.md §2. Placing it on D1_out means every round trip
+//      applies one LP, accumulating toward darker tails at high Decay.
+//
+//   B. DECAY — g_d via power-curve log-shaped map (replaces hard-coded 0.85).
+//
+//      Endpoints from fabula-design.md §7:
+//        Decay=0 → g_d_min = kGdMin = 0.60  (short tail, ~4-5 s RT60)
+//        Decay=1 → g_d_max = kGdMax = 0.97  (long tail, ~25-30 s RT60)
+//
+//      Mapping (power curve, upward-biased to place default at approved feel):
+//        g_d = kGdMin + (kGdMax - kGdMin) * pow(decay, kDecayShape)
+//        kDecayShape = 0.565
+//
+//      Calibration:
+//        Decay=0.0 → g_d = 0.60
+//        Decay=0.5 → g_d = 0.60 + 0.37 * 0.5^0.565 = 0.60 + 0.37*0.676 = 0.850
+//        Decay=1.0 → g_d = 0.97
+//        → Decay=0.5 maps to g_d≈0.850, preserving the 0.1.0.4 approved sound.
+//
+//      RT60 formula (fabula-design.md §2):
+//        RT60 = -3 * RTT / log10(g_d)
+//        RTT (L loop) = AP1(1087) + D1(7187) + AP2(1471) + D2(5101) =
+//          15846 smp = 0.330 s at 48 kHz (Size=0.5)
+//        Decay=0: RT60 = -3*0.330/log10(0.60) ≈ 4.5 s
+//        Decay=1: RT60 = -3*0.330/log10(0.97) ≈ 31 s
+//        Note: "Decay=0→~2s" in §11 assumed a shorter RTT (0.323 s) and
+//        lower g_d_min; the ~4.5 s minimum is the actual result with the
+//        longer tank. Recalibrate endpoint in 0.1.0.7 if a shorter minimum
+//        tail is desired.
+//
+//      HARD SAFETY CAP: g_d = min(g_d, kGdCap = 0.985) regardless of Decay.
+//      The Spiral governors are the second backstop but g_d<1 must hold
+//      unconditionally for passive stability.
+//
+//      PRIMARY TUNING KNOBS: kGdMin (lift to shorten the short tail),
+//        kGdMax (lower to reduce maximum decay), kDecayShape (shift midpoint).
+//        kDecayShape derivation: 0.5^k = (0.85-0.60)/(0.97-0.60) = 0.676
+//        → k = log(0.676)/log(0.5) = 0.565.
+//
+//   C. SIZE — delay-length scaling (block rate, careful bounds).
+//
+//      sizeFactor = kSizeMin + Size * (kSizeMax - kSizeMin)
+//        kSizeMin = 0.5  → Size=0.0 (smallest room)
+//        kSizeMax = 1.5  → Size=1.0 (largest room)
+//        Size=0.5 → sizeFactor=1.0 → EXACTLY the 0.1.0.4 base lengths:
+//          D1_L=7187, D2_L=5101, D1_R=6803, D2_R=6343.
+//          The 0.1.0.4 approved sound is preserved at the default.
+//
+//      Scaled lengths rounded to nearest ODD integer (not full prime-snap;
+//      Brownian modulation smears eigentones so strict primeness is less
+//      critical post-modulation). The four scaled lengths are checked for
+//      shared divisors at audition; re-snap to prime pool in 0.1.0.7 if
+//      needed. See note on prime rounding below.
+//
+//      BUFFER SIZING: buffers are allocated at MAXIMUM size (sizeFactor=1.5)
+//      plus 128-sample headroom each side plus 1 interp neighbor:
+//        D1_L: base=7187, max_base=10781 (7187*1.5 rounded to odd),
+//              buffer = 10781 + 256 + 1 = 11038
+//        D2_L: base=5101, max_base=7651  (5101*1.5 rounded to odd),
+//              buffer = 7651  + 256 + 1 = 7908
+//        D1_R: base=6803, max_base=10205 (6803*1.5 rounded to odd),
+//              buffer = 10205 + 256 + 1 = 10462
+//        D2_R: base=6343, max_base=9515  (6343*1.5 rounded to odd),
+//              buffer = 9515  + 256 + 1 = 9772
+//
+//      BOUNDS PROOF (worst case: Size=1.0, walk=+72, interp neighbor):
+//        scaledBase_max = 10781 (D1_L)
+//        Buffer size    = 11038
+//        Write head wraps at 11038.
+//        Read = wrHead - scaledBase_max + walk
+//             = wrHead - 10781 + 72 = wrHead - 10709
+//        For i1 = i0+1: max integer offset from center = 72+1 = 73.
+//        Needed headroom = 73 < 128 — safe with 55 samples margin.
+//        At Size=0.0 (sizeFactor=0.5): scaledBase = round(7187*0.5)=3593(odd),
+//        Buffer wraps at 11038; read is wrHead-3593±72 — all in [0,11038) mod.
+//        The modular arithmetic handles ALL scaledBase values safely.
+//
+//      CLICK ON SIZE CHANGE: changing Size repoints the read length, which
+//      may produce a click on large jumps (ACCEPTABLE v1; crossfading
+//      deferred to a later sub-phase). Size changes at block rate only.
+//
+//      PRIME ROUNDING NOTE: to_odd() is applied at block rate. Full
+//      prime-snapping from a precomputed prime pool is deferred to 0.1.0.7.
+//
+//   D. DC BLOCKER — per loop, on the tank input signal (before AP1).
+//
+//      Form: y[n] = x[n] - x[n-1] + R*y[n-1]   R = kDCBlockR = 0.9995
+//      State per loop: mDCx1_L, mDCy1_L, mDCx1_R, mDCy1_R (doubles, init 0).
+//
+//      Corner frequency: fc ≈ (1-R)*sr/(2π) ≈ 0.0005*48000/6.283 ≈ 3.8 Hz.
+//      This removes DC and sub-3 Hz content only — inaudible in reverb tail.
+//
+//      Placement: on tankIn_L / tankIn_R BEFORE AP1, after accumulating
+//      diffIn + feedback. This prevents DC from entering the tank in the
+//      first place; every round trip the DC blocker cleanly removes any
+//      accumulated offset. Placing it before the wet taps (d1Read, d2Read)
+//      means DC never reaches the output either.
+//
+//      Why here and not on d2Read×g_d (feedback signal): placing on tankIn
+//      blocks DC from entering, whereas blocking on the feedback signal would
+//      still allow DC from diffIn to accumulate for one round trip. Either
+//      placement is stable; tankIn is cleaner.
 //
 // INERT parameters this sub-phase (declared, Lua-tied, DSP-unused):
-//   Size, Decay, Damp, Diffusion.
-// Wired parameters: Predelay, Mix, Mod, ModRate.
+//   Diffusion.
+// Wired parameters: Predelay, Mix, Mod, ModRate, Damp, Decay, Size.
 //
 // Tank allpass convention (plain Schroeder, provably unity-gain):
 //   vDelayed = buf[read N samples behind write head]   // v[n-N]
@@ -142,31 +209,48 @@ namespace zaum
   static const int kTA2  = 1471;   // AP2 delay (= buffer size), both loops
   static const int kTA2i = 491;    // AP2 Gardner inner delay (UNUSED this phase)
 
-  // Tank delay lines with modulation headroom — L loop.
-  // D1_L: base 7187 + 128 head slack each end = 7187 + 256 = 7443.
-  // D2_L: base 5101 + 128 head slack each end = 5101 + 256 = 5357.
-  // Modulated reads stay within [center-72, center+73] — 73 < 128 headroom.
-  static const int kD1_L          = 7187;
-  static const int kD1_headroom   = 128;
-  static const int kD1_L_size     = kD1_L + 2 * kD1_headroom;   // 7443
+  // ---------------------------------------------------------------------------
+  // Tank delay line base lengths (Size=0.5 default = current approved sound)
+  // ---------------------------------------------------------------------------
+  // These four values are the "canonical" lengths from fabula-design.md §2.
+  // With Size=0.5 → sizeFactor=1.0, the scaled lengths reproduce these exactly.
+  static const int kD1_L_base = 7187;
+  static const int kD2_L_base = 5101;
+  static const int kD1_R_base = 6803;
+  static const int kD2_R_base = 6343;
 
-  static const int kD2_L          = 5101;
-  static const int kD2_headroom   = 128;
-  static const int kD2_L_size     = kD2_L + 2 * kD2_headroom;   // 5357
+  // ---------------------------------------------------------------------------
+  // Tank delay line buffer sizes: must hold MAX scaled length + headroom.
+  //
+  // Max sizeFactor = kSizeMax = 1.5
+  //   D1_L: 7187 * 1.5 = 10780.5 → round to nearest odd → 10781
+  //   D2_L: 5101 * 1.5 = 7651.5  → round to nearest odd → 7651
+  //   D1_R: 6803 * 1.5 = 10204.5 → round to nearest odd → 10205
+  //   D2_R: 6343 * 1.5 = 9514.5  → round to nearest odd → 9515
+  //
+  // Headroom: 128 samples each side for modulation + 1 for linear interp.
+  // Buffer = max_scaled_length + 2*128 + 1.
+  //
+  // BOUNDS PROOF at max Size + max walk:
+  //   Walk clamped to [-kMaxExcursion, +kMaxExcursion] = [-72, +72].
+  //   Linear interp reads i0 and i1=i0+1.
+  //   Worst additional reach from center = 72 + 1 = 73 samples.
+  //   Headroom = 128 > 73 — safe with 55 samples margin on each side.
+  //   All index arithmetic uses modular wrap (% bufSize), so no OOB access.
+  // ---------------------------------------------------------------------------
+  static const int kD1_headroom    = 128;   // modulation headroom each side
 
-  // Tank delay lines with modulation headroom — R loop (ASYMMETRIC).
-  // Asymmetry (6803 vs 7187, 6343 vs 5101) decorrelates L from R.
-  // All four lengths (7187, 5101, 6803, 6343) are mutually prime:
-  //   gcd(7187,5101)=1, gcd(7187,6803)=1, gcd(7187,6343)=1,
-  //   gcd(5101,6803)=1, gcd(5101,6343)=1, gcd(6803,6343)=1.
-  // Mutual primality suppresses shared modal reinforcement in the
-  // coupled feedback system; the eigen-frequency distribution is
-  // incoherent → smooth dense tail instead of flutter/ring.
-  static const int kD1_R          = 6803;
-  static const int kD1_R_size     = kD1_R + 2 * kD1_headroom;   // 7059
+  static const int kD1_L_maxBase  = 10781;  // 7187*1.5 rounded to odd
+  static const int kD1_L_size     = kD1_L_maxBase + 2 * kD1_headroom + 1; // 11038
 
-  static const int kD2_R          = 6343;
-  static const int kD2_R_size     = kD2_R + 2 * kD2_headroom;   // 6599
+  static const int kD2_L_maxBase  = 7651;   // 5101*1.5 rounded to odd
+  static const int kD2_L_size     = kD2_L_maxBase + 2 * kD1_headroom + 1; // 7908
+
+  static const int kD1_R_maxBase  = 10205;  // 6803*1.5 rounded to odd
+  static const int kD1_R_size     = kD1_R_maxBase + 2 * kD1_headroom + 1; // 10462
+
+  static const int kD2_R_maxBase  = 9515;   // 6343*1.5 rounded to odd
+  static const int kD2_R_size     = kD2_R_maxBase + 2 * kD1_headroom + 1; // 9772
 
   // ---------------------------------------------------------------------------
   // Modulation tuning constants — adjust these by ear at the 0.1.0.4 gate.
@@ -186,6 +270,51 @@ namespace zaum
   static const double kMaxStep = 0.1;
 
   // ---------------------------------------------------------------------------
+  // Decay → g_d tuning constants.
+  // Power-curve mapping: g_d = kGdMin + (kGdMax - kGdMin) * pow(decay, kDecayShape)
+  //   kDecayShape = 0.565: chosen so Decay=0.5 → g_d≈0.850
+  //     Derivation: 0.5^k = (0.85-0.60)/(0.97-0.60) = 0.676 → k=0.565
+  //   kGdMin = 0.60:  Decay=0 tail (~4-5 s RT60 with this tank's RTT)
+  //   kGdMax = 0.97:  Decay=1 tail (~25-30 s RT60)
+  //   kGdCap = 0.985: hard unconditional cap — g_d must stay < 1.0
+  // To shorten the minimum tail, raise kGdMin toward 0.50 or lower.
+  // To shift the Decay=0.5 feel brighter/darker, adjust kDecayShape.
+  // ---------------------------------------------------------------------------
+  static const double kGdMin      = 0.60;
+  static const double kGdMax      = 0.97;
+  static const double kGdCap      = 0.985;
+  static const double kDecayShape = 0.565;
+
+  // ---------------------------------------------------------------------------
+  // Damp → one-pole LP coefficient tuning constants.
+  // Mapping: coeff = 1.0 - Damp * (1.0 - kMinDampCoeff)
+  //   kMinDampCoeff = 0.08: darkest setting (corner ~600 Hz at 48 kHz)
+  //   Damp=0.00 → coeff=1.0 (open, passthrough)
+  //   Damp=0.25 → coeff=0.77 (default: mild HF shelf, barely audible)
+  //   Damp=0.50 → coeff=0.54 (~1.5 kHz corner, noticeably warmer)
+  //   Damp=1.00 → coeff=0.08 (~600 Hz corner, very dark)
+  // Primary tuning knob: kMinDampCoeff (lower = darker maximum damp).
+  // ---------------------------------------------------------------------------
+  static const double kMinDampCoeff = 0.08;
+
+  // ---------------------------------------------------------------------------
+  // Size → sizeFactor tuning constants.
+  // sizeFactor = kSizeMin + Size * (kSizeMax - kSizeMin)
+  //   kSizeMin = 0.5:  Size=0.0 → smallest room (50% of base lengths)
+  //   kSizeMax = 1.5:  Size=1.0 → largest room (150% of base lengths)
+  //   Size=0.5 → sizeFactor=1.0 → EXACT 0.1.0.4 base lengths (sound preserved)
+  // ---------------------------------------------------------------------------
+  static const double kSizeMin = 0.5;
+  static const double kSizeMax = 1.5;
+
+  // ---------------------------------------------------------------------------
+  // DC blocker coefficient.
+  // Form: y[n] = x[n] - x[n-1] + kDCBlockR * y[n-1]
+  // fc ≈ (1-R)*sr/(2π) ≈ 3.8 Hz at 48 kHz — inaudible in reverb tail.
+  // ---------------------------------------------------------------------------
+  static const double kDCBlockR = 0.9995;
+
+  // ---------------------------------------------------------------------------
   // xorshift64 PRNG — fast, period 2^64-1, audio-thread safe (no libc).
   // From Marsaglia (2003). NEVER pass seed=0 (degenerate fixed point).
   // ---------------------------------------------------------------------------
@@ -195,6 +324,18 @@ namespace zaum
     s ^= s >> 7;
     s ^= s << 17;
     return s;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Round x to the nearest odd integer >= 1.
+  // Used at block rate for Size-scaled delay lengths.
+  // (Full prime-snapping deferred to 0.1.0.7; Brownian modulation already
+  // smears eigentones so strict primeness is less critical post-modulation.)
+  // ---------------------------------------------------------------------------
+  static inline int toOdd(int x)
+  {
+    if (x < 1) x = 1;
+    return (x % 2 == 0) ? x + 1 : x;
   }
 
   class APFTank : public od::Object
@@ -258,6 +399,21 @@ namespace zaum
       mWalk_D2_L = 0.0;
       mWalk_D1_R = 0.0;
       mWalk_D2_R = 0.0;
+
+      // HF damp filter state (one per loop, initialized to silence).
+      mDampL = 0.0;
+      mDampR = 0.0;
+
+      // DC blocker state (one pair per loop, initialized to 0).
+      mDCx1_L = 0.0;  mDCy1_L = 0.0;
+      mDCx1_R = 0.0;  mDCy1_R = 0.0;
+
+      // Size-scaled delay lengths — initialize to base lengths (Size=0.5 default).
+      mScaledD1_L = kD1_L_base;
+      mScaledD2_L = kD2_L_base;
+      mScaledD1_R = kD1_R_base;
+      mScaledD2_R = kD2_R_base;
+      mLastSize   = 0.5f;
     }
 
     virtual ~APFTank() {}
@@ -289,26 +445,85 @@ namespace zaum
       // Mix:      0..1 linear crossfade.
       // Mod:      0..1 → excursion in samples (kMinExcursion..kMaxExcursion).
       // ModRate:  0..1 → walk step_size per sample (kMinStep..kMaxStep).
-      // All other params INERT this sub-phase.
+      // Damp:     0..1 → one-pole LP coeff for HF damping.
+      // Decay:    0..1 → g_d via power-curve map.
+      // Size:     0..1 → sizeFactor → scaled delay lengths (block rate).
+      // Diffusion: INERT this sub-phase (wired in 0.1.0.7).
       // ------------------------------------------------------------------
       const float predelayParam = mPredelay.value();  // 0..1
       const float mix           = mMix.value();       // 0..1
       const float modParam      = mMod.value();       // 0..1
       const float modRateParam  = mModRate.value();   // 0..1
+      const float dampParam     = mDamp.value();      // 0..1
+      const float decayParam    = mDecay.value();     // 0..1
+      const float sizeParam     = mSize.value();      // 0..1
 
       // Max tap = kPD - 1 (keep at least 1-sample separation from write head)
       const int predelayTap = (int)(predelayParam * (float)(kPD - 1));
 
-      // Hard-coded decay gain this sub-phase (Decay param wired in 0.1.0.5).
-      const double g_d = 0.85;
+      // Decay → g_d via power-curve: g_d = kGdMin + (kGdMax - kGdMin) * decay^kDecayShape
+      // Hard cap at kGdCap prevents g_d >= 1 unconditionally.
+      // pow(0, kDecayShape) = 0 safely; pow(1, kDecayShape) = 1 safely.
+      double decayD = (double)decayParam;
+      // Clamp input to [0,1] before pow to avoid domain errors.
+      if (decayD < 0.0) decayD = 0.0;
+      if (decayD > 1.0) decayD = 1.0;
+      double g_d = kGdMin + (kGdMax - kGdMin) * pow(decayD, kDecayShape);
+      if (g_d > kGdCap) g_d = kGdCap;   // unconditional hard safety cap
 
-      // Input diffusion coefficients (Diffusion param wired in 0.1.0.5).
+      // Damp → one-pole LP coefficient.
+      // coeff = 1.0 - Damp * (1.0 - kMinDampCoeff)
+      // Damp=0 → coeff=1.0 (open). Damp=1 → coeff=kMinDampCoeff (dark).
+      double dampD     = (double)dampParam;
+      if (dampD < 0.0) dampD = 0.0;
+      if (dampD > 1.0) dampD = 1.0;
+      const double dampCoeff = 1.0 - dampD * (1.0 - kMinDampCoeff);
+
+      // Input diffusion coefficients (Diffusion param wired in 0.1.0.7).
       const double gID12 = 0.75;
       const double gID34 = 0.625;
 
       // Tank AP coefficients (plain Schroeder allpass, unity-gain by construction).
       const double gTA1 = 0.70;
       const double gTA2 = 0.50;
+
+      // Size → scaled delay lengths (block rate, only recompute when changed).
+      // Clamped to [kSizeMin, kSizeMax] so sizeFactor is always in bounds.
+      if (sizeParam != mLastSize)
+      {
+        mLastSize = sizeParam;
+        double sizeD = (double)sizeParam;
+        if (sizeD < 0.0) sizeD = 0.0;
+        if (sizeD > 1.0) sizeD = 1.0;
+        const double sizeFactor = kSizeMin + sizeD * (kSizeMax - kSizeMin);
+
+        // Round to nearest odd to minimize comb resonances.
+        // Result is clamped to [1, maxBase] implicitly by toOdd().
+        mScaledD1_L = toOdd((int)(kD1_L_base * sizeFactor + 0.5));
+        mScaledD2_L = toOdd((int)(kD2_L_base * sizeFactor + 0.5));
+        mScaledD1_R = toOdd((int)(kD1_R_base * sizeFactor + 0.5));
+        mScaledD2_R = toOdd((int)(kD2_R_base * sizeFactor + 0.5));
+
+        // Clamp to strictly less than their respective buffer sizes minus
+        // the headroom+interp margin, so read index can never exceed buffer.
+        // Effective max usable scaled base = bufSize - 2*headroom - 1.
+        // With headroom=128: D1_L usable max = 11038 - 257 = 10781 = kD1_L_maxBase.
+        if (mScaledD1_L > kD1_L_maxBase) mScaledD1_L = kD1_L_maxBase;
+        if (mScaledD2_L > kD2_L_maxBase) mScaledD2_L = kD2_L_maxBase;
+        if (mScaledD1_R > kD1_R_maxBase) mScaledD1_R = kD1_R_maxBase;
+        if (mScaledD2_R > kD2_R_maxBase) mScaledD2_R = kD2_R_maxBase;
+        // Min: 1 (toOdd guarantees >= 1, but guard explicitly).
+        if (mScaledD1_L < 1) mScaledD1_L = 1;
+        if (mScaledD2_L < 1) mScaledD2_L = 1;
+        if (mScaledD1_R < 1) mScaledD1_R = 1;
+        if (mScaledD2_R < 1) mScaledD2_R = 1;
+      }
+
+      // Load scaled lengths as local ints for the sample loop.
+      const int scaledD1_L = mScaledD1_L;
+      const int scaledD2_L = mScaledD2_L;
+      const int scaledD1_R = mScaledD1_R;
+      const int scaledD2_R = mScaledD2_R;
 
       // Modulation parameters — computed once per block.
       // excursion: how far the walk can stray from center, in samples.
@@ -329,6 +544,14 @@ namespace zaum
       uint64_t seed_D2_L = mSeed_D2_L;
       uint64_t seed_D1_R = mSeed_D1_R;
       uint64_t seed_D2_R = mSeed_D2_R;
+
+      // Copy HF damp filter state local for the sample loop.
+      double dampL = mDampL;
+      double dampR = mDampR;
+
+      // Copy DC blocker state local for the sample loop.
+      double dcx1_L = mDCx1_L;  double dcy1_L = mDCy1_L;
+      double dcx1_R = mDCx1_R;  double dcy1_R = mDCy1_R;
 
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
@@ -418,52 +641,46 @@ namespace zaum
         //   3. Integrate:  walk += n * step_size
         //   4. Clamp:      walk = clamp(walk, -excursion, +excursion)
         //   5. Compute fractional read position:
-        //        readPos = wrHead - base_delay + walk   (double)
+        //        readPos = wrHead - scaledBase + walk   (double)
         //        offset  = (int)floor(readPos)
         //        frac    = readPos - (double)offset
         //   6. Wrap to valid buffer indices (add size, mod size):
-        //        i0 = ((wrHead + offset + bufSize) % bufSize + bufSize) % bufSize
+        //        i0 = ((offset % bufSize) + bufSize) % bufSize
         //        i1 = (i0 + 1) % bufSize
-        //        NOTE: wrHead - base_delay is typically negative relative to
-        //        wrHead, so (wrHead - base_delay + walk) in absolute coords
-        //        is wrHead - (base_delay - walk). We fold this into the
-        //        modular arithmetic. Adding bufSize twice ensures no negative
-        //        result even if offset is deeply negative after floating mod.
         //   7. Interpolate: out = (1-frac)*buf[i0] + frac*buf[i1]
         //
-        // BOUNDS PROOF:
-        //   walk clamped to [-72, +72].
-        //   Fractional part frac ∈ [0, 1).
-        //   So i1 = i0+1 mod bufSize — always valid (mod handles wrap).
-        //   The integer offset from center is at most 72; i0 always lands
-        //   somewhere in [wrHead-base_delay-72 .. wrHead-base_delay+72]
-        //   mod bufSize — all of which are in [0, bufSize), since the
-        //   headroom is 128 samples each side and 72 < 128.
+        // DC BLOCKER: applied to tankIn_L / tankIn_R (before AP1), after
+        // accumulating diffIn + feedback. Removes DC and sub-4 Hz content
+        // before it enters the tank; prevents long-decay accumulation.
+        // Form: y[n] = x[n] - x[n-1] + R*y[n-1]  (R = kDCBlockR = 0.9995)
         //
-        // ORDERING DISCIPLINE (critical for correct cross-coupling):
-        //   Each loop's tankIn is formed from diffIn + last sample's
-        //   mFeedback_X (already set). Both loops advance completely
-        //   (producing d2Read_L and d2Read_R) for THIS sample. Then
-        //   mFeedback_L/R are updated from the cross outputs for NEXT
-        //   sample. This matches the existing single-loop convention:
-        //   mFeedback is set at end of sample for use on next sample.
-        //   No loop consumes the other's same-sample D2 read before
-        //   it is computed.
+        // HF DAMP: one-pole LP applied to d1Read (after D1, before AP2).
+        // Form: dampState += dampCoeff * (d1Read - dampState)
+        // Output = dampState. This is in the recirculating feedback path
+        // so each round trip accumulates one LP application → longer Decay
+        // with higher Damp = progressively darker tail.
         //
-        // Cross-couple wiring (coupling coefficient = 1.0, Dattorro §5):
+        // CROSS-COUPLE WIRING (Dattorro, coupling coefficient = 1.0):
         //   mFeedback_L = spiralFastSaturate(d2Read_R * g_d, 1.0)
         //   mFeedback_R = spiralFastSaturate(d2Read_L * g_d, 1.0)
         //
-        // 2×2 stability: the coupling matrix is [[0, g_d],[g_d, 0]].
-        // Eigenvalues are ±g_d = ±0.85, magnitude 0.85 < 1. Both
-        // allpass stages are unity-gain (|H|=1 for all ω). Per-loop
-        // Spiral governors are the additional hard safety net.
+        // ORDERING: Both loops fully computed for THIS sample before
+        // either feedback value is updated — no same-sample causality leak.
         // ----------------------------------------------------------------
 
         // -- L LOOP --
 
         // Accumulate: diffusion output + previous-sample cross-feed from R.
         double tankIn_L = diffIn + mFeedback_L;
+
+        // DC blocker on tank input (L loop).
+        // y[n] = x[n] - x[n-1] + R*y[n-1]
+        {
+          double dcOut = tankIn_L - dcx1_L + kDCBlockR * dcy1_L;
+          dcx1_L = tankIn_L;
+          dcy1_L = dcOut;
+          tankIn_L = dcOut;
+        }
 
         // AP1_L: plain Schroeder allpass, delay=kTA1=1087, g=0.70
         double ap1Out_L;
@@ -478,6 +695,7 @@ namespace zaum
         }
 
         // D1_L: Brownian-modulated read with linear interpolation.
+        // Uses Size-scaled base length (scaledD1_L).
         double d1Read_L;
         {
           // Write current sample to buffer.
@@ -491,14 +709,12 @@ namespace zaum
           if (walk_D1_L < -excursion) walk_D1_L = -excursion;
 
           // Fractional read position relative to write head.
-          // (mWrD1_L - kD1_L) is the integer center; walk offsets it.
-          double readPos = (double)(mWrD1_L - kD1_L) + walk_D1_L;
+          // (mWrD1_L - scaledD1_L) is the integer center; walk offsets it.
+          double readPos = (double)(mWrD1_L - scaledD1_L) + walk_D1_L;
           int    offset  = (int)floor(readPos);
           double frac    = readPos - (double)offset;
 
           // Map offset to valid buffer indices [0, kD1_L_size).
-          // The expression (offset % size + size) % size handles negative
-          // values correctly without UB (offset is always far from INT_MIN).
           int i0 = ((offset % kD1_L_size) + kD1_L_size) % kD1_L_size;
           int i1 = (i0 + 1) % kD1_L_size;
 
@@ -508,8 +724,12 @@ namespace zaum
           if (mWrD1_L >= kD1_L_size) mWrD1_L = 0;
         }
 
-        // HF damp: DISABLED this sub-phase.
-        double dampedD1_L = d1Read_L;
+        // HF damp: one-pole LP on D1 output (Schroeder/Jot feedback form).
+        // y += coeff * (x - y)  with state dampL.
+        // Damp=0 → coeff=1.0 → dampL tracks x exactly (passthrough).
+        // Damp>0 → coeff<1.0 → dampL lags x → LF-pass filtering.
+        dampL += dampCoeff * (d1Read_L - dampL);
+        double dampedD1_L = dampL;
 
         // AP2_L: plain Schroeder allpass, delay=kTA2=1471, g=0.50
         double ap2Out_L;
@@ -524,6 +744,7 @@ namespace zaum
         }
 
         // D2_L: Brownian-modulated read with linear interpolation.
+        // Uses Size-scaled base length (scaledD2_L).
         double d2Read_L;
         {
           mD2_L[mWrD2_L] = (float)ap2Out_L;
@@ -534,7 +755,7 @@ namespace zaum
           if (walk_D2_L >  excursion) walk_D2_L =  excursion;
           if (walk_D2_L < -excursion) walk_D2_L = -excursion;
 
-          double readPos = (double)(mWrD2_L - kD2_L) + walk_D2_L;
+          double readPos = (double)(mWrD2_L - scaledD2_L) + walk_D2_L;
           int    offset  = (int)floor(readPos);
           double frac    = readPos - (double)offset;
 
@@ -552,6 +773,14 @@ namespace zaum
         // Accumulate: diffusion output + previous-sample cross-feed from L.
         double tankIn_R = diffIn + mFeedback_R;
 
+        // DC blocker on tank input (R loop).
+        {
+          double dcOut = tankIn_R - dcx1_R + kDCBlockR * dcy1_R;
+          dcx1_R = tankIn_R;
+          dcy1_R = dcOut;
+          tankIn_R = dcOut;
+        }
+
         // AP1_R: plain Schroeder allpass, delay=kTA1=1087, g=0.70
         // Same coefficients as L; separate buffer for independent state.
         double ap1Out_R;
@@ -565,7 +794,7 @@ namespace zaum
           ap1Out_R = yOut;
         }
 
-        // D1_R: Brownian-modulated read, ASYMMETRIC base (6803), R-specific seed.
+        // D1_R: Brownian-modulated read, ASYMMETRIC base (scaledD1_R), R-specific seed.
         double d1Read_R;
         {
           mD1_R[mWrD1_R] = (float)ap1Out_R;
@@ -576,7 +805,7 @@ namespace zaum
           if (walk_D1_R >  excursion) walk_D1_R =  excursion;
           if (walk_D1_R < -excursion) walk_D1_R = -excursion;
 
-          double readPos = (double)(mWrD1_R - kD1_R) + walk_D1_R;
+          double readPos = (double)(mWrD1_R - scaledD1_R) + walk_D1_R;
           int    offset  = (int)floor(readPos);
           double frac    = readPos - (double)offset;
 
@@ -589,8 +818,9 @@ namespace zaum
           if (mWrD1_R >= kD1_R_size) mWrD1_R = 0;
         }
 
-        // HF damp: DISABLED this sub-phase.
-        double dampedD1_R = d1Read_R;
+        // HF damp: one-pole LP on D1_R output.
+        dampR += dampCoeff * (d1Read_R - dampR);
+        double dampedD1_R = dampR;
 
         // AP2_R: plain Schroeder allpass, delay=kTA2=1471, g=0.50
         double ap2Out_R;
@@ -604,7 +834,7 @@ namespace zaum
           ap2Out_R = yOut;
         }
 
-        // D2_R: Brownian-modulated read, ASYMMETRIC base (6343), R-specific seed.
+        // D2_R: Brownian-modulated read, ASYMMETRIC base (scaledD2_R), R-specific seed.
         double d2Read_R;
         {
           mD2_R[mWrD2_R] = (float)ap2Out_R;
@@ -615,7 +845,7 @@ namespace zaum
           if (walk_D2_R >  excursion) walk_D2_R =  excursion;
           if (walk_D2_R < -excursion) walk_D2_R = -excursion;
 
-          double readPos = (double)(mWrD2_R - kD2_R) + walk_D2_R;
+          double readPos = (double)(mWrD2_R - scaledD2_R) + walk_D2_R;
           int    offset  = (int)floor(readPos);
           double frac    = readPos - (double)offset;
 
@@ -672,6 +902,14 @@ namespace zaum
       mSeed_D2_L = seed_D2_L;
       mSeed_D1_R = seed_D1_R;
       mSeed_D2_R = seed_D2_R;
+
+      // Propagate HF damp state.
+      mDampL = dampL;
+      mDampR = dampR;
+
+      // Propagate DC blocker state.
+      mDCx1_L = dcx1_L;  mDCy1_L = dcy1_L;
+      mDCx1_R = dcx1_R;  mDCy1_R = dcy1_R;
     }
 
   private:
@@ -692,9 +930,9 @@ namespace zaum
     float mTA2_L[kTA2];
     int   mWrTA1_L, mWrTA2_L;
 
-    // Tank delay lines — L loop (with modulation headroom)
-    float mD1_L[kD1_L_size];
-    float mD2_L[kD2_L_size];
+    // Tank delay lines — L loop (sized for max sizeFactor=1.5 + headroom).
+    float mD1_L[kD1_L_size];   // 11038 samples
+    float mD2_L[kD2_L_size];   // 7908 samples
     int   mWrD1_L, mWrD2_L;
 
     // Tank allpass buffers — R loop (same lengths as L, separate state)
@@ -702,9 +940,9 @@ namespace zaum
     float mTA2_R[kTA2];
     int   mWrTA1_R, mWrTA2_R;
 
-    // Tank delay lines — R loop (ASYMMETRIC: D1_R=6803, D2_R=6343)
-    float mD1_R[kD1_R_size];
-    float mD2_R[kD2_R_size];
+    // Tank delay lines — R loop (sized for max sizeFactor=1.5 + headroom).
+    float mD1_R[kD1_R_size];   // 10462 samples
+    float mD2_R[kD2_R_size];   // 9772 samples
     int   mWrD1_R, mWrD2_R;
 
     // Recirculating feedback accumulators (double precision: these values
@@ -714,6 +952,24 @@ namespace zaum
     //                mFeedback_R is written from d2Read_L×g_d (L feeds R).
     double mFeedback_L;
     double mFeedback_R;
+
+    // HF damp filter state — one per loop (one-pole LP on D1 output).
+    // Initialized to 0 in constructor; converges quickly on first use.
+    double mDampL;
+    double mDampR;
+
+    // DC blocker state — one pair per loop.
+    // mDCx1_X: previous input sample; mDCy1_X: previous output sample.
+    double mDCx1_L;  double mDCy1_L;
+    double mDCx1_R;  double mDCy1_R;
+
+    // Size-scaled delay lengths — updated at block rate when Size changes.
+    // Initialized to base lengths (Size=0.5 default) in constructor.
+    int   mScaledD1_L;
+    int   mScaledD2_L;
+    int   mScaledD1_R;
+    int   mScaledD2_R;
+    float mLastSize;   // tracks last seen Size value to detect changes
 
     // Brownian LFO state — four independent xorshift64 PRNGs + walk accumulators.
     // Seeds initialized to distinct non-zero constants in constructor.
