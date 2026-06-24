@@ -1,54 +1,57 @@
 // zaum::STFTSpectral
 //
-// BUILD SUB-PHASE 0.2.0.1 — STFT identity passthrough (ShyFFT, N=1024,
-// hop 256, sine window, COLA-verified transparent in the offline rig).
-// SMD + spectral ops land in 0.2.0.2+. Inherent latency 1280 smp ≈ 26.7 ms.
+// BUILD SUB-PHASE 0.2.0.3 — Diffuse (V) phase randomization + Damp (HF tilt).
+// ShyFFT N=1024, hop R=256, sine window. Inherent latency 1280 smp ≈ 26.7 ms.
 //
-// Pipeline per hop:
-//   analysis ring → analysis window → ShyFFT::Direct → (identity: copy bins)
-//   → ShyFFT::Inverse → synthesis window × 1/(2N) → overlap-add into synthesis ring
+// What changed from 0.2.0.2:
+//   1. DIFFUSE (V): per-bin phase randomization. After RectToPolar, before
+//      PolarToRect, each complex bin's phase gets:
+//        phi = phase_in + V * xi_k     xi_k ~ uniform[-pi, pi]
+//      V=0 → coherent (0.2.0.2 sound — mechanical/metallic).
+//      V rising → each bin's tail broadens into narrowband noise → lush diffuse reverb.
+//      V=1 → full randomization → whisperization / spectral mangling.
+//      V is the headline control. Default 0.4 (Sujet §7 table).
 //
-// ShyFFT API (verified by offline rig — atom must mirror this exactly):
-//   fft.Direct(input, output)   — forward; input is CLOBBERED (used as scratch)
-//   fft.Inverse(input, output)  — inverse; input is CLOBBERED; output scaled by N
-//   Bin layout for bin k (1 ≤ k ≤ N/2−1):
-//     real[k]      = output[k]
-//     −imag_DFT[k] = output[N/2 + k]   (ShyFFT stores negated imaginary)
-//   DC:      output[0]    = real only
-//   Nyquist: output[N/2]  = real only
-//   For polar ops (SMD phase): mag = sqrt(r²+i²), phase = atan2(−output[N/2+k], output[k])
+//   2. DAMP: per-bin RT60 tilt. Each bin gets a decayed g:
+//        g_k = g_base * damp_factor^k   where damp_factor in (0,1]
+//      Damp=0 → damp_factor=1 → flat (identical to 0.2.0.2 across all bins).
+//      Damp=1 → HF bins decay faster than LF (dark tail).
+//      Mapping: damp_factor = pow(kDampFloor, Damp) so Damp=0→1.0, Damp=1→kDampFloor.
+//      g_k clamped to [0, kGMax] per bin.
+//      NOTE: damp_factor^k is computed by running multiplication (no pow per bin).
 //
-// Normalization (matches Clouds stft.cc ShyFFT path):
-//   IFFT scale = N  (no built-in 1/N in ShyFFT Inverse)
-//   COLA sum   = 2.0  (sine window at 4× overlap, verified at −307 dB ripple)
-//   Combined:  IFFT_NORM = 1/(2N) = 1/2048 applied per sample after Inverse
-//   Equivalent Clouds formula: 2R/N² = 2×256/1024² = 1/2048 ✓
+// SMD pipeline per hop (full, with V and Damp):
+//   analysis ring → window → ShyFFT::Direct
+//   → per bin: mag = |X[k]|, phase = atan2(-nim, re)
+//              M_out[k] = mag + M_out[k] * g_k          (g_k = g_base * damp_factor^k)
+//              phi = phase + V * xi_k                    (xi from xorshift PRNG)
+//              out = M_out[k] * e^{j*phi}
+//   → ShyFFT::Inverse → window × 1/(2N) → overlap-add
 //
-// Latency: 1280 samples = N + R = 1024 + 256.
-//   Due to Clouds-style ring init: process_ptr starts at (2R) % (N+R) = 512.
-//   Dry delay compensates exactly: dry ring also sized 1280, providing unity
-//   at Mix=0; at Mix=1 the wet output is the STFT round-trip ≈ input delayed
-//   by 1280 smp — the emu transparency gate.
+// DC (k=0) and Nyquist (k=N/2) are real-only bins; they skip phase randomization
+// and Damp tilt (they always use g_base, and sign is preserved as in 0.2.0.2).
 //
-// Internal-stereo: L and R each have independent analysis/synthesis rings and
-// dry delay. One shared ShyFFT instance (Direct/Inverse are stateless per call;
-// L and R are processed sequentially in process()).
+// xorshift64 PRNG: one per channel (L seed ≠ R seed → stereo decorrelation).
+// xi_k drawn per complex bin per hop. Mapping: uint64 → float [-pi, pi].
+// Never libc rand() on the audio thread.
 //
-// All 8 parameters are declared for a stable surface.
-// Only Mix is DSP-wired this sub-phase; the remaining 7 are INERT stubs.
+// ShyFFT packing (verified by offline rig — unchanged):
+//   real[k]      = spectrum[k]        k=0..N/2
+//   -imag_DFT[k] = spectrum[N/2 + k]  k=1..N/2-1  (ShyFFT stores negated imag)
+//   phase = atan2(-nim, re);  repack: spectrum[k]=m*cos(phi), spectrum[N/2+k]=m*sin(phi)
+//   (sin(phi) = -(-imag)/mag when phi=phase, i.e. nim_out = m*sin(phi) correctly)
+//
+// Normalization: IFFT_NORM = 1/(2N) = 1/2048. COLA sum=2.0 at 4×.
+// Decay → g: log-linear RT60 map, unchanged from 0.2.0.2.
+// Wired params: Decay, Diffuse, Damp, Mix. Freeze/Blur/Bloom/Predelay INERT.
 
 #pragma once
 
 #include <od/config.h>
 #include <od/objects/Object.h>
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
-
-// NOTE: ShyFFT is a template-heavy header that SWIG cannot parse.
-// Everything that references it — the include, the member, and process() —
-// must be inside #ifndef SWIGLUA so the SWIG step never sees it.
-// The addInput/addOutput/addParameter calls live outside the guard
-// so SWIG can build the Lua bindings for the public surface.
 
 #ifndef SWIGLUA
 #include "stmlib/fft/shy_fft.h"
@@ -58,15 +61,37 @@ namespace zaum
 {
 
   // ---------------------------------------------------------------------------
-  // STFT framework constants (N=1024, R=256, 4× overlap / 75%)
+  // STFT framework constants
   // ---------------------------------------------------------------------------
-  static const int kStftN    = 1024;         // FFT / frame size
-  static const int kStftR    = 256;          // hop size
-  static const int kStftBuf  = kStftN + kStftR;   // ring buffer size (1280)
-  // Inherent latency = kStftBuf = N + R samples (Clouds ring-buffer scheme).
-  static const int kStftLat  = kStftBuf;    // 1280 samples ≈ 26.7 ms @ 48 kHz
-  // Normalization: 1/(2N). Compensates ShyFFT Inverse scale of N plus COLA sum of 2.
+  static const int   kStftN    = 1024;
+  static const int   kStftR    = 256;
+  static const int   kStftBuf  = kStftN + kStftR;
+  static const int   kStftLat  = kStftBuf;
   static const float kStftNorm = 1.0f / (2.0f * (float)kStftN);
+  static const int   kStftBins = kStftN / 2 + 1;   // 513
+
+  // ---------------------------------------------------------------------------
+  // SMD + Damp tuning constants
+  // ---------------------------------------------------------------------------
+  static const double kRT60Min  = 0.3;
+  static const double kRT60Max  = 120.0;
+  static const double kGMax     = 0.9999;
+  static const float  kMagClamp = 32.0f;
+
+  // Damp: per-bin g multiplier per bin index.
+  //   g_k = g_base * damp_factor^k
+  //   damp_factor = pow(kDampFloor, Damp)
+  //   Damp=0  → damp_factor=1.0  → flat decay across all bins (no tilt)
+  //   Damp=1  → damp_factor=kDampFloor → HF bins decay much faster than LF
+  //
+  // kDampFloor: the damp_factor at Damp=1.
+  // Must satisfy: damp_factor^(N/2) gives a reasonable HF rolloff at Damp=1.
+  // At N/2=512 bins (Nyquist), damp_factor^512 = kDampFloor^512.
+  // We want g_Nyquist / g_DC ≈ a large ratio (e.g. HF decays ~10× faster).
+  // kDampFloor = 0.99: damp_factor^512 = 0.99^512 ≈ 0.006 → ~44 dB faster decay at Nyq.
+  // This is a strong tilt; at Damp=0.5: factor=0.99^0.5≈0.995, ^512≈0.075 → ~22 dB.
+  // PRIMARY TUNING KNOB: adjust kDampFloor for darker/brighter maximum tilt.
+  static const double kDampFloor = 0.99;
 
   class STFTSpectral : public od::Object
   {
@@ -86,7 +111,6 @@ namespace zaum
       addParameter(mPredelay);
       addParameter(mMix);
 
-      // All ring/scratch buffers to zero so startup produces silence.
       memset(mAnalysisL,  0, sizeof(mAnalysisL));
       memset(mAnalysisR,  0, sizeof(mAnalysisR));
       memset(mSynthesisL, 0, sizeof(mSynthesisL));
@@ -95,26 +119,31 @@ namespace zaum
       memset(mDryR,       0, sizeof(mDryR));
 
 #ifndef SWIGLUA
-      // Compute the MLT sine window: w(n) = sin(pi*(n+0.5)/N)
-      // Analysis × synthesis product = w² = Hann shape.
-      // COLA sum at 4× overlap = 2.0 (analytically exact, rig verified).
       for (int n = 0; n < kStftN; ++n) {
         mWindow[n] = sinf((float)M_PI * ((float)n + 0.5f) / (float)kStftN);
       }
 
-      // Initialize ShyFFT (builds trig tables and bit-reversal LUT).
       mFFT.Init();
+
+      memset(mMagAccL, 0, sizeof(mMagAccL));
+      memset(mMagAccR, 0, sizeof(mMagAccR));
 #endif
 
-      // Ring/state pointer init — mirrors Clouds STFT::Reset().
       mBufPtr    = 0;
-      // process_ptr starts at (2*R) % BufSize = 512 (Clouds convention).
-      // This provides N+R = 1280 samples inherent latency.
       mProcPtr   = (2 * kStftR) % kStftBuf;
       mBlockSize = 0;
       mReady     = 0;
       mDone      = 0;
       mDryPtr    = 0;
+      mG         = 0.0f;
+      mV         = 0.4f;
+      mDampFactor = 1.0f;
+
+      // PRNG seeds: L and R use distinct non-zero constants so the two channels
+      // generate independent xi sequences from sample 0 → stereo decorrelation.
+      // Seed neighborhoods chosen to be far apart in 64-bit state space.
+      mPrngL = UINT64_C(0x9E3779B97F4A7C15);   // golden-ratio constant
+      mPrngR = UINT64_C(0xBF58476D1CE4E5B9);   // splitmix64 constant
     }
 
     virtual ~STFTSpectral() {}
@@ -124,14 +153,14 @@ namespace zaum
     od::Inlet     mInR{"In R"};
     od::Outlet    mOutL{"Out L"};
     od::Outlet    mOutR{"Out R"};
-    od::Parameter mDecay{"Decay",    0.5f};
-    od::Parameter mDamp{"Damp",      0.3f};
+    od::Parameter mDecay{"Decay",     0.5f};
+    od::Parameter mDamp{"Damp",       0.3f};
     od::Parameter mDiffuse{"Diffuse", 0.4f};
-    od::Parameter mFreeze{"Freeze",  0.0f};
-    od::Parameter mBlur{"Blur",      0.0f};
-    od::Parameter mBloom{"Bloom",    0.0f};
+    od::Parameter mFreeze{"Freeze",   0.0f};
+    od::Parameter mBlur{"Blur",       0.0f};
+    od::Parameter mBloom{"Bloom",     0.0f};
     od::Parameter mPredelay{"Predelay", 0.0f};
-    od::Parameter mMix{"Mix",        0.4f};
+    od::Parameter mMix{"Mix",         0.4f};
 
     virtual void process()
     {
@@ -140,51 +169,54 @@ namespace zaum
       float* out1 = mOutL.buffer();
       float* out2 = mOutR.buffer();
 
-      // Read Mix at block rate (only wired DSP param this sub-phase).
-      const float mix = mMix.value();
-      const float dry = 1.0f - mix;
+      const float mix   = mMix.value();
+      const float dry   = 1.0f - mix;
+      const float decay = mDecay.value();
+      const float damp  = mDamp.value();
+      mV = mDiffuse.value();   // V cached for processHop
 
-      // Process one FRAMELENGTH block.
-      // The hop (R=256) typically spans multiple blocks (block=32 → 8 blocks per hop).
-      // We accumulate samples until a hop is ready, then fire the FFT.
+      // Decay → RT60 → g_base (uniform base decay, same as 0.2.0.2).
+      {
+        const double fs   = (double)globalConfig.sampleRate;
+        const double rt60 = kRT60Min * pow(kRT60Max / kRT60Min, (double)decay);
+        double g = pow(10.0, -3.0 * (double)kStftR / (rt60 * fs));
+        if (g > kGMax) g = kGMax;
+        mG = (float)g;
+      }
+
+      // Damp → per-bin tilt factor.
+      // damp_factor = pow(kDampFloor, Damp):  Damp=0→1.0 (flat), Damp=1→kDampFloor.
+      // g_k = g_base * damp_factor^k, computed by running multiplication in the bin loop.
+      // pow() called once per block (block rate), not per bin.
+      {
+        mDampFactor = (float)pow(kDampFloor, (double)damp);
+      }
+
+      // Sample loop: ring I/O + dry delay + mix.
       for (int i = 0; i < FRAMELENGTH; ++i) {
+        const float inL = in1[i];
+        const float inR = in2[i];
 
-        // --- Write input into analysis rings, read output from synthesis rings ---
-        const float inSampleL = in1[i];
-        const float inSampleR = in2[i];
-
-        mAnalysisL[mBufPtr] = inSampleL;
-        mAnalysisR[mBufPtr] = inSampleR;
+        mAnalysisL[mBufPtr] = inL;
+        mAnalysisR[mBufPtr] = inR;
 
         const float wetL = mSynthesisL[mBufPtr];
         const float wetR = mSynthesisR[mBufPtr];
 
-        // --- Dry delay: compensates the 1280-sample inherent STFT latency ---
-        // Write current input into the dry ring at the current dry write head,
-        // then read the delayed sample that was written 1280 samples ago.
-        // The dry ring is exactly kStftLat (1280) samples long.
-        mDryL[mDryPtr] = inSampleL;
-        mDryR[mDryPtr] = inSampleR;
-        // Read the oldest sample in the ring (one full ring revolution ago).
-        // Because the ring is exactly kStftLat long and we advance by 1 per sample,
-        // the sample at (mDryPtr + 1) % kStftLat was written kStftLat samples ago.
-        const int dryReadPtr = (mDryPtr + 1) % kStftLat;
-        const float dryL = mDryL[dryReadPtr];
-        const float dryR = mDryR[dryReadPtr];
-
-        // Advance dry pointer
+        mDryL[mDryPtr] = inL;
+        mDryR[mDryPtr] = inR;
+        const int   dryRead = (mDryPtr + 1) % kStftLat;
+        const float dryL    = mDryL[dryRead];
+        const float dryR    = mDryR[dryRead];
         ++mDryPtr;
         if (mDryPtr >= kStftLat) mDryPtr = 0;
 
-        // --- Mix dry + wet ---
         out1[i] = dry * dryL + mix * wetL;
         out2[i] = dry * dryR + mix * wetR;
 
-        // --- Advance buffer pointer ---
         ++mBufPtr;
         if (mBufPtr >= kStftBuf) mBufPtr = 0;
 
-        // --- Accumulate toward next hop ---
         ++mBlockSize;
         if (mBlockSize >= kStftR) {
           mBlockSize = 0;
@@ -192,7 +224,6 @@ namespace zaum
         }
       }
 
-      // --- Process all pending hops (usually 0 or 1 per block) ---
       while (mReady != mDone) {
         processHop();
         ++mDone;
@@ -202,14 +233,9 @@ namespace zaum
     }
 
   private:
-    // -------------------------------------------------------------------------
-    // processHop(): one FFT→identity→IFFT→OLA cycle.
-    // Called when a full hop (R samples) has accumulated in the analysis ring.
-    // -------------------------------------------------------------------------
     void processHop()
     {
-      // 1. Extract frame from analysis ring, apply analysis window.
-      //    Read kStftN samples starting at mProcPtr (wrapping at kStftBuf).
+      // 1. Windowed analysis frame.
       {
         int src = mProcPtr;
         for (int i = 0; i < kStftN; ++i) {
@@ -220,64 +246,31 @@ namespace zaum
         }
       }
 
-      // 2. Forward FFT — L channel.
-      //    mFFT.Direct(input, output): input is CLOBBERED (used as internal scratch).
-      //    mFftBufL is clobbered; mFftOutL receives the split-real spectrum.
+      // 2. Forward FFT.
       mFFT.Direct(mFftBufL, mFftOutL);
-
-      // 3. IDENTITY processing (0.2.0.1 — no spectral modification yet).
-      //    Copy spectrum unchanged from fft_out to ifft_in.
-      //    SMD magnitude accumulator, phase synthesis, etc. replace this in 0.2.0.2+.
-      //    mFftBufL is reused as ifft_in (safe: Direct has finished with it).
-      for (int k = 0; k < kStftN; ++k) {
-        mFftBufL[k] = mFftOutL[k];
-      }
-
-      // 4. Inverse FFT — L channel.
-      //    mFFT.Inverse(input, output): input is CLOBBERED; output scaled by N.
-      //    mFftBufL is clobbered; mIfftOutL receives time-domain signal ×N.
-      mFFT.Inverse(mFftBufL, mIfftOutL);
-
-      // 5. Apply synthesis window, normalize by 1/(2N), overlap-add into synthesis ring.
-      //    OLA boundary: first (N−R) samples overlap with the previous frame's tail
-      //    (accumulated via +=). The last R samples are new territory (overwrite).
-      //    Getting this boundary wrong produces a click every R samples.
-      {
-        int dst = mProcPtr;
-        for (int i = 0; i < kStftN; ++i) {
-          const float s = mIfftOutL[i] * mWindow[i] * kStftNorm;
-          if (i < kStftN - kStftR) {
-            mSynthesisL[dst] += s;   // overlap-add region
-          } else {
-            mSynthesisL[dst]  = s;   // new region: overwrite stale content
-          }
-          ++dst;
-          if (dst >= kStftBuf) dst -= kStftBuf;
-        }
-      }
-
-      // --- Repeat for R channel ---
-
-      // 2R. Forward FFT — R channel.
       mFFT.Direct(mFftBufR, mFftOutR);
 
-      // 3R. Identity: copy spectrum.
-      for (int k = 0; k < kStftN; ++k) {
-        mFftBufR[k] = mFftOutR[k];
-      }
+      // 3. SMD + Diffuse + Damp — L and R channels.
+      //    Independent PRNG state per channel → decorrelated stereo phase noise.
+      smdProcess(mFftOutL, mFftBufL, mMagAccL, mG, mV, mDampFactor, mPrngL);
+      smdProcess(mFftOutR, mFftBufR, mMagAccR, mG, mV, mDampFactor, mPrngR);
 
-      // 4R. Inverse FFT — R channel.
+      // 4. Inverse FFT.
+      mFFT.Inverse(mFftBufL, mIfftOutL);
       mFFT.Inverse(mFftBufR, mIfftOutR);
 
-      // 5R. Synthesis window + OLA — R channel.
+      // 5. Synthesis window + 1/(2N) + overlap-add.
       {
         int dst = mProcPtr;
         for (int i = 0; i < kStftN; ++i) {
-          const float s = mIfftOutR[i] * mWindow[i] * kStftNorm;
+          const float sL = mIfftOutL[i] * mWindow[i] * kStftNorm;
+          const float sR = mIfftOutR[i] * mWindow[i] * kStftNorm;
           if (i < kStftN - kStftR) {
-            mSynthesisR[dst] += s;
+            mSynthesisL[dst] += sL;
+            mSynthesisR[dst] += sR;
           } else {
-            mSynthesisR[dst]  = s;
+            mSynthesisL[dst]  = sL;
+            mSynthesisR[dst]  = sR;
           }
           ++dst;
           if (dst >= kStftBuf) dst -= kStftBuf;
@@ -286,33 +279,101 @@ namespace zaum
     }
 
     // -------------------------------------------------------------------------
-    // Member declarations — inside #ifndef SWIGLUA so SWIG never parses them.
+    // smdProcess(): SMD accumulate + Damp tilt + Diffuse phase randomization.
+    //
+    // spectrum[]:  ShyFFT Direct output (N floats).
+    // ifft_in[]:   repacked spectrum for Inverse.
+    // magAcc[]:    per-bin magnitude accumulator (kStftBins floats, persistent).
+    // g:           base decay factor (uniform pre-tilt).
+    // V:           phase randomization depth 0..1.
+    // dampFactor:  per-bin g tilt multiplier (1.0=flat, <1.0=HF darker).
+    // prng:        per-channel xorshift64 state (updated in place → decorrelated L/R).
+    // -------------------------------------------------------------------------
+    void smdProcess(const float* spectrum, float* ifft_in,
+                    float* magAcc, float g, float V,
+                    float dampFactor, uint64_t& prng)
+    {
+      // DC (k=0): real-only. No phase randomization. g_base used (no Damp tilt at DC).
+      {
+        const float re  = spectrum[0];
+        const float mag = (re >= 0.0f) ? re : -re;
+        float m = mag + magAcc[0] * g;
+        if (m > kMagClamp) m = kMagClamp;
+        magAcc[0] = m;
+        ifft_in[0] = (re >= 0.0f) ? m : -m;
+      }
+
+      // Complex bins k=1..N/2-1: SMD + Damp tilt + Diffuse phase randomization.
+      // g_k = g_base * dampFactor^k, accumulated by running multiplication.
+      // Starting with dampFactor^1 at k=1.
+      float g_k = g * dampFactor;   // g for k=1; multiplied by dampFactor each step
+
+      for (int k = 1; k < kStftN / 2; ++k) {
+        // Clamp per-bin g to [0, kGMax] (dampFactor<1 can only reduce g, but
+        // clamp anyway for safety in case of parameter edge cases).
+        const float gk = (g_k < (float)kGMax) ? g_k : (float)kGMax;
+
+        const float re  = spectrum[k];
+        const float nim = spectrum[kStftN / 2 + k];   // nim = -imag_DFT[k]
+
+        // RectToPolar.
+        const float mag   = sqrtf(re * re + nim * nim);
+        const float phase = atan2f(-nim, re);   // standard DFT phase
+
+        // SMD accumulate with per-bin g.
+        float m = mag + magAcc[k] * gk;
+        if (m > kMagClamp) m = kMagClamp;
+        magAcc[k] = m;
+
+        // Diffuse: per-bin phase randomization.
+        // Draw xi ~ uniform[-pi, pi] from the running PRNG.
+        // V=0 → phi=phase (coherent, identical to 0.2.0.2).
+        // V=1 → phi = phase + full-range random → decorrelated noise tail.
+        // V=0.4 (default) → lush diffuse reverb, the Sujet sweet spot.
+        // xorshift64 inline (Marsaglia 2003) — avoids ODR collision with APFTank.h
+        prng ^= prng << 13; prng ^= prng >> 7; prng ^= prng << 17;
+        // Map upper 24 bits → float [-pi, pi)
+        const float xi = ((float)(prng >> 40) * (1.0f / 8388608.0f) - 1.0f) * (float)M_PI;
+        const float phi = phase + V * xi;
+
+        // PolarToRect + repack in ShyFFT convention.
+        // ShyFFT spectrum[N/2+k] stores -imag_DFT, so we store m*sin(phi)
+        // (sin of the output phase, which equals -(-imag)/mag when phi=phase).
+        ifft_in[k]               = m * cosf(phi);
+        ifft_in[kStftN / 2 + k] = m * sinf(phi);
+
+        // Advance per-bin g tilt for next bin.
+        g_k *= dampFactor;
+      }
+
+      // Nyquist (k=N/2): real-only. No phase randomization. g_base used.
+      {
+        const int   kNyq = kStftN / 2;
+        const float re   = spectrum[kNyq];
+        const float mag  = (re >= 0.0f) ? re : -re;
+        float m = mag + magAcc[kNyq] * g;
+        if (m > kMagClamp) m = kMagClamp;
+        magAcc[kNyq] = m;
+        ifft_in[kNyq] = (re >= 0.0f) ? m : -m;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Members
     // -------------------------------------------------------------------------
 
-    // ShyFFT instance: one shared for L and R (stateless per call, sequential use).
-    // ShyFFT<float, 1024, stmlib::RotationPhasor>: matches Clouds' non-ARM fallback.
-    // DISALLOW_COPY_AND_ASSIGN is in ShyFFT — declare as member, not pointer.
     stmlib::ShyFFT<float, kStftN, stmlib::RotationPhasor> mFFT;
 
-    // MLT sine window table (computed once in constructor).
     float mWindow[kStftN];
 
-    // Analysis rings (input accumulation). Size = N + R = 1280.
     float mAnalysisL[kStftBuf];
     float mAnalysisR[kStftBuf];
-
-    // Synthesis rings (OLA output accumulation). Size = N + R = 1280.
     float mSynthesisL[kStftBuf];
     float mSynthesisR[kStftBuf];
 
-    // Dry delay lines (1280 samples = kStftLat, compensates inherent STFT latency).
     float mDryL[kStftLat];
     float mDryR[kStftLat];
 
-    // FFT scratch buffers.
-    // mFftBufL/R: windowed analysis frame → clobbered by Direct → reused as ifft_in.
-    // mFftOutL/R: output of Direct (split-real spectrum).
-    // mIfftOutL/R: output of Inverse (time-domain, scaled ×N).
     float mFftBufL[kStftN];
     float mFftBufR[kStftN];
     float mFftOutL[kStftN];
@@ -320,13 +381,26 @@ namespace zaum
     float mIfftOutL[kStftN];
     float mIfftOutR[kStftN];
 
-    // Ring buffer state (mirrors Clouds STFT member names).
-    int mBufPtr;      // write head for analysis ring / read head for synthesis ring
-    int mProcPtr;     // frame extraction pointer (starts at 2R = 512)
-    int mBlockSize;   // samples accumulated in current hop (0..R-1)
-    int mReady;       // hops accumulated and waiting for FFT processing
-    int mDone;        // hops already processed (mReady == mDone → nothing pending)
-    int mDryPtr;      // write head for dry delay ring
+    // SMD magnitude accumulators — persistent reverb tail state.
+    float mMagAccL[kStftBins];
+    float mMagAccR[kStftBins];
+
+    // xorshift64 PRNG state — one per channel for independent stereo phase noise.
+    uint64_t mPrngL;
+    uint64_t mPrngR;
+
+    // Ring/hop state.
+    int   mBufPtr;
+    int   mProcPtr;
+    int   mBlockSize;
+    int   mReady;
+    int   mDone;
+    int   mDryPtr;
+
+    // Block-rate cached parameters.
+    float mG;           // base decay factor from Decay param
+    float mV;           // phase randomization depth from Diffuse param
+    float mDampFactor;  // per-bin g tilt multiplier from Damp param
 
 #endif  // SWIGLUA
   };
