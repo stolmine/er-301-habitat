@@ -1,30 +1,32 @@
 // zaum::STFTSpectral
 //
-// BUILD SUB-PHASE 0.2.0.9 — Blur redesigned: cross-time IIR magnitude smoother;
-//   cross-bin 3-tap removed; alpha = 1 - exp(-6 * Blur).
+// BUILD SUB-PHASE 0.2.0.10 — Bloom: per-bin asymmetric IIR slow-rise/fast-fall
+//   + frequency stagger; chains after Blur (magAcc → blurState → bloomState → synth).
 //
-//   Replaces the 0.2.0.8 symmetric 3-tap cross-bin magnitude kernel with a
-//   per-bin cross-TIME first-order IIR exponential smoother (pvsmooth model).
-//   Each bin k carries persistent state blurState[k] that is updated every hop:
-//     blurState[k] = alpha * blurState[k] + (1-alpha) * magAcc[k]
-//   The synth pass then uses blurState[k] as the magnitude (magAcc[k] is left
-//   UNTOUCHED — Freeze and Decay continue to operate on it unmodified).
+//   0.2.0.9 Blur (cross-time symmetric IIR) unchanged. This adds a second per-bin
+//   IIR stage with ASYMMETRIC coefficients: slow rise (controlled by Bloom param,
+//   freq-staggered so HF builds in later), instant fall (kBloomAlphaFall = 0).
 //
-//   alpha is computed once per block in process():
-//     mBlurAlpha = 1.0f - expf(-6.0f * mBlurAmt)
-//   Blur=0 → alpha=0 → blurState[k] = magAcc[k] every hop → bit-identical to
-//   0.2.0.7. Blur=0.5 → alpha≈0.950 (tau≈19 hops≈100 ms). Blur=0.9 → alpha≈0.998.
-//   Blur=1.0 → alpha≈0.998 (very long time constant, approaches freeze-like sustain).
+//   Per-bin rise-alpha table (recomputed only when Bloom param changes):
+//     mBloomStagger[k] = 1 + kBloomStagger * k/(N/2)    // 1.0 at DC, 4.0 at Nyquist
+//     mBloomAlphaRise[k] = 1 - exp(-6 * Bloom * mBloomStagger[k])
+//   → HF bins have larger alpha_rise → slower rise → bloom in later → brightening swell.
 //
-//   Freeze interaction: magAcc[k] converges toward a held value at Freeze=1;
-//   blurState[k] then smoothly converges toward that same value — "creep into freeze."
+//   Per-hop update (feed from blurState[k]; fall = snap; rise = freq-staggered slow):
+//     if blurState[k] >= bloomState[k]: rise path (slow)
+//       bloomState[k] = mBloomAlphaRise[k]*bloomState[k] + (1-mBloomAlphaRise[k])*blurState[k]
+//     else: fall path (fast)
+//       bloomState[k] = kBloomAlphaFall*bloomState[k]   + (1-kBloomAlphaFall)*blurState[k]
+//   Synth reads bloomState[k]. magAcc and blurState are UNTOUCHED by Bloom.
 //
-//   Two-pass smdProcess structure:
-//   1. Accumulate pass (k=0..N/2): SMD+Freeze+Damp into magAcc[k]; store
-//      per-bin base phase into phaseScratch[k] (atan2 for complex bins,
-//      sign-encoded +1/-1 for DC/Nyquist). Update blurState[k] via IIR.
-//   2. Synth pass (k=0..N/2): synthesize from blurState[k]+stored phase.
-//      xi drawn from PRNG for complex bins in same k order as before.
+//   Bloom=0 → mBloomAlphaRise[k]=0, kBloomAlphaFall=0 → bloomState[k]=blurState[k]
+//   every hop → bit-identical to 0.2.0.9.
+//
+//   Three-pass smdProcess structure (0.2.0.10):
+//   1. Accumulate pass (k=0..N/2): SMD+Freeze+Damp into magAcc[k]; update
+//      blurState[k] via symmetric IIR; store base phase in phaseScratch[k].
+//   2. Bloom pass (k=0..N/2): asymmetric IIR from blurState[k] into bloomState[k].
+//   3. Synth pass (k=0..N/2): synthesize from bloomState[k] + stored phase + PRNG xi.
 //
 //   Below: 0.2.0.7 spiral wet-output governor (clip/runaway safety).
 //   0.2.0.6 Freeze fix (decay extension + floored input).
@@ -65,19 +67,22 @@
 //   DC and Nyquist also get the Freeze lerp (same formula, no phase path).
 //   The same kMagClamp backstop applies.
 //
-// SMD pipeline per hop (full, with Decay, Damp, Diffuse, Freeze, Blur):
+// SMD pipeline per hop (full, with Decay, Damp, Diffuse, Freeze, Blur, Bloom):
 //   analysis ring → window → ShyFFT::Direct
 //   → pass 1: per bin: mag = |X[k]|, phase = atan2(-nim, re)
 //              gEff = g_k + freeze*(1-g_k);  inputGain = max(1-freeze, floor)
 //              M_out[k] = inputGain*mag + M_out[k]*gEff  (clamped)
-//              blurState[k] = alpha*blurState[k] + (1-alpha)*M_out[k]   // IIR time smoother
+//              blurState[k] = alpha*blurState[k] + (1-alpha)*M_out[k]   // symmetric IIR
 //              phaseScratch[k] = phase (or sign for DC/Nyquist)
-//   → pass 2: per bin: phi = phaseScratch[k] + V * xi_k (complex); or sign*blurState (DC/Nyq)
-//              out = blurState[k] * e^{j*phi}
+//   → pass 2: per bin: asymmetric IIR bloomState[k] from blurState[k]
+//              rise (blurState>=bloomState): bloomState[k] = alphaRise[k]*bloomState[k] + (1-alphaRise[k])*blurState[k]
+//              fall (blurState<bloomState):  bloomState[k] = kBloomAlphaFall*bloomState[k] + (1-kBloomAlphaFall)*blurState[k]
+//   → pass 3: per bin: phi = phaseScratch[k] + V * xi_k (complex); or sign*bloomState (DC/Nyq)
+//              out = bloomState[k] * e^{j*phi}
 //   → ShyFFT::Inverse → window × 1/(2N) → overlap-add
 //
 // ShyFFT packing, normalization, PRNG, OLA — all unchanged from 0.2.0.3.
-// Wired params: Decay, Damp, Diffuse, Freeze, Blur, Mix. Bloom/Predelay INERT.
+// Wired params: Decay, Damp, Diffuse, Freeze, Blur, Bloom, Mix. Predelay INERT.
 
 #pragma once
 
@@ -137,6 +142,13 @@ namespace zaum
   // PRIMARY TUNING KNOB: adjust kDampFloor for darker/brighter maximum tilt.
   static const double kDampFloor = 0.99;
 
+  // Bloom: per-bin asymmetric IIR — slow rise (freq-staggered), fast fall.
+  //   mBloomStagger[k] = 1 + kBloomStagger * k/(N/2)
+  //   → DC rise multiplier = 1.0×, Nyquist = (1 + kBloomStagger)×
+  //   HF bins get a larger alpha_rise → slower rise → bloom in later → brightening swell.
+  static const float  kBloomStagger  = 3.0f;    // HF rise time up to 4× LF
+  static const float  kBloomAlphaFall = 0.0f;   // snap release: fall tracks magAcc/blurState immediately
+
   class STFTSpectral : public od::Object
   {
   public:
@@ -174,6 +186,19 @@ namespace zaum
       memset(mPhaseScratch, 0, sizeof(mPhaseScratch));
       memset(mBlurStateL,   0, sizeof(mBlurStateL));
       memset(mBlurStateR,   0, sizeof(mBlurStateR));
+      memset(mBloomStateL,  0, sizeof(mBloomStateL));
+      memset(mBloomStateR,  0, sizeof(mBloomStateR));
+
+      // Pre-compute the per-bin stagger multiplier (static, never changes).
+      // mBloomStagger[k] = 1.0 + kBloomStagger * k/(N/2)
+      // → DC=1.0, Nyquist=1+kBloomStagger=4.0. HF rises up to 4× slower than DC.
+      for (int k = 0; k <= kStftN / 2; ++k) {
+        mBloomStagger[k] = 1.0f + kBloomStagger * (float)k / (float)(kStftN / 2);
+      }
+
+      // Bloom alpha-rise table initialised to 0 (Bloom=0 passthrough).
+      // Recomputed lazily in process() when Bloom param changes.
+      memset(mBloomAlphaRise, 0, sizeof(mBloomAlphaRise));
 #endif
 
       mBufPtr    = 0;
@@ -188,6 +213,8 @@ namespace zaum
       mFreezeAmt = 0.0f;
       mBlurAmt   = 0.0f;
       mBlurAlpha = 0.0f;
+      mBloomAmt  = 0.0f;
+      mLastBloom = -1.0f;   // force table recompute on first block
 
       // PRNG seeds: L and R use distinct non-zero constants so the two channels
       // generate independent xi sequences from sample 0 → stereo decorrelation.
@@ -228,6 +255,16 @@ namespace zaum
       mBlurAmt   = mBlur.value();      // 0..1, cached for processHop
       // Cross-time IIR alpha: 0→0 (passthrough), 0.5→0.950 (~100ms), 1→0.998
       mBlurAlpha = 1.0f - expf(-6.0f * mBlurAmt);
+
+      // Bloom: per-bin asymmetric IIR rise-alpha table, lazily recomputed.
+      // 513 expf calls only when Bloom param actually changes.
+      mBloomAmt = mBloom.value();
+      if (mBloomAmt != mLastBloom) {
+        for (int k = 0; k <= kStftN / 2; ++k) {
+          mBloomAlphaRise[k] = 1.0f - expf(-6.0f * mBloomAmt * mBloomStagger[k]);
+        }
+        mLastBloom = mBloomAmt;
+      }
 
       // Decay → RT60 → g_base (uniform base decay, same as 0.2.0.2).
       {
@@ -310,8 +347,8 @@ namespace zaum
 
       // 3. SMD + Diffuse + Damp + Blur — L and R channels.
       //    Independent PRNG state per channel → decorrelated stereo phase noise.
-      smdProcess(mFftOutL, mFftBufL, mMagAccL, mBlurStateL, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mPrngL);
-      smdProcess(mFftOutR, mFftBufR, mMagAccR, mBlurStateR, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mPrngR);
+      smdProcess(mFftOutL, mFftBufL, mMagAccL, mBlurStateL, mBloomStateL, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngL);
+      smdProcess(mFftOutR, mFftBufR, mMagAccR, mBlurStateR, mBloomStateR, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngR);
 
       // 4. Inverse FFT.
       mFFT.Inverse(mFftBufL, mIfftOutL);
@@ -337,38 +374,44 @@ namespace zaum
     }
 
     // -------------------------------------------------------------------------
-    // smdProcess(): two-pass SMD accumulate+IIR-blur + Synth.
+    // smdProcess(): three-pass SMD accumulate + Blur + Bloom + Synth.
     //
     // Pass 1 — Accumulate+Blur: compute mag, SMD+Freeze+Damp into magAcc[k],
-    //           update blurState[k] via per-bin IIR, store base phase.
-    // Pass 2 — Synth: synthesize ifft_in from blurState[k] + stored phase + PRNG xi.
+    //           update blurState[k] via symmetric IIR, store base phase.
+    // Pass 2 — Bloom: asymmetric IIR from blurState[k] into bloomState[k].
+    //           Rise path: slow, freq-staggered (alphaRise[k] larger at HF → HF later).
+    //           Fall path: kBloomAlphaFall=0 → instant (snap to blurState).
+    // Pass 3 — Synth: synthesize ifft_in from bloomState[k] + stored phase + PRNG xi.
     //
-    // spectrum[]:   ShyFFT Direct output (N floats).
-    // ifft_in[]:    repacked spectrum for Inverse.
-    // magAcc[]:     per-bin magnitude accumulator (kStftBins floats, persistent).
-    // blurState[]:  per-bin IIR time-smoother state (kStftBins floats, persistent).
-    // g:            base decay factor (uniform pre-tilt).
-    // V:            phase randomization depth 0..1.
-    // dampFactor:   per-bin g tilt multiplier (1.0=flat, <1.0=HF darker).
-    // freeze:       freeze amount 0..1.
-    // alpha:        IIR smoothing coefficient; 0→passthrough, →1→long time constant.
-    //               Computed in process() as: alpha = 1 - exp(-6 * mBlurAmt).
-    // prng:         per-channel xorshift64 state (updated in place → decorrelated L/R).
+    // spectrum[]:    ShyFFT Direct output (N floats).
+    // ifft_in[]:     repacked spectrum for Inverse.
+    // magAcc[]:      per-bin magnitude accumulator (kStftBins floats, persistent).
+    // blurState[]:   per-bin symmetric IIR state (kStftBins floats, persistent).
+    // bloomState[]:  per-bin asymmetric IIR state (kStftBins floats, persistent).
+    // g:             base decay factor (uniform pre-tilt).
+    // V:             phase randomization depth 0..1.
+    // dampFactor:    per-bin g tilt multiplier (1.0=flat, <1.0=HF darker).
+    // freeze:        freeze amount 0..1.
+    // blurAlpha:     symmetric IIR coefficient (Blur); 0→passthrough.
+    // bloomAlphaRise[]: per-bin asymmetric rise coefficients (shared L/R, block-rate).
+    // prng:          per-channel xorshift64 state (updated in place → decorrelated L/R).
     //
-    // alpha=0 (Blur=0): blurState[k] = magAcc[k] every hop → synth is bit-identical
-    // to 0.2.0.7. PRNG draw order (one xi per complex bin k=1..N/2-1) unchanged.
-    // magAcc[k] is NEVER modified by the blur path — Freeze/Decay unaffected.
+    // Bloom=0 → bloomAlphaRise[k]=0 + kBloomAlphaFall=0 → bloomState[k]=blurState[k]
+    // every hop → bit-identical to 0.2.0.9.
+    // magAcc and blurState are NEVER modified by the Bloom path.
+    // PRNG draw order (one xi per complex bin k=1..N/2-1) unchanged.
     // -------------------------------------------------------------------------
     void smdProcess(const float* spectrum, float* ifft_in,
-                    float* magAcc, float* blurState, float g, float V,
-                    float dampFactor, float freeze, float alpha, uint64_t& prng)
+                    float* magAcc, float* blurState, float* bloomState,
+                    float g, float V, float dampFactor, float freeze,
+                    float blurAlpha, const float* bloomAlphaRise, uint64_t& prng)
     {
       const int kNyq = kStftN / 2;
-      const float alphaComp = 1.0f - alpha;   // (1-alpha) pre-computed once
+      const float blurAlphaComp = 1.0f - blurAlpha;   // (1-blurAlpha) pre-computed
 
       // -----------------------------------------------------------------------
-      // PASS 1 — Accumulate + IIR Blur: SMD+Freeze+Damp into magAcc, then
-      //          update blurState[k] via per-bin IIR, store base phase.
+      // PASS 1 — Accumulate + Blur IIR: SMD+Freeze+Damp into magAcc, then
+      //          update blurState[k] via symmetric per-bin IIR, store base phase.
       // phaseScratch[k] for complex bins: atan2(-nim, re) (standard DFT phase).
       // phaseScratch[k] for DC/Nyquist:  +1.0 or -1.0 (sign of input real).
       // -----------------------------------------------------------------------
@@ -382,11 +425,11 @@ namespace zaum
         float m = inGain * mag + magAcc[0] * gEff;
         if (m > kMagClamp) m = kMagClamp;
         magAcc[0]    = m;
-        blurState[0] = alpha * blurState[0] + alphaComp * m;
+        blurState[0] = blurAlpha * blurState[0] + blurAlphaComp * m;
         mPhaseScratch[0] = (re >= 0.0f) ? 1.0f : -1.0f;   // sign-encoding
       }
 
-      // Complex bins k=1..N/2-1: SMD + Damp tilt + IIR blur + store phase.
+      // Complex bins k=1..N/2-1: SMD + Damp tilt + Blur IIR + store phase.
       float g_k = g * dampFactor;   // g for k=1; multiplied by dampFactor each step
       for (int k = 1; k < kNyq; ++k) {
         const float gk = (g_k < (float)kGMax) ? g_k : (float)kGMax;
@@ -401,7 +444,7 @@ namespace zaum
         float m = inGain * mag + magAcc[k] * gkEff;
         if (m > kMagClamp) m = kMagClamp;
         magAcc[k]    = m;
-        blurState[k] = alpha * blurState[k] + alphaComp * m;
+        blurState[k] = blurAlpha * blurState[k] + blurAlphaComp * m;
         mPhaseScratch[k] = phase;
 
         g_k *= dampFactor;
@@ -416,12 +459,37 @@ namespace zaum
         float m = inGain * mag + magAcc[kNyq] * gEff;
         if (m > kMagClamp) m = kMagClamp;
         magAcc[kNyq]    = m;
-        blurState[kNyq] = alpha * blurState[kNyq] + alphaComp * m;
+        blurState[kNyq] = blurAlpha * blurState[kNyq] + blurAlphaComp * m;
         mPhaseScratch[kNyq] = (re >= 0.0f) ? 1.0f : -1.0f;   // sign-encoding
       }
 
       // -----------------------------------------------------------------------
-      // PASS 2 — Synth: synthesize ifft_in from blurState + stored phase + PRNG xi.
+      // PASS 2 — Bloom: asymmetric IIR from blurState[k] into bloomState[k].
+      //
+      // Rise (blurState >= bloomState): slow, freq-staggered.
+      //   bloomState[k] = ar[k]*bloomState[k] + (1-ar[k])*blurState[k]
+      //   ar[k] = bloomAlphaRise[k] (larger at HF → HF rises more slowly → later bloom)
+      // Fall (blurState < bloomState):  snap release.
+      //   bloomState[k] = kBloomAlphaFall*bloomState[k] + (1-kBloomAlphaFall)*blurState[k]
+      //   kBloomAlphaFall=0 → bloomState[k] = blurState[k] instantly.
+      //
+      // Bloom=0 → bloomAlphaRise[k]=0 → both paths collapse to bloomState[k]=blurState[k].
+      // magAcc and blurState are UNTOUCHED here.
+      // -----------------------------------------------------------------------
+      for (int k = 0; k <= kNyq; ++k) {
+        const float src = blurState[k];
+        const float bs  = bloomState[k];
+        if (src >= bs) {
+          const float ar = bloomAlphaRise[k];
+          bloomState[k] = ar * bs + (1.0f - ar) * src;
+        } else {
+          // kBloomAlphaFall = 0.0f: snap to src
+          bloomState[k] = src;
+        }
+      }
+
+      // -----------------------------------------------------------------------
+      // PASS 3 — Synth: synthesize ifft_in from bloomState + stored phase + PRNG xi.
       //
       // DC and Nyquist: real-only, sign from phaseScratch (no PRNG).
       // Complex bins: phi = phaseScratch[k] + V*xi; xi drawn from PRNG in same
@@ -429,7 +497,7 @@ namespace zaum
       // -----------------------------------------------------------------------
 
       // DC (k=0)
-      ifft_in[0] = mPhaseScratch[0] * blurState[0];
+      ifft_in[0] = mPhaseScratch[0] * bloomState[0];
 
       // Complex bins k=1..N/2-1
       for (int k = 1; k < kNyq; ++k) {
@@ -439,12 +507,12 @@ namespace zaum
         const float xi  = ((float)(prng >> 40) * (1.0f / 8388608.0f) - 1.0f) * (float)M_PI;
         const float phi = mPhaseScratch[k] + V * xi;
 
-        ifft_in[k]          = blurState[k] * cosf(phi);
-        ifft_in[kNyq + k]   = blurState[k] * sinf(phi);
+        ifft_in[k]          = bloomState[k] * cosf(phi);
+        ifft_in[kNyq + k]   = bloomState[k] * sinf(phi);
       }
 
       // Nyquist (k=N/2)
-      ifft_in[kNyq] = mPhaseScratch[kNyq] * blurState[kNyq];
+      ifft_in[kNyq] = mPhaseScratch[kNyq] * bloomState[kNyq];
     }
 
     // -------------------------------------------------------------------------
@@ -484,6 +552,20 @@ namespace zaum
     float mBlurStateL[kStftBins];
     float mBlurStateR[kStftBins];
 
+    // Asymmetric Bloom IIR state — persistent per-channel per-bin.
+    // Updated from blurState[k] each hop: slow freq-staggered rise, instant fall.
+    // Bloom=0 → bloomState[k] == blurState[k] each hop → bit-identical to 0.2.0.9.
+    float mBloomStateL[kStftBins];
+    float mBloomStateR[kStftBins];
+
+    // Bloom stagger table (static, computed once in ctor):
+    //   mBloomStagger[k] = 1.0 + kBloomStagger * k/(N/2)  — DC=1.0, Nyquist=4.0
+    float mBloomStagger[kStftBins];
+
+    // Per-bin rise-alpha table (shared L/R, recomputed lazily when Bloom changes):
+    //   mBloomAlphaRise[k] = 1 - exp(-6 * Bloom * mBloomStagger[k])
+    float mBloomAlphaRise[kStftBins];
+
     // xorshift64 PRNG state — one per channel for independent stereo phase noise.
     uint64_t mPrngL;
     uint64_t mPrngR;
@@ -503,6 +585,8 @@ namespace zaum
     float mFreezeAmt;   // freeze amount 0..1 from Freeze param
     float mBlurAmt;     // raw Blur param 0..1
     float mBlurAlpha;   // IIR smoothing coefficient: 1 - exp(-6*mBlurAmt)
+    float mBloomAmt;    // raw Bloom param 0..1
+    float mLastBloom;   // cached previous Bloom value for lazy table recompute
 
 #endif  // SWIGLUA
   };
