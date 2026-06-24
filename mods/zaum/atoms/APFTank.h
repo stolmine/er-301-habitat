@@ -10,14 +10,34 @@
 // Plan: planning/fabula-design.md (DSP architecture, delay tables,
 // modulation, governor). Roadmap: planning/zaum-roadmap.md §"Phase 1".
 //
-// BUILD SUB-PHASE 0.1.0.6 — Diffusion wired; all 8 params now live.
+// BUILD SUB-PHASE 0.1.0.7 — Series-cascade allpasses + Dattorro multi-tap output.
 //
-//   This sub-phase wires the last inert parameter: Diffusion. All six
-//   fixed allpass coefficients (4 input diffusers + 2 tank APs, both
-//   L and R loops) are now functions of Diffusion instead of compile-
-//   time constants.
+//   PART 1: Each tank AP (AP1 and AP2, both L and R loops) is now a
+//   SERIES CASCADE of two independent unity-gain Schroeder allpasses
+//   (outer → inner). This is explicitly NOT in-feedback Gardner nesting
+//   (which ran away in 0.1.0.2). The cascade transfer function is
+//   H_outer(z)·H_inner(z), a product of two |H|=1 allpasses, so |H|=1
+//   everywhere for |g|<1. Cannot run away — provably unity-gain.
 //
-//   A. DAMP — one-pole HF low-pass in each loop's D1 feedback path.
+//   Each inner AP has its OWN separate buffer (kTA1i=367, kTA2i=491),
+//   unmodulated, exact size with no headroom, zeroed in constructor.
+//   The outer reads use the existing outer buffers (mTA1_L etc.).
+//   Inner coefficients fixed at gTA1_in = gTA2_in = 0.50 this sub-phase
+//   (Diffusion scaling of inner coeffs deferred to polish pass).
+//
+//   PART 2: Multi-tap output replaces the old 0.5*(d1+d2) wet sum.
+//   Dattorro-style: signed weighted sum of ap1Out, three intermediate
+//   D1 taps, two intermediate D2 taps, and the full D1/D2 end reads.
+//   Intermediate tap positions scale with Size (fractions of scaled length,
+//   rounded to nearest odd). A 2.2× level match restores perceived wet
+//   level (signed sum is ~7 dB quieter than the old 0.5*(d1+d2)).
+//   This moves the 1000 echoes/sec threshold from ~160 ms to ~10 ms
+//   (rig-validated). Loop stability is unaffected — this is output-tap
+//   only; governors/DC blocker/cross-feed are all unchanged.
+//
+//   This sub-phase also inherits the 0.1.0.6 Diffusion wiring:
+//
+//   A. DAMP — one-pole HF low-pass in each loop's D1 feedback path. (unchanged)
 //
 //      Form: y += coeff * (x - y)   (one-pole LP, "leaky integrator")
 //      State: mDampL, mDampR (double, init 0).
@@ -148,15 +168,12 @@
 // All 8 parameters are now wired.
 // Wired parameters: Predelay, Mix, Mod, ModRate, Damp, Decay, Size, Diffusion.
 //
-// Tank allpass convention (plain Schroeder, provably unity-gain):
-//   vDelayed = buf[read N samples behind write head]   // v[n-N]
-//   vNew     = x + g * v[n-N]
-//   yOut     = -g * vNew + v[n-N]
-//   buf[w]   = vNew; advance w
-// Gardner nesting (inner 367/491) deferred per fabula-design.md §6;
-// plain Schroeder allpass used for guaranteed unity-gain stability.
-// Revisit nesting (with correct separate inner buffers) as a density
-// enhancement if the tail sounds thin.
+// Tank allpass convention — series cascade (0.1.0.7), per Schroeder, provably unity-gain:
+//   Each tank AP stage is: outer Schroeder AP → inner Schroeder AP (SERIES, not nested).
+//   Outer AP: vO_new = x + g_out*vO_del; out = -g_out*vO_new + vO_del; write vO_new.
+//   Inner AP: vI_new = out + g_in*vI_del; y   = -g_in*vI_new + vI_del; write vI_new.
+//   |H_cascade| = |H_outer|·|H_inner| = 1·1 = 1. Cannot run away for |g| < 1.
+//   Inner buffers (367, 491) are SEPARATE from the outer buffers — NOT in-feedback.
 //
 // Spiral feedback governor (fabula-design.md §4) applied once per
 // round trip on each loop's recirculating feedback. With densityA=1.0
@@ -196,17 +213,16 @@ namespace zaum
   static const int kID3  = 613;
   static const int kID4  = 449;
 
-  // Tank allpass buffers (plain Schroeder APF, BOTH L and R loops).
-  // AP1: delay N=1087, g=0.70. AP2: delay N=1471, g=0.50.
-  // L and R loops share the SAME delay lengths and coefficients but use
-  // SEPARATE buffers (mTA1_L/mTA1_R, mTA2_L/mTA2_R) and write indices.
-  // Each buffer is exactly N samples; write head wraps at N.
-  // Gardner inner delays kTA1i/kTA2i are reserved for future nesting
-  // (deferred per fabula-design.md §6 — requires separate inner buffers).
+  // Tank allpass buffers (series-cascade Schroeder APF, BOTH L and R loops).
+  // Each tank AP is a SERIES CASCADE: outer (kTA1=1087, g=gTA1_out) feeds
+  // inner (kTA1i=367, g=gTA1_in=0.50). Separate buffer per stage per loop.
+  // AP1 outer: N=1087, g from Diffusion (~0.70 at default). Inner: N=367, g=0.50.
+  // AP2 outer: N=1471, g from Diffusion (~0.50 at default). Inner: N=491, g=0.50.
+  // L and R loops use SEPARATE buffers and write indices for all 8 buffers.
   static const int kTA1  = 1087;   // AP1 delay (= buffer size), both loops
-  static const int kTA1i = 367;    // AP1 Gardner inner delay (UNUSED this phase)
+  static const int kTA1i = 367;    // AP1 inner delay — series cascade (0.1.0.7)
   static const int kTA2  = 1471;   // AP2 delay (= buffer size), both loops
-  static const int kTA2i = 491;    // AP2 Gardner inner delay (UNUSED this phase)
+  static const int kTA2i = 491;    // AP2 inner delay — series cascade (0.1.0.7)
 
   // ---------------------------------------------------------------------------
   // Tank delay line base lengths (Size=0.5 default = current approved sound)
@@ -359,6 +375,60 @@ namespace zaum
   static const double kDCBlockR = 0.9995;
 
   // ---------------------------------------------------------------------------
+  // Series-cascade inner AP coefficients (0.1.0.7).
+  // Both inner stages fixed at 0.50 this sub-phase (Dattorro value).
+  // Hard cap |g| < 0.95 applied in process() regardless of these constants.
+  // Diffusion scaling of inner coefficients is deferred to the polish pass.
+  // ---------------------------------------------------------------------------
+  static const double kGTA1_in = 0.50;   // AP1 inner cascade coefficient
+  static const double kGTA2_in = 0.50;   // AP2 inner cascade coefficient
+
+  // ---------------------------------------------------------------------------
+  // Multi-tap output constants (0.1.0.7) — Dattorro-style signed wet sum.
+  //
+  // Intermediate tap positions expressed as fractions of the Size-scaled delay
+  // length. At block rate the fractions are multiplied by the current scaled
+  // length and rounded to the nearest odd integer (anti-comb, matches rig).
+  //
+  // D1 intermediate fractions (three taps along D1):
+  //   fD1a = 0.2277  →  Size=0.5: 7187*0.2277 = 1636.6 → 1637 (odd)
+  //   fD1b = 0.4524  →  Size=0.5: 7187*0.4524 = 3251.3 → 3251 (odd)
+  //   fD1c = 0.6960  →  Size=0.5: 7187*0.6960 = 5002.2 → 5003 (odd)
+  //
+  // D2 intermediate fractions (two taps along D2):
+  //   fD2a = 0.2838  →  Size=0.5: 5101*0.2838 = 1447.7 → 1447 (odd)
+  //   fD2b = 0.6113  →  Size=0.5: 5101*0.6113 = 3118.8 → 3119 (odd)
+  //
+  // Bounds safety: all fractions < 1.0, so off < scaledLength ≤ bufSize.
+  // True at ALL Size values [0,1]. Modular wrap in the read is still applied.
+  //
+  // Wet sum weights and signs from the rig (per channel, e.g. L):
+  //   wetL = kWetLevel * ( +kWap1  * ap1Out_L
+  //                        +kWd1a  * D1tap(fD1a) - kWd1b * D1tap(fD1b) + kWd1c * D1tap(fD1c)
+  //                        +kWd1e  * d1Read_L     (full D1 end read)
+  //                        -kWd2a  * D2tap(fD2a) + kWd2b * D2tap(fD2b)
+  //                        +kWd2e  * d2Read_L )   (full D2 end read)
+  //
+  // kWetLevel = 2.2 restores perceived wet level: the signed sum is ~7 dB
+  // quieter than the old 0.5*(d1+d2), and 2.2× compensates (~7 dB gain).
+  // ---------------------------------------------------------------------------
+  static const double kFD1a = 0.2277;    // D1 intermediate tap fraction a
+  static const double kFD1b = 0.4524;    // D1 intermediate tap fraction b
+  static const double kFD1c = 0.6960;    // D1 intermediate tap fraction c
+  static const double kFD2a = 0.2838;    // D2 intermediate tap fraction a
+  static const double kFD2b = 0.6113;    // D2 intermediate tap fraction b
+
+  static const double kWap1  = 0.167;    // weight: ap1Out (early cascade tap)
+  static const double kWd1a  = 0.111;    // weight: D1 tap a (+)
+  static const double kWd1b  = 0.111;    // weight: D1 tap b (-)
+  static const double kWd1c  = 0.111;    // weight: D1 tap c (+)
+  static const double kWd1e  = 0.139;    // weight: D1 end read (+)
+  static const double kWd2a  = 0.111;    // weight: D2 tap a (-)
+  static const double kWd2b  = 0.111;    // weight: D2 tap b (+)
+  static const double kWd2e  = 0.139;    // weight: D2 end read (+)
+  static const double kWetLevel = 2.2;   // level match for signed-sum cancellation
+
+  // ---------------------------------------------------------------------------
   // xorshift64 PRNG — fast, period 2^64-1, audio-thread safe (no libc).
   // From Marsaglia (2003). NEVER pass seed=0 (degenerate fixed point).
   // ---------------------------------------------------------------------------
@@ -406,23 +476,29 @@ namespace zaum
       memset(mID3,    0, sizeof(mID3));
       memset(mID4,    0, sizeof(mID4));
       // L-loop allpass + delay buffers
-      memset(mTA1_L,  0, sizeof(mTA1_L));
-      memset(mTA2_L,  0, sizeof(mTA2_L));
-      memset(mD1_L,   0, sizeof(mD1_L));
-      memset(mD2_L,   0, sizeof(mD2_L));
+      memset(mTA1_L,   0, sizeof(mTA1_L));
+      memset(mTA1i_L,  0, sizeof(mTA1i_L));   // AP1 inner cascade buffer
+      memset(mTA2_L,   0, sizeof(mTA2_L));
+      memset(mTA2i_L,  0, sizeof(mTA2i_L));   // AP2 inner cascade buffer
+      memset(mD1_L,    0, sizeof(mD1_L));
+      memset(mD2_L,    0, sizeof(mD2_L));
       // R-loop allpass + delay buffers
-      memset(mTA1_R,  0, sizeof(mTA1_R));
-      memset(mTA2_R,  0, sizeof(mTA2_R));
-      memset(mD1_R,   0, sizeof(mD1_R));
-      memset(mD2_R,   0, sizeof(mD2_R));
+      memset(mTA1_R,   0, sizeof(mTA1_R));
+      memset(mTA1i_R,  0, sizeof(mTA1i_R));   // AP1 inner cascade buffer
+      memset(mTA2_R,   0, sizeof(mTA2_R));
+      memset(mTA2i_R,  0, sizeof(mTA2i_R));   // AP2 inner cascade buffer
+      memset(mD1_R,    0, sizeof(mD1_R));
+      memset(mD2_R,    0, sizeof(mD2_R));
 
       mWrPD  = 0;
       mWrID1 = 0; mWrID2 = 0; mWrID3 = 0; mWrID4 = 0;
-      // L-loop write heads
-      mWrTA1_L = 0; mWrTA2_L = 0;
+      // L-loop write heads (outer allpasses)
+      mWrTA1_L = 0; mWrTA1i_L = 0;   // AP1 outer + inner
+      mWrTA2_L = 0; mWrTA2i_L = 0;   // AP2 outer + inner
       mWrD1_L  = 0; mWrD2_L  = 0;
-      // R-loop write heads
-      mWrTA1_R = 0; mWrTA2_R = 0;
+      // R-loop write heads (outer allpasses)
+      mWrTA1_R = 0; mWrTA1i_R = 0;   // AP1 outer + inner
+      mWrTA2_R = 0; mWrTA2i_R = 0;   // AP2 outer + inner
       mWrD1_R  = 0; mWrD2_R  = 0;
 
       mFeedback_L = 0.0;
@@ -585,6 +661,31 @@ namespace zaum
       const int scaledD1_R = mScaledD1_R;
       const int scaledD2_R = mScaledD2_R;
 
+      // Multi-tap intermediate offset computation (block rate).
+      // Each offset = fraction * scaledLength, rounded to nearest odd integer.
+      // Bounds: fraction < 1.0 so off < scaledLength <= bufSize — always safe.
+      // The same fractions apply to both L and R loops (only scaled lengths differ).
+      // toOdd() guarantees odd integer >= 1; clamp is unnecessary (fractions < 0.70).
+      //
+      // L-loop D1 taps (three intermediate points):
+      const int offD1a_L = toOdd((int)(kFD1a * scaledD1_L + 0.5));
+      const int offD1b_L = toOdd((int)(kFD1b * scaledD1_L + 0.5));
+      const int offD1c_L = toOdd((int)(kFD1c * scaledD1_L + 0.5));
+      // L-loop D2 taps (two intermediate points):
+      const int offD2a_L = toOdd((int)(kFD2a * scaledD2_L + 0.5));
+      const int offD2b_L = toOdd((int)(kFD2b * scaledD2_L + 0.5));
+      // R-loop D1 taps:
+      const int offD1a_R = toOdd((int)(kFD1a * scaledD1_R + 0.5));
+      const int offD1b_R = toOdd((int)(kFD1b * scaledD1_R + 0.5));
+      const int offD1c_R = toOdd((int)(kFD1c * scaledD1_R + 0.5));
+      // R-loop D2 taps:
+      const int offD2a_R = toOdd((int)(kFD2a * scaledD2_R + 0.5));
+      const int offD2b_R = toOdd((int)(kFD2b * scaledD2_R + 0.5));
+
+      // Inner AP coefficients — fixed this sub-phase; hard cap < 0.95.
+      const double gTA1_in = (kGTA1_in > 0.95) ? 0.95 : kGTA1_in;
+      const double gTA2_in = (kGTA2_in > 0.95) ? 0.95 : kGTA2_in;
+
       // Modulation parameters — computed once per block.
       // excursion: how far the walk can stray from center, in samples.
       // step_size: per-sample walk increment multiplied by noise ∈ [-0.5, 0.5].
@@ -742,16 +843,25 @@ namespace zaum
           tankIn_L = dcOut;
         }
 
-        // AP1_L: plain Schroeder allpass, delay=kTA1=1087, g=0.70
+        // AP1_L: series cascade — outer (kTA1=1087, g=gTA1) → inner (kTA1i=367, g=gTA1_in).
+        // SERIES form (NOT in-feedback nesting): outer AP's feedforward output feeds
+        // a second independent AP. Unity-gain by construction: |H_outer|·|H_inner|=1.
         double ap1Out_L;
         {
-          double vD = (double)mTA1_L[mWrTA1_L];
-          double vNew, yOut;
-          house::allpassNestedStep(tankIn_L, vD, gTA1, vNew, yOut);
-          mTA1_L[mWrTA1_L] = (float)vNew;
+          // Outer AP (kTA1=1087, g=gTA1 from Diffusion):
+          double vO1d = (double)mTA1_L[mWrTA1_L];          // outer read v[n-1087]
+          double vO1n = tankIn_L + gTA1 * vO1d;
+          double in1  = -gTA1 * vO1n + vO1d;               // outer AP output → inner input
+          mTA1_L[mWrTA1_L] = (float)vO1n;
           mWrTA1_L++;
           if (mWrTA1_L >= kTA1) mWrTA1_L = 0;
-          ap1Out_L = yOut;
+          // Inner AP (kTA1i=367, g=gTA1_in=0.50):
+          double vI1d = (double)mTA1i_L[mWrTA1i_L];        // inner read v[n-367]
+          double vI1n = in1 + gTA1_in * vI1d;
+          ap1Out_L    = -gTA1_in * vI1n + vI1d;            // cascade output
+          mTA1i_L[mWrTA1i_L] = (float)vI1n;
+          mWrTA1i_L++;
+          if (mWrTA1i_L >= kTA1i) mWrTA1i_L = 0;
         }
 
         // D1_L: Brownian-modulated read with linear interpolation.
@@ -784,6 +894,19 @@ namespace zaum
           if (mWrD1_L >= kD1_L_size) mWrD1_L = 0;
         }
 
+        // D1_L intermediate taps — STATIC (unmodulated), read from the same buffer.
+        // Offsets computed at block rate as fraction of scaledD1_L, rounded to odd.
+        // Modular wrap matches the end-read pattern; all offsets < scaledD1_L < bufSize.
+        double d1tap_a_L, d1tap_b_L, d1tap_c_L;
+        {
+          int ia = ((mWrD1_L - offD1a_L) % kD1_L_size + kD1_L_size) % kD1_L_size;
+          int ib = ((mWrD1_L - offD1b_L) % kD1_L_size + kD1_L_size) % kD1_L_size;
+          int ic = ((mWrD1_L - offD1c_L) % kD1_L_size + kD1_L_size) % kD1_L_size;
+          d1tap_a_L = (double)mD1_L[ia];
+          d1tap_b_L = (double)mD1_L[ib];
+          d1tap_c_L = (double)mD1_L[ic];
+        }
+
         // HF damp: one-pole LP on D1 output (Schroeder/Jot feedback form).
         // y += coeff * (x - y)  with state dampL.
         // Damp=0 → coeff=1.0 → dampL tracks x exactly (passthrough).
@@ -791,16 +914,23 @@ namespace zaum
         dampL += dampCoeff * (d1Read_L - dampL);
         double dampedD1_L = dampL;
 
-        // AP2_L: plain Schroeder allpass, delay=kTA2=1471, g=0.50
+        // AP2_L: series cascade — outer (kTA2=1471, g=gTA2) → inner (kTA2i=491, g=gTA2_in).
         double ap2Out_L;
         {
-          double vD = (double)mTA2_L[mWrTA2_L];
-          double vNew, yOut;
-          house::allpassNestedStep(dampedD1_L, vD, gTA2, vNew, yOut);
-          mTA2_L[mWrTA2_L] = (float)vNew;
+          // Outer AP (kTA2=1471, g=gTA2 from Diffusion):
+          double vO2d = (double)mTA2_L[mWrTA2_L];
+          double vO2n = dampedD1_L + gTA2 * vO2d;
+          double in2  = -gTA2 * vO2n + vO2d;
+          mTA2_L[mWrTA2_L] = (float)vO2n;
           mWrTA2_L++;
           if (mWrTA2_L >= kTA2) mWrTA2_L = 0;
-          ap2Out_L = yOut;
+          // Inner AP (kTA2i=491, g=gTA2_in=0.50):
+          double vI2d = (double)mTA2i_L[mWrTA2i_L];
+          double vI2n = in2 + gTA2_in * vI2d;
+          ap2Out_L    = -gTA2_in * vI2n + vI2d;
+          mTA2i_L[mWrTA2i_L] = (float)vI2n;
+          mWrTA2i_L++;
+          if (mWrTA2i_L >= kTA2i) mWrTA2i_L = 0;
         }
 
         // D2_L: Brownian-modulated read with linear interpolation.
@@ -828,6 +958,15 @@ namespace zaum
           if (mWrD2_L >= kD2_L_size) mWrD2_L = 0;
         }
 
+        // D2_L intermediate taps — STATIC (unmodulated).
+        double d2tap_a_L, d2tap_b_L;
+        {
+          int ia = ((mWrD2_L - offD2a_L) % kD2_L_size + kD2_L_size) % kD2_L_size;
+          int ib = ((mWrD2_L - offD2b_L) % kD2_L_size + kD2_L_size) % kD2_L_size;
+          d2tap_a_L = (double)mD2_L[ia];
+          d2tap_b_L = (double)mD2_L[ib];
+        }
+
         // -- R LOOP --
 
         // Accumulate: diffusion output + previous-sample cross-feed from L.
@@ -841,17 +980,24 @@ namespace zaum
           tankIn_R = dcOut;
         }
 
-        // AP1_R: plain Schroeder allpass, delay=kTA1=1087, g=0.70
-        // Same coefficients as L; separate buffer for independent state.
+        // AP1_R: series cascade — outer (kTA1=1087, g=gTA1) → inner (kTA1i=367, g=gTA1_in).
+        // Same coefficients as L; separate buffers (mTA1_R, mTA1i_R) for independent state.
         double ap1Out_R;
         {
-          double vD = (double)mTA1_R[mWrTA1_R];
-          double vNew, yOut;
-          house::allpassNestedStep(tankIn_R, vD, gTA1, vNew, yOut);
-          mTA1_R[mWrTA1_R] = (float)vNew;
+          // Outer AP:
+          double vO1d = (double)mTA1_R[mWrTA1_R];
+          double vO1n = tankIn_R + gTA1 * vO1d;
+          double in1  = -gTA1 * vO1n + vO1d;
+          mTA1_R[mWrTA1_R] = (float)vO1n;
           mWrTA1_R++;
           if (mWrTA1_R >= kTA1) mWrTA1_R = 0;
-          ap1Out_R = yOut;
+          // Inner AP:
+          double vI1d = (double)mTA1i_R[mWrTA1i_R];
+          double vI1n = in1 + gTA1_in * vI1d;
+          ap1Out_R    = -gTA1_in * vI1n + vI1d;
+          mTA1i_R[mWrTA1i_R] = (float)vI1n;
+          mWrTA1i_R++;
+          if (mWrTA1i_R >= kTA1i) mWrTA1i_R = 0;
         }
 
         // D1_R: Brownian-modulated read, ASYMMETRIC base (scaledD1_R), R-specific seed.
@@ -878,20 +1024,38 @@ namespace zaum
           if (mWrD1_R >= kD1_R_size) mWrD1_R = 0;
         }
 
+        // D1_R intermediate taps — STATIC (unmodulated).
+        double d1tap_a_R, d1tap_b_R, d1tap_c_R;
+        {
+          int ia = ((mWrD1_R - offD1a_R) % kD1_R_size + kD1_R_size) % kD1_R_size;
+          int ib = ((mWrD1_R - offD1b_R) % kD1_R_size + kD1_R_size) % kD1_R_size;
+          int ic = ((mWrD1_R - offD1c_R) % kD1_R_size + kD1_R_size) % kD1_R_size;
+          d1tap_a_R = (double)mD1_R[ia];
+          d1tap_b_R = (double)mD1_R[ib];
+          d1tap_c_R = (double)mD1_R[ic];
+        }
+
         // HF damp: one-pole LP on D1_R output.
         dampR += dampCoeff * (d1Read_R - dampR);
         double dampedD1_R = dampR;
 
-        // AP2_R: plain Schroeder allpass, delay=kTA2=1471, g=0.50
+        // AP2_R: series cascade — outer (kTA2=1471, g=gTA2) → inner (kTA2i=491, g=gTA2_in).
         double ap2Out_R;
         {
-          double vD = (double)mTA2_R[mWrTA2_R];
-          double vNew, yOut;
-          house::allpassNestedStep(dampedD1_R, vD, gTA2, vNew, yOut);
-          mTA2_R[mWrTA2_R] = (float)vNew;
+          // Outer AP:
+          double vO2d = (double)mTA2_R[mWrTA2_R];
+          double vO2n = dampedD1_R + gTA2 * vO2d;
+          double in2  = -gTA2 * vO2n + vO2d;
+          mTA2_R[mWrTA2_R] = (float)vO2n;
           mWrTA2_R++;
           if (mWrTA2_R >= kTA2) mWrTA2_R = 0;
-          ap2Out_R = yOut;
+          // Inner AP:
+          double vI2d = (double)mTA2i_R[mWrTA2i_R];
+          double vI2n = in2 + gTA2_in * vI2d;
+          ap2Out_R    = -gTA2_in * vI2n + vI2d;
+          mTA2i_R[mWrTA2i_R] = (float)vI2n;
+          mWrTA2i_R++;
+          if (mWrTA2i_R >= kTA2i) mWrTA2i_R = 0;
         }
 
         // D2_R: Brownian-modulated read, ASYMMETRIC base (scaledD2_R), R-specific seed.
@@ -918,6 +1082,15 @@ namespace zaum
           if (mWrD2_R >= kD2_R_size) mWrD2_R = 0;
         }
 
+        // D2_R intermediate taps — STATIC (unmodulated).
+        double d2tap_a_R, d2tap_b_R;
+        {
+          int ia = ((mWrD2_R - offD2a_R) % kD2_R_size + kD2_R_size) % kD2_R_size;
+          int ib = ((mWrD2_R - offD2b_R) % kD2_R_size + kD2_R_size) % kD2_R_size;
+          d2tap_a_R = (double)mD2_R[ia];
+          d2tap_b_R = (double)mD2_R[ib];
+        }
+
         // -- CROSS-FEED UPDATE (for next sample) --
         // R's D2 output × g_d feeds L's next-sample accumulator, and
         // vice versa. Spiral governor bounds each independently.
@@ -927,13 +1100,31 @@ namespace zaum
         mFeedback_R = house::spiralFastSaturate(d2Read_L * g_d, 1.0);
 
         // ----------------------------------------------------------------
-        // 5. Stereo wet taps.
-        //    wetL draws from L-loop delay lines; wetR from R-loop.
-        //    Summing D1+D2 per channel and halving keeps the wet level
-        //    comparable to dry and blends the two tap points for density.
+        // 5. Stereo wet taps — Dattorro-style multi-tap signed sum (0.1.0.7).
+        //
+        // Signed weighted sum of: ap1Out (early cascade tap), three
+        // intermediate D1 points, the full D1 end read, two intermediate
+        // D2 points, and the full D2 end read. Signs and weights from the
+        // rig-validated scheme. kWetLevel=2.2 restores perceived wet level
+        // (~7 dB boost vs old 0.5*(d1+d2), matching the signed-sum loss).
+        //
+        // Loop stability unaffected — output-tap change only. Governors,
+        // DC blocker, and cross-feed are all unchanged.
         // ----------------------------------------------------------------
-        double wetL = (d1Read_L + d2Read_L) * 0.5;
-        double wetR = (d1Read_R + d2Read_R) * 0.5;
+        double wetL = kWetLevel * (
+            + kWap1 * ap1Out_L
+            + kWd1a * d1tap_a_L - kWd1b * d1tap_b_L + kWd1c * d1tap_c_L
+            + kWd1e * d1Read_L
+            - kWd2a * d2tap_a_L + kWd2b * d2tap_b_L
+            + kWd2e * d2Read_L
+        );
+        double wetR = kWetLevel * (
+            + kWap1 * ap1Out_R
+            + kWd1a * d1tap_a_R - kWd1b * d1tap_b_R + kWd1c * d1tap_c_R
+            + kWd1e * d1Read_R
+            - kWd2a * d2tap_a_R + kWd2b * d2tap_b_R
+            + kWd2e * d2Read_R
+        );
 
         // ----------------------------------------------------------------
         // 6. Dry/wet mix — true stereo.
@@ -984,21 +1175,27 @@ namespace zaum
     float mID4[kID4];
     int   mWrID1, mWrID2, mWrID3, mWrID4;
 
-    // Tank allpass buffers — L loop (plain Schroeder APF,
-    // each buffer exactly N samples deep, write head wraps at N)
+    // Tank allpass buffers — L loop (series-cascade Schroeder APF).
+    // Outer buffers (kTA1=1087, kTA2=1471): exact size, write head wraps at N.
+    // Inner buffers (kTA1i=367, kTA2i=491): UNMODULATED, exact size, no headroom.
+    // All four zeroed in constructor; all four write heads initialized to 0.
     float mTA1_L[kTA1];
+    float mTA1i_L[kTA1i];   // AP1 inner cascade
     float mTA2_L[kTA2];
-    int   mWrTA1_L, mWrTA2_L;
+    float mTA2i_L[kTA2i];   // AP2 inner cascade
+    int   mWrTA1_L, mWrTA1i_L, mWrTA2_L, mWrTA2i_L;
 
     // Tank delay lines — L loop (sized for max sizeFactor=1.5 + headroom).
     float mD1_L[kD1_L_size];   // 11038 samples
     float mD2_L[kD2_L_size];   // 7908 samples
     int   mWrD1_L, mWrD2_L;
 
-    // Tank allpass buffers — R loop (same lengths as L, separate state)
+    // Tank allpass buffers — R loop (same lengths as L, separate state).
     float mTA1_R[kTA1];
+    float mTA1i_R[kTA1i];   // AP1 inner cascade
     float mTA2_R[kTA2];
-    int   mWrTA1_R, mWrTA2_R;
+    float mTA2i_R[kTA2i];   // AP2 inner cascade
+    int   mWrTA1_R, mWrTA1i_R, mWrTA2_R, mWrTA2i_R;
 
     // Tank delay lines — R loop (sized for max sizeFactor=1.5 + headroom).
     float mD1_R[kD1_R_size];   // 10462 samples
