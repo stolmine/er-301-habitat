@@ -779,3 +779,24 @@ so it equalizes across the range (directly targets "worse at higher
 cutoff"). Tunable. If a steady high-cutoff BUZZ (not movement-tied pops)
 remains after this, that's 2× OS decimator aliasing → the deferred
 halfband-FIR decimator is the next lever.
+
+### Phase 5f — roll back audio-rate Span, keep audio-rate Quality, 2.8.1.8
+
+User decision (2026-06-24): the audio-rate Span path wasn't worth the
+trouble (its wide exponential cutoff leverage kept popping; ended in the
+high-freq aliasing logged for research). Rolled Span back to a block-rate
+`Parameter` (ParameterAdapter + tie, like Fundamental) — CV still
+modulates at block rate. Quality stays an audio-rate `Inlet` (per-sample,
+damping derived per-sample in innerStep).
+
+Changes: Canals.h `mSpan` Inlet→Parameter; constructor addInput→
+addParameter; process reads `span`/`spanMult`/`invSpanMult` once per
+frame again (captured by ref in innerStep); removed the Span one-pole
+slew (spanSlew/kSpanSlew) and the per-sample span read/interp; innerStep
+signature drops the `span` arg. Lua: span GainBias+connect+MinMax →
+ParameterAdapter+tie, view range back to the adapter.
+
+KEPT (not Span-specific, benefit V/Oct FM + Quality): the interpolated
+`semisToRatioSmooth` (de-quantized cutoff/spread) and the C1 soft-knee
+clamps (`softClampF`/`softCeil`). The high-freq aliasing / halfband-
+decimator research item still stands for the remaining V/Oct-FM artifact.

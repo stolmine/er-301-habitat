@@ -24,20 +24,20 @@ namespace stolmine
     od::Inlet mCentreIn{"Centre In"}; // per-block CTR input; overrides ALL when patched
     od::Inlet mHighIn{"High In"}; // per-block HIGH input; overrides ALL when patched
     od::Inlet mVOct{"V/Oct"};
-    // Span + Quality are audio-rate Inlets (per-sample read, fed by a
-    // Lua GainBias->connect), NOT block-rate Parameters. This is what
-    // lets Canals take audio-rate Span/Quality modulation cleanly
-    // instead of stair-stepping ("flapping"). Mirrors the native Sine
-    // Osc, where every modulatable input is an Inlet. Fundamental stays
-    // a Parameter knob — V/Oct already carries audio-rate freq FM.
-    // See planning/canals-audio-rate-mod.md Phase 5.
-    od::Inlet mSpan{"Span"};
+    // Quality is an audio-rate Inlet (per-sample read, fed by a Lua
+    // GainBias->connect) so it takes audio-rate modulation cleanly,
+    // mirroring the native Sine Osc. Span was rolled back to a block-
+    // rate Parameter (per-frame read) — its audio-rate path was removed
+    // per user request (the wide exponential cutoff leverage made
+    // audio-rate Span sweeps pop). See planning/canals-audio-rate-mod.md
+    // Phase 5 / 5f.
     od::Inlet mQuality{"Quality"};
     od::Outlet mOut{"Out"};         // fader-selected mix (sub-out 1, chain auto-wire)
     od::Outlet mOutLow{"Low"};      // parallel LOW band tap
     od::Outlet mOutCentre{"Centre"}; // parallel CENTRE band tap
     od::Outlet mOutHigh{"High"};    // parallel HIGH band tap
     od::Parameter mFundamental{"Fundamental", 0.0f};
+    od::Parameter mSpan{"Span", 0.25f};
     od::Parameter mOutput{"Output", 0.0f};
     od::Parameter mMode{"Mode", 0.0f}; // 0=crossover, 1=formant
     // Per-block input routing (set from Lua side via branch-state polling).

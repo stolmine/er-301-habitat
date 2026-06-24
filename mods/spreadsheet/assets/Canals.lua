@@ -118,16 +118,13 @@ function Canals:onLoadGraph(channelCount)
   tie(op, "Fundamental", fundamental, "Out")
   self:addMonoBranch("fundamental", fundamental, "In", fundamental, "Out")
 
-  -- Span (audio-rate: GainBias Out -> Inlet, read per-sample in C++).
-  -- Was ParameterAdapter+tie (block-rate) — the source of the "flappy"
-  -- character under audio-rate Span modulation. See
-  -- planning/canals-audio-rate-mod.md Phase 5.
-  local span = self:addObject("span", app.GainBias())
-  span:hardSet("Gain", 0.0)   -- CV opt-in: no modulation depth until dialed up
+  -- Span (block-rate: ParameterAdapter + tie). The audio-rate path was
+  -- rolled back per user request — Span's wide exponential cutoff
+  -- leverage made audio-rate sweeps pop. CV still modulates at block
+  -- rate. See planning/canals-audio-rate-mod.md Phase 5f.
+  local span = self:addObject("span", app.ParameterAdapter())
   span:hardSet("Bias", 0.25)
-  local spanRange = self:addObject("spanRange", app.MinMax())
-  connect(span, "Out", spanRange, "In")
-  connect(span, "Out", op, "Span")
+  tie(op, "Span", span, "Out")
   self:addMonoBranch("span", span, "In", span, "Out")
 
   -- Quality (audio-rate: GainBias Out -> Inlet, read per-sample in C++).
@@ -256,7 +253,7 @@ function Canals:onLoadViews()
       description   = "Span",
       branch        = self.branches.span,
       gainbias      = self.objects.span,
-      range         = self.objects.spanRange,
+      range         = self.objects.span,
       biasMap       = Encoder.getMap("[0,1]"),
       biasPrecision = 2,
       initialBias   = 0.25

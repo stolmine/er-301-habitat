@@ -30,17 +30,6 @@ namespace stolmine
     // Quality is an audio-rate Inlet — carry the prior frame's last
     // sample for the 2× OS midpoint interp (same pattern as lastVoct).
     float lastQuality;
-    // Span is audio-rate but one-pole slewed before the exponential
-    // cutoff mapping. Each knob detent is GainBias-ramped over only one
-    // block (~1.3 ms), and Span's 4-octave leverage turns that into a
-    // fast cutoff jump that the resonant bands click on — worse at
-    // higher cutoffs (bigger Hz jump per detent), at all Q. Slewing in
-    // [0,1] = slewing in log-cutoff = constant oct/s, equalizing the fix
-    // across the range. Safe now that the rail clamps are soft (Phase
-    // 5d) — the earlier 5c slew only sounded worse because it swept
-    // Span slowly THROUGH the old hard-clamp seams. Persists across
-    // frames.
-    float spanSlew;
 
     // Per-block post-routing input ring buffer for the overview ply
     // viz. Stored at decimated rate (one sample per ~8 cycles
@@ -65,7 +54,6 @@ namespace stolmine
       lastInCentre = 0.0f;
       lastInHigh = 0.0f;
       lastQuality = 0.0f;
-      spanSlew = 0.25f;      // matches GainBias default bias
       memset(inputRing, 0, sizeof(inputRing));
       inputRingPos = 0;
       inputRingDecimCounter = 0;
@@ -83,13 +71,13 @@ namespace stolmine
     addInput(mCentreIn);
     addInput(mHighIn);
     addInput(mVOct);
-    addInput(mSpan);        // audio-rate Inlet (was Parameter) — per-sample
-    addInput(mQuality);     // audio-rate Inlet (was Parameter) — per-sample
+    addInput(mQuality);     // audio-rate Inlet — per-sample
     addOutput(mOut);
     addOutput(mOutLow);     // FIXED: was missing — sub-out picker silently failed
     addOutput(mOutCentre);  // FIXED
     addOutput(mOutHigh);    // FIXED
     addParameter(mFundamental);
+    addParameter(mSpan);    // block-rate Parameter (audio-rate path rolled back)
     addParameter(mOutput);
     addParameter(mMode);
     // Routing options driven by Lua-side branch-state polling.
@@ -209,7 +197,6 @@ namespace stolmine
     float *centreIn = mCentreIn.buffer();
     float *highIn   = mHighIn.buffer();
     float *voct     = mVOct.buffer();
-    float *spanBuf  = mSpan.buffer();     // audio-rate Span CV
     float *qualBuf  = mQuality.buffer();  // audio-rate Quality CV
     float *out       = mOut.buffer();
     float *outLow    = mOutLow.buffer();
@@ -232,11 +219,15 @@ namespace stolmine
     sBlockState.curUsingAll[2] = !hiPatched && allEn;
 
     // === Block-rate parameter sampling ===
-    // Span + Quality are NOT read here — they are audio-rate Inlets read
-    // per-sample inside the loop and their derived constants (damping,
-    // antiRes, spanMult) are computed per-sample inside innerStep. Only
-    // the genuine block-rate controls are sampled here.
+    // Quality stays audio-rate (read per-sample in the loop; its damping
+    // is derived per-sample inside innerStep). Span is block-rate again
+    // (audio-rate path rolled back per user request): read once here and
+    // its cutoff-spread multiplier derived once per frame. Still uses the
+    // interpolated semitone→ratio so the spread is smooth.
     float fundamental = mFundamental.value();
+    float span = CLAMP(0.0f, 1.0f, mSpan.value());
+    float spanMult = semisToRatioSmooth(span * 48.0f);
+    float invSpanMult = 1.0f / spanMult;
     float outputPos = CLAMP(0.0f, 3.0f, mOutput.value());
     int mode = CLAMP(0, 1, (int)(mMode.value() + 0.5f));
 
@@ -269,15 +260,6 @@ namespace stolmine
     // normalized against this rate, so g = tan(π·f/96k).
     const float kInvSR_OS = 1.0f / 96000.0f;
 
-    // Span one-pole slew coefficient (~8 ms). Smooths the per-detent
-    // cutoff transients (see spanSlew note). Tune kSpanSlewMs: shorter =
-    // snappier knob, risk of pop creeping back at high cutoffs; longer =
-    // silkier, more glide. Bandlimits Span CV to ~20 Hz — span audio-
-    // rate FM is exotic; knob smoothness wins.
-    const float kSpanSlewMs = 8.0f;
-    float kSpanSlew = (globalConfig.samplePeriod * 1000.0f) / kSpanSlewMs;
-    if (kSpanSlew > 1.0f) kSpanSlew = 1.0f;
-
     // Linear-interpolation upsample state — carry the last V/Oct
     // and input sample from the prior frame so the first output
     // sample can interpolate a midpoint between them.
@@ -294,14 +276,14 @@ namespace stolmine
     // entries = 512 audio samples ≈ 10.7 ms.
     s.inputRingDecimRate = 2;
 
-    // Internal-step helper: takes (v, span, quality, x) at the internal
-    // sample time, configures all 6 SVFs, processes, returns raw
-    // vL/vC/vH pre-NaN-clamp. Run twice per output sample (midpoint +
-    // current). span/quality arrive per-sample (audio-rate Inlets), so
-    // their derived constants (damping, antiRes, spanMult) are computed
-    // here per internal step — which also gives them the 2× OS headroom
-    // the cutoff already enjoys.
-    auto innerStep = [&](float v, float span, float quality,
+    // Internal-step helper: takes (v, quality, x) at the internal sample
+    // time, configures all 6 SVFs, processes, returns raw vL/vC/vH
+    // pre-NaN-clamp. Run twice per output sample (midpoint + current).
+    // Quality arrives per-sample (audio-rate Inlet), so its damping is
+    // derived here per internal step (2× OS headroom). spanMult /
+    // invSpanMult are block-rate (Span is a Parameter again) and captured
+    // by reference.
+    auto innerStep = [&](float v, float quality,
                          float xL, float xC, float xH,
                          float &vL, float &vC, float &vH)
     {
@@ -329,11 +311,7 @@ namespace stolmine
       }
       float antiRes = (quality < 0.0f) ? -quality : 0.0f;
 
-      // Span → cutoff spread multiplier (per-sample; was block-rate).
-      // Smooth (interpolated) ratio — see semisToRatioSmooth: the
-      // truncated stmlib LUT quantizes this under audio-rate Span mod.
-      float spanMult = semisToRatioSmooth(span * 48.0f);
-      float invSpanMult = 1.0f / spanMult;
+      // spanMult / invSpanMult are block-rate (captured by reference).
 
       // Cutoff derivation at this internal sample time.
       float totalSemis = v * 120.0f + fundamental;
@@ -439,14 +417,8 @@ namespace stolmine
       if (fabsf(xCurrH) < 1.18e-23f) xCurrH = 1.18e-17f;
 
       float vCurr = voct[i];
-      // Quality per-sample (audio-rate Inlet). Span per-sample then
-      // one-pole slewed (kSpanSlew) to smooth the per-detent cutoff
-      // transients — the slewed value is already smooth, so it feeds
-      // both 2× sub-steps directly (no midpoint interp needed).
+      // Quality per-sample (audio-rate Inlet). Span is block-rate.
       float qualCurr = CLAMP(-1.0f, 1.0f, qualBuf[i]);
-      float spanTarget = CLAMP(0.0f, 1.0f, spanBuf[i]);
-      s.spanSlew += (spanTarget - s.spanSlew) * kSpanSlew;
-      float spanNow = s.spanSlew;
 
       // Internal sample A: midpoint between prev and current
       // (linear interp at the upsampled 96 kHz timeline). Per-block
@@ -462,11 +434,11 @@ namespace stolmine
       if (fabsf(xMidH) < 1.18e-23f) xMidH = 1.18e-17f;
 
       float vL_a, vC_a, vH_a;
-      innerStep(vMid, spanNow, qualMid, xMidL, xMidC, xMidH, vL_a, vC_a, vH_a);
+      innerStep(vMid, qualMid, xMidL, xMidC, xMidH, vL_a, vC_a, vH_a);
 
       // Internal sample B: current sample
       float vL_b, vC_b, vH_b;
-      innerStep(vCurr, spanNow, qualCurr, xCurrL, xCurrC, xCurrH, vL_b, vC_b, vH_b);
+      innerStep(vCurr, qualCurr, xCurrL, xCurrC, xCurrH, vL_b, vC_b, vH_b);
 
       // Decimation: simple [1/2, 1/2] kernel = average of pair.
       // -3 dB at host-rate Fs/4 (= 12 kHz at 48k host). A sharper
@@ -500,7 +472,6 @@ namespace stolmine
     // midpoint interpolation has a valid history.
     s.lastVoct      = prevV;
     s.lastQuality   = prevQual;
-    // s.spanSlew persists in place (mutated each sample above).
     s.lastInLow     = prevXL;
     s.lastInCentre  = prevXC;
     s.lastInHigh    = prevXH;

@@ -60,6 +60,11 @@ local qMap = (function()
   return map
 end)()
 local typeMap = (function()
+  -- Integer map: the type selector uses ModeSelector's discrete encoder
+  -- mode (accumulate raw ticks, step once per threshold) for a deliberate
+  -- feel that doesn't fight encoder acceleration — see ModeSelector. The
+  -- dial-map step is irrelevant in discrete mode; keep it integer so any
+  -- non-encoder set path stays on whole types.
   local map = app.LinearDialMap(0, 7)
   map:setSteps(1, 1, 1, 1)
   map:setRounding(1)
@@ -241,24 +246,31 @@ function MultibandSaturator:onLoadGraph(channelCount)
     end
   end
 
-  -- Set Bias refs for per-band params (direct read from UI, bypasses unscheduled adapters)
+  -- Wire per-band param refs the C++ reads at audio rate. These MUST be
+  -- the adapter's modulated "Out" (= Bias + Gain·CV), NOT the static
+  -- "Bias" — otherwise CV patched into a per-band sub-branch moves the
+  -- control's graphic but never reaches audio. The adapter's Out equals
+  -- its Bias when nothing is patched (input is 0), so the knob still
+  -- works; the tie() scheduling that makes the main params (Drive/Skew/
+  -- Mix) modulate applies identically here. "Out" is the ParameterAdapter
+  -- output Parameter (od::Parameter mOutput{"Out"}).
   -- param indices: 0=amount, 1=bias, 2=type, 3=weight, 4=filterFreq, 5=filterMorph, 6=filterQ
   for i = 0, 2 do
-    op:setBandBias(i, 0, self.objects["bandAmount" .. i]:getParameter("Bias"))
-    op:setBandBias(i, 1, self.objects["bandBias" .. i]:getParameter("Bias"))
-    op:setBandBias(i, 2, self.objects["bandType" .. i]:getParameter("Bias"))
-    op:setBandBias(i, 3, self.objects["bandWeight" .. i]:getParameter("Bias"))
-    op:setBandBias(i, 4, self.objects["bandFilterFreq" .. i]:getParameter("Bias"))
-    op:setBandBias(i, 5, self.objects["bandFilterMorph" .. i]:getParameter("Bias"))
-    op:setBandBias(i, 6, self.objects["bandFilterQ" .. i]:getParameter("Bias"))
+    op:setBandBias(i, 0, self.objects["bandAmount" .. i]:getParameter("Out"))
+    op:setBandBias(i, 1, self.objects["bandBias" .. i]:getParameter("Out"))
+    op:setBandBias(i, 2, self.objects["bandType" .. i]:getParameter("Out"))
+    op:setBandBias(i, 3, self.objects["bandWeight" .. i]:getParameter("Out"))
+    op:setBandBias(i, 4, self.objects["bandFilterFreq" .. i]:getParameter("Out"))
+    op:setBandBias(i, 5, self.objects["bandFilterMorph" .. i]:getParameter("Out"))
+    op:setBandBias(i, 6, self.objects["bandFilterQ" .. i]:getParameter("Out"))
     if stereo then
-      self.objects.opR:setBandBias(i, 0, self.objects["bandAmount" .. i]:getParameter("Bias"))
-      self.objects.opR:setBandBias(i, 1, self.objects["bandBias" .. i]:getParameter("Bias"))
-      self.objects.opR:setBandBias(i, 2, self.objects["bandType" .. i]:getParameter("Bias"))
-      self.objects.opR:setBandBias(i, 3, self.objects["bandWeight" .. i]:getParameter("Bias"))
-      self.objects.opR:setBandBias(i, 4, self.objects["bandFilterFreq" .. i]:getParameter("Bias"))
-      self.objects.opR:setBandBias(i, 5, self.objects["bandFilterMorph" .. i]:getParameter("Bias"))
-      self.objects.opR:setBandBias(i, 6, self.objects["bandFilterQ" .. i]:getParameter("Bias"))
+      self.objects.opR:setBandBias(i, 0, self.objects["bandAmount" .. i]:getParameter("Out"))
+      self.objects.opR:setBandBias(i, 1, self.objects["bandBias" .. i]:getParameter("Out"))
+      self.objects.opR:setBandBias(i, 2, self.objects["bandType" .. i]:getParameter("Out"))
+      self.objects.opR:setBandBias(i, 3, self.objects["bandWeight" .. i]:getParameter("Out"))
+      self.objects.opR:setBandBias(i, 4, self.objects["bandFilterFreq" .. i]:getParameter("Out"))
+      self.objects.opR:setBandBias(i, 5, self.objects["bandFilterMorph" .. i]:getParameter("Out"))
+      self.objects.opR:setBandBias(i, 6, self.objects["bandFilterQ" .. i]:getParameter("Out"))
     end
   end
 end
@@ -362,7 +374,14 @@ function MultibandSaturator:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0.0,
-      modeNames = shaperNames
+      modeNames = shaperNames,
+      -- Discrete encoder: step once per N raw encoder counts. On hardware
+      -- the eQEP runs 4× quadrature (~4 counts per physical detent), so
+      -- threshold ≈ 4 × (detents per type). 16 ≈ ~4 detents per shaper
+      -- type. Acceleration-independent (resets each step), so fast spins
+      -- can't overshoot. Tune in steps of ~4 for ±1 detent per type.
+      discrete = true,
+      discreteThreshold = 16
     }
     controls[bn .. "Wt"] = GainBias {
       button = "wt",
