@@ -1,5 +1,5 @@
 PKGNAME ?= zaum
-PKGVERSION ?= 0.1.0.12
+PKGVERSION ?= 0.2.0.1
 
 include scripts/env.mk
 
@@ -37,7 +37,7 @@ ASSETS := $(call rwildcard, $(ASSET_DIR), *)
 # atoms (AllpassMono.h, Spiral.h) directly without copying them. The
 # house atoms are header-only with no link deps; they compile into
 # whichever package %include's them. Per planning/fabula-design.md §6.
-INCLUDES = $(MOD_DIR) mods mods/house/atoms $(SDKPATH) $(SDKPATH)/arch/$(ARCH) $(SDKPATH)/emu
+INCLUDES = $(MOD_DIR) mods mods/house/atoms $(SDKPATH) $(SDKPATH)/arch/$(ARCH) $(SDKPATH)/emu eurorack
 
 CFLAGS.common = -Wall -ffunction-sections -fdata-sections
 CFLAGS.speed = -O3 -ftree-vectorize -ffast-math

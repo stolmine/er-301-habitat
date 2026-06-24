@@ -93,7 +93,7 @@ FFTs, so no separate worker thread is needed).
 | Window | **Hann (or MLT sine²)** | COLA-satisfied; analysis×synthesis product = Hann for OLA. Apply on **both** analysis and synthesis (modification regime). |
 | COLA | **strong COLA** | `Σ_m w(n−mR) = const`; prefer the bandlimited (no-aliasing) regime since we modify the spectrum. Size `N ≥ M+L−1` if any bin-shift/convolution op (shimmer/blur) risks circular aliasing. |
 | FFT | **ShyFFT** (`eurorack/stmlib/fft/shy_fft.h`) | Already vendored — **eliminates the new-dependency / license risk** the roadmap flagged. Scalar radix-2; NEON optimization deferred. Add `eurorack` / `eurorack/stmlib` to `mods/zaum/mod.mk` INCLUDES (or vendor a copy into `atoms/`). |
-| Latency | **~N samples ≈ 21 ms**, presented as **predelay** | Inherent; documented in the unit description, folded into the Predelay readout. In Zaum-Tunnel it becomes part of the loop time (a feature). |
+| Latency | **N+R = 1280 samples ≈ 26.7 ms**, presented as **predelay** | Inherent (ring-buffer offset, measured in the rig — not ~N as first estimated). Documented in the unit description, folded into the Predelay readout. In Zaum-Tunnel it becomes part of the loop time (a feature). |
 | Control rate | **per audio block** | Read params every `process()` block (FRAMELENGTH 32–128), apply to the next frame — this is what makes Clouds spectral feel responsive despite STFT latency. Never block the audio path on the FFT. |
 
 Plumbing (mirror `clouds/dsp/pvoc/stft.cc`): an input analysis ring + an output
@@ -288,7 +288,7 @@ transparent before adding any fiction**.
 magnitude+phase arrays (`N/2+1` doubles ×2 ×2 ch), window + scratch, predelay buffer.
 Order **~100–200 KB** — fits CM4 L2 (1 MB) easily.
 
-**Latency:** ~N = 1024 smp ≈ **21 ms**, presented as predelay (documented, not a bug).
+**Latency:** N+R = 1280 smp ≈ **26.7 ms** (measured in the rig; ring-buffer offset), presented as predelay (documented, not a bug).
 
 ---
 
