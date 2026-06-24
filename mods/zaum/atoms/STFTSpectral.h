@@ -1,6 +1,15 @@
 // zaum::STFTSpectral
 //
-// BUILD SUB-PHASE 0.2.0.4 — continuous Freeze (g→1, inputGain→0).
+// BUILD SUB-PHASE 0.2.0.6 — Freeze = decay extension + floored input (the fix).
+//   0.2.0.4 made freeze extend the decay (gEff→1) → gorgeous long tails, BUT
+//   zeroed the input at freeze=1 → starved to near-silence ("dry"). 0.2.0.5's
+//   snapshot/hold rewrite fixed the dry but REMOVED the decay extension → lost
+//   the tail (short metallic ring). This restores the decay extension and only
+//   FLOORS the input (kFreezeInFloor) so freeze=1 keeps filling + holds forever:
+//     gkEff  = gk + freeze*(1-gk)                  // decay → infinite at 1
+//     inGain = max(1-freeze, kFreezeInFloor)       // never starve the input
+//     M[k]   = inGain*mag + M[k]*gkEff             // (magnitude-clamped)
+//   freeze=0 = plain reverb; rising = ever-longer tail; 1 = infinite sustain.
 // ShyFFT N=1024, hop R=256, sine window. Inherent latency 1280 smp ≈ 26.7 ms.
 //
 // What changed from 0.2.0.3:
@@ -73,6 +82,10 @@ namespace zaum
   static const double kRT60Max  = 120.0;
   static const double kGMax     = 0.9999;
   static const float  kMagClamp = 32.0f;
+  // Freeze input floor: at freeze=1 the input gain is held at this value (not 0)
+  // so the spectrum keeps filling and HOLDS (infinite sustain) instead of
+  // starving to silence. Hoisted for ear-tuning.
+  static const float  kFreezeInFloor = 0.15f;
 
   // Damp: per-bin g multiplier per bin index.
   //   g_k = g_base * damp_factor^k
@@ -296,7 +309,8 @@ namespace zaum
         const float re  = spectrum[0];
         const float mag = (re >= 0.0f) ? re : -re;
         const float gEff = g + freeze * (1.0f - g);
-        float m = (1.0f - freeze) * mag + magAcc[0] * gEff;
+        const float inGain = (1.0f - freeze > kFreezeInFloor) ? (1.0f - freeze) : kFreezeInFloor;
+        float m = inGain * mag + magAcc[0] * gEff;
         if (m > kMagClamp) m = kMagClamp;
         magAcc[0] = m;
         ifft_in[0] = (re >= 0.0f) ? m : -m;
@@ -319,11 +333,14 @@ namespace zaum
         const float mag   = sqrtf(re * re + nim * nim);
         const float phase = atan2f(-nim, re);   // standard DFT phase
 
-        // SMD accumulate with per-bin g and Freeze blend.
-        // gkEff lerps gk→1 and the input term fades out as freeze→1, so
-        // freeze=1 holds the spectrum (M=M) bounded; freeze=0 is identical.
-        const float gkEff = gk + freeze * (1.0f - gk);
-        float m = (1.0f - freeze) * mag + magAcc[k] * gkEff;
+        // Freeze = decay extension (the long-tail behavior): gkEff lerps the
+        // per-bin decay gk toward 1 as freeze rises, lengthening the tail to
+        // infinite at freeze=1. inGain is FLOORED (not zeroed) so freeze=1 keeps
+        // filling + holding the spectrum (true infinite sustain) instead of
+        // starving to silence. freeze=0 → gkEff=gk, inGain=1 (plain reverb).
+        const float gkEff  = gk + freeze * (1.0f - gk);
+        const float inGain = (1.0f - freeze > kFreezeInFloor) ? (1.0f - freeze) : kFreezeInFloor;
+        float m = inGain * mag + magAcc[k] * gkEff;
         if (m > kMagClamp) m = kMagClamp;
         magAcc[k] = m;
 
@@ -354,7 +371,8 @@ namespace zaum
         const float re   = spectrum[kNyq];
         const float mag  = (re >= 0.0f) ? re : -re;
         const float gEff = g + freeze * (1.0f - g);
-        float m = (1.0f - freeze) * mag + magAcc[kNyq] * gEff;
+        const float inGain = (1.0f - freeze > kFreezeInFloor) ? (1.0f - freeze) : kFreezeInFloor;
+        float m = inGain * mag + magAcc[kNyq] * gEff;
         if (m > kMagClamp) m = kMagClamp;
         magAcc[kNyq] = m;
         ifft_in[kNyq] = (re >= 0.0f) ? m : -m;
