@@ -6,6 +6,27 @@ Design context: `planning/fabula-design.md`. Current build: zaum **0.1.0.6** (al
 
 ---
 
+## 0. UPDATE — offline rig findings (supersedes the §4 A/B split)
+
+The offline density rig (scratchpad `density-rig/`) validated the structure numerically
+and produced a **plan-changing finding**: the audible discrete echoes are driven by
+**where the output is tapped**, not the allpass count. With the wet output tapped only at
+the *ends* of D1/D2 (≈172 ms), there is a ~140 ms near-silent gap then a burst — the
+series cascade alone still first crosses 1000/sec at ~160 ms (it adds 45–61% density only
+*after* onset). Tapping the allpass outputs + several **intermediate points along D1/D2**
+(Dattorro-style multi-tap, mixed signs) moves first energy to ~30 ms and the 1000/sec
+crossing to **~10 ms — 16× earlier — with no added comb coloration** (measured slightly
+flatter) and unchanged loop stability.
+
+**Decision:** merge the cascade (still kept — cheap, safe, real density) and the multi-tap
+output into a SINGLE sub-phase **0.1.0.7**. The runaway risk that motivated the cautious
+A-then-B split is retired by the rig's unity-gain pass, so they ship together. Inner-coeff
+Diffusion scaling and any further polish stay in the later release pass. The validated tap
+scheme (fractional positions of the Size-scaled line length, signed weights, ~2.2× wet
+level match) is in the rig report and the implementation brief.
+
+---
+
 ## 1. Problem and goal
 
 The tank has **2 plain Schroeder allpasses per loop**, giving ~25–40 echoes/sec at
