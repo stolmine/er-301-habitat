@@ -5,12 +5,13 @@
 -- tank lives in the C++ atom), so the Lua wiring just maps In1/In2 ->
 -- In L/In R and Out L/Out R -> Out1/Out2.
 --
--- 8 parameters surfaced via standard ParameterAdapter + GainBias plies.
+-- 9 parameters surfaced via standard ParameterAdapter + GainBias plies.
 -- Design doc: planning/fabula-design.md. Roadmap: planning/zaum-roadmap.md.
 --
--- Sub-phase 0.1.0.1: the APFTank atom is a passthrough stub; the unit
--- loads, installs, and appears in the browser with all 8 controls
--- present but inert. DSP lands across 0.1.0.2 .. 0.1.0.6.
+-- Sub-phase 0.1.0.9 (Tier 3): adds the Early parameter + discrete ER network.
+-- Early=0 → pure diffuse hall (0.1.0.8 output unchanged).
+-- Early up → discrete room reflections in the 7–70 ms window appear,
+-- creating a more present, immediate room character.
 
 local app = app
 local libzaum = require "zaum.libzaum"
@@ -85,6 +86,11 @@ function Fabula:onLoadGraph(channelCount)
   mix:hardSet("Bias", 0.40)
   tie(op, "Mix", mix, "Out")
   self:addMonoBranch("mix", mix, "In", mix, "Out")
+
+  local early = self:addObject("early", app.ParameterAdapter())
+  early:hardSet("Bias", 0.4)
+  tie(op, "Early", early, "Out")
+  self:addMonoBranch("early", early, "In", early, "Out")
 end
 
 function Fabula:onLoadViews()
@@ -176,9 +182,20 @@ function Fabula:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.40
+    },
+    early = GainBias {
+      button = "ER",
+      description = "Early Reflections",
+      branch = self.branches.early,
+      gainbias = self.objects.early,
+      range = self.objects.early,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.4
     }
   }, {
-    expanded = { "size", "decay", "damp", "diffusion", "mod", "modRate", "predelay", "mix" },
+    expanded = { "size", "decay", "damp", "diffusion", "mod", "modRate", "predelay", "mix", "early" },
     collapsed = {}
   }
 end

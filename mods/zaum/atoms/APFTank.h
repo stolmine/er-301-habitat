@@ -10,7 +10,28 @@
 // Plan: planning/fabula-design.md (DSP architecture, delay tables,
 // modulation, governor). Roadmap: planning/zaum-roadmap.md §"Phase 1".
 //
-// BUILD SUB-PHASE 0.1.0.8 — Tier 1 present-room default retune (default-value changes only).
+// BUILD SUB-PHASE 0.1.0.9 — Tier 3 early-reflection (ER) network + Early control.
+//
+//   Adds a discrete feedforward early-reflection (ER) FIR network that injects
+//   room-character reflections in the 7–70 ms window (Griesinger/Moorer precedence
+//   effect range) into the wet output — PARALLEL to the existing tank multi-tap,
+//   summed as: wetL += kERLevel * earlyParam * erSumL (and R).
+//
+//   Source signal: the predelayed, pre-diffusion sample (diffIn captured before
+//   the input-diffusion chain), written each sample into a dedicated 4096-sample
+//   mono ER ring buffer (mER, power-of-two for cheap & wrap). L and R each read
+//   9 taps with DIFFERENT delay offsets (decorrelated stereo) and mixed signs
+//   (emulating surface-interaction phase inversions per Moorer 1979).
+//
+//   New parameter: Early (default 0.4). At Early=0 the ER term is zero —
+//   the 0.1.0.8 output is reproduced exactly. At Early=1 the ER network is at
+//   full level. With Size/Decay low + Early high → tight present room.
+//   With Size/Decay high + Early low → the existing diffuse hall character.
+//
+//   Early=0 backward-compatibility guarantee: kERLevel * 0.0f * erSum = 0
+//   unconditionally — no floating-point residual, no change to existing signal path.
+//
+// (Previous: 0.1.0.8 — Tier 1 present-room default retune, default-value changes only.)
 //
 //   Parameter defaults retuned for a "present room" voicing per fabula-character-tuning.md:
 //     Size:      0.5f  → 0.35f   (smaller, more intimate room)
@@ -229,6 +250,12 @@ namespace zaum
   static const int kID3  = 613;
   static const int kID4  = 449;
 
+  // Early-reflection ring buffer (dedicated mono, pre-diffusion source).
+  // 4096 samples at 48 kHz = 85.3 ms — covers the full 7–70 ms ER window.
+  // Power-of-two for cheap bitwise wrap: & (kER - 1).
+  // Maximum tap delay used = 71 ms = 3408 samples < 4096 — all reads in-bounds.
+  static const int kER = 4096;
+
   // Tank allpass buffers (series-cascade Schroeder APF, BOTH L and R loops).
   // Each tank AP is a SERIES CASCADE: outer (kTA1=1087, g=gTA1_out) feeds
   // inner (kTA1i=367, g=gTA1_in=0.50). Separate buffer per stage per loop.
@@ -445,6 +472,75 @@ namespace zaum
   static const double kWetLevel = 2.2;   // level match for signed-sum cancellation
 
   // ---------------------------------------------------------------------------
+  // Early-reflection (ER) FIR network — Tier 3 (0.1.0.9).
+  //
+  // Tap pattern adapted from Moorer (1979) "About This Reverberation Business"
+  // Table II (small concert hall ER times) and Gardner (1992) "The Virtual
+  // Acoustic Room" Appendix B (reflection decay model), scaled to 48 kHz.
+  //
+  // Design choices:
+  //   - 9 taps per channel, spanning 7–70 ms (336–3360 samples at 48 kHz).
+  //   - IRREGULAR spacing (no two gaps equal) avoids comb resonances.
+  //   - DIFFERENT L/R delays for stereo decorrelation.
+  //   - Gains: exponential decay from ~0.70 at 7 ms to ~0.15 at 70 ms
+  //     (6 dB per doubling of time ≈ –6 dB/oct energy decay), with mixed
+  //     signs on every other tap (emulating surface-reflection phase
+  //     inversions measured by Moorer in live rooms).
+  //   - All tap delays < kER=4096 — guaranteed in-bounds (max = 3408 < 4096).
+  //
+  // Source signal: pre-diffusion predelayed mono (so reflections stay discrete,
+  // not smeared by the four input-diffusion allpasses). Written to mER[] each
+  // sample. Reads via ((mWrER - delay) & (kER-1)) — pure integer, no interp
+  // needed (discrete reflections, not a modulated line).
+  //
+  // L tap delays (samples at 48 kHz) — Moorer Table II row A scaled:
+  //   7 ms=336, 13 ms=624, 20 ms=960, 29 ms=1392, 37 ms=1776,
+  //   46 ms=2208, 55 ms=2640, 62 ms=2976, 70 ms=3360
+  //
+  // R tap delays (offset by ~2–3 ms per tap for decorrelation):
+  //   9 ms=432, 16 ms=768, 23 ms=1104, 31 ms=1488, 40 ms=1920,
+  //   49 ms=2352, 57 ms=2736, 65 ms=3120, 71 ms=3408
+  //
+  // Gains (alternating sign, exponential envelope):
+  //   index 0: +0.68, 1: -0.56, 2: +0.45, 3: -0.36, 4: +0.28,
+  //   index 5: -0.22, 6: +0.17, 7: -0.13, 8: +0.10
+  //
+  // kERLevel = 1.5: at Early=0.4, typical ER sum magnitude ~0.4 (signed),
+  //   contribution = 1.5 * 0.4 * 0.4 = 0.24 — clearly present but below
+  //   the tank tail level (~0.4–0.6 at mix=0.4), giving a natural balance.
+  //   PRIMARY TUNING KNOB: raise to strengthen the "room snap" character.
+  //
+  // Bounds proof: all tap delays < kER=4096.
+  //   L: max delay = 3360 < 4096.   R: max delay = 3408 < 4096.
+  //   Read: ((mWrER - delay) & (kER-1)) is always in [0, 4095]. Safe.
+  // ---------------------------------------------------------------------------
+  static const int kER_tapCount = 9;
+
+  // ER tap delay tables and gain array — namespace-scope, defined inline.
+  // Single TU (zaum_swig.cpp) guarantees no ODR violation.
+  //
+  // L delays in samples at 48 kHz (Moorer 1979 Table II row A adapted):
+  //   7, 13, 20, 29, 37, 46, 55, 62, 70 ms
+  static const int kER_delayL[9] = { 336, 624, 960, 1392, 1776, 2208, 2640, 2976, 3360 };
+  //
+  // R delays in samples at 48 kHz (offset ~2–3 ms per tap for decorrelation):
+  //   9, 16, 23, 31, 40, 49, 57, 65, 71 ms
+  static const int kER_delayR[9] = { 432, 768, 1104, 1488, 1920, 2352, 2736, 3120, 3408 };
+  //
+  // Shared gain envelope: alternating-sign exponential decay.
+  // Energy model: -6 dB per octave of delay time (Moorer measured).
+  // Signs alternate to emulate surface-reflection phase inversions.
+  // Absolute magnitudes: 0.68, 0.56, 0.45, 0.36, 0.28, 0.22, 0.17, 0.13, 0.10
+  static const double kER_gain[9] = {
+    +0.68, -0.56, +0.45, -0.36, +0.28,
+    -0.22, +0.17, -0.13, +0.10
+  };
+  //
+  // Output level scaler. PRIMARY TUNING KNOB for ER-vs-tail balance.
+  // At Early=0.4, mean |erSum| ~0.4 → contribution = 1.5 * 0.4 * 0.4 = 0.24.
+  static const double kERLevel = 1.5;
+
+  // ---------------------------------------------------------------------------
   // xorshift64 PRNG — fast, period 2^64-1, audio-thread safe (no libc).
   // From Marsaglia (2003). NEVER pass seed=0 (degenerate fixed point).
   // ---------------------------------------------------------------------------
@@ -485,8 +581,11 @@ namespace zaum
       addParameter(mModRate);
       addParameter(mPredelay);
       addParameter(mMix);
+      addParameter(mEarly);
 
       memset(mPD,     0, sizeof(mPD));
+      memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
+      mWrER = 0;
       memset(mID1,    0, sizeof(mID1));
       memset(mID2,    0, sizeof(mID2));
       memset(mID3,    0, sizeof(mID3));
@@ -572,6 +671,7 @@ namespace zaum
     od::Parameter mModRate{"ModRate", 0.2f};
     od::Parameter mPredelay{"Predelay", 0.041f};
     od::Parameter mMix{"Mix", 0.40f};
+    od::Parameter mEarly{"Early", 0.4f};
 
     virtual void process()
     {
@@ -600,6 +700,8 @@ namespace zaum
       const float decayParam     = mDecay.value();      // 0..1
       const float sizeParam      = mSize.value();       // 0..1
       const float diffusionParam = mDiffusion.value();  // 0..1
+      // Early: 0..1, scales ER contribution. At 0 → no ER (exact 0.1.0.8 output).
+      const float earlyParam     = mEarly.value();      // 0..1
 
       // Max tap = kPD - 1 (keep at least 1-sample separation from write head)
       const int predelayTap = (int)(predelayParam * (float)(kPD - 1));
@@ -755,6 +857,38 @@ namespace zaum
         if (rdPD < 0) rdPD += kPD;
         double diffIn = (double)mPD[rdPD];
         mWrPD = (mWrPD + 1) & (kPD - 1);
+
+        // ----------------------------------------------------------------
+        // 2b. Early-reflection (ER) network — Tier 3 (0.1.0.9).
+        //
+        // Write the pre-diffusion predelayed sample into the dedicated ER
+        // ring buffer. Then read 9 taps per channel at irregular delays in
+        // the 7–70 ms window (adapted from Moorer 1979 / Gardner 1992).
+        // L and R use DIFFERENT tap delays for stereo decorrelation.
+        // All reads: ((mWrER - delay) & (kER-1)) — in-bounds guaranteed
+        // because all delays < kER=4096. Power-of-two & mask handles wrap.
+        //
+        // erSumL and erSumR are the signed weighted tap sums. They are added
+        // to wetL/wetR (below, after the tank multi-tap) scaled by:
+        //   kERLevel * earlyParam
+        // At earlyParam=0.0f the entire ER contribution is zero — the
+        // 0.1.0.8 signal path is reproduced exactly (no floating-point
+        // residual beyond the invariant 0 * anything = 0).
+        // ----------------------------------------------------------------
+        mER[mWrER] = (float)diffIn;
+        double erSumL = 0.0;
+        double erSumR = 0.0;
+        if (earlyParam > 0.0f)
+        {
+          for (int t = 0; t < kER_tapCount; t++)
+          {
+            int idxL = (mWrER - kER_delayL[t]) & (kER - 1);
+            int idxR = (mWrER - kER_delayR[t]) & (kER - 1);
+            erSumL += kER_gain[t] * (double)mER[idxL];
+            erSumR += kER_gain[t] * (double)mER[idxR];
+          }
+        }
+        mWrER = (mWrER + 1) & (kER - 1);
 
         // ----------------------------------------------------------------
         // 3. Input diffusion: 4 series allpasses (fixed coefficients).
@@ -1147,6 +1281,13 @@ namespace zaum
             + kWd2e * d2Read_R
         );
 
+        // Add ER contribution (parallel, AFTER tank multi-tap).
+        // Scales to zero when earlyParam=0 → exact 0.1.0.8 output.
+        // ER is purely feedforward (FIR): no feedback, no stability concern.
+        double erScale = (double)(kERLevel * earlyParam);
+        wetL += erScale * erSumL;
+        wetR += erScale * erSumR;
+
         // ----------------------------------------------------------------
         // 6. Dry/wet mix — true stereo.
         //    Each channel's dry is preserved; each channel's wet is drawn
@@ -1188,6 +1329,12 @@ namespace zaum
     // Predelay buffer (power-of-two for & wrap)
     float mPD[kPD];
     int   mWrPD;
+
+    // Early-reflection ring buffer (power-of-two for & wrap).
+    // Fed from the pre-diffusion predelayed mono signal each sample.
+    // kER=4096 → 85.3 ms at 48 kHz; all 9 ER taps read within this range.
+    float mER[kER];
+    int   mWrER;
 
     // Input diffusion allpass buffers (4 series, shared mono path)
     float mID1[kID1];
