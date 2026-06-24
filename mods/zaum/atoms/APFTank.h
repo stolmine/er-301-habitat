@@ -10,7 +10,26 @@
 // Plan: planning/fabula-design.md (DSP architecture, delay tables,
 // modulation, governor). Roadmap: planning/zaum-roadmap.md §"Phase 1".
 //
-// BUILD SUB-PHASE 0.1.0.10 — Size/Decay range extended to room scale; default sound preserved.
+// BUILD SUB-PHASE 0.1.0.11 — Outer-allpass Brownian modulation for metallic reduction.
+//
+//   Extends the Brownian walk modulation to the four OUTER tank allpasses
+//   (AP1 outer 1087 L/R, AP2 outer 1471 L/R) to break up residual eigentone
+//   ringing in the tail. Per Dattorro 1997 and Valhalla DSP (2011), modulating
+//   the longer tank allpass delays reduces metallic modal coloration; short inner
+//   APs (367/491) and input diffusers (229/173/613/449) remain UNMODULATED to
+//   avoid "water sloshing" artifacts.
+//
+//   Four new independent xorshift64 PRNGs + walk accumulators (one per outer AP),
+//   seeded with distinct constants DIFFERENT from the D1/D2 delay-line seeds.
+//   Excursion: kAPModMin + Mod*(kAPModMax-kAPModMin) → ±0.5..6 samples.
+//   At default Mod=0.40: apExcursion ≈ 2.7 samples — subtle, below audible chorus.
+//   At Mod=0.0: apExcursion ≈ 0.5 samples — effectively static.
+//   Outer AP buffers sized to base + 2*kAPHeadroom (16): 1087→1119, 1471→1503.
+//   Inner AP buffers (367/491) UNCHANGED — unmodulated, exact size, no headroom.
+//   AP excursion NOT size-scaled: outer AP delays are fixed (not Size-scaled),
+//   so ±6 on 1087/1471 is ~0.4–0.55% — already a constant subtle ratio.
+//
+// (Previous: 0.1.0.10 — Size/Decay range extended to room scale; default sound preserved.)
 //
 //   Adds a discrete feedforward early-reflection (ER) FIR network that injects
 //   room-character reflections in the 7–70 ms window (Griesinger/Moorer precedence
@@ -250,10 +269,42 @@ namespace zaum
   // AP1 outer: N=1087, g from Diffusion (~0.70 at default). Inner: N=367, g=0.50.
   // AP2 outer: N=1471, g from Diffusion (~0.50 at default). Inner: N=491, g=0.50.
   // L and R loops use SEPARATE buffers and write indices for all 8 buffers.
-  static const int kTA1  = 1087;   // AP1 delay (= buffer size), both loops
-  static const int kTA1i = 367;    // AP1 inner delay — series cascade (0.1.0.7)
-  static const int kTA2  = 1471;   // AP2 delay (= buffer size), both loops
-  static const int kTA2i = 491;    // AP2 inner delay — series cascade (0.1.0.7)
+  //
+  // 0.1.0.11: OUTER AP buffers sized base + 2*kAPHeadroom for Brownian modulation.
+  //   kAPHeadroom=16: generous for ±6-sample max excursion + 1 interp neighbor = 7 < 16.
+  //   kTA1_size = 1087 + 32 = 1119; kTA2_size = 1471 + 32 = 1503.
+  // INNER AP buffers (kTA1i=367, kTA2i=491) UNCHANGED — exact size, UNMODULATED.
+  static const int kTA1  = 1087;   // AP1 outer base delay
+  static const int kTA1i = 367;    // AP1 inner delay — series cascade (0.1.0.7), UNMODULATED
+  static const int kTA2  = 1471;   // AP2 outer base delay
+  static const int kTA2i = 491;    // AP2 inner delay — series cascade (0.1.0.7), UNMODULATED
+
+  // ---------------------------------------------------------------------------
+  // Outer AP modulation headroom and buffer sizes (0.1.0.11).
+  // kAPHeadroom: headroom samples each side for Brownian walk + interp neighbor.
+  //   Max excursion = kAPModMax = 6 samples; interp neighbor = 1 → total = 7 < 16.
+  //   Safe with 9-sample margin.
+  // kTA1_size = kTA1 + 2*kAPHeadroom = 1087 + 32 = 1119
+  // kTA2_size = kTA2 + 2*kAPHeadroom = 1471 + 32 = 1503
+  // ---------------------------------------------------------------------------
+  static const int kAPHeadroom = 16;
+  static const int kTA1_size   = kTA1 + 2 * kAPHeadroom;   // 1119
+  static const int kTA2_size   = kTA2 + 2 * kAPHeadroom;   // 1503
+
+  // ---------------------------------------------------------------------------
+  // Outer AP modulation excursion constants (0.1.0.11).
+  // Driven by the Mod parameter (unified modulation-depth control).
+  //   apExcursion = kAPModMin + Mod * (kAPModMax - kAPModMin)
+  //   Mod=0.00 → apExcursion = 0.5 smp (≈ static — no audible effect)
+  //   Mod=0.40 → apExcursion = 0.5 + 0.40*5.5 = 2.7 smp (gentle, sub-chorus)
+  //   Mod=1.00 → apExcursion = 6.0 smp (±0.55% on 1087, ±0.41% on 1471)
+  // AP excursion is NOT size-scaled: the outer AP delays are fixed (1087/1471),
+  // not Size-scaled, so the ratio is already constant across all room sizes.
+  // Rate: reuses the D1/D2 step_size (ModRate-derived) — same gentle Brownian
+  // drift, just applied to a smaller excursion window.
+  // ---------------------------------------------------------------------------
+  static const double kAPModMin = 0.5;   // min AP excursion (samples) — near-static at Mod=0
+  static const double kAPModMax = 6.0;   // max AP excursion (samples) — subtle, below chorus
 
   // ---------------------------------------------------------------------------
   // Tank delay line base lengths (Size=0.5 default = current approved sound)
@@ -639,17 +690,19 @@ namespace zaum
       memset(mID3,    0, sizeof(mID3));
       memset(mID4,    0, sizeof(mID4));
       // L-loop allpass + delay buffers
+      // Outer AP buffers (mTA1_L, mTA2_L) sized kTA1_size/kTA2_size (headroom for Brownian mod).
+      // Inner AP buffers (mTA1i_L, mTA2i_L) sized exactly kTA1i/kTA2i — UNMODULATED.
       memset(mTA1_L,   0, sizeof(mTA1_L));
-      memset(mTA1i_L,  0, sizeof(mTA1i_L));   // AP1 inner cascade buffer
+      memset(mTA1i_L,  0, sizeof(mTA1i_L));   // AP1 inner cascade buffer (UNMODULATED)
       memset(mTA2_L,   0, sizeof(mTA2_L));
-      memset(mTA2i_L,  0, sizeof(mTA2i_L));   // AP2 inner cascade buffer
+      memset(mTA2i_L,  0, sizeof(mTA2i_L));   // AP2 inner cascade buffer (UNMODULATED)
       memset(mD1_L,    0, sizeof(mD1_L));
       memset(mD2_L,    0, sizeof(mD2_L));
-      // R-loop allpass + delay buffers
+      // R-loop allpass + delay buffers (same sizing rationale as L).
       memset(mTA1_R,   0, sizeof(mTA1_R));
-      memset(mTA1i_R,  0, sizeof(mTA1i_R));   // AP1 inner cascade buffer
+      memset(mTA1i_R,  0, sizeof(mTA1i_R));   // AP1 inner cascade buffer (UNMODULATED)
       memset(mTA2_R,   0, sizeof(mTA2_R));
-      memset(mTA2i_R,  0, sizeof(mTA2i_R));   // AP2 inner cascade buffer
+      memset(mTA2i_R,  0, sizeof(mTA2i_R));   // AP2 inner cascade buffer (UNMODULATED)
       memset(mD1_R,    0, sizeof(mD1_R));
       memset(mD2_R,    0, sizeof(mD2_R));
 
@@ -682,6 +735,23 @@ namespace zaum
       mWalk_D2_L = 0.0;
       mWalk_D1_R = 0.0;
       mWalk_D2_R = 0.0;
+
+      // Outer AP Brownian walk seeds (0.1.0.11) — four NEW seeds, DISTINCT from each
+      // other and from all four D1/D2 delay-line seeds above. Chosen from different
+      // numeric neighborhoods (wyhash / Murmur constants) for guaranteed decorrelation
+      // from sample 0. Never use 0 (xorshift64 fixed point).
+      //   D1/D2 seeds use: 0x9E37..., 0x6C62..., 0xBF58..., 0x94D0... (golden/pi/splitmix)
+      //   AP seeds use:    0xA076..., 0xE703..., 0x3184..., 0xC6BC... (wyhash/murmur)
+      mSeed_AP1_L = UINT64_C(0xA0761D6478BD642F);  // wyhash constant a
+      mSeed_AP2_L = UINT64_C(0xE7037ED1A0B428DB);  // wyhash constant b
+      mSeed_AP1_R = UINT64_C(0x31848A9BCDB0E235);  // distinct neighborhood
+      mSeed_AP2_R = UINT64_C(0xC6BC279692B5CC83);  // Murmur3 finalizer constant
+
+      // AP walk accumulators — start at 0 (center of headroom window).
+      mWalk_AP1_L = 0.0;
+      mWalk_AP2_L = 0.0;
+      mWalk_AP1_R = 0.0;
+      mWalk_AP2_R = 0.0;
 
       // HF damp filter state (one per loop, initialized to silence).
       mDampL = 0.0;
@@ -889,6 +959,15 @@ namespace zaum
       if (excursion > kMaxExcursion) excursion = kMaxExcursion;
       const double step_size = kMinStep + (double)modRateParam * (kMaxStep - kMinStep);
 
+      // Outer AP modulation excursion (0.1.0.11).
+      // Driven by same Mod param (unified depth control) but mapped to a smaller
+      // window suitable for allpass modulation (not Size-scaled: AP delays are fixed).
+      //   Mod=0.00 → 0.5 smp (near-static)
+      //   Mod=0.40 → 2.7 smp (gentle, default)
+      //   Mod=1.00 → 6.0 smp (subtle, below audible chorus on 1087/1471 smp delays)
+      // Bounds: apExcursion=6 + interp neighbor=1 → 7 < kAPHeadroom=16 — safe.
+      const double apExcursion = kAPModMin + (double)modParam * (kAPModMax - kAPModMin);
+
       // Copy walk accumulators and seeds into local variables for the inner
       // loop. Propagate back to members at end of block.
       double walk_D1_L = mWalk_D1_L;
@@ -900,6 +979,17 @@ namespace zaum
       uint64_t seed_D2_L = mSeed_D2_L;
       uint64_t seed_D1_R = mSeed_D1_R;
       uint64_t seed_D2_R = mSeed_D2_R;
+
+      // Outer AP Brownian walk locals (0.1.0.11) — propagated back after the block.
+      double walk_AP1_L = mWalk_AP1_L;
+      double walk_AP2_L = mWalk_AP2_L;
+      double walk_AP1_R = mWalk_AP1_R;
+      double walk_AP2_R = mWalk_AP2_R;
+
+      uint64_t seed_AP1_L = mSeed_AP1_L;
+      uint64_t seed_AP2_L = mSeed_AP2_L;
+      uint64_t seed_AP1_R = mSeed_AP1_R;
+      uint64_t seed_AP2_R = mSeed_AP2_R;
 
       // Copy HF damp filter state local for the sample loop.
       double dampL = mDampL;
@@ -1073,16 +1163,36 @@ namespace zaum
         // AP1_L: series cascade — outer (kTA1=1087, g=gTA1) → inner (kTA1i=367, g=gTA1_in).
         // SERIES form (NOT in-feedback nesting): outer AP's feedforward output feeds
         // a second independent AP. Unity-gain by construction: |H_outer|·|H_inner|=1.
+        //
+        // 0.1.0.11: outer AP read is now a BROWNIAN-MODULATED fractional (linear-interp)
+        // read at (kTA1 ± walk) behind the write head, using the headroom'd buffer
+        // (kTA1_size=1119). Write still advances by 1 each sample at the write head.
+        // Inner AP (kTA1i=367) remains UNMODULATED — exact read at write head.
         double ap1Out_L;
         {
-          // Outer AP (kTA1=1087, g=gTA1 from Diffusion):
-          double vO1d = (double)mTA1_L[mWrTA1_L];          // outer read v[n-1087]
+          // Outer AP (kTA1=1087, g=gTA1 from Diffusion) — MODULATED read:
+          // Advance PRNG, integrate walk, clamp to ±apExcursion.
+          seed_AP1_L = xorshift64(seed_AP1_L);
+          double apNoise1L = (double)(seed_AP1_L & 0xFFFF) / 65535.0 - 0.5;
+          walk_AP1_L += apNoise1L * step_size;
+          if (walk_AP1_L >  apExcursion) walk_AP1_L =  apExcursion;
+          if (walk_AP1_L < -apExcursion) walk_AP1_L = -apExcursion;
+
+          // Fractional read at kTA1 + walk behind write head.
+          double apReadPos1L = (double)(mWrTA1_L - kTA1) + walk_AP1_L;
+          int    apOff1L     = (int)floor(apReadPos1L);
+          double apFrac1L    = apReadPos1L - (double)apOff1L;
+          int    apI0_1L     = ((apOff1L % kTA1_size) + kTA1_size) % kTA1_size;
+          int    apI1_1L     = (apI0_1L + 1) % kTA1_size;
+          double vO1d = (1.0 - apFrac1L) * (double)mTA1_L[apI0_1L]
+                      +        apFrac1L  * (double)mTA1_L[apI1_1L];
+
           double vO1n = tankIn_L + gTA1 * vO1d;
           double in1  = -gTA1 * vO1n + vO1d;               // outer AP output → inner input
           mTA1_L[mWrTA1_L] = (float)vO1n;
           mWrTA1_L++;
-          if (mWrTA1_L >= kTA1) mWrTA1_L = 0;
-          // Inner AP (kTA1i=367, g=gTA1_in=0.50):
+          if (mWrTA1_L >= kTA1_size) mWrTA1_L = 0;
+          // Inner AP (kTA1i=367, g=gTA1_in=0.50) — UNMODULATED, exact read:
           double vI1d = (double)mTA1i_L[mWrTA1i_L];        // inner read v[n-367]
           double vI1n = in1 + gTA1_in * vI1d;
           ap1Out_L    = -gTA1_in * vI1n + vI1d;            // cascade output
@@ -1142,16 +1252,31 @@ namespace zaum
         double dampedD1_L = dampL;
 
         // AP2_L: series cascade — outer (kTA2=1471, g=gTA2) → inner (kTA2i=491, g=gTA2_in).
+        // 0.1.0.11: outer AP2_L also uses Brownian-modulated fractional read (kTA2_size=1503).
+        // Inner AP2i_L (491) remains UNMODULATED.
         double ap2Out_L;
         {
-          // Outer AP (kTA2=1471, g=gTA2 from Diffusion):
-          double vO2d = (double)mTA2_L[mWrTA2_L];
+          // Outer AP (kTA2=1471, g=gTA2 from Diffusion) — MODULATED read:
+          seed_AP2_L = xorshift64(seed_AP2_L);
+          double apNoise2L = (double)(seed_AP2_L & 0xFFFF) / 65535.0 - 0.5;
+          walk_AP2_L += apNoise2L * step_size;
+          if (walk_AP2_L >  apExcursion) walk_AP2_L =  apExcursion;
+          if (walk_AP2_L < -apExcursion) walk_AP2_L = -apExcursion;
+
+          double apReadPos2L = (double)(mWrTA2_L - kTA2) + walk_AP2_L;
+          int    apOff2L     = (int)floor(apReadPos2L);
+          double apFrac2L    = apReadPos2L - (double)apOff2L;
+          int    apI0_2L     = ((apOff2L % kTA2_size) + kTA2_size) % kTA2_size;
+          int    apI1_2L     = (apI0_2L + 1) % kTA2_size;
+          double vO2d = (1.0 - apFrac2L) * (double)mTA2_L[apI0_2L]
+                      +        apFrac2L  * (double)mTA2_L[apI1_2L];
+
           double vO2n = dampedD1_L + gTA2 * vO2d;
           double in2  = -gTA2 * vO2n + vO2d;
           mTA2_L[mWrTA2_L] = (float)vO2n;
           mWrTA2_L++;
-          if (mWrTA2_L >= kTA2) mWrTA2_L = 0;
-          // Inner AP (kTA2i=491, g=gTA2_in=0.50):
+          if (mWrTA2_L >= kTA2_size) mWrTA2_L = 0;
+          // Inner AP (kTA2i=491, g=gTA2_in=0.50) — UNMODULATED, exact read:
           double vI2d = (double)mTA2i_L[mWrTA2i_L];
           double vI2n = in2 + gTA2_in * vI2d;
           ap2Out_L    = -gTA2_in * vI2n + vI2d;
@@ -1209,16 +1334,31 @@ namespace zaum
 
         // AP1_R: series cascade — outer (kTA1=1087, g=gTA1) → inner (kTA1i=367, g=gTA1_in).
         // Same coefficients as L; separate buffers (mTA1_R, mTA1i_R) for independent state.
+        // 0.1.0.11: outer AP1_R uses independent Brownian walk (seed_AP1_R / walk_AP1_R).
+        // Inner AP1i_R (367) remains UNMODULATED.
         double ap1Out_R;
         {
-          // Outer AP:
-          double vO1d = (double)mTA1_R[mWrTA1_R];
+          // Outer AP (kTA1=1087, g=gTA1 from Diffusion) — MODULATED read:
+          seed_AP1_R = xorshift64(seed_AP1_R);
+          double apNoise1R = (double)(seed_AP1_R & 0xFFFF) / 65535.0 - 0.5;
+          walk_AP1_R += apNoise1R * step_size;
+          if (walk_AP1_R >  apExcursion) walk_AP1_R =  apExcursion;
+          if (walk_AP1_R < -apExcursion) walk_AP1_R = -apExcursion;
+
+          double apReadPos1R = (double)(mWrTA1_R - kTA1) + walk_AP1_R;
+          int    apOff1R     = (int)floor(apReadPos1R);
+          double apFrac1R    = apReadPos1R - (double)apOff1R;
+          int    apI0_1R     = ((apOff1R % kTA1_size) + kTA1_size) % kTA1_size;
+          int    apI1_1R     = (apI0_1R + 1) % kTA1_size;
+          double vO1d = (1.0 - apFrac1R) * (double)mTA1_R[apI0_1R]
+                      +        apFrac1R  * (double)mTA1_R[apI1_1R];
+
           double vO1n = tankIn_R + gTA1 * vO1d;
           double in1  = -gTA1 * vO1n + vO1d;
           mTA1_R[mWrTA1_R] = (float)vO1n;
           mWrTA1_R++;
-          if (mWrTA1_R >= kTA1) mWrTA1_R = 0;
-          // Inner AP:
+          if (mWrTA1_R >= kTA1_size) mWrTA1_R = 0;
+          // Inner AP (kTA1i=367, g=gTA1_in=0.50) — UNMODULATED, exact read:
           double vI1d = (double)mTA1i_R[mWrTA1i_R];
           double vI1n = in1 + gTA1_in * vI1d;
           ap1Out_R    = -gTA1_in * vI1n + vI1d;
@@ -1267,16 +1407,31 @@ namespace zaum
         double dampedD1_R = dampR;
 
         // AP2_R: series cascade — outer (kTA2=1471, g=gTA2) → inner (kTA2i=491, g=gTA2_in).
+        // 0.1.0.11: outer AP2_R uses independent Brownian walk (seed_AP2_R / walk_AP2_R).
+        // Inner AP2i_R (491) remains UNMODULATED.
         double ap2Out_R;
         {
-          // Outer AP:
-          double vO2d = (double)mTA2_R[mWrTA2_R];
+          // Outer AP (kTA2=1471, g=gTA2 from Diffusion) — MODULATED read:
+          seed_AP2_R = xorshift64(seed_AP2_R);
+          double apNoise2R = (double)(seed_AP2_R & 0xFFFF) / 65535.0 - 0.5;
+          walk_AP2_R += apNoise2R * step_size;
+          if (walk_AP2_R >  apExcursion) walk_AP2_R =  apExcursion;
+          if (walk_AP2_R < -apExcursion) walk_AP2_R = -apExcursion;
+
+          double apReadPos2R = (double)(mWrTA2_R - kTA2) + walk_AP2_R;
+          int    apOff2R     = (int)floor(apReadPos2R);
+          double apFrac2R    = apReadPos2R - (double)apOff2R;
+          int    apI0_2R     = ((apOff2R % kTA2_size) + kTA2_size) % kTA2_size;
+          int    apI1_2R     = (apI0_2R + 1) % kTA2_size;
+          double vO2d = (1.0 - apFrac2R) * (double)mTA2_R[apI0_2R]
+                      +        apFrac2R  * (double)mTA2_R[apI1_2R];
+
           double vO2n = dampedD1_R + gTA2 * vO2d;
           double in2  = -gTA2 * vO2n + vO2d;
           mTA2_R[mWrTA2_R] = (float)vO2n;
           mWrTA2_R++;
-          if (mWrTA2_R >= kTA2) mWrTA2_R = 0;
-          // Inner AP:
+          if (mWrTA2_R >= kTA2_size) mWrTA2_R = 0;
+          // Inner AP (kTA2i=491, g=gTA2_in=0.50) — UNMODULATED, exact read:
           double vI2d = (double)mTA2i_R[mWrTA2i_R];
           double vI2n = in2 + gTA2_in * vI2d;
           ap2Out_R    = -gTA2_in * vI2n + vI2d;
@@ -1388,6 +1543,17 @@ namespace zaum
       mSeed_D1_R = seed_D1_R;
       mSeed_D2_R = seed_D2_R;
 
+      // Propagate outer AP walk + seed state (0.1.0.11).
+      mWalk_AP1_L = walk_AP1_L;
+      mWalk_AP2_L = walk_AP2_L;
+      mWalk_AP1_R = walk_AP1_R;
+      mWalk_AP2_R = walk_AP2_R;
+
+      mSeed_AP1_L = seed_AP1_L;
+      mSeed_AP2_L = seed_AP2_L;
+      mSeed_AP1_R = seed_AP1_R;
+      mSeed_AP2_R = seed_AP2_R;
+
       // Propagate HF damp state.
       mDampL = dampL;
       mDampR = dampR;
@@ -1416,13 +1582,14 @@ namespace zaum
     int   mWrID1, mWrID2, mWrID3, mWrID4;
 
     // Tank allpass buffers — L loop (series-cascade Schroeder APF).
-    // Outer buffers (kTA1=1087, kTA2=1471): exact size, write head wraps at N.
+    // Outer buffers (0.1.0.11): sized kTA1_size=1119, kTA2_size=1503 (base + 2*kAPHeadroom=32).
+    //   Write head wraps at kTA1_size / kTA2_size. Provides headroom for ±6-smp Brownian walk.
     // Inner buffers (kTA1i=367, kTA2i=491): UNMODULATED, exact size, no headroom.
     // All four zeroed in constructor; all four write heads initialized to 0.
-    float mTA1_L[kTA1];
-    float mTA1i_L[kTA1i];   // AP1 inner cascade
-    float mTA2_L[kTA2];
-    float mTA2i_L[kTA2i];   // AP2 inner cascade
+    float mTA1_L[kTA1_size];
+    float mTA1i_L[kTA1i];   // AP1 inner cascade — UNMODULATED
+    float mTA2_L[kTA2_size];
+    float mTA2i_L[kTA2i];   // AP2 inner cascade — UNMODULATED
     int   mWrTA1_L, mWrTA1i_L, mWrTA2_L, mWrTA2i_L;
 
     // Tank delay lines — L loop (sized for max sizeFactor=1.5 + headroom).
@@ -1431,10 +1598,10 @@ namespace zaum
     int   mWrD1_L, mWrD2_L;
 
     // Tank allpass buffers — R loop (same lengths as L, separate state).
-    float mTA1_R[kTA1];
-    float mTA1i_R[kTA1i];   // AP1 inner cascade
-    float mTA2_R[kTA2];
-    float mTA2i_R[kTA2i];   // AP2 inner cascade
+    float mTA1_R[kTA1_size];
+    float mTA1i_R[kTA1i];   // AP1 inner cascade — UNMODULATED
+    float mTA2_R[kTA2_size];
+    float mTA2i_R[kTA2i];   // AP2 inner cascade — UNMODULATED
     int   mWrTA1_R, mWrTA1i_R, mWrTA2_R, mWrTA2i_R;
 
     // Tank delay lines — R loop (sized for max sizeFactor=1.5 + headroom).
@@ -1484,6 +1651,20 @@ namespace zaum
     double mWalk_D2_L;
     double mWalk_D1_R;
     double mWalk_D2_R;
+
+    // Outer AP Brownian walk state (0.1.0.11) — 4 seeds + 4 accumulators.
+    // Seeds are DISTINCT from each other and from all D1/D2 seeds above
+    // (different numeric neighborhoods: wyhash/Murmur constants).
+    // Accumulators stay in [-apExcursion, +apExcursion] = [-6, +6] samples max.
+    uint64_t mSeed_AP1_L;
+    uint64_t mSeed_AP2_L;
+    uint64_t mSeed_AP1_R;
+    uint64_t mSeed_AP2_R;
+
+    double mWalk_AP1_L;
+    double mWalk_AP2_L;
+    double mWalk_AP1_R;
+    double mWalk_AP2_R;
 
 #endif
   };
