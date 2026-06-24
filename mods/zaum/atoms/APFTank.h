@@ -10,7 +10,7 @@
 // Plan: planning/fabula-design.md (DSP architecture, delay tables,
 // modulation, governor). Roadmap: planning/zaum-roadmap.md §"Phase 1".
 //
-// BUILD SUB-PHASE 0.1.0.9 — Tier 3 early-reflection (ER) network + Early control.
+// BUILD SUB-PHASE 0.1.0.10 — Size/Decay range extended to room scale; default sound preserved.
 //
 //   Adds a discrete feedforward early-reflection (ER) FIR network that injects
 //   room-character reflections in the 7–70 ms window (Griesinger/Moorer precedence
@@ -104,48 +104,36 @@
 //
 //   B. DECAY — g_d via power-curve log-shaped map (replaces hard-coded 0.85).
 //
-//      Endpoints from fabula-design.md §7:
-//        Decay=0 → g_d_min = kGdMin = 0.60  (short tail, ~4-5 s RT60)
-//        Decay=1 → g_d_max = kGdMax = 0.97  (long tail, ~25-30 s RT60)
+//      0.1.0.10: floor lowered, shape re-solved to preserve default output.
+//        kGdMin: 0.60 → 0.30  (Decay=0 now gives a short dry tail)
+//        kDecayShape: 0.565 → 0.277  (re-solved to pin Decay=0.30 → g_d=0.780)
 //
-//      Mapping (power curve, upward-biased to place default at approved feel):
-//        g_d = kGdMin + (kGdMax - kGdMin) * pow(decay, kDecayShape)
-//        kDecayShape = 0.565
+//      Mapping:  g_d = kGdMin + (kGdMax - kGdMin) * pow(decay, kDecayShape)
 //
-//      Calibration:
-//        Decay=0.0 → g_d = 0.60
-//        Decay=0.5 → g_d = 0.60 + 0.37 * 0.5^0.565 = 0.60 + 0.37*0.676 = 0.850
-//        Decay=1.0 → g_d = 0.97
-//        → Decay=0.5 maps to g_d≈0.850, preserving the 0.1.0.4 approved sound.
+//      Calibration (0.1.0.10):
+//        Decay=0.00 → g_d = 0.30   RT60 ≈ 0.4 s  (tight/dry room — NEW FLOOR)
+//        Decay=0.30 → g_d = 0.780  RT60 ≈ 3.1 s  (default — UNCHANGED)
+//        Decay=0.50 → g_d = 0.864  RT60 ≈ 5.0 s
+//        Decay=1.00 → g_d = 0.970  RT60 ≈ 28 s   (UNCHANGED)
+//        (RTT ≈ 0.330 s at Size=0.35 default; RT60 = -3*RTT/log10(g_d))
 //
-//      RT60 formula (fabula-design.md §2):
-//        RT60 = -3 * RTT / log10(g_d)
-//        RTT (L loop) = AP1(1087) + D1(7187) + AP2(1471) + D2(5101) =
-//          15846 smp = 0.330 s at 48 kHz (Size=0.5)
-//        Decay=0: RT60 = -3*0.330/log10(0.60) ≈ 4.5 s
-//        Decay=1: RT60 = -3*0.330/log10(0.97) ≈ 31 s
-//        Note: "Decay=0→~2s" in §11 assumed a shorter RTT (0.323 s) and
-//        lower g_d_min; the ~4.5 s minimum is the actual result with the
-//        longer tank. Recalibrate endpoint in 0.1.0.7 if a shorter minimum
-//        tail is desired.
+//      kDecayShape derivation (0.1.0.10):
+//        Solve for k: 0.78 = 0.30 + 0.67*0.30^k → 0.30^k=0.71641 → k=0.277.
 //
 //      HARD SAFETY CAP: g_d = min(g_d, kGdCap = 0.985) regardless of Decay.
-//      The Spiral governors are the second backstop but g_d<1 must hold
-//      unconditionally for passive stability.
-//
-//      PRIMARY TUNING KNOBS: kGdMin (lift to shorten the short tail),
-//        kGdMax (lower to reduce maximum decay), kDecayShape (shift midpoint).
-//        kDecayShape derivation: 0.5^k = (0.85-0.60)/(0.97-0.60) = 0.676
-//        → k = log(0.676)/log(0.5) = 0.565.
+//      Lower g_d is strictly more stable; no new runaway path.
 //
 //   C. SIZE — delay-length scaling (block rate, careful bounds).
 //
-//      sizeFactor = kSizeMin + Size * (kSizeMax - kSizeMin)
-//        kSizeMin = 0.5  → Size=0.0 (smallest room)
-//        kSizeMax = 1.5  → Size=1.0 (largest room)
-//        Size=0.5 → sizeFactor=1.0 → EXACTLY the 0.1.0.4 base lengths:
-//          D1_L=7187, D2_L=5101, D1_R=6803, D2_R=6343.
-//          The 0.1.0.4 approved sound is preserved at the default.
+//      0.1.0.10: now a POWER CURVE so the floor reaches genuine small-room scale
+//      while Size=0.35 (default knob) still maps to sizeFactor=0.850 (UNCHANGED).
+//
+//      sizeFactor = kSizeMin + (kSizeMax - kSizeMin) * pow(Size, kSizeShape)
+//        kSizeMin = 0.18  → Size=0.0 (small room, D1_L≈1295 smp ≈27 ms)
+//        kSizeMax = 1.50  → Size=1.0 (large hall — UNCHANGED)
+//        kSizeShape = 0.647: pinned so Size=0.35 → sizeFactor=0.850 (UNCHANGED)
+//        kSizeRef = 0.850: default sizeFactor, used for excursion scaling
+//        Size=0.35 → sizeFactor=0.850 → current approved sound preserved.
 //
 //      Scaled lengths rounded to nearest ODD integer (not full prime-snap;
 //      Brownian modulation smears eigentones so strict primeness is less
@@ -290,10 +278,14 @@ namespace zaum
   // Buffer = max_scaled_length + 2*128 + 1.
   //
   // BOUNDS PROOF at max Size + max walk:
-  //   Walk clamped to [-kMaxExcursion, +kMaxExcursion] = [-72, +72].
+  //   Walk clamped to [-excursion, +excursion] where excursion ≤ kMaxExcursion=72.
+  //   (0.1.0.10: excursion is scaled by sizeFactor/kSizeRef but hard-capped at
+  //   kMaxExcursion=72 in process(), so the 128-sample headroom always applies.)
   //   Linear interp reads i0 and i1=i0+1.
   //   Worst additional reach from center = 72 + 1 = 73 samples.
   //   Headroom = 128 > 73 — safe with 55 samples margin on each side.
+  //   At min Size=0.0 (sizeFactor=0.18): scaledD2_L≈919 smp (shortest line).
+  //   Scaled excursion = 72*(0.18/0.85) ≈ 15 smp. Min positive delay = 919-15-1=903>0.
   //   All index arithmetic uses modular wrap (% bufSize), so no OOB access.
   // ---------------------------------------------------------------------------
   static const int kD1_headroom    = 128;   // modulation headroom each side
@@ -330,18 +322,36 @@ namespace zaum
   // ---------------------------------------------------------------------------
   // Decay → g_d tuning constants.
   // Power-curve mapping: g_d = kGdMin + (kGdMax - kGdMin) * pow(decay, kDecayShape)
-  //   kDecayShape = 0.565: chosen so Decay=0.5 → g_d≈0.850
-  //     Derivation: 0.5^k = (0.85-0.60)/(0.97-0.60) = 0.676 → k=0.565
-  //   kGdMin = 0.60:  Decay=0 tail (~4-5 s RT60 with this tank's RTT)
-  //   kGdMax = 0.97:  Decay=1 tail (~25-30 s RT60)
+  //
+  //   EXTENDED FLOOR (0.1.0.10): kGdMin lowered from 0.60 → 0.30, kDecayShape
+  //   re-solved to preserve the existing default output at Decay=0.30.
+  //
+  //   Constraint: Decay=0.30 must still → g_d≈0.78 (the current approved sound).
+  //     0.78 = 0.30 + (0.97 - 0.30) * 0.30^k
+  //     0.48 = 0.67 * 0.30^k
+  //     0.30^k = 0.71641
+  //     k = log(0.71641) / log(0.30) = 0.2767 → use 0.277
+  //   Verify: 0.30 + 0.67 * 0.30^0.277 = 0.30 + 0.67*0.7167 = 0.30+0.480 = 0.780 ✓
+  //
+  //   Calibration table:
+  //     Decay=0.00 → g_d = 0.30   RT60 ≈ 0.42 s  (tight room, dry)
+  //     Decay=0.30 → g_d = 0.780  RT60 ≈ 3.1 s   (default — UNCHANGED)
+  //     Decay=0.50 → g_d = 0.864  RT60 ≈ 5.0 s
+  //     Decay=1.00 → g_d = 0.970  RT60 ≈ 28 s
+  //
+  //   RT60 formula: -3 * RTT / log10(g_d), RTT ≈ 0.330 s (Size=0.35 default).
+  //
+  //   kGdMin = 0.30:  Decay=0 → very short tail (~0.4 s RT60), tight/dry
+  //   kGdMax = 0.97:  Decay=1 → long hall tail (~28 s RT60) — UNCHANGED
   //   kGdCap = 0.985: hard unconditional cap — g_d must stay < 1.0
-  // To shorten the minimum tail, raise kGdMin toward 0.50 or lower.
-  // To shift the Decay=0.5 feel brighter/darker, adjust kDecayShape.
+  //   kDecayShape = 0.277: re-solved to pin Decay=0.30 → g_d=0.780
+  //
+  //   STABILITY: lower g_d is strictly more stable; no new runaway path.
   // ---------------------------------------------------------------------------
-  static const double kGdMin      = 0.60;
+  static const double kGdMin      = 0.30;
   static const double kGdMax      = 0.97;
   static const double kGdCap      = 0.985;
-  static const double kDecayShape = 0.565;
+  static const double kDecayShape = 0.277;
 
   // ---------------------------------------------------------------------------
   // Damp → one-pole LP coefficient tuning constants.
@@ -357,13 +367,51 @@ namespace zaum
 
   // ---------------------------------------------------------------------------
   // Size → sizeFactor tuning constants.
-  // sizeFactor = kSizeMin + Size * (kSizeMax - kSizeMin)
-  //   kSizeMin = 0.5:  Size=0.0 → smallest room (50% of base lengths)
-  //   kSizeMax = 1.5:  Size=1.0 → largest room (150% of base lengths)
-  //   Size=0.5 → sizeFactor=1.0 → EXACT 0.1.0.4 base lengths (sound preserved)
+  //
+  //   EXTENDED FLOOR (0.1.0.10): now a POWER CURVE (not linear) so the floor
+  //   drops to a genuine small room while the default knob position (Size=0.35)
+  //   maps to the SAME sizeFactor as before (0.850), preserving the approved sound.
+  //
+  //   Formula: sizeFactor = kSizeMin + (kSizeMax - kSizeMin) * pow(Size, kSizeShape)
+  //
+  //   Constraints:
+  //     Size=0.0 → sizeFactor = kSizeMin = 0.18  (new small-room floor)
+  //     Size=1.0 → sizeFactor = kSizeMax = 1.50  (UNCHANGED large room)
+  //     Size=0.35 must still → sizeFactor = 0.850 (current approved sound):
+  //       0.850 = 0.18 + (1.50 - 0.18) * 0.35^p
+  //       0.670 = 1.32 * 0.35^p
+  //       0.35^p = 0.50758
+  //       p = log(0.50758) / log(0.35) = 0.6468 → use 0.647
+  //   Verify: 0.18 + 1.32 * 0.35^0.647 = 0.18 + 1.32*0.5077 = 0.18+0.670 = 0.850 ✓
+  //
+  //   Calibration table:
+  //     Size=0.00 → sizeFactor=0.18  D1_L≈1294 smp ≈27 ms  (small room)
+  //     Size=0.35 → sizeFactor=0.850 D1_L≈6109 smp ≈127 ms (default — UNCHANGED)
+  //     Size=0.50 → sizeFactor=0.994 D1_L≈7144 smp ≈149 ms
+  //     Size=1.00 → sizeFactor=1.500 D1_L≈10781 smp ≈225 ms (large hall)
+  //
+  //   BUFFER BOUNDS at new minimum sizeFactor=0.18:
+  //     D1_L: round(7187*0.18)=1294 → toOdd→1295 smp; walk ±72; min read=1295-72-1=1222>0 ✓
+  //     D2_L: round(5101*0.18)=918  → toOdd→919  smp; 919-72-1=846>0 ✓
+  //     D1_R: round(6803*0.18)=1225 (odd); 1225-72-1=1152>0 ✓
+  //     D2_R: round(6343*0.18)=1142 → toOdd→1143 smp; 1143-72-1=1070>0 ✓
+  //   All reads stay well above zero. Modular wrap handles the large buffer safely.
+  //
+  //   MODULATION SCALING: the effective excursion is scaled by (sizeFactor / kSizeRef)
+  //   where kSizeRef=0.850 (the default sizeFactor). This keeps the pitch-mod ratio
+  //   constant across room sizes (~0.56% relative at all Size values) and prevents
+  //   audible warble in small rooms. At Size=0.35 (sizeFactor=0.850 = kSizeRef) the
+  //   scale factor is 1.0 — EXACTLY the current behavior.
+  //
+  //   kSizeMin = 0.18: Size=0 floor (D1_L≈1295 smp ≈27 ms — genuine small room)
+  //   kSizeMax = 1.50: Size=1 ceiling — UNCHANGED (large hall)
+  //   kSizeShape = 0.647: power exponent, re-solved to pin Size=0.35→0.850
+  //   kSizeRef  = 0.850: reference sizeFactor for modulation scaling (= default)
   // ---------------------------------------------------------------------------
-  static const double kSizeMin = 0.5;
-  static const double kSizeMax = 1.5;
+  static const double kSizeMin   = 0.18;
+  static const double kSizeMax   = 1.50;
+  static const double kSizeShape = 0.647;
+  static const double kSizeRef   = 0.850;
 
   // ---------------------------------------------------------------------------
   // Diffusion → allpass coefficient tuning constants.
@@ -644,16 +692,19 @@ namespace zaum
       mDCx1_R = 0.0;  mDCy1_R = 0.0;
 
       // Size-scaled delay lengths — initialize to Size=0.35 default lengths.
-      // sizeFactor = kSizeMin + 0.35*(kSizeMax-kSizeMin) = 0.5 + 0.35*1.0 = 0.85
-      //   D1_L: round(7187*0.85)=round(6108.95)=6109 (odd)
-      //   D2_L: round(5101*0.85)=round(4335.85)=4335 (odd) — wait: 4335 is odd ✓
-      //   D1_R: round(6803*0.85)=round(5782.55)=5783 (odd)
-      //   D2_R: round(6343*0.85)=round(5391.55)=5391 (odd)
+      // 0.1.0.10 power-curve mapping: sizeFactor = kSizeMin+(kSizeMax-kSizeMin)*Size^kSizeShape
+      //   At Size=0.35: sizeFactor = 0.18 + 1.32*0.35^0.647 = 0.18+0.670 = 0.850
+      //   (Same sizeFactor=0.850 as the old linear mapping — default sound preserved.)
+      //   D1_L: round(7187*0.850)=round(6108.95)=6109 (odd)
+      //   D2_L: round(5101*0.850)=round(4335.85)=4335 (odd) — 4335 is odd ✓
+      //   D1_R: round(6803*0.850)=round(5782.55)=5783 (odd)
+      //   D2_R: round(6343*0.850)=round(5391.55)=5391 (odd)
       mScaledD1_L = 6109;
       mScaledD2_L = 4335;
       mScaledD1_R = 5783;
       mScaledD2_R = 5391;
       mLastSize   = 0.35f;
+      mSizeFactor = 0.850;
     }
 
     virtual ~APFTank() {}
@@ -747,14 +798,18 @@ namespace zaum
       #undef DIFFCLAMP
 
       // Size → scaled delay lengths (block rate, only recompute when changed).
-      // Clamped to [kSizeMin, kSizeMax] so sizeFactor is always in bounds.
+      // Power-curve mapping (0.1.0.10): sizeFactor = kSizeMin + (kSizeMax-kSizeMin)*Size^kSizeShape
+      // At Size=0.35 (default): sizeFactor=0.850 — IDENTICAL to the previous linear mapping.
+      // At Size=0.0: sizeFactor=kSizeMin=0.18 (genuine small room, ~27 ms D1_L).
+      // At Size=1.0: sizeFactor=kSizeMax=1.50 (large hall — unchanged).
       if (sizeParam != mLastSize)
       {
         mLastSize = sizeParam;
         double sizeD = (double)sizeParam;
         if (sizeD < 0.0) sizeD = 0.0;
         if (sizeD > 1.0) sizeD = 1.0;
-        const double sizeFactor = kSizeMin + sizeD * (kSizeMax - kSizeMin);
+        const double sizeFactor = kSizeMin + (kSizeMax - kSizeMin) * pow(sizeD, kSizeShape);
+        mSizeFactor = sizeFactor;
 
         // Round to nearest odd to minimize comb resonances.
         // Result is clamped to [1, maxBase] implicitly by toOdd().
@@ -814,7 +869,24 @@ namespace zaum
       // step_size: per-sample walk increment multiplied by noise ∈ [-0.5, 0.5].
       // TUNING: to shift the sweet spot, adjust kMinExcursion/kMaxExcursion
       //   and kMinStep/kMaxStep at the top of this file.
-      const double excursion = kMinExcursion + (double)modParam * (kMaxExcursion - kMinExcursion);
+      //
+      // EXCURSION SCALING (0.1.0.10): scale excursion proportionally to sizeFactor
+      // so the RELATIVE pitch-mod (excursion/delayLength) stays constant across
+      // the Size range. Without scaling, a ±72-sample walk on a ~900-sample delay
+      // (~8% relative) would produce audible warble in small rooms. With scaling,
+      // the ratio stays ~0.56% at all sizes — the same pleasant chorus as default.
+      // At Size=0.35 (mSizeFactor=0.850=kSizeRef) the scale factor is exactly 1.0:
+      // the current default behavior is UNCHANGED.
+      // The raw (unscaled) excursion is still bounded to kMaxExcursion for safety;
+      // the size-scaled value is always <= raw, so headroom margins still hold.
+      const double rawExcursion = kMinExcursion + (double)modParam * (kMaxExcursion - kMinExcursion);
+      // Scale excursion by (sizeFactor/kSizeRef) to keep relative pitch-mod constant.
+      // Cap at kMaxExcursion so that at large Size the headroom margin is preserved:
+      //   at Size=1.0, scale=1.5/0.85≈1.76; without cap, scaled excursion could reach
+      //   72*1.76=127 smp → walk+interp=128 = headroom limit with zero margin. Cap
+      //   holds it at 72 smp max — safe with the 128-sample headroom as before.
+      double excursion = rawExcursion * (mSizeFactor / kSizeRef);
+      if (excursion > kMaxExcursion) excursion = kMaxExcursion;
       const double step_size = kMinStep + (double)modRateParam * (kMaxStep - kMinStep);
 
       // Copy walk accumulators and seeds into local variables for the inner
@@ -1389,12 +1461,13 @@ namespace zaum
     double mDCx1_R;  double mDCy1_R;
 
     // Size-scaled delay lengths — updated at block rate when Size changes.
-    // Initialized to base lengths (Size=0.5 default) in constructor.
-    int   mScaledD1_L;
-    int   mScaledD2_L;
-    int   mScaledD1_R;
-    int   mScaledD2_R;
-    float mLastSize;   // tracks last seen Size value to detect changes
+    // Initialized to Size=0.35 default values (sizeFactor=0.850) in constructor.
+    int    mScaledD1_L;
+    int    mScaledD2_L;
+    int    mScaledD1_R;
+    int    mScaledD2_R;
+    float  mLastSize;     // tracks last seen Size value to detect changes
+    double mSizeFactor;   // current sizeFactor (for modulation excursion scaling)
 
     // Brownian LFO state — four independent xorshift64 PRNGs + walk accumulators.
     // Seeds initialized to distinct non-zero constants in constructor.
