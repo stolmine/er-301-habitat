@@ -1,49 +1,45 @@
 // zaum::STFTSpectral
 //
-// BUILD SUB-PHASE 0.2.0.3 — Diffuse (V) phase randomization + Damp (HF tilt).
+// BUILD SUB-PHASE 0.2.0.4 — continuous Freeze (g→1, inputGain→0).
 // ShyFFT N=1024, hop R=256, sine window. Inherent latency 1280 smp ≈ 26.7 ms.
 //
-// What changed from 0.2.0.2:
-//   1. DIFFUSE (V): per-bin phase randomization. After RectToPolar, before
-//      PolarToRect, each complex bin's phase gets:
-//        phi = phase_in + V * xi_k     xi_k ~ uniform[-pi, pi]
-//      V=0 → coherent (0.2.0.2 sound — mechanical/metallic).
-//      V rising → each bin's tail broadens into narrowband noise → lush diffuse reverb.
-//      V=1 → full randomization → whisperization / spectral mangling.
-//      V is the headline control. Default 0.4 (Sujet §7 table).
+// What changed from 0.2.0.3:
+//   FREEZE: continuous 0..1 parameter that simultaneously blends g toward 1
+//   and fades the incoming input toward 0, so the captured spectrum holds
+//   indefinitely without growing without bound.
 //
-//   2. DAMP: per-bin RT60 tilt. Each bin gets a decayed g:
-//        g_k = g_base * damp_factor^k   where damp_factor in (0,1]
-//      Damp=0 → damp_factor=1 → flat (identical to 0.2.0.2 across all bins).
-//      Damp=1 → HF bins decay faster than LF (dark tail).
-//      Mapping: damp_factor = pow(kDampFloor, Damp) so Damp=0→1.0, Damp=1→kDampFloor.
-//      g_k clamped to [0, kGMax] per bin.
-//      NOTE: damp_factor^k is computed by running multiplication (no pow per bin).
+//   SMD accumulate step (per complex bin, replacing 0.2.0.3 line):
+//     gEff      = g_k + freeze * (1.0f - g_k)   // lerp g_k → 1 as freeze rises
+//     inputGain = 1.0f - freeze                  // fade fresh input toward 0
+//     M_out[k]  = inputGain * mag + M_out[k] * gEff
+//     (clamp M_out[k] ≤ kMagClamp as before)
 //
-// SMD pipeline per hop (full, with V and Damp):
+//   freeze=0: gEff=g_k, inputGain=1 → bit-identical to 0.2.0.3. No change.
+//   freeze=1: gEff=1,   inputGain=0 → M_out[k] = M_out[k]. Infinite hold.
+//   mid-freeze: partial input + near-infinite decay → smooth lengthening tail.
+//
+//   Damp interaction: gEff uses the per-bin Damp-tilted g_k. At freeze=1 all
+//   bins reach gEff=1 regardless of Damp — freeze wins unconditionally. Correct.
+//
+//   Diffuse interaction: the phase path (phi = phase + V*xi) is UNCHANGED and
+//   still runs every hop during freeze. Frozen + Diffuse>0 → the magnitude is
+//   held but the phase re-randomizes each hop → shimmering, evolving drone.
+//   Frozen + Diffuse=0 → static tonal hold. Both are expected and correct.
+//
+//   DC and Nyquist also get the Freeze lerp (same formula, no phase path).
+//   The same kMagClamp backstop applies.
+//
+// SMD pipeline per hop (full, with Decay, Damp, Diffuse, Freeze):
 //   analysis ring → window → ShyFFT::Direct
 //   → per bin: mag = |X[k]|, phase = atan2(-nim, re)
-//              M_out[k] = mag + M_out[k] * g_k          (g_k = g_base * damp_factor^k)
-//              phi = phase + V * xi_k                    (xi from xorshift PRNG)
+//              gEff = g_k + freeze*(1-g_k);  inputGain = 1-freeze
+//              M_out[k] = inputGain*mag + M_out[k]*gEff  (clamped)
+//              phi = phase + V * xi_k
 //              out = M_out[k] * e^{j*phi}
 //   → ShyFFT::Inverse → window × 1/(2N) → overlap-add
 //
-// DC (k=0) and Nyquist (k=N/2) are real-only bins; they skip phase randomization
-// and Damp tilt (they always use g_base, and sign is preserved as in 0.2.0.2).
-//
-// xorshift64 PRNG: one per channel (L seed ≠ R seed → stereo decorrelation).
-// xi_k drawn per complex bin per hop. Mapping: uint64 → float [-pi, pi].
-// Never libc rand() on the audio thread.
-//
-// ShyFFT packing (verified by offline rig — unchanged):
-//   real[k]      = spectrum[k]        k=0..N/2
-//   -imag_DFT[k] = spectrum[N/2 + k]  k=1..N/2-1  (ShyFFT stores negated imag)
-//   phase = atan2(-nim, re);  repack: spectrum[k]=m*cos(phi), spectrum[N/2+k]=m*sin(phi)
-//   (sin(phi) = -(-imag)/mag when phi=phase, i.e. nim_out = m*sin(phi) correctly)
-//
-// Normalization: IFFT_NORM = 1/(2N) = 1/2048. COLA sum=2.0 at 4×.
-// Decay → g: log-linear RT60 map, unchanged from 0.2.0.2.
-// Wired params: Decay, Diffuse, Damp, Mix. Freeze/Blur/Bloom/Predelay INERT.
+// ShyFFT packing, normalization, PRNG, OLA — all unchanged from 0.2.0.3.
+// Wired params: Decay, Damp, Diffuse, Freeze, Mix. Blur/Bloom/Predelay INERT.
 
 #pragma once
 
@@ -138,6 +134,7 @@ namespace zaum
       mG         = 0.0f;
       mV         = 0.4f;
       mDampFactor = 1.0f;
+      mFreezeAmt = 0.0f;
 
       // PRNG seeds: L and R use distinct non-zero constants so the two channels
       // generate independent xi sequences from sample 0 → stereo decorrelation.
@@ -173,7 +170,8 @@ namespace zaum
       const float dry   = 1.0f - mix;
       const float decay = mDecay.value();
       const float damp  = mDamp.value();
-      mV = mDiffuse.value();   // V cached for processHop
+      mV      = mDiffuse.value();   // cached for processHop
+      mFreezeAmt = mFreeze.value();   // 0..1, cached for processHop
 
       // Decay → RT60 → g_base (uniform base decay, same as 0.2.0.2).
       {
@@ -252,8 +250,8 @@ namespace zaum
 
       // 3. SMD + Diffuse + Damp — L and R channels.
       //    Independent PRNG state per channel → decorrelated stereo phase noise.
-      smdProcess(mFftOutL, mFftBufL, mMagAccL, mG, mV, mDampFactor, mPrngL);
-      smdProcess(mFftOutR, mFftBufR, mMagAccR, mG, mV, mDampFactor, mPrngR);
+      smdProcess(mFftOutL, mFftBufL, mMagAccL, mG, mV, mDampFactor, mFreezeAmt, mPrngL);
+      smdProcess(mFftOutR, mFftBufR, mMagAccR, mG, mV, mDampFactor, mFreezeAmt, mPrngR);
 
       // 4. Inverse FFT.
       mFFT.Inverse(mFftBufL, mIfftOutL);
@@ -291,13 +289,14 @@ namespace zaum
     // -------------------------------------------------------------------------
     void smdProcess(const float* spectrum, float* ifft_in,
                     float* magAcc, float g, float V,
-                    float dampFactor, uint64_t& prng)
+                    float dampFactor, float freeze, uint64_t& prng)
     {
       // DC (k=0): real-only. No phase randomization. g_base used (no Damp tilt at DC).
       {
         const float re  = spectrum[0];
         const float mag = (re >= 0.0f) ? re : -re;
-        float m = mag + magAcc[0] * g;
+        const float gEff = g + freeze * (1.0f - g);
+        float m = (1.0f - freeze) * mag + magAcc[0] * gEff;
         if (m > kMagClamp) m = kMagClamp;
         magAcc[0] = m;
         ifft_in[0] = (re >= 0.0f) ? m : -m;
@@ -320,8 +319,11 @@ namespace zaum
         const float mag   = sqrtf(re * re + nim * nim);
         const float phase = atan2f(-nim, re);   // standard DFT phase
 
-        // SMD accumulate with per-bin g.
-        float m = mag + magAcc[k] * gk;
+        // SMD accumulate with per-bin g and Freeze blend.
+        // gkEff lerps gk→1 and the input term fades out as freeze→1, so
+        // freeze=1 holds the spectrum (M=M) bounded; freeze=0 is identical.
+        const float gkEff = gk + freeze * (1.0f - gk);
+        float m = (1.0f - freeze) * mag + magAcc[k] * gkEff;
         if (m > kMagClamp) m = kMagClamp;
         magAcc[k] = m;
 
@@ -351,7 +353,8 @@ namespace zaum
         const int   kNyq = kStftN / 2;
         const float re   = spectrum[kNyq];
         const float mag  = (re >= 0.0f) ? re : -re;
-        float m = mag + magAcc[kNyq] * g;
+        const float gEff = g + freeze * (1.0f - g);
+        float m = (1.0f - freeze) * mag + magAcc[kNyq] * gEff;
         if (m > kMagClamp) m = kMagClamp;
         magAcc[kNyq] = m;
         ifft_in[kNyq] = (re >= 0.0f) ? m : -m;
@@ -401,6 +404,7 @@ namespace zaum
     float mG;           // base decay factor from Decay param
     float mV;           // phase randomization depth from Diffuse param
     float mDampFactor;  // per-bin g tilt multiplier from Damp param
+    float mFreezeAmt;   // freeze amount 0..1 from Freeze param
 
 #endif  // SWIGLUA
   };
