@@ -1,9 +1,32 @@
 // zaum::STFTSpectral
 //
-// BUILD SUB-PHASE 0.2.0.7 — Spiral wet-output governor (clip/runaway safety).
-//   Adds house::spiralFastSaturate on the wet signal (kGovDensity=1.0), so the
-//   magnitude-accumulator build-up at high Freeze/Decay soft-saturates to a
-//   bounded wall instead of clipping the output. Dry stays clean. Below: the
+// BUILD SUB-PHASE 0.2.0.9 — Blur redesigned: cross-time IIR magnitude smoother;
+//   cross-bin 3-tap removed; alpha = 1 - exp(-6 * Blur).
+//
+//   Replaces the 0.2.0.8 symmetric 3-tap cross-bin magnitude kernel with a
+//   per-bin cross-TIME first-order IIR exponential smoother (pvsmooth model).
+//   Each bin k carries persistent state blurState[k] that is updated every hop:
+//     blurState[k] = alpha * blurState[k] + (1-alpha) * magAcc[k]
+//   The synth pass then uses blurState[k] as the magnitude (magAcc[k] is left
+//   UNTOUCHED — Freeze and Decay continue to operate on it unmodified).
+//
+//   alpha is computed once per block in process():
+//     mBlurAlpha = 1.0f - expf(-6.0f * mBlurAmt)
+//   Blur=0 → alpha=0 → blurState[k] = magAcc[k] every hop → bit-identical to
+//   0.2.0.7. Blur=0.5 → alpha≈0.950 (tau≈19 hops≈100 ms). Blur=0.9 → alpha≈0.998.
+//   Blur=1.0 → alpha≈0.998 (very long time constant, approaches freeze-like sustain).
+//
+//   Freeze interaction: magAcc[k] converges toward a held value at Freeze=1;
+//   blurState[k] then smoothly converges toward that same value — "creep into freeze."
+//
+//   Two-pass smdProcess structure:
+//   1. Accumulate pass (k=0..N/2): SMD+Freeze+Damp into magAcc[k]; store
+//      per-bin base phase into phaseScratch[k] (atan2 for complex bins,
+//      sign-encoded +1/-1 for DC/Nyquist). Update blurState[k] via IIR.
+//   2. Synth pass (k=0..N/2): synthesize from blurState[k]+stored phase.
+//      xi drawn from PRNG for complex bins in same k order as before.
+//
+//   Below: 0.2.0.7 spiral wet-output governor (clip/runaway safety).
 //   0.2.0.6 Freeze fix (decay extension + floored input).
 //   0.2.0.4 made freeze extend the decay (gEff→1) → gorgeous long tails, BUT
 //   zeroed the input at freeze=1 → starved to near-silence ("dry"). 0.2.0.5's
@@ -42,17 +65,19 @@
 //   DC and Nyquist also get the Freeze lerp (same formula, no phase path).
 //   The same kMagClamp backstop applies.
 //
-// SMD pipeline per hop (full, with Decay, Damp, Diffuse, Freeze):
+// SMD pipeline per hop (full, with Decay, Damp, Diffuse, Freeze, Blur):
 //   analysis ring → window → ShyFFT::Direct
-//   → per bin: mag = |X[k]|, phase = atan2(-nim, re)
-//              gEff = g_k + freeze*(1-g_k);  inputGain = 1-freeze
+//   → pass 1: per bin: mag = |X[k]|, phase = atan2(-nim, re)
+//              gEff = g_k + freeze*(1-g_k);  inputGain = max(1-freeze, floor)
 //              M_out[k] = inputGain*mag + M_out[k]*gEff  (clamped)
-//              phi = phase + V * xi_k
-//              out = M_out[k] * e^{j*phi}
+//              blurState[k] = alpha*blurState[k] + (1-alpha)*M_out[k]   // IIR time smoother
+//              phaseScratch[k] = phase (or sign for DC/Nyquist)
+//   → pass 2: per bin: phi = phaseScratch[k] + V * xi_k (complex); or sign*blurState (DC/Nyq)
+//              out = blurState[k] * e^{j*phi}
 //   → ShyFFT::Inverse → window × 1/(2N) → overlap-add
 //
 // ShyFFT packing, normalization, PRNG, OLA — all unchanged from 0.2.0.3.
-// Wired params: Decay, Damp, Diffuse, Freeze, Mix. Blur/Bloom/Predelay INERT.
+// Wired params: Decay, Damp, Diffuse, Freeze, Blur, Mix. Bloom/Predelay INERT.
 
 #pragma once
 
@@ -130,12 +155,12 @@ namespace zaum
       addParameter(mPredelay);
       addParameter(mMix);
 
-      memset(mAnalysisL,  0, sizeof(mAnalysisL));
-      memset(mAnalysisR,  0, sizeof(mAnalysisR));
-      memset(mSynthesisL, 0, sizeof(mSynthesisL));
-      memset(mSynthesisR, 0, sizeof(mSynthesisR));
-      memset(mDryL,       0, sizeof(mDryL));
-      memset(mDryR,       0, sizeof(mDryR));
+      memset(mAnalysisL,    0, sizeof(mAnalysisL));
+      memset(mAnalysisR,    0, sizeof(mAnalysisR));
+      memset(mSynthesisL,   0, sizeof(mSynthesisL));
+      memset(mSynthesisR,   0, sizeof(mSynthesisR));
+      memset(mDryL,         0, sizeof(mDryL));
+      memset(mDryR,         0, sizeof(mDryR));
 
 #ifndef SWIGLUA
       for (int n = 0; n < kStftN; ++n) {
@@ -144,8 +169,11 @@ namespace zaum
 
       mFFT.Init();
 
-      memset(mMagAccL, 0, sizeof(mMagAccL));
-      memset(mMagAccR, 0, sizeof(mMagAccR));
+      memset(mMagAccL,      0, sizeof(mMagAccL));
+      memset(mMagAccR,      0, sizeof(mMagAccR));
+      memset(mPhaseScratch, 0, sizeof(mPhaseScratch));
+      memset(mBlurStateL,   0, sizeof(mBlurStateL));
+      memset(mBlurStateR,   0, sizeof(mBlurStateR));
 #endif
 
       mBufPtr    = 0;
@@ -158,6 +186,8 @@ namespace zaum
       mV         = 0.4f;
       mDampFactor = 1.0f;
       mFreezeAmt = 0.0f;
+      mBlurAmt   = 0.0f;
+      mBlurAlpha = 0.0f;
 
       // PRNG seeds: L and R use distinct non-zero constants so the two channels
       // generate independent xi sequences from sample 0 → stereo decorrelation.
@@ -193,8 +223,11 @@ namespace zaum
       const float dry   = 1.0f - mix;
       const float decay = mDecay.value();
       const float damp  = mDamp.value();
-      mV      = mDiffuse.value();   // cached for processHop
-      mFreezeAmt = mFreeze.value();   // 0..1, cached for processHop
+      mV         = mDiffuse.value();   // cached for processHop
+      mFreezeAmt = mFreeze.value();    // 0..1, cached for processHop
+      mBlurAmt   = mBlur.value();      // 0..1, cached for processHop
+      // Cross-time IIR alpha: 0→0 (passthrough), 0.5→0.950 (~100ms), 1→0.998
+      mBlurAlpha = 1.0f - expf(-6.0f * mBlurAmt);
 
       // Decay → RT60 → g_base (uniform base decay, same as 0.2.0.2).
       {
@@ -275,10 +308,10 @@ namespace zaum
       mFFT.Direct(mFftBufL, mFftOutL);
       mFFT.Direct(mFftBufR, mFftOutR);
 
-      // 3. SMD + Diffuse + Damp — L and R channels.
+      // 3. SMD + Diffuse + Damp + Blur — L and R channels.
       //    Independent PRNG state per channel → decorrelated stereo phase noise.
-      smdProcess(mFftOutL, mFftBufL, mMagAccL, mG, mV, mDampFactor, mFreezeAmt, mPrngL);
-      smdProcess(mFftOutR, mFftBufR, mMagAccR, mG, mV, mDampFactor, mFreezeAmt, mPrngR);
+      smdProcess(mFftOutL, mFftBufL, mMagAccL, mBlurStateL, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mPrngL);
+      smdProcess(mFftOutR, mFftBufR, mMagAccR, mBlurStateR, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mPrngR);
 
       // 4. Inverse FFT.
       mFFT.Inverse(mFftBufL, mIfftOutL);
@@ -304,93 +337,114 @@ namespace zaum
     }
 
     // -------------------------------------------------------------------------
-    // smdProcess(): SMD accumulate + Damp tilt + Diffuse phase randomization.
+    // smdProcess(): two-pass SMD accumulate+IIR-blur + Synth.
     //
-    // spectrum[]:  ShyFFT Direct output (N floats).
-    // ifft_in[]:   repacked spectrum for Inverse.
-    // magAcc[]:    per-bin magnitude accumulator (kStftBins floats, persistent).
-    // g:           base decay factor (uniform pre-tilt).
-    // V:           phase randomization depth 0..1.
-    // dampFactor:  per-bin g tilt multiplier (1.0=flat, <1.0=HF darker).
-    // prng:        per-channel xorshift64 state (updated in place → decorrelated L/R).
+    // Pass 1 — Accumulate+Blur: compute mag, SMD+Freeze+Damp into magAcc[k],
+    //           update blurState[k] via per-bin IIR, store base phase.
+    // Pass 2 — Synth: synthesize ifft_in from blurState[k] + stored phase + PRNG xi.
+    //
+    // spectrum[]:   ShyFFT Direct output (N floats).
+    // ifft_in[]:    repacked spectrum for Inverse.
+    // magAcc[]:     per-bin magnitude accumulator (kStftBins floats, persistent).
+    // blurState[]:  per-bin IIR time-smoother state (kStftBins floats, persistent).
+    // g:            base decay factor (uniform pre-tilt).
+    // V:            phase randomization depth 0..1.
+    // dampFactor:   per-bin g tilt multiplier (1.0=flat, <1.0=HF darker).
+    // freeze:       freeze amount 0..1.
+    // alpha:        IIR smoothing coefficient; 0→passthrough, →1→long time constant.
+    //               Computed in process() as: alpha = 1 - exp(-6 * mBlurAmt).
+    // prng:         per-channel xorshift64 state (updated in place → decorrelated L/R).
+    //
+    // alpha=0 (Blur=0): blurState[k] = magAcc[k] every hop → synth is bit-identical
+    // to 0.2.0.7. PRNG draw order (one xi per complex bin k=1..N/2-1) unchanged.
+    // magAcc[k] is NEVER modified by the blur path — Freeze/Decay unaffected.
     // -------------------------------------------------------------------------
     void smdProcess(const float* spectrum, float* ifft_in,
-                    float* magAcc, float g, float V,
-                    float dampFactor, float freeze, uint64_t& prng)
+                    float* magAcc, float* blurState, float g, float V,
+                    float dampFactor, float freeze, float alpha, uint64_t& prng)
     {
-      // DC (k=0): real-only. No phase randomization. g_base used (no Damp tilt at DC).
+      const int kNyq = kStftN / 2;
+      const float alphaComp = 1.0f - alpha;   // (1-alpha) pre-computed once
+
+      // -----------------------------------------------------------------------
+      // PASS 1 — Accumulate + IIR Blur: SMD+Freeze+Damp into magAcc, then
+      //          update blurState[k] via per-bin IIR, store base phase.
+      // phaseScratch[k] for complex bins: atan2(-nim, re) (standard DFT phase).
+      // phaseScratch[k] for DC/Nyquist:  +1.0 or -1.0 (sign of input real).
+      // -----------------------------------------------------------------------
+
+      // DC (k=0): real-only.
       {
         const float re  = spectrum[0];
         const float mag = (re >= 0.0f) ? re : -re;
-        const float gEff = g + freeze * (1.0f - g);
+        const float gEff   = g + freeze * (1.0f - g);
         const float inGain = (1.0f - freeze > kFreezeInFloor) ? (1.0f - freeze) : kFreezeInFloor;
         float m = inGain * mag + magAcc[0] * gEff;
         if (m > kMagClamp) m = kMagClamp;
-        magAcc[0] = m;
-        ifft_in[0] = (re >= 0.0f) ? m : -m;
+        magAcc[0]    = m;
+        blurState[0] = alpha * blurState[0] + alphaComp * m;
+        mPhaseScratch[0] = (re >= 0.0f) ? 1.0f : -1.0f;   // sign-encoding
       }
 
-      // Complex bins k=1..N/2-1: SMD + Damp tilt + Diffuse phase randomization.
-      // g_k = g_base * dampFactor^k, accumulated by running multiplication.
-      // Starting with dampFactor^1 at k=1.
+      // Complex bins k=1..N/2-1: SMD + Damp tilt + IIR blur + store phase.
       float g_k = g * dampFactor;   // g for k=1; multiplied by dampFactor each step
-
-      for (int k = 1; k < kStftN / 2; ++k) {
-        // Clamp per-bin g to [0, kGMax] (dampFactor<1 can only reduce g, but
-        // clamp anyway for safety in case of parameter edge cases).
+      for (int k = 1; k < kNyq; ++k) {
         const float gk = (g_k < (float)kGMax) ? g_k : (float)kGMax;
 
         const float re  = spectrum[k];
-        const float nim = spectrum[kStftN / 2 + k];   // nim = -imag_DFT[k]
-
-        // RectToPolar.
+        const float nim = spectrum[kNyq + k];   // nim = -imag_DFT[k]
         const float mag   = sqrtf(re * re + nim * nim);
-        const float phase = atan2f(-nim, re);   // standard DFT phase
+        const float phase = atan2f(-nim, re);
 
-        // Freeze = decay extension (the long-tail behavior): gkEff lerps the
-        // per-bin decay gk toward 1 as freeze rises, lengthening the tail to
-        // infinite at freeze=1. inGain is FLOORED (not zeroed) so freeze=1 keeps
-        // filling + holding the spectrum (true infinite sustain) instead of
-        // starving to silence. freeze=0 → gkEff=gk, inGain=1 (plain reverb).
         const float gkEff  = gk + freeze * (1.0f - gk);
         const float inGain = (1.0f - freeze > kFreezeInFloor) ? (1.0f - freeze) : kFreezeInFloor;
         float m = inGain * mag + magAcc[k] * gkEff;
         if (m > kMagClamp) m = kMagClamp;
-        magAcc[k] = m;
+        magAcc[k]    = m;
+        blurState[k] = alpha * blurState[k] + alphaComp * m;
+        mPhaseScratch[k] = phase;
 
-        // Diffuse: per-bin phase randomization.
-        // Draw xi ~ uniform[-pi, pi] from the running PRNG.
-        // V=0 → phi=phase (coherent, identical to 0.2.0.2).
-        // V=1 → phi = phase + full-range random → decorrelated noise tail.
-        // V=0.4 (default) → lush diffuse reverb, the Sujet sweet spot.
-        // xorshift64 inline (Marsaglia 2003) — avoids ODR collision with APFTank.h
-        prng ^= prng << 13; prng ^= prng >> 7; prng ^= prng << 17;
-        // Map upper 24 bits → float [-pi, pi)
-        const float xi = ((float)(prng >> 40) * (1.0f / 8388608.0f) - 1.0f) * (float)M_PI;
-        const float phi = phase + V * xi;
-
-        // PolarToRect + repack in ShyFFT convention.
-        // ShyFFT spectrum[N/2+k] stores -imag_DFT, so we store m*sin(phi)
-        // (sin of the output phase, which equals -(-imag)/mag when phi=phase).
-        ifft_in[k]               = m * cosf(phi);
-        ifft_in[kStftN / 2 + k] = m * sinf(phi);
-
-        // Advance per-bin g tilt for next bin.
         g_k *= dampFactor;
       }
 
-      // Nyquist (k=N/2): real-only. No phase randomization. g_base used.
+      // Nyquist (k=N/2): real-only.
       {
-        const int   kNyq = kStftN / 2;
         const float re   = spectrum[kNyq];
         const float mag  = (re >= 0.0f) ? re : -re;
-        const float gEff = g + freeze * (1.0f - g);
+        const float gEff   = g + freeze * (1.0f - g);
         const float inGain = (1.0f - freeze > kFreezeInFloor) ? (1.0f - freeze) : kFreezeInFloor;
         float m = inGain * mag + magAcc[kNyq] * gEff;
         if (m > kMagClamp) m = kMagClamp;
-        magAcc[kNyq] = m;
-        ifft_in[kNyq] = (re >= 0.0f) ? m : -m;
+        magAcc[kNyq]    = m;
+        blurState[kNyq] = alpha * blurState[kNyq] + alphaComp * m;
+        mPhaseScratch[kNyq] = (re >= 0.0f) ? 1.0f : -1.0f;   // sign-encoding
       }
+
+      // -----------------------------------------------------------------------
+      // PASS 2 — Synth: synthesize ifft_in from blurState + stored phase + PRNG xi.
+      //
+      // DC and Nyquist: real-only, sign from phaseScratch (no PRNG).
+      // Complex bins: phi = phaseScratch[k] + V*xi; xi drawn from PRNG in same
+      // k order (k=1..N/2-1) as 0.2.0.7 → PRNG draw count/order unchanged.
+      // -----------------------------------------------------------------------
+
+      // DC (k=0)
+      ifft_in[0] = mPhaseScratch[0] * blurState[0];
+
+      // Complex bins k=1..N/2-1
+      for (int k = 1; k < kNyq; ++k) {
+        // xorshift64 inline (Marsaglia 2003) — avoids ODR collision with APFTank.h
+        prng ^= prng << 13; prng ^= prng >> 7; prng ^= prng << 17;
+        // Map upper 24 bits → float [-pi, pi)
+        const float xi  = ((float)(prng >> 40) * (1.0f / 8388608.0f) - 1.0f) * (float)M_PI;
+        const float phi = mPhaseScratch[k] + V * xi;
+
+        ifft_in[k]          = blurState[k] * cosf(phi);
+        ifft_in[kNyq + k]   = blurState[k] * sinf(phi);
+      }
+
+      // Nyquist (k=N/2)
+      ifft_in[kNyq] = mPhaseScratch[kNyq] * blurState[kNyq];
     }
 
     // -------------------------------------------------------------------------
@@ -420,6 +474,16 @@ namespace zaum
     float mMagAccL[kStftBins];
     float mMagAccR[kStftBins];
 
+    // Phase scratch — shared between L and R calls (fully overwritten each smdProcess).
+    // phaseScratch[k]: base phase for complex bins (atan2); sign (+1/-1) for DC/Nyquist.
+    float mPhaseScratch[kStftBins];
+
+    // Cross-time IIR blur state — persistent per-channel per-bin smoother.
+    // blurState[k] = alpha*blurState[k] + (1-alpha)*magAcc[k], updated every hop.
+    // alpha=0 (Blur=0) → blurState[k] == magAcc[k] each hop → bit-identical to 0.2.0.7.
+    float mBlurStateL[kStftBins];
+    float mBlurStateR[kStftBins];
+
     // xorshift64 PRNG state — one per channel for independent stereo phase noise.
     uint64_t mPrngL;
     uint64_t mPrngR;
@@ -437,6 +501,8 @@ namespace zaum
     float mV;           // phase randomization depth from Diffuse param
     float mDampFactor;  // per-bin g tilt multiplier from Damp param
     float mFreezeAmt;   // freeze amount 0..1 from Freeze param
+    float mBlurAmt;     // raw Blur param 0..1
+    float mBlurAlpha;   // IIR smoothing coefficient: 1 - exp(-6*mBlurAmt)
 
 #endif  // SWIGLUA
   };
