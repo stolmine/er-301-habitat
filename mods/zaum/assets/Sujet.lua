@@ -66,15 +66,10 @@ function Sujet:onLoadGraph(channelCount)
   tie(op, "Freeze", freeze, "Out")
   self:addMonoBranch("freeze", freeze, "In", freeze, "Out")
 
-  local blur = self:addObject("blur", app.ParameterAdapter())
-  blur:hardSet("Bias", 0.0)
-  tie(op, "Blur", blur, "Out")
-  self:addMonoBranch("blur", blur, "In", blur, "Out")
-
-  local bloom = self:addObject("bloom", app.ParameterAdapter())
-  bloom:hardSet("Bias", 0.0)
-  tie(op, "Bloom", bloom, "Out")
-  self:addMonoBranch("bloom", bloom, "In", bloom, "Out")
+  local smear = self:addObject("smear", app.ParameterAdapter())
+  smear:hardSet("Bias", 0.5)
+  tie(op, "Smear", smear, "Out")
+  self:addMonoBranch("smear", smear, "In", smear, "Out")
 
   local predelay = self:addObject("predelay", app.ParameterAdapter())
   predelay:hardSet("Bias", 0.0)
@@ -133,27 +128,16 @@ function Sujet:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.0
     },
-    blur = GainBias {
-      button = "blur",
-      description = "Blur — bin-smear kernel width (transients melt)",
-      branch = self.branches.blur,
-      gainbias = self.objects.blur,
-      range = self.objects.blur,
+    smear = GainBias {
+      button = "smr",
+      description = "Smear — <0.5 Bloom swell / >0.5 Blur cloud (0.5 = off)",
+      branch = self.branches.smear,
+      gainbias = self.objects.smear,
+      range = self.objects.smear,
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.0
-    },
-    bloom = GainBias {
-      button = "blm",
-      description = "Bloom — frequency-staggered attack (reverse swell)",
-      branch = self.branches.bloom,
-      gainbias = self.objects.bloom,
-      range = self.objects.bloom,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.0
+      initialBias = 0.5
     },
     predelay = GainBias {
       button = "pre",
@@ -178,7 +162,7 @@ function Sujet:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "decay", "damp", "diffuse", "freeze", "blur", "bloom", "predelay", "mix" },
+    expanded = { "decay", "damp", "diffuse", "freeze", "smear", "predelay", "mix" },
     collapsed = {}
   }
 end

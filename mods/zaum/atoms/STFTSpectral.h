@@ -1,6 +1,10 @@
 // zaum::STFTSpectral
 //
-// BUILD SUB-PHASE 0.2.0.10 — Bloom: per-bin asymmetric IIR slow-rise/fast-fall
+// BUILD SUB-PHASE 0.2.0.11 — consolidate Blur+Bloom onto one bipolar "Smear"
+//   param: <0.5 → Bloom (swell), >0.5 → Blur (cloud), 0.5 = off. Frees a
+//   parameter slot for the fictional ops (Warp/Scramble/Spray). The Blur and
+//   Bloom DSP are unchanged; only their amounts are derived from one knob.
+//   Below: 0.2.0.10 — Bloom: per-bin asymmetric IIR slow-rise/fast-fall
 //   + frequency stagger; chains after Blur (magAcc → blurState → bloomState → synth).
 //
 //   0.2.0.9 Blur (cross-time symmetric IIR) unchanged. This adds a second per-bin
@@ -162,8 +166,7 @@ namespace zaum
       addParameter(mDamp);
       addParameter(mDiffuse);
       addParameter(mFreeze);
-      addParameter(mBlur);
-      addParameter(mBloom);
+      addParameter(mSmear);
       addParameter(mPredelay);
       addParameter(mMix);
 
@@ -234,8 +237,9 @@ namespace zaum
     od::Parameter mDamp{"Damp",       0.3f};
     od::Parameter mDiffuse{"Diffuse", 0.4f};
     od::Parameter mFreeze{"Freeze",   0.0f};
-    od::Parameter mBlur{"Blur",       0.0f};
-    od::Parameter mBloom{"Bloom",     0.0f};
+    // Smear: bipolar consolidation of Bloom (lower half) and Blur (upper half).
+    // 0.5 = center/off; <0.5 → Bloom swell; >0.5 → Blur cloud.
+    od::Parameter mSmear{"Smear",     0.5f};
     od::Parameter mPredelay{"Predelay", 0.0f};
     od::Parameter mMix{"Mix",         0.4f};
 
@@ -252,13 +256,16 @@ namespace zaum
       const float damp  = mDamp.value();
       mV         = mDiffuse.value();   // cached for processHop
       mFreezeAmt = mFreeze.value();    // 0..1, cached for processHop
-      mBlurAmt   = mBlur.value();      // 0..1, cached for processHop
+      // Smear (bipolar): >0.5 → Blur (upper half), <0.5 → Bloom (lower half),
+      // 0.5 = off. One knob, both behaviors retained (mutually exclusive).
+      const float smear = mSmear.value();
+      mBlurAmt   = (smear > 0.5f) ? (smear - 0.5f) * 2.0f : 0.0f;
+      mBloomAmt  = (smear < 0.5f) ? (0.5f - smear) * 2.0f : 0.0f;
       // Cross-time IIR alpha: 0→0 (passthrough), 0.5→0.950 (~100ms), 1→0.998
       mBlurAlpha = 1.0f - expf(-6.0f * mBlurAmt);
 
       // Bloom: per-bin asymmetric IIR rise-alpha table, lazily recomputed.
-      // 513 expf calls only when Bloom param actually changes.
-      mBloomAmt = mBloom.value();
+      // 513 expf calls only when Bloom amount actually changes.
       if (mBloomAmt != mLastBloom) {
         for (int k = 0; k <= kStftN / 2; ++k) {
           mBloomAlphaRise[k] = 1.0f - expf(-6.0f * mBloomAmt * mBloomStagger[k]);
