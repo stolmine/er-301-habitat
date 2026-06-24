@@ -47,27 +47,27 @@ function Fabula:onLoadGraph(channelCount)
 
   -- 8 ParameterAdapter ties for the user-facing parameters.
   local size = self:addObject("size", app.ParameterAdapter())
-  size:hardSet("Bias", 0.5)
+  size:hardSet("Bias", 0.35)
   tie(op, "Size", size, "Out")
   self:addMonoBranch("size", size, "In", size, "Out")
 
   local decay = self:addObject("decay", app.ParameterAdapter())
-  decay:hardSet("Bias", 0.5)
+  decay:hardSet("Bias", 0.30)
   tie(op, "Decay", decay, "Out")
   self:addMonoBranch("decay", decay, "In", decay, "Out")
 
   local damp = self:addObject("damp", app.ParameterAdapter())
-  damp:hardSet("Bias", 0.25)
+  damp:hardSet("Bias", 0.40)
   tie(op, "Damp", damp, "Out")
   self:addMonoBranch("damp", damp, "In", damp, "Out")
 
   local diffusion = self:addObject("diffusion", app.ParameterAdapter())
-  diffusion:hardSet("Bias", 0.6)
+  diffusion:hardSet("Bias", 0.45)
   tie(op, "Diffusion", diffusion, "Out")
   self:addMonoBranch("diffusion", diffusion, "In", diffusion, "Out")
 
   local mod = self:addObject("mod", app.ParameterAdapter())
-  mod:hardSet("Bias", 0.3)
+  mod:hardSet("Bias", 0.40)
   tie(op, "Mod", mod, "Out")
   self:addMonoBranch("mod", mod, "In", mod, "Out")
 
@@ -77,12 +77,12 @@ function Fabula:onLoadGraph(channelCount)
   self:addMonoBranch("modRate", modRate, "In", modRate, "Out")
 
   local predelay = self:addObject("predelay", app.ParameterAdapter())
-  predelay:hardSet("Bias", 0.0)
+  predelay:hardSet("Bias", 0.041)
   tie(op, "Predelay", predelay, "Out")
   self:addMonoBranch("predelay", predelay, "In", predelay, "Out")
 
   local mix = self:addObject("mix", app.ParameterAdapter())
-  mix:hardSet("Bias", 0.5)
+  mix:hardSet("Bias", 0.40)
   tie(op, "Mix", mix, "Out")
   self:addMonoBranch("mix", mix, "In", mix, "Out")
 end
@@ -98,7 +98,7 @@ function Fabula:onLoadViews()
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.5
+      initialBias = 0.35
     },
     decay = GainBias {
       button = "dcy",
@@ -109,7 +109,7 @@ function Fabula:onLoadViews()
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.5
+      initialBias = 0.30
     },
     damp = GainBias {
       button = "damp",
@@ -120,7 +120,7 @@ function Fabula:onLoadViews()
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.25
+      initialBias = 0.40
     },
     diffusion = GainBias {
       button = "diff",
@@ -131,7 +131,7 @@ function Fabula:onLoadViews()
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.6
+      initialBias = 0.45
     },
     mod = GainBias {
       button = "mod",
@@ -142,7 +142,7 @@ function Fabula:onLoadViews()
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.3
+      initialBias = 0.40
     },
     modRate = GainBias {
       button = "rate",
@@ -164,7 +164,7 @@ function Fabula:onLoadViews()
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.0
+      initialBias = 0.041
     },
     mix = GainBias {
       button = "mix",
@@ -175,7 +175,7 @@ function Fabula:onLoadViews()
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.5
+      initialBias = 0.40
     }
   }, {
     expanded = { "size", "decay", "damp", "diffusion", "mod", "modRate", "predelay", "mix" },

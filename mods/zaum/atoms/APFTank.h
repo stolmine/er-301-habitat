@@ -10,7 +10,23 @@
 // Plan: planning/fabula-design.md (DSP architecture, delay tables,
 // modulation, governor). Roadmap: planning/zaum-roadmap.md §"Phase 1".
 //
-// BUILD SUB-PHASE 0.1.0.7 — Series-cascade allpasses + Dattorro multi-tap output.
+// BUILD SUB-PHASE 0.1.0.8 — Tier 1 present-room default retune (default-value changes only).
+//
+//   Parameter defaults retuned for a "present room" voicing per fabula-character-tuning.md:
+//     Size:      0.5f  → 0.35f   (smaller, more intimate room)
+//     Decay:     0.5f  → 0.30f   (shorter tail, less cavernous)
+//     Damp:      0.25f → 0.40f   (more HF rolloff, warmer default)
+//     Diffusion: 0.6f  → 0.45f   (less onset smear, more transient clarity;
+//                                  coefficients stay within clamped stable range —
+//                                  lower g is always stable for Schroeder allpasses)
+//     Mod:       0.3f  → 0.40f   (slightly more chorusing at default)
+//     Predelay:  0.0f  → 0.041f  (≈14 ms; 0.041×16383 ≈ 672 smp at 48 kHz)
+//     Mix:       0.5f  → 0.40f   (more dry presence at default)
+//     ModRate:   0.2f  → 0.2f    (UNCHANGED)
+//
+//   No DSP logic, mappings, tuning constants, or structure were changed.
+//
+// (Previous: 0.1.0.7 — Series-cascade allpasses + Dattorro multi-tap output.)
 //
 //   PART 1: Each tank AP (AP1 and AP2, both L and R loops) is now a
 //   SERIES CASCADE of two independent unity-gain Schroeder allpasses
@@ -528,12 +544,17 @@ namespace zaum
       mDCx1_L = 0.0;  mDCy1_L = 0.0;
       mDCx1_R = 0.0;  mDCy1_R = 0.0;
 
-      // Size-scaled delay lengths — initialize to base lengths (Size=0.5 default).
-      mScaledD1_L = kD1_L_base;
-      mScaledD2_L = kD2_L_base;
-      mScaledD1_R = kD1_R_base;
-      mScaledD2_R = kD2_R_base;
-      mLastSize   = 0.5f;
+      // Size-scaled delay lengths — initialize to Size=0.35 default lengths.
+      // sizeFactor = kSizeMin + 0.35*(kSizeMax-kSizeMin) = 0.5 + 0.35*1.0 = 0.85
+      //   D1_L: round(7187*0.85)=round(6108.95)=6109 (odd)
+      //   D2_L: round(5101*0.85)=round(4335.85)=4335 (odd) — wait: 4335 is odd ✓
+      //   D1_R: round(6803*0.85)=round(5782.55)=5783 (odd)
+      //   D2_R: round(6343*0.85)=round(5391.55)=5391 (odd)
+      mScaledD1_L = 6109;
+      mScaledD2_L = 4335;
+      mScaledD1_R = 5783;
+      mScaledD2_R = 5391;
+      mLastSize   = 0.35f;
     }
 
     virtual ~APFTank() {}
@@ -543,14 +564,14 @@ namespace zaum
     od::Inlet     mInR{"In R"};
     od::Outlet    mOutL{"Out L"};
     od::Outlet    mOutR{"Out R"};
-    od::Parameter mSize{"Size", 0.5f};
-    od::Parameter mDecay{"Decay", 0.5f};
-    od::Parameter mDamp{"Damp", 0.25f};
-    od::Parameter mDiffusion{"Diffusion", 0.6f};
-    od::Parameter mMod{"Mod", 0.3f};
+    od::Parameter mSize{"Size", 0.35f};
+    od::Parameter mDecay{"Decay", 0.30f};
+    od::Parameter mDamp{"Damp", 0.40f};
+    od::Parameter mDiffusion{"Diffusion", 0.45f};
+    od::Parameter mMod{"Mod", 0.40f};
     od::Parameter mModRate{"ModRate", 0.2f};
-    od::Parameter mPredelay{"Predelay", 0.0f};
-    od::Parameter mMix{"Mix", 0.5f};
+    od::Parameter mPredelay{"Predelay", 0.041f};
+    od::Parameter mMix{"Mix", 0.40f};
 
     virtual void process()
     {
