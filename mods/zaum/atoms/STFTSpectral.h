@@ -1,6 +1,10 @@
 // zaum::STFTSpectral
 //
-// BUILD SUB-PHASE 0.2.0.6 — Freeze = decay extension + floored input (the fix).
+// BUILD SUB-PHASE 0.2.0.7 — Spiral wet-output governor (clip/runaway safety).
+//   Adds house::spiralFastSaturate on the wet signal (kGovDensity=1.0), so the
+//   magnitude-accumulator build-up at high Freeze/Decay soft-saturates to a
+//   bounded wall instead of clipping the output. Dry stays clean. Below: the
+//   0.2.0.6 Freeze fix (decay extension + floored input).
 //   0.2.0.4 made freeze extend the decay (gEff→1) → gorgeous long tails, BUT
 //   zeroed the input at freeze=1 → starved to near-silence ("dry"). 0.2.0.5's
 //   snapshot/hold rewrite fixed the dry but REMOVED the decay extension → lost
@@ -60,6 +64,7 @@
 
 #ifndef SWIGLUA
 #include "stmlib/fft/shy_fft.h"
+#include <Spiral.h>   // house::spiralFastSaturate — wet output governor
 #endif
 
 namespace zaum
@@ -82,6 +87,11 @@ namespace zaum
   static const double kRT60Max  = 120.0;
   static const double kGMax     = 0.9999;
   static const float  kMagClamp = 32.0f;
+  // Wet output governor: Spiral soft-saturator on the wet signal, bounding it
+  // to [-1/kGovDensity, 1/kGovDensity]. Near-linear below ~0.8/kGovDensity,
+  // so transparent at normal levels; only catches the magnitude-accumulator
+  // build-up at high Freeze/Decay (prevents output clipping / runaway). Hoisted.
+  static const double kGovDensity = 1.0;
   // Freeze input floor: at freeze=1 the input gain is held at this value (not 0)
   // so the spectrum keeps filling and HOLDS (infinite sustain) instead of
   // starving to silence. Hoisted for ear-tuning.
@@ -222,8 +232,12 @@ namespace zaum
         ++mDryPtr;
         if (mDryPtr >= kStftLat) mDryPtr = 0;
 
-        out1[i] = dry * dryL + mix * wetL;
-        out2[i] = dry * dryR + mix * wetR;
+        // Spiral governor on the wet only (dry stays clean), so the SMD
+        // accumulator build-up at high Freeze/Decay can't blow up the output.
+        const float wetSatL = (float)house::spiralFastSaturate((double)wetL, kGovDensity);
+        const float wetSatR = (float)house::spiralFastSaturate((double)wetR, kGovDensity);
+        out1[i] = dry * dryL + mix * wetSatL;
+        out2[i] = dry * dryR + mix * wetSatR;
 
         ++mBufPtr;
         if (mBufPtr >= kStftBuf) mBufPtr = 0;
