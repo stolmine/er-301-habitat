@@ -10,7 +10,47 @@
 // Plan: planning/fabula-design.md (DSP architecture, delay tables,
 // modulation, governor). Roadmap: planning/zaum-roadmap.md §"Phase 1".
 //
-// BUILD SUB-PHASE 0.1.0.11 — Outer-allpass Brownian modulation for metallic reduction.
+// BUILD SUB-PHASE 0.1.0.12 — ER diffuser (slapback fix) + Early room-macro coupling.
+//
+//   PART A — ER diffuser: after summing the 9 ER taps into erSumL/erSumR, each
+//   channel is passed through 2 short plain Schroeder allpasses (series) BEFORE
+//   being scaled into the wet sum. This smears the discrete FIR taps into a
+//   continuous early wash, eliminating discrete slapback echoes at high Early.
+//
+//   L diffuser delays: 211 smp (≈4.4 ms) and 317 smp (≈6.6 ms). Prime, decorrelated.
+//   R diffuser delays: 241 smp (≈5.0 ms) and 359 smp (≈7.5 ms). Prime, decorrelated.
+//   Coefficient g = 0.6 for all four stages (unity-gain, |g|<1 — provably stable).
+//   Static (unmodulated). Four dedicated float buffers + write heads in constructor.
+//
+//   Stability proof: the ER diffuser is purely in the feedforward ER path (no
+//   recirculating feedback anywhere). erSumL/erSumR are FIR tap sums from mER[];
+//   passing them through short IIR allpasses cannot destabilize the tank, which
+//   is a completely separate signal path. |H_allpass| = 1 — unity-gain, bounded.
+//
+//   PART B — Early room-macro coupling: at block rate, compute an EFFECTIVE
+//   sizeFactor, g_d, and dampCoeff biased toward a smaller/shorter/warmer room
+//   as the Early parameter rises. A macro value = kEarlyMacroDepth*earlyParam
+//   is distributed across three targets via per-target weight constants.
+//
+//   sizeFactorEff = sizeFactor * (1 - macro*kMacroSizeAmt)
+//     → smaller room as Early rises (fewer initial reflections on long delays)
+//   g_d_eff = g_d - macro*kMacroDecayAmt*(g_d - kGdMin)
+//     → shorter tail as Early rises (matches the denser early-reflection energy)
+//   dampCoeff_eff applied to dampCoeff via effective Damp, pulled toward 1.0
+//     (more HF absorption) as Early rises
+//   sizeFactorEff one-pole smoothed per block (kSizeFactorSmooth) so Early
+//   sweeps don't jump delay lengths abruptly.
+//
+//   Early=0 INVARIANT: macro=0 → effective values equal manual exactly, AND
+//   erSumL/erSumR=0 (guarded), AND ER diffuser output=0 (driven by zero input).
+//   Output is BIT-FOR-BIT identical to 0.1.0.11 at Early=0.
+//
+//   Residual click on Early sweep: sizeFactorEff changes delay lengths (same as
+//   Size sweep). The per-block one-pole smoother (kSizeFactorSmooth=0.05) reduces
+//   jump magnitude per block, but large fast Early moves may produce a brief zip.
+//   This is the same deferred behavior as Size sweeps (known since 0.1.0.10).
+//
+// (Previous: 0.1.0.11 — Outer-allpass Brownian modulation for metallic reduction.)
 //
 //   Extends the Brownian walk modulation to the four OUTER tank allpasses
 //   (AP1 outer 1087 L/R, AP2 outer 1471 L/R) to break up residual eigentone
@@ -262,6 +302,21 @@ namespace zaum
   // Power-of-two for cheap bitwise wrap: & (kER - 1).
   // Maximum tap delay used = 71 ms = 3408 samples < 4096 — all reads in-bounds.
   static const int kER = 4096;
+
+  // ER diffuser allpass buffer sizes (0.1.0.12).
+  // Two plain Schroeder allpasses per channel (series), STATIC, g=0.6.
+  // Delays chosen prime and decorrelated between L and R.
+  // At 48 kHz: 211 smp≈4.4 ms, 317 smp≈6.6 ms (L); 241 smp≈5.0 ms, 359 smp≈7.5 ms (R).
+  // Buffers sized exactly to their delays — no modulation, no headroom needed.
+  static const int kERD_L1 = 211;   // L ER diffuser stage 1 delay
+  static const int kERD_L2 = 317;   // L ER diffuser stage 2 delay
+  static const int kERD_R1 = 241;   // R ER diffuser stage 1 delay
+  static const int kERD_R2 = 359;   // R ER diffuser stage 2 delay
+
+  // ER diffuser allpass coefficient — shared across all 4 stages.
+  // g=0.6: unity-gain (|g|<1), enough diffusion to smear 7–70 ms FIR taps
+  // into a smooth wash within a few ms of smear. Primary tuning knob.
+  static const double kERDiffG = 0.6;
 
   // Tank allpass buffers (series-cascade Schroeder APF, BOTH L and R loops).
   // Each tank AP is a SERIES CASCADE: outer (kTA1=1087, g=gTA1_out) feeds
@@ -640,6 +695,43 @@ namespace zaum
   static const double kERLevel = 1.5;
 
   // ---------------------------------------------------------------------------
+  // Early room-macro coupling tuning constants (0.1.0.12).
+  //
+  // macro = kEarlyMacroDepth * earlyParam   (0..kEarlyMacroDepth)
+  //
+  // At Early=0: macro=0 → all effective values equal manual → BIT-IDENTICAL output.
+  // At Early=1: macro=kEarlyMacroDepth → maximum bias toward small/short/warm room.
+  //
+  // Per-target weights scale how much of the macro is applied to each dimension.
+  // All weights are in [0,1] and are independent — tunable by ear without
+  // affecting the other two dimensions.
+  //
+  //   Size bias:  sizeFactorEff = sizeFactor * (1 - macro*kMacroSizeAmt)
+  //     At Early=1: sizeFactorEff = sizeFactor * (1 - 0.5*0.5) = sizeFactor * 0.75
+  //   Decay bias: g_d_eff = g_d - macro*kMacroDecayAmt*(g_d - kGdMin)
+  //     At Early=1: g_d_eff = g_d - 0.5*0.6*(g_d-kGdMin)  →  shorter tail
+  //   Damp bias:  effective Damp raised by macro*kMacroDampAmt (more absorption)
+  //     At Early=1: dampEff = min(dampD + 0.5*0.5, 1.0)  →  warmer/darker tail
+  //
+  // kSizeFactorSmooth: per-block one-pole smoothing coefficient for sizeFactorEff.
+  // Prevents hard delay-length jumps on Early sweeps. At FRAMELENGTH=32, 48 kHz:
+  //   0.05 per block ≈ ~20 blocks (~13 ms) to settle 63% of a step — gentle.
+  //   PRIMARY CLICK-SOFTENING KNOB: raise toward 1.0 for instant (clickier),
+  //   lower toward 0.0 for slower (smoother) transitions.
+  //
+  // kSizeFactorMin: hard floor on sizeFactorEff after smoothing.
+  // Prevents delay lengths from going below a safe minimum under any Early value.
+  // At kSizeFactorMin=0.12, shortest delay = D2_L: round(5101*0.12)=612→613 (odd).
+  // Walk at Mod=1: excursion = 72*(0.12/0.85)=10.2 smp; min read = 613-10-1=602 > 0. Safe.
+  // ---------------------------------------------------------------------------
+  static const double kEarlyMacroDepth = 0.5;   // global macro scale; tunable by ear
+  static const double kMacroSizeAmt    = 0.5;   // fraction of macro applied to Size
+  static const double kMacroDecayAmt   = 0.6;   // fraction of macro applied to Decay
+  static const double kMacroDampAmt    = 0.5;   // fraction of macro applied to Damp
+  static const double kSizeFactorSmooth = 0.05; // per-block smoothing toward sizeFactorEff target
+  static const double kSizeFactorMin    = 0.12; // hard floor on sizeFactorEff (bounds safety)
+
+  // ---------------------------------------------------------------------------
   // xorshift64 PRNG — fast, period 2^64-1, audio-thread safe (no libc).
   // From Marsaglia (2003). NEVER pass seed=0 (degenerate fixed point).
   // ---------------------------------------------------------------------------
@@ -685,6 +777,14 @@ namespace zaum
       memset(mPD,     0, sizeof(mPD));
       memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
       mWrER = 0;
+      // ER diffuser allpass buffers (0.1.0.12) — 2 stages per channel, g=0.6.
+      // Zeroed so first-block output is silence (consistent with zero input on startup).
+      memset(mERD_L1, 0, sizeof(mERD_L1));
+      memset(mERD_L2, 0, sizeof(mERD_L2));
+      memset(mERD_R1, 0, sizeof(mERD_R1));
+      memset(mERD_R2, 0, sizeof(mERD_R2));
+      mWrERD_L1 = 0; mWrERD_L2 = 0;
+      mWrERD_R1 = 0; mWrERD_R2 = 0;
       memset(mID1,    0, sizeof(mID1));
       memset(mID2,    0, sizeof(mID2));
       memset(mID3,    0, sizeof(mID3));
@@ -761,20 +861,29 @@ namespace zaum
       mDCx1_L = 0.0;  mDCy1_L = 0.0;
       mDCx1_R = 0.0;  mDCy1_R = 0.0;
 
-      // Size-scaled delay lengths — initialize to Size=0.35 default lengths.
-      // 0.1.0.10 power-curve mapping: sizeFactor = kSizeMin+(kSizeMax-kSizeMin)*Size^kSizeShape
-      //   At Size=0.35: sizeFactor = 0.18 + 1.32*0.35^0.647 = 0.18+0.670 = 0.850
-      //   (Same sizeFactor=0.850 as the old linear mapping — default sound preserved.)
-      //   D1_L: round(7187*0.850)=round(6108.95)=6109 (odd)
-      //   D2_L: round(5101*0.850)=round(4335.85)=4335 (odd) — 4335 is odd ✓
-      //   D1_R: round(6803*0.850)=round(5782.55)=5783 (odd)
-      //   D2_R: round(6343*0.850)=round(5391.55)=5391 (odd)
-      mScaledD1_L = 6109;
-      mScaledD2_L = 4335;
-      mScaledD1_R = 5783;
-      mScaledD2_R = 5391;
-      mLastSize   = 0.35f;
-      mSizeFactor = 0.850;
+      // Size-scaled delay lengths — initialize consistent with defaults Size=0.35, Early=0.4.
+      //
+      // 0.1.0.12: scaled lengths now use the EFFECTIVE sizeFactor after macro coupling.
+      //   Raw sizeFactor at Size=0.35: 0.18 + 1.32*0.35^0.647 = 0.850
+      //   macro = kEarlyMacroDepth * earlyDefault = 0.5 * 0.4 = 0.20
+      //   sizeFactorEff = 0.850 * (1 - 0.20 * kMacroSizeAmt)
+      //                 = 0.850 * (1 - 0.20 * 0.5) = 0.850 * 0.90 = 0.7650
+      //
+      //   D1_L: round(7187*0.765)=round(5498.1)=5498 → toOdd → 5499
+      //   D2_L: round(5101*0.765)=round(3902.3)=3902 → toOdd → 3903
+      //   D1_R: round(6803*0.765)=round(5204.3)=5204 → toOdd → 5205
+      //   D2_R: round(6343*0.765)=round(4852.4)=4852 → toOdd → 4853
+      //
+      //   mSizeFactorSmoothed initialized to 0.7650 (matches first-block target exactly
+      //   → no first-block step; the smoother starts converged).
+      mScaledD1_L = 5499;
+      mScaledD2_L = 3903;
+      mScaledD1_R = 5205;
+      mScaledD2_R = 4853;
+      mLastSize         = 0.35f;
+      mLastEarly        = 0.4f;
+      mSizeFactor       = 0.850;    // raw sizeFactor (Size only), for reference
+      mSizeFactorSmoothed = 0.7650; // effective sizeFactor at defaults — smoother starts converged
     }
 
     virtual ~APFTank() {}
@@ -837,13 +946,16 @@ namespace zaum
       double g_d = kGdMin + (kGdMax - kGdMin) * pow(decayD, kDecayShape);
       if (g_d > kGdCap) g_d = kGdCap;   // unconditional hard safety cap
 
-      // Damp → one-pole LP coefficient.
-      // coeff = 1.0 - Damp * (1.0 - kMinDampCoeff)
-      // Damp=0 → coeff=1.0 (open). Damp=1 → coeff=kMinDampCoeff (dark).
+      // Damp → base dampD for the one-pole LP coefficient.
+      // 0.1.0.12: dampCoeff is no longer computed directly here; instead the Early
+      // macro coupling (below) computes dampCoeffEff from dampD + macro bias.
+      // coeff = 1.0 - dampEff * (1.0 - kMinDampCoeff)
+      // Damp=0,Early=0 → dampEff=0 → coeff=1.0 (open, passthrough).
+      // Damp=1,Early=0 → dampEff=1 → coeff=kMinDampCoeff (dark).
       double dampD     = (double)dampParam;
       if (dampD < 0.0) dampD = 0.0;
       if (dampD > 1.0) dampD = 1.0;
-      const double dampCoeff = 1.0 - dampD * (1.0 - kMinDampCoeff);
+      // dampCoeffEff computed in the macro coupling block below.
 
       // Diffusion → allpass coefficients.
       // Linear offset from each baseline: coeff = base + (D - 0.6) * kDiffSlope.
@@ -867,40 +979,74 @@ namespace zaum
 
       #undef DIFFCLAMP
 
-      // Size → scaled delay lengths (block rate, only recompute when changed).
-      // Power-curve mapping (0.1.0.10): sizeFactor = kSizeMin + (kSizeMax-kSizeMin)*Size^kSizeShape
-      // At Size=0.35 (default): sizeFactor=0.850 — IDENTICAL to the previous linear mapping.
-      // At Size=0.0: sizeFactor=kSizeMin=0.18 (genuine small room, ~27 ms D1_L).
-      // At Size=1.0: sizeFactor=kSizeMax=1.50 (large hall — unchanged).
-      if (sizeParam != mLastSize)
+      // Early macro coupling (0.1.0.12) — compute EFFECTIVE Size/Decay/Damp.
+      //
+      // macro ∈ [0, kEarlyMacroDepth]. At Early=0: macro=0 → effective=manual exactly.
+      // At Early=1: macro=kEarlyMacroDepth → maximum bias toward smaller/shorter/warmer room.
+      //
+      // Size bias: sizeFactorEff = sizeFactor * (1 - macro*kMacroSizeAmt)
+      //   Smaller room as Early rises. Smoothed per block to avoid click on Early sweep.
+      // Decay bias: g_d_eff = g_d - macro*kMacroDecayAmt*(g_d - kGdMin)
+      //   Shorter tail as Early rises. Gain change — click-free.
+      // Damp bias: effective Damp raised, pulling dampCoeff toward more absorption (lower coeff).
+      //   Warmer/darker tail as Early rises. Coeff change — click-free.
+      //
+      // Size → raw sizeFactor (block rate, always recomputed — cheap pow(), and
+      // sizeFactorEff changes every block during smoothing anyway).
+      double sizeD = (double)sizeParam;
+      if (sizeD < 0.0) sizeD = 0.0;
+      if (sizeD > 1.0) sizeD = 1.0;
+      const double sizeFactor = kSizeMin + (kSizeMax - kSizeMin) * pow(sizeD, kSizeShape);
+      mSizeFactor = sizeFactor;   // raw (Size-only) stored for reference
+
+      // Early macro: pull toward smaller/shorter/warmer room.
+      const double macro = kEarlyMacroDepth * (double)earlyParam;
+
+      // Effective sizeFactor: smaller room as Early rises.
+      const double sizeFactorEffTarget = sizeFactor * (1.0 - macro * kMacroSizeAmt);
+      // Clamp effective sizeFactor to a safe minimum (bounds-safety at extreme Early+small Size).
+      const double sizeFactorEffClamped = (sizeFactorEffTarget < kSizeFactorMin)
+                                        ? kSizeFactorMin : sizeFactorEffTarget;
+      // One-pole smooth toward the target to soften delay-length jumps on Early/Size sweeps.
+      mSizeFactorSmoothed += kSizeFactorSmooth * (sizeFactorEffClamped - mSizeFactorSmoothed);
+      const double sizeFactorEff = mSizeFactorSmoothed;
+
+      // Effective g_d: shorter tail as Early rises.
+      // g_d_eff = g_d - macro*kMacroDecayAmt*(g_d - kGdMin)
+      double g_d_eff = g_d - macro * kMacroDecayAmt * (g_d - kGdMin);
+      if (g_d_eff < kGdMin)  g_d_eff = kGdMin;   // floor: never below kGdMin
+      if (g_d_eff > kGdCap)  g_d_eff = kGdCap;   // ceiling: same hard cap as raw
+
+      // Effective dampCoeff: more HF absorption as Early rises.
+      // Bias Damp toward 1.0 (max damp) by raising the effective Damp before coeff mapping.
+      // dampEff ∈ [dampD, 1.0]; the coeff mapping then gives a lower (darker) value.
+      double dampEffD = dampD + macro * kMacroDampAmt;
+      if (dampEffD > 1.0) dampEffD = 1.0;
+      const double dampCoeffEff = 1.0 - dampEffD * (1.0 - kMinDampCoeff);
+      // (dampCoeffEff replaces dampCoeff everywhere damping is applied in the tank.)
+
+      // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
+      // since the smoothed value moves continuously when converging.
+      // Round to nearest odd; clamp to [1, maxBase].
+      mLastSize  = sizeParam;    // track for reference (no longer used as change guard)
+      mLastEarly = earlyParam;
       {
-        mLastSize = sizeParam;
-        double sizeD = (double)sizeParam;
-        if (sizeD < 0.0) sizeD = 0.0;
-        if (sizeD > 1.0) sizeD = 1.0;
-        const double sizeFactor = kSizeMin + (kSizeMax - kSizeMin) * pow(sizeD, kSizeShape);
-        mSizeFactor = sizeFactor;
-
-        // Round to nearest odd to minimize comb resonances.
-        // Result is clamped to [1, maxBase] implicitly by toOdd().
-        mScaledD1_L = toOdd((int)(kD1_L_base * sizeFactor + 0.5));
-        mScaledD2_L = toOdd((int)(kD2_L_base * sizeFactor + 0.5));
-        mScaledD1_R = toOdd((int)(kD1_R_base * sizeFactor + 0.5));
-        mScaledD2_R = toOdd((int)(kD2_R_base * sizeFactor + 0.5));
-
-        // Clamp to strictly less than their respective buffer sizes minus
-        // the headroom+interp margin, so read index can never exceed buffer.
-        // Effective max usable scaled base = bufSize - 2*headroom - 1.
-        // With headroom=128: D1_L usable max = 11038 - 257 = 10781 = kD1_L_maxBase.
-        if (mScaledD1_L > kD1_L_maxBase) mScaledD1_L = kD1_L_maxBase;
-        if (mScaledD2_L > kD2_L_maxBase) mScaledD2_L = kD2_L_maxBase;
-        if (mScaledD1_R > kD1_R_maxBase) mScaledD1_R = kD1_R_maxBase;
-        if (mScaledD2_R > kD2_R_maxBase) mScaledD2_R = kD2_R_maxBase;
-        // Min: 1 (toOdd guarantees >= 1, but guard explicitly).
-        if (mScaledD1_L < 1) mScaledD1_L = 1;
-        if (mScaledD2_L < 1) mScaledD2_L = 1;
-        if (mScaledD1_R < 1) mScaledD1_R = 1;
-        if (mScaledD2_R < 1) mScaledD2_R = 1;
+        int d1L = toOdd((int)(kD1_L_base * sizeFactorEff + 0.5));
+        int d2L = toOdd((int)(kD2_L_base * sizeFactorEff + 0.5));
+        int d1R = toOdd((int)(kD1_R_base * sizeFactorEff + 0.5));
+        int d2R = toOdd((int)(kD2_R_base * sizeFactorEff + 0.5));
+        if (d1L > kD1_L_maxBase) d1L = kD1_L_maxBase;
+        if (d2L > kD2_L_maxBase) d2L = kD2_L_maxBase;
+        if (d1R > kD1_R_maxBase) d1R = kD1_R_maxBase;
+        if (d2R > kD2_R_maxBase) d2R = kD2_R_maxBase;
+        if (d1L < 1) d1L = 1;
+        if (d2L < 1) d2L = 1;
+        if (d1R < 1) d1R = 1;
+        if (d2R < 1) d2R = 1;
+        mScaledD1_L = d1L;
+        mScaledD2_L = d2L;
+        mScaledD1_R = d1R;
+        mScaledD2_R = d2R;
       }
 
       // Load scaled lengths as local ints for the sample loop.
@@ -955,7 +1101,7 @@ namespace zaum
       //   at Size=1.0, scale=1.5/0.85≈1.76; without cap, scaled excursion could reach
       //   72*1.76=127 smp → walk+interp=128 = headroom limit with zero margin. Cap
       //   holds it at 72 smp max — safe with the 128-sample headroom as before.
-      double excursion = rawExcursion * (mSizeFactor / kSizeRef);
+      double excursion = rawExcursion * (sizeFactorEff / kSizeRef);
       if (excursion > kMaxExcursion) excursion = kMaxExcursion;
       const double step_size = kMinStep + (double)modRateParam * (kMaxStep - kMinStep);
 
@@ -1053,6 +1199,70 @@ namespace zaum
         mWrER = (mWrER + 1) & (kER - 1);
 
         // ----------------------------------------------------------------
+        // 2c. ER diffuser — 2 series plain Schroeder allpasses per channel (0.1.0.12).
+        //
+        // Passes erSumL and erSumR through short static allpasses BEFORE
+        // they are scaled into the wet output. This smears the 9 discrete
+        // FIR tap positions into a continuous early wash, eliminating
+        // slapback echoes at high Early. Purely feedforward — no connection
+        // to the recirculating tank. Stability proof: |H_allpass|=1, g=0.6<1.
+        //
+        // Same allpassNestedStep form as the input-diffusion chain:
+        //   vNew = x + g * v[n-N]
+        //   yOut = -g * vNew + v[n-N]
+        //
+        // L: stage 1 (N=211), then stage 2 (N=317). g=kERDiffG=0.6 for all.
+        // R: stage 1 (N=241), then stage 2 (N=359). Decorrelated from L.
+        //
+        // When earlyParam=0: erSumL=erSumR=0 (guarded above), so the diffuser
+        // runs on zero input → output is zero → no contribution to wetL/wetR.
+        // The Early=0 output is BIT-IDENTICAL to 0.1.0.11.
+        // ----------------------------------------------------------------
+        if (earlyParam > 0.0f)
+        {
+          // L channel diffuser — stage 1 (N=kERD_L1=211)
+          {
+            double vD = (double)mERD_L1[mWrERD_L1];
+            double vNew, yOut;
+            house::allpassNestedStep(erSumL, vD, kERDiffG, vNew, yOut);
+            mERD_L1[mWrERD_L1] = (float)vNew;
+            mWrERD_L1++;
+            if (mWrERD_L1 >= kERD_L1) mWrERD_L1 = 0;
+            erSumL = yOut;
+          }
+          // L channel diffuser — stage 2 (N=kERD_L2=317)
+          {
+            double vD = (double)mERD_L2[mWrERD_L2];
+            double vNew, yOut;
+            house::allpassNestedStep(erSumL, vD, kERDiffG, vNew, yOut);
+            mERD_L2[mWrERD_L2] = (float)vNew;
+            mWrERD_L2++;
+            if (mWrERD_L2 >= kERD_L2) mWrERD_L2 = 0;
+            erSumL = yOut;
+          }
+          // R channel diffuser — stage 1 (N=kERD_R1=241)
+          {
+            double vD = (double)mERD_R1[mWrERD_R1];
+            double vNew, yOut;
+            house::allpassNestedStep(erSumR, vD, kERDiffG, vNew, yOut);
+            mERD_R1[mWrERD_R1] = (float)vNew;
+            mWrERD_R1++;
+            if (mWrERD_R1 >= kERD_R1) mWrERD_R1 = 0;
+            erSumR = yOut;
+          }
+          // R channel diffuser — stage 2 (N=kERD_R2=359)
+          {
+            double vD = (double)mERD_R2[mWrERD_R2];
+            double vNew, yOut;
+            house::allpassNestedStep(erSumR, vD, kERDiffG, vNew, yOut);
+            mERD_R2[mWrERD_R2] = (float)vNew;
+            mWrERD_R2++;
+            if (mWrERD_R2 >= kERD_R2) mWrERD_R2 = 0;
+            erSumR = yOut;
+          }
+        }
+
+        // ----------------------------------------------------------------
         // 3. Input diffusion: 4 series allpasses (fixed coefficients).
         //    Each AP: standard (non-nested) allpassNestedStep pattern.
         //      vNew = x + g * v[n-N]
@@ -1139,8 +1349,9 @@ namespace zaum
         // with higher Damp = progressively darker tail.
         //
         // CROSS-COUPLE WIRING (Dattorro, coupling coefficient = 1.0):
-        //   mFeedback_L = spiralFastSaturate(d2Read_R * g_d, 1.0)
-        //   mFeedback_R = spiralFastSaturate(d2Read_L * g_d, 1.0)
+        //   mFeedback_L = spiralFastSaturate(d2Read_R * g_d_eff, 1.0)
+        //   mFeedback_R = spiralFastSaturate(d2Read_L * g_d_eff, 1.0)
+        //   (0.1.0.12: uses g_d_eff — macro-biased decay — not raw g_d)
         //
         // ORDERING: Both loops fully computed for THIS sample before
         // either feedback value is updated — no same-sample causality leak.
@@ -1246,9 +1457,9 @@ namespace zaum
 
         // HF damp: one-pole LP on D1 output (Schroeder/Jot feedback form).
         // y += coeff * (x - y)  with state dampL.
-        // Damp=0 → coeff=1.0 → dampL tracks x exactly (passthrough).
-        // Damp>0 → coeff<1.0 → dampL lags x → LF-pass filtering.
-        dampL += dampCoeff * (d1Read_L - dampL);
+        // Uses dampCoeffEff (macro-biased: more absorption as Early rises).
+        // Damp=0,Early=0 → dampCoeffEff=1.0 → dampL tracks x exactly (passthrough).
+        dampL += dampCoeffEff * (d1Read_L - dampL);
         double dampedD1_L = dampL;
 
         // AP2_L: series cascade — outer (kTA2=1471, g=gTA2) → inner (kTA2i=491, g=gTA2_in).
@@ -1402,8 +1613,8 @@ namespace zaum
           d1tap_c_R = (double)mD1_R[ic];
         }
 
-        // HF damp: one-pole LP on D1_R output.
-        dampR += dampCoeff * (d1Read_R - dampR);
+        // HF damp: one-pole LP on D1_R output. Uses dampCoeffEff (macro-biased).
+        dampR += dampCoeffEff * (d1Read_R - dampR);
         double dampedD1_R = dampR;
 
         // AP2_R: series cascade — outer (kTA2=1471, g=gTA2) → inner (kTA2i=491, g=gTA2_in).
@@ -1478,8 +1689,9 @@ namespace zaum
         // vice versa. Spiral governor bounds each independently.
         // Both d2Read_L and d2Read_R are fully computed above before
         // either feedback value is updated — no same-sample causality leak.
-        mFeedback_L = house::spiralFastSaturate(d2Read_R * g_d, 1.0);
-        mFeedback_R = house::spiralFastSaturate(d2Read_L * g_d, 1.0);
+        // Cross-feed uses g_d_eff (macro-biased decay) — shorter tail as Early rises.
+        mFeedback_L = house::spiralFastSaturate(d2Read_R * g_d_eff, 1.0);
+        mFeedback_R = house::spiralFastSaturate(d2Read_L * g_d_eff, 1.0);
 
         // ----------------------------------------------------------------
         // 5. Stereo wet taps — Dattorro-style multi-tap signed sum (0.1.0.7).
@@ -1574,6 +1786,15 @@ namespace zaum
     float mER[kER];
     int   mWrER;
 
+    // ER diffuser allpass buffers (0.1.0.12) — 2 stages per channel, static, g=0.6.
+    // Sized exactly to their delays; no headroom (UNMODULATED).
+    // L: 211 + 317 smp; R: 241 + 359 smp (prime, decorrelated).
+    float mERD_L1[kERD_L1];   // L ER diffuser stage 1 (211 smp)
+    float mERD_L2[kERD_L2];   // L ER diffuser stage 2 (317 smp)
+    float mERD_R1[kERD_R1];   // R ER diffuser stage 1 (241 smp)
+    float mERD_R2[kERD_R2];   // R ER diffuser stage 2 (359 smp)
+    int   mWrERD_L1, mWrERD_L2, mWrERD_R1, mWrERD_R2;
+
     // Input diffusion allpass buffers (4 series, shared mono path)
     float mID1[kID1];
     float mID2[kID2];
@@ -1627,14 +1848,16 @@ namespace zaum
     double mDCx1_L;  double mDCy1_L;
     double mDCx1_R;  double mDCy1_R;
 
-    // Size-scaled delay lengths — updated at block rate when Size changes.
-    // Initialized to Size=0.35 default values (sizeFactor=0.850) in constructor.
+    // Size-scaled delay lengths — updated every block from sizeFactorEff (smoothed).
+    // Initialized consistent with defaults Size=0.35, Early=0.4 in constructor.
     int    mScaledD1_L;
     int    mScaledD2_L;
     int    mScaledD1_R;
     int    mScaledD2_R;
-    float  mLastSize;     // tracks last seen Size value to detect changes
-    double mSizeFactor;   // current sizeFactor (for modulation excursion scaling)
+    float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
+    float  mLastEarly;          // last seen Early (reference only)
+    double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
+    double mSizeFactorSmoothed; // effective sizeFactor after macro + one-pole smoothing
 
     // Brownian LFO state — four independent xorshift64 PRNGs + walk accumulators.
     // Seeds initialized to distinct non-zero constants in constructor.
