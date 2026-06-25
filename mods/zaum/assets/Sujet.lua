@@ -86,10 +86,10 @@ function Sujet:onLoadGraph(channelCount)
   tie(op, "Space", space, "Out")
   self:addMonoBranch("space", space, "In", space, "Out")
 
-  local predelay = self:addObject("predelay", app.ParameterAdapter())
-  predelay:hardSet("Bias", 0.0)
-  tie(op, "Predelay", predelay, "Out")
-  self:addMonoBranch("predelay", predelay, "In", predelay, "Out")
+  local distance = self:addObject("distance", app.ParameterAdapter())
+  distance:hardSet("Bias", 0.25)
+  tie(op, "Distance", distance, "Out")
+  self:addMonoBranch("distance", distance, "In", distance, "Out")
 
   local mix = self:addObject("mix", app.ParameterAdapter())
   mix:hardSet("Bias", 0.4)
@@ -176,16 +176,16 @@ function Sujet:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.4
     },
-    predelay = GainBias {
-      button = "pre",
-      description = "Predelay — onset delay (absorbs inherent 26.7 ms STFT latency)",
-      branch = self.branches.predelay,
-      gainbias = self.objects.predelay,
-      range = self.objects.predelay,
+    distance = GainBias {
+      button = "dist",
+      description = "Distance — push source into the space: ITDG + HF air-absorption + DRR (≠ Mix)",
+      branch = self.branches.distance,
+      gainbias = self.objects.distance,
+      range = self.objects.distance,
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.0
+      initialBias = 0.25
     },
     mix = GainBias {
       button = "mix",
@@ -199,7 +199,7 @@ function Sujet:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "decay", "damp", "diffuse", "freeze", "smear", "spray", "space", "predelay", "mix" },
+    expanded = { "decay", "damp", "diffuse", "freeze", "smear", "spray", "space", "distance", "mix" },
     collapsed = {}
   }
 end

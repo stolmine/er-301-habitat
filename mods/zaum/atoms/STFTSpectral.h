@@ -1,5 +1,9 @@
 // zaum::STFTSpectral
 //
+// BUILD SUB-PHASE 0.2.0.14 — Distance macro (repurposing inert Predelay slot):
+//   ITDG wet-predelay + HF air-absorption + DRR wet-bias; one knob 0..1.
+//   Distance=0 → bit-identical to 0.2.0.13.
+//
 // BUILD SUB-PHASE 0.2.0.13 — Space axis: frequency-weighted static anti-symmetric
 //   inter-channel phase decorrelation, decoupled from Diffuse; mono fan-out.
 //   Two static per-bin tables computed once in the constructor:
@@ -110,7 +114,7 @@
 //   → ShyFFT::Inverse → window × 1/(2N) → overlap-add
 //
 // ShyFFT packing, normalization, PRNG, OLA — all unchanged from 0.2.0.3.
-// Wired params: Decay, Damp, Diffuse, Freeze, Blur, Bloom, Mix. Predelay INERT.
+// Wired params: Decay, Damp, Diffuse, Freeze, Blur, Bloom, Mix, Distance (was Predelay).
 
 #pragma once
 
@@ -170,6 +174,37 @@ namespace zaum
   // adjacent bins while preserving reasonable per-bin structure.
   static const int   kSpaceDecorrSmooth = 6;
 
+  // Distance macro: three correlated cues from one 0..1 knob.
+  //
+  // 1. ITDG (initial time-delay gap): wet delay line inserted AFTER the governor,
+  //    before mixing. Quadratic mapping: mITDGSamples = (int)(d*d * kITDGMax).
+  //    At Distance=1 → ~75 ms gap between dry arrival and reverb onset.
+  //    kITDGMax = 3600 samples ≈ 75 ms at 48 kHz.  Ear-tune: raise for a longer
+  //    gap at Distance=1, lower for a shorter gap.
+  static const int   kWetDelayLen = 4096;   // ≈ 85 ms at 48 kHz; must be > kITDGMax
+  static const int   kITDGMax     = 3600;   // ≈ 75 ms at 48 kHz
+
+  // 2. HF air-absorption tilt on the wet (applied to synth magnitude, not accum).
+  //    mAirAbsCurve[k] ∈ [0,1]: ~0 below kAirAbsHz, ramps smoothly to kAirAbsMax
+  //    at Nyquist. Multiplication: m *= (1 - distance * mAirAbsCurve[k]).
+  //    At Distance=1, Nyquist bin is attenuated by kAirAbsMax.
+  //    kAirAbsHz: frequency below which absorption is ~0.  Ear-tune: lower
+  //    (e.g. 2000) for darker absorb; raise (e.g. 6000) for brighter-sounding air.
+  static const float kAirAbsHz  = 4000.0f;  // absorption corner frequency
+  static const float kAirAbsMax = 0.85f;    // max attenuation fraction at Distance=1, Nyquist
+
+  // 3. DRR wet-bias: boost the wet relative to the unchanged dry.
+  //    mWetBias = 10^(distance * kDistanceWetExp).
+  //    Applied BEFORE the Spiral governor so the governor still bounds runaway.
+  //    At Distance=0.5 → 10^(0.5*0.4) = 10^0.2 ≈ +4 dB.
+  //    At Distance=1.0 → 10^0.4 ≈ +8 dB.
+  //    Keep modest: raising too high over-saturates the governor.  Ear-tune.
+  static const float kDistanceWetExp = 0.4f;  // dB-exponent: ~+8 dB max at Distance=1
+
+  // Default Distance (0.25 = gently present; default sound shifts from 0.2.0.13
+  // by design.  Distance=0 remains bit-identical to 0.2.0.13 at any time).
+  static const float kDistanceDefault = 0.25f;
+
   // Damp: per-bin g multiplier per bin index.
   //   g_k = g_base * damp_factor^k
   //   damp_factor = pow(kDampFloor, Damp)
@@ -208,7 +243,7 @@ namespace zaum
       addParameter(mSmear);
       addParameter(mSpray);
       addParameter(mSpace);
-      addParameter(mPredelay);
+      addParameter(mDistance);
       addParameter(mMix);
 
       memset(mAnalysisL,    0, sizeof(mAnalysisL));
@@ -217,6 +252,9 @@ namespace zaum
       memset(mSynthesisR,   0, sizeof(mSynthesisR));
       memset(mDryL,         0, sizeof(mDryL));
       memset(mDryR,         0, sizeof(mDryR));
+      memset(mWetDelayL,    0, sizeof(mWetDelayL));
+      memset(mWetDelayR,    0, sizeof(mWetDelayR));
+      mWetDelayWr = 0;
 
 #ifndef SWIGLUA
       for (int n = 0; n < kStftN; ++n) {
@@ -303,6 +341,27 @@ namespace zaum
           mFreqWeight[k] = w;
         }
       }
+
+      // -----------------------------------------------------------------------
+      // Distance: static air-absorption curve.
+      // mAirAbsCurve[k] ∈ [0, kAirAbsMax]: 0 below kAirAbsHz, linear ramp to
+      // kAirAbsMax at Nyquist.  Applied in synth pass: m *= (1 - d * curve[k]).
+      // At Distance=0: factor = 1.0 everywhere → no effect (bit-identical path).
+      // -----------------------------------------------------------------------
+      {
+        const float binHz = 46.875f;   // 48000 / 1024, nominal
+        const float nyqHz = 24000.0f;  // nominal Nyquist
+        for (int k = 0; k <= kStftN / 2; ++k) {
+          const float f = (float)k * binHz;
+          if (f <= kAirAbsHz) {
+            mAirAbsCurve[k] = 0.0f;
+          } else {
+            const float t = (f - kAirAbsHz) / (nyqHz - kAirAbsHz);
+            const float tc = (t < 1.0f) ? t : 1.0f;
+            mAirAbsCurve[k] = kAirAbsMax * tc;
+          }
+        }
+      }
 #endif
 
       mBufPtr    = 0;
@@ -319,7 +378,10 @@ namespace zaum
       mBlurAlpha = 0.0f;
       mBloomAmt  = 0.0f;
       mLastBloom = -1.0f;   // force table recompute on first block
-      mSpaceAmt  = 0.4f;
+      mSpaceAmt    = 0.4f;
+      mDistanceAmt = kDistanceDefault;
+      mITDGSamples = (int)(kDistanceDefault * kDistanceDefault * (float)kITDGMax);
+      mWetBias     = powf(10.0f, kDistanceDefault * kDistanceWetExp);
 
       // PRNG seeds: L and R use distinct non-zero constants so the two channels
       // generate independent xi sequences from sample 0 → stereo decorrelation.
@@ -356,7 +418,10 @@ namespace zaum
     // Decoupled from Diffuse (which controls intra-channel phase noise).
     // Space=0 → offset=0 → bit-identical to 0.2.0.12.
     od::Parameter mSpace{"Space",     0.4f};
-    od::Parameter mPredelay{"Predelay", 0.0f};
+    // Distance: one knob driving ITDG + HF air-absorption + DRR wet-bias.
+    // Default 0.25 = gently present depth (changes default sound vs 0.2.0.13;
+    // Distance=0 is bit-identical to 0.2.0.13).
+    od::Parameter mDistance{"Distance", kDistanceDefault};
     od::Parameter mMix{"Mix",         0.4f};
 
     virtual void process()
@@ -373,7 +438,15 @@ namespace zaum
       mV         = mDiffuse.value();   // cached for processHop
       mFreezeAmt = mFreeze.value();    // 0..1, cached for processHop
       mSprayEps  = mSpray.value() * kSprayMax;   // synth-stage noise injection coeff
-      mSpaceAmt  = mSpace.value();     // inter-channel decorrelation amount 0..1
+      mSpaceAmt    = mSpace.value();     // inter-channel decorrelation amount 0..1
+      // Distance macro: derive three cues at block rate.
+      mDistanceAmt = mDistance.value();
+      {
+        const float d = mDistanceAmt;
+        mITDGSamples = (int)(d * d * (float)kITDGMax);
+        if (mITDGSamples >= kWetDelayLen) mITDGSamples = kWetDelayLen - 1;
+        mWetBias = powf(10.0f, d * kDistanceWetExp);
+      }
       // Smear (bipolar): >0.5 → Blur (upper half), <0.5 → Bloom (lower half),
       // 0.5 = off. One knob, both behaviors retained (mutually exclusive).
       const float smear = mSmear.value();
@@ -427,10 +500,27 @@ namespace zaum
         ++mDryPtr;
         if (mDryPtr >= kStftLat) mDryPtr = 0;
 
-        // Spiral governor on the wet only (dry stays clean), so the SMD
-        // accumulator build-up at high Freeze/Decay can't blow up the output.
-        const float wetSatL = (float)house::spiralFastSaturate((double)wetL, kGovDensity);
-        const float wetSatR = (float)house::spiralFastSaturate((double)wetR, kGovDensity);
+        // Distance: DRR wet-bias applied before the governor (governor still bounds).
+        // ITDG: write governed wet into the delay line; read back mITDGSamples later.
+        // mITDGSamples=0 → readback == current sample → no delay (Distance=0 path).
+        //
+        // Apply wet-bias to the STFT output wet BEFORE the governor.
+        const float biasedWetL = wetL * mWetBias;
+        const float biasedWetR = wetR * mWetBias;
+
+        // Spiral governor on the biased wet (dry stays clean).
+        const float govL = (float)house::spiralFastSaturate((double)biasedWetL, kGovDensity);
+        const float govR = (float)house::spiralFastSaturate((double)biasedWetR, kGovDensity);
+
+        // ITDG wet delay: write governed wet, read mITDGSamples behind.
+        mWetDelayL[mWetDelayWr] = govL;
+        mWetDelayR[mWetDelayWr] = govR;
+        const int wetRead = (mWetDelayWr - mITDGSamples + kWetDelayLen) % kWetDelayLen;
+        const float wetSatL = mWetDelayL[wetRead];
+        const float wetSatR = mWetDelayR[wetRead];
+        ++mWetDelayWr;
+        if (mWetDelayWr >= kWetDelayLen) mWetDelayWr = 0;
+
         out1[i] = dry * dryL + mix * wetSatL;
         out2[i] = dry * dryR + mix * wetSatR;
 
@@ -472,8 +562,8 @@ namespace zaum
 
       // 3. SMD + Diffuse + Damp + Blur — L and R channels.
       //    Independent PRNG state per channel → decorrelated stereo phase noise.
-      smdProcess(mFftOutL, mFftBufL, mMagAccL, mBlurStateL, mBloomStateL, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngL, mSprayEps, mSprayPrngL, +1.0f);
-      smdProcess(mFftOutR, mFftBufR, mMagAccR, mBlurStateR, mBloomStateR, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngR, mSprayEps, mSprayPrngR, -1.0f);
+      smdProcess(mFftOutL, mFftBufL, mMagAccL, mBlurStateL, mBloomStateL, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngL, mSprayEps, mSprayPrngL, +1.0f, mDistanceAmt);
+      smdProcess(mFftOutR, mFftBufR, mMagAccR, mBlurStateR, mBloomStateR, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngR, mSprayEps, mSprayPrngR, -1.0f, mDistanceAmt);
 
       // 4. Inverse FFT.
       mFFT.Inverse(mFftBufL, mIfftOutL);
@@ -530,7 +620,8 @@ namespace zaum
                     float* magAcc, float* blurState, float* bloomState,
                     float g, float V, float dampFactor, float freeze,
                     float blurAlpha, const float* bloomAlphaRise, uint64_t& prng,
-                    float sprayEps, uint64_t& sprayPrng, float spaceSign)
+                    float sprayEps, uint64_t& sprayPrng, float spaceSign,
+                    float distance)
     {
       const int kNyq = kStftN / 2;
       const float blurAlphaComp = 1.0f - blurAlpha;   // (1-blurAlpha) pre-computed
@@ -644,7 +735,12 @@ namespace zaum
         // is untouched, so no accumulator feedback). sprayEps=0 → m = bloomState[k].
         sprayPrng ^= sprayPrng << 13; sprayPrng ^= sprayPrng >> 7; sprayPrng ^= sprayPrng << 17;
         const float n01 = (float)(sprayPrng >> 40) * (1.0f / 16777216.0f);
-        const float m   = bloomState[k] * (1.0f + sprayEps * n01);
+        // Air-absorption (Distance cue 2): attenuate HF bins in proportion to Distance.
+        // mAirAbsCurve[k]=0 for k below kAirAbsHz → no effect at LF.
+        // bloomState/accumulator are UNTOUCHED — synth magnitude only.
+        // distance=0 → factor = 1.0 → no change (bit-identical path).
+        const float airFactor = 1.0f - distance * mAirAbsCurve[k];
+        const float m   = bloomState[k] * (1.0f + sprayEps * n01) * airFactor;
         ifft_in[k]          = m * cosf(phi);
         ifft_in[kNyq + k]   = m * sinf(phi);
       }
@@ -711,6 +807,18 @@ namespace zaum
     float mDecorrPhase[kStftBins];
     float mFreqWeight[kStftBins];
 
+    // Distance: static air-absorption curve (computed once in ctor).
+    // mAirAbsCurve[k] ∈ [0, kAirAbsMax]: 0 below kAirAbsHz, linear ramp to
+    // kAirAbsMax at Nyquist.  Synth-stage only; bloomState/accum untouched.
+    float mAirAbsCurve[kStftBins];
+
+    // Distance: wet delay line for ITDG (initial time-delay gap).
+    // Filled sample-by-sample with the governor output; read back mITDGSamples later.
+    // kWetDelayLen = 4096 ≈ 85 ms at 48 kHz; mITDGSamples clamped < kWetDelayLen.
+    float mWetDelayL[kWetDelayLen];
+    float mWetDelayR[kWetDelayLen];
+    int   mWetDelayWr;   // write pointer (wraps at kWetDelayLen)
+
     // xorshift64 PRNG state — one per channel for independent stereo phase noise.
     uint64_t mPrngL;
     uint64_t mPrngR;
@@ -737,6 +845,11 @@ namespace zaum
     float mBloomAmt;    // raw Bloom param 0..1
     float mLastBloom;   // cached previous Bloom value for lazy table recompute
     float mSpaceAmt;    // inter-channel decorrelation amount 0..1 (block-rate)
+
+    // Distance macro block-rate state.
+    float mDistanceAmt;  // raw Distance param 0..1
+    int   mITDGSamples;  // wet delay read-back offset: (int)(d*d * kITDGMax), clamped
+    float mWetBias;      // DRR wet-bias scalar: 10^(d * kDistanceWetExp) ≥ 1.0
 
 #endif  // SWIGLUA
   };
