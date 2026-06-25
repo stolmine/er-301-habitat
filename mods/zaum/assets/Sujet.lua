@@ -71,6 +71,11 @@ function Sujet:onLoadGraph(channelCount)
   tie(op, "Smear", smear, "Out")
   self:addMonoBranch("smear", smear, "In", smear, "Out")
 
+  local spray = self:addObject("spray", app.ParameterAdapter())
+  spray:hardSet("Bias", 0.0)
+  tie(op, "Spray", spray, "Out")
+  self:addMonoBranch("spray", spray, "In", spray, "Out")
+
   local predelay = self:addObject("predelay", app.ParameterAdapter())
   predelay:hardSet("Bias", 0.0)
   tie(op, "Predelay", predelay, "Out")
@@ -139,6 +144,17 @@ function Sujet:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.5
     },
+    spray = GainBias {
+      button = "spry",
+      description = "Spray — noise-skirt magnitude injection (breathy halo; ≠ Diffuse)",
+      branch = self.branches.spray,
+      gainbias = self.objects.spray,
+      range = self.objects.spray,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
+    },
     predelay = GainBias {
       button = "pre",
       description = "Predelay — onset delay (absorbs inherent 26.7 ms STFT latency)",
@@ -162,7 +178,7 @@ function Sujet:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "decay", "damp", "diffuse", "freeze", "smear", "predelay", "mix" },
+    expanded = { "decay", "damp", "diffuse", "freeze", "smear", "spray", "predelay", "mix" },
     collapsed = {}
   }
 end

@@ -1,6 +1,13 @@
 // zaum::STFTSpectral
 //
-// BUILD SUB-PHASE 0.2.0.11 — consolidate Blur+Bloom onto one bipolar "Smear"
+// BUILD SUB-PHASE 0.2.0.12 — Spray (fiction op 1/3): per-bin magnitude noise
+//   injection at the synth stage (Loris/SMS bandwidth-enhanced model).
+//   m = bloomState[k] * (1 + Spray*kSprayMax * rand01), applied to the OUTPUT
+//   magnitude only — bloomState untouched → no accumulator feedback →
+//   unconditionally safe. Separate per-channel Spray PRNG keeps Diffuse's phase
+//   noise independent. Spray=0 → m = bloomState[k] (bit-identical to 0.2.0.11).
+//   Distinct from Diffuse: Diffuse randomizes PHASE, Spray adds noise ENERGY.
+//   Below: 0.2.0.11 — consolidate Blur+Bloom onto one bipolar "Smear"
 //   param: <0.5 → Bloom (swell), >0.5 → Blur (cloud), 0.5 = off. Frees a
 //   parameter slot for the fictional ops (Warp/Scramble/Spray). The Blur and
 //   Bloom DSP are unchanged; only their amounts are derived from one knob.
@@ -130,6 +137,9 @@ namespace zaum
   // so the spectrum keeps filling and HOLDS (infinite sustain) instead of
   // starving to silence. Hoisted for ear-tuning.
   static const float  kFreezeInFloor = 0.15f;
+  // Spray noise-skirt injection ceiling: epsilon = Spray * kSprayMax. At Spray=1
+  // the injected noise magnitude ≈ kSprayMax × the bin magnitude. Hoisted.
+  static const float  kSprayMax = 0.3f;
 
   // Damp: per-bin g multiplier per bin index.
   //   g_k = g_base * damp_factor^k
@@ -167,6 +177,7 @@ namespace zaum
       addParameter(mDiffuse);
       addParameter(mFreeze);
       addParameter(mSmear);
+      addParameter(mSpray);
       addParameter(mPredelay);
       addParameter(mMix);
 
@@ -224,6 +235,9 @@ namespace zaum
       // Seed neighborhoods chosen to be far apart in 64-bit state space.
       mPrngL = UINT64_C(0x9E3779B97F4A7C15);   // golden-ratio constant
       mPrngR = UINT64_C(0xBF58476D1CE4E5B9);   // splitmix64 constant
+      mSprayPrngL = UINT64_C(0xD1B54A32D192ED03);   // separate Spray PRNG (Diffuse stays independent)
+      mSprayPrngR = UINT64_C(0xA0761D6478BD642F);
+      mSprayEps   = 0.0f;
     }
 
     virtual ~STFTSpectral() {}
@@ -240,6 +254,11 @@ namespace zaum
     // Smear: bipolar consolidation of Bloom (lower half) and Blur (upper half).
     // 0.5 = center/off; <0.5 → Bloom swell; >0.5 → Blur cloud.
     od::Parameter mSmear{"Smear",     0.5f};
+    // Spray: noise-skirt — per-bin magnitude noise injection at the synth stage
+    // (Loris/SMS bandwidth-enhanced model). Distinct from Diffuse (phase): Spray
+    // adds noise ENERGY. Applied to the output magnitude only, never to the
+    // accumulator → no feedback → unconditionally safe.
+    od::Parameter mSpray{"Spray",     0.0f};
     od::Parameter mPredelay{"Predelay", 0.0f};
     od::Parameter mMix{"Mix",         0.4f};
 
@@ -256,6 +275,7 @@ namespace zaum
       const float damp  = mDamp.value();
       mV         = mDiffuse.value();   // cached for processHop
       mFreezeAmt = mFreeze.value();    // 0..1, cached for processHop
+      mSprayEps  = mSpray.value() * kSprayMax;   // synth-stage noise injection coeff
       // Smear (bipolar): >0.5 → Blur (upper half), <0.5 → Bloom (lower half),
       // 0.5 = off. One knob, both behaviors retained (mutually exclusive).
       const float smear = mSmear.value();
@@ -354,8 +374,8 @@ namespace zaum
 
       // 3. SMD + Diffuse + Damp + Blur — L and R channels.
       //    Independent PRNG state per channel → decorrelated stereo phase noise.
-      smdProcess(mFftOutL, mFftBufL, mMagAccL, mBlurStateL, mBloomStateL, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngL);
-      smdProcess(mFftOutR, mFftBufR, mMagAccR, mBlurStateR, mBloomStateR, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngR);
+      smdProcess(mFftOutL, mFftBufL, mMagAccL, mBlurStateL, mBloomStateL, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngL, mSprayEps, mSprayPrngL);
+      smdProcess(mFftOutR, mFftBufR, mMagAccR, mBlurStateR, mBloomStateR, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngR, mSprayEps, mSprayPrngR);
 
       // 4. Inverse FFT.
       mFFT.Inverse(mFftBufL, mIfftOutL);
@@ -411,7 +431,8 @@ namespace zaum
     void smdProcess(const float* spectrum, float* ifft_in,
                     float* magAcc, float* blurState, float* bloomState,
                     float g, float V, float dampFactor, float freeze,
-                    float blurAlpha, const float* bloomAlphaRise, uint64_t& prng)
+                    float blurAlpha, const float* bloomAlphaRise, uint64_t& prng,
+                    float sprayEps, uint64_t& sprayPrng)
     {
       const int kNyq = kStftN / 2;
       const float blurAlphaComp = 1.0f - blurAlpha;   // (1-blurAlpha) pre-computed
@@ -503,8 +524,9 @@ namespace zaum
       // k order (k=1..N/2-1) as 0.2.0.7 → PRNG draw count/order unchanged.
       // -----------------------------------------------------------------------
 
-      // DC (k=0)
-      ifft_in[0] = mPhaseScratch[0] * bloomState[0];
+      // DC (k=0) — Spray adds magnitude noise (separate PRNG; Diffuse independent).
+      sprayPrng ^= sprayPrng << 13; sprayPrng ^= sprayPrng >> 7; sprayPrng ^= sprayPrng << 17;
+      ifft_in[0] = mPhaseScratch[0] * (bloomState[0] * (1.0f + sprayEps * ((float)(sprayPrng >> 40) * (1.0f / 16777216.0f))));
 
       // Complex bins k=1..N/2-1
       for (int k = 1; k < kNyq; ++k) {
@@ -514,12 +536,18 @@ namespace zaum
         const float xi  = ((float)(prng >> 40) * (1.0f / 8388608.0f) - 1.0f) * (float)M_PI;
         const float phi = mPhaseScratch[k] + V * xi;
 
-        ifft_in[k]          = bloomState[k] * cosf(phi);
-        ifft_in[kNyq + k]   = bloomState[k] * sinf(phi);
+        // Spray: per-bin magnitude noise injection (synth-stage only — bloomState
+        // is untouched, so no accumulator feedback). sprayEps=0 → m = bloomState[k].
+        sprayPrng ^= sprayPrng << 13; sprayPrng ^= sprayPrng >> 7; sprayPrng ^= sprayPrng << 17;
+        const float n01 = (float)(sprayPrng >> 40) * (1.0f / 16777216.0f);
+        const float m   = bloomState[k] * (1.0f + sprayEps * n01);
+        ifft_in[k]          = m * cosf(phi);
+        ifft_in[kNyq + k]   = m * sinf(phi);
       }
 
-      // Nyquist (k=N/2)
-      ifft_in[kNyq] = mPhaseScratch[kNyq] * bloomState[kNyq];
+      // Nyquist (k=N/2) — Spray
+      sprayPrng ^= sprayPrng << 13; sprayPrng ^= sprayPrng >> 7; sprayPrng ^= sprayPrng << 17;
+      ifft_in[kNyq] = mPhaseScratch[kNyq] * (bloomState[kNyq] * (1.0f + sprayEps * ((float)(sprayPrng >> 40) * (1.0f / 16777216.0f))));
     }
 
     // -------------------------------------------------------------------------
@@ -576,6 +604,10 @@ namespace zaum
     // xorshift64 PRNG state — one per channel for independent stereo phase noise.
     uint64_t mPrngL;
     uint64_t mPrngR;
+    // Separate Spray PRNG per channel (keeps Diffuse's phase noise independent).
+    uint64_t mSprayPrngL;
+    uint64_t mSprayPrngR;
+    float    mSprayEps;   // Spray noise injection coeff (Spray * kSprayMax), block-rate
 
     // Ring/hop state.
     int   mBufPtr;
