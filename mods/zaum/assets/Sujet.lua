@@ -44,6 +44,11 @@ function Sujet:onLoadGraph(channelCount)
   if channelCount > 1 then
     connect(self, "In2", op, "In R")
     connect(op, "Out R", self, "Out2")
+  else
+    -- Mono fan-out: feed In1 to both STFT channels so Space can create stereo
+    -- width from a mono source. Magnitude is identical L/R; Space decorrelates
+    -- the phase anti-symmetrically → wide enveloping field from mono.
+    connect(self, "In1", op, "In R")
   end
 
   local decay = self:addObject("decay", app.ParameterAdapter())
@@ -75,6 +80,11 @@ function Sujet:onLoadGraph(channelCount)
   spray:hardSet("Bias", 0.0)
   tie(op, "Spray", spray, "Out")
   self:addMonoBranch("spray", spray, "In", spray, "Out")
+
+  local space = self:addObject("space", app.ParameterAdapter())
+  space:hardSet("Bias", 0.4)
+  tie(op, "Space", space, "Out")
+  self:addMonoBranch("space", space, "In", space, "Out")
 
   local predelay = self:addObject("predelay", app.ParameterAdapter())
   predelay:hardSet("Bias", 0.0)
@@ -155,6 +165,17 @@ function Sujet:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.0
     },
+    space = GainBias {
+      button = "spc",
+      description = "Space — inter-channel decorrelation (width/envelopment; ≠ Diffuse noise)",
+      branch = self.branches.space,
+      gainbias = self.objects.space,
+      range = self.objects.space,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.4
+    },
     predelay = GainBias {
       button = "pre",
       description = "Predelay — onset delay (absorbs inherent 26.7 ms STFT latency)",
@@ -178,7 +199,7 @@ function Sujet:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "decay", "damp", "diffuse", "freeze", "smear", "spray", "predelay", "mix" },
+    expanded = { "decay", "damp", "diffuse", "freeze", "smear", "spray", "space", "predelay", "mix" },
     collapsed = {}
   }
 end

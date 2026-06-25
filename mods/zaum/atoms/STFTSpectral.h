@@ -1,6 +1,23 @@
 // zaum::STFTSpectral
 //
-// BUILD SUB-PHASE 0.2.0.12 — Spray (fiction op 1/3): per-bin magnitude noise
+// BUILD SUB-PHASE 0.2.0.13 — Space axis: frequency-weighted static anti-symmetric
+//   inter-channel phase decorrelation, decoupled from Diffuse; mono fan-out.
+//   Two static per-bin tables computed once in the constructor:
+//     mDecorrPhase[k]: structured per-bin phase offset, smoothed across frequency
+//       (6-pass boxcar), scaled to [-π, +π]. Adjacent bins share similar offsets →
+//       no metallic coloration from white per-bin random phase (per Kendall 1995
+//       refutation of naive approach).
+//     mFreqWeight[k]: perceptual frequency weighting — ramps to peak at
+//       kSpacePeakHz (~600 Hz), stays high to kSpaceTaperHz (~3 kHz), tapers to
+//       kSpaceFloor beyond. Implements the Okano/Beranek/Hidaka BQI band emphasis.
+//   In the synth pass: phi = phaseScratch[k] + V*xi + spaceSign*mSpaceAmt*mFreqWeight[k]*mDecorrPhase[k]
+//   L call spaceSign=+1, R call spaceSign=-1 → anti-symmetric between channels.
+//   Same offset every hop (temporally coherent → no line-broadening noise) but
+//   opposite between channels → inter-channel correlation toward 0 → width/LEV.
+//   Magnitude (bloomState[k]) identical L/R — only phase differs.
+//   Space=0 → offset=0 → phi unchanged → bit-identical to 0.2.0.12.
+//   Diffuse (V) is UNTOUCHED; PRNG draw order for xi unchanged.
+//   Below: 0.2.0.12 — Spray (fiction op 1/3): per-bin magnitude noise
 //   injection at the synth stage (Loris/SMS bandwidth-enhanced model).
 //   m = bloomState[k] * (1 + Spray*kSprayMax * rand01), applied to the OUTPUT
 //   magnitude only — bloomState untouched → no accumulator feedback →
@@ -141,6 +158,18 @@ namespace zaum
   // the injected noise magnitude ≈ kSprayMax × the bin magnitude. Hoisted.
   static const float  kSprayMax = 0.3f;
 
+  // Space: inter-channel phase decorrelation frequency weighting.
+  // Bin width at 48 kHz: sampleRate/kStftN = 46.875 Hz/bin (bin k ≈ k*46.875 Hz).
+  // Peak weighting region: DC up to kSpacePeakHz → ramp to 1.0; plateau to kSpaceTaperHz;
+  // taper to kSpaceFloor above. kSpacePeakHz/kSpaceTaperHz are hoisted for ear-tuning.
+  static const float kSpacePeakHz    = 600.0f;    // peak weight reaches 1.0 at this freq
+  static const float kSpaceTaperHz   = 3000.0f;   // taper begins here; above → kSpaceFloor
+  static const float kSpaceFloor     = 0.15f;     // minimum weight at HF (>kSpaceTaperHz)
+  // kSpaceDecorrSmooth: number of boxcar passes over mDecorrPhase to smooth across bins.
+  // More passes → smoother (less metallic), fewer → more random. 6 gives well-correlated
+  // adjacent bins while preserving reasonable per-bin structure.
+  static const int   kSpaceDecorrSmooth = 6;
+
   // Damp: per-bin g multiplier per bin index.
   //   g_k = g_base * damp_factor^k
   //   damp_factor = pow(kDampFloor, Damp)
@@ -178,6 +207,7 @@ namespace zaum
       addParameter(mFreeze);
       addParameter(mSmear);
       addParameter(mSpray);
+      addParameter(mSpace);
       addParameter(mPredelay);
       addParameter(mMix);
 
@@ -213,6 +243,66 @@ namespace zaum
       // Bloom alpha-rise table initialised to 0 (Bloom=0 passthrough).
       // Recomputed lazily in process() when Bloom param changes.
       memset(mBloomAlphaRise, 0, sizeof(mBloomAlphaRise));
+
+      // -----------------------------------------------------------------------
+      // Space: build static per-bin tables (computed once; deterministic).
+      // -----------------------------------------------------------------------
+
+      // mDecorrPhase[k]: structured per-bin decorrelation phase offset.
+      // Strategy: generate a white-phase sequence via a local xorshift seeded
+      // with a fixed constant, then smooth it with kSpaceDecorrSmooth passes of
+      // a length-3 boxcar (running-average across adjacent bins). Result: adjacent
+      // bins have correlated offsets → no metallic coloration; global distribution
+      // stays approximately [-π, +π] after rescaling.
+      {
+        // Local xorshift seeded with a fixed deterministic constant.
+        uint64_t rng = UINT64_C(0x853C49E6748FEA9B);
+        for (int k = 0; k <= kStftN / 2; ++k) {
+          rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+          // Map upper 24 bits → [-π, +π)
+          mDecorrPhase[k] = ((float)(rng >> 40) * (1.0f / 8388608.0f) - 1.0f) * (float)M_PI;
+        }
+        // Smooth across bin index: kSpaceDecorrSmooth passes of 3-tap boxcar.
+        for (int pass = 0; pass < kSpaceDecorrSmooth; ++pass) {
+          float prev = mDecorrPhase[0];
+          for (int k = 1; k < kStftN / 2; ++k) {
+            const float cur  = mDecorrPhase[k];
+            const float next = mDecorrPhase[k + 1 <= kStftN / 2 ? k + 1 : kStftN / 2];
+            mDecorrPhase[k] = (prev + cur + next) * (1.0f / 3.0f);
+            prev = cur;
+          }
+        }
+      }
+
+      // mFreqWeight[k]: perceptual frequency weighting for Space decorrelation.
+      // Bin k corresponds to frequency f = k * sampleRate / kStftN.
+      // We use a fixed nominal 48 kHz bin width (46.875 Hz/bin) for the static
+      // table; the curve is smooth enough that small SR deviations are inaudible.
+      // Curve:
+      //   f < kSpacePeakHz  → linear ramp from 0.3 at DC up to 1.0 at peak
+      //   f in [peak, taper] → 1.0 plateau
+      //   f > kSpaceTaperHz  → linear ramp from 1.0 down to kSpaceFloor
+      {
+        const float binHz = 46.875f;   // 48000 / 1024, nominal
+        for (int k = 0; k <= kStftN / 2; ++k) {
+          const float f = (float)k * binHz;
+          float w;
+          if (f < kSpacePeakHz) {
+            // Ramp from 0.3 at DC to 1.0 at kSpacePeakHz
+            const float t = f / kSpacePeakHz;
+            w = 0.3f + 0.7f * t;
+          } else if (f <= kSpaceTaperHz) {
+            w = 1.0f;
+          } else {
+            // Linear taper from 1.0 at kSpaceTaperHz to kSpaceFloor at ~12 kHz
+            const float fTop = 12000.0f;
+            const float t = (f - kSpaceTaperHz) / (fTop - kSpaceTaperHz);
+            const float tc = (t < 1.0f) ? t : 1.0f;
+            w = 1.0f + (kSpaceFloor - 1.0f) * tc;
+          }
+          mFreqWeight[k] = w;
+        }
+      }
 #endif
 
       mBufPtr    = 0;
@@ -229,6 +319,7 @@ namespace zaum
       mBlurAlpha = 0.0f;
       mBloomAmt  = 0.0f;
       mLastBloom = -1.0f;   // force table recompute on first block
+      mSpaceAmt  = 0.4f;
 
       // PRNG seeds: L and R use distinct non-zero constants so the two channels
       // generate independent xi sequences from sample 0 → stereo decorrelation.
@@ -259,6 +350,12 @@ namespace zaum
     // adds noise ENERGY. Applied to the output magnitude only, never to the
     // accumulator → no feedback → unconditionally safe.
     od::Parameter mSpray{"Spray",     0.0f};
+    // Space: inter-channel phase decorrelation for width/envelopment.
+    // Applies a static, frequency-weighted, anti-symmetric per-bin phase offset:
+    // +δ[k] to L, -δ[k] to R → drives inter-channel correlation toward 0.
+    // Decoupled from Diffuse (which controls intra-channel phase noise).
+    // Space=0 → offset=0 → bit-identical to 0.2.0.12.
+    od::Parameter mSpace{"Space",     0.4f};
     od::Parameter mPredelay{"Predelay", 0.0f};
     od::Parameter mMix{"Mix",         0.4f};
 
@@ -276,6 +373,7 @@ namespace zaum
       mV         = mDiffuse.value();   // cached for processHop
       mFreezeAmt = mFreeze.value();    // 0..1, cached for processHop
       mSprayEps  = mSpray.value() * kSprayMax;   // synth-stage noise injection coeff
+      mSpaceAmt  = mSpace.value();     // inter-channel decorrelation amount 0..1
       // Smear (bipolar): >0.5 → Blur (upper half), <0.5 → Bloom (lower half),
       // 0.5 = off. One knob, both behaviors retained (mutually exclusive).
       const float smear = mSmear.value();
@@ -374,8 +472,8 @@ namespace zaum
 
       // 3. SMD + Diffuse + Damp + Blur — L and R channels.
       //    Independent PRNG state per channel → decorrelated stereo phase noise.
-      smdProcess(mFftOutL, mFftBufL, mMagAccL, mBlurStateL, mBloomStateL, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngL, mSprayEps, mSprayPrngL);
-      smdProcess(mFftOutR, mFftBufR, mMagAccR, mBlurStateR, mBloomStateR, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngR, mSprayEps, mSprayPrngR);
+      smdProcess(mFftOutL, mFftBufL, mMagAccL, mBlurStateL, mBloomStateL, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngL, mSprayEps, mSprayPrngL, +1.0f);
+      smdProcess(mFftOutR, mFftBufR, mMagAccR, mBlurStateR, mBloomStateR, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngR, mSprayEps, mSprayPrngR, -1.0f);
 
       // 4. Inverse FFT.
       mFFT.Inverse(mFftBufL, mIfftOutL);
@@ -432,7 +530,7 @@ namespace zaum
                     float* magAcc, float* blurState, float* bloomState,
                     float g, float V, float dampFactor, float freeze,
                     float blurAlpha, const float* bloomAlphaRise, uint64_t& prng,
-                    float sprayEps, uint64_t& sprayPrng)
+                    float sprayEps, uint64_t& sprayPrng, float spaceSign)
     {
       const int kNyq = kStftN / 2;
       const float blurAlphaComp = 1.0f - blurAlpha;   // (1-blurAlpha) pre-computed
@@ -529,12 +627,18 @@ namespace zaum
       ifft_in[0] = mPhaseScratch[0] * (bloomState[0] * (1.0f + sprayEps * ((float)(sprayPrng >> 40) * (1.0f / 16777216.0f))));
 
       // Complex bins k=1..N/2-1
+      // spaceOffset: frequency-weighted, anti-symmetric between L (+spaceSign=+1)
+      // and R (+spaceSign=-1). Static per-bin table → same every hop (temporally
+      // coherent → no line broadening); opposite sign between channels → drives
+      // inter-channel correlation toward 0 → width/envelopment. Space=0 → 0.
+      const float spaceAmtSigned = mSpaceAmt * spaceSign;
       for (int k = 1; k < kNyq; ++k) {
         // xorshift64 inline (Marsaglia 2003) — avoids ODR collision with APFTank.h
         prng ^= prng << 13; prng ^= prng >> 7; prng ^= prng << 17;
         // Map upper 24 bits → float [-pi, pi)
         const float xi  = ((float)(prng >> 40) * (1.0f / 8388608.0f) - 1.0f) * (float)M_PI;
-        const float phi = mPhaseScratch[k] + V * xi;
+        const float phi = mPhaseScratch[k] + V * xi
+                        + spaceAmtSigned * mFreqWeight[k] * mDecorrPhase[k];
 
         // Spray: per-bin magnitude noise injection (synth-stage only — bloomState
         // is untouched, so no accumulator feedback). sprayEps=0 → m = bloomState[k].
@@ -601,6 +705,12 @@ namespace zaum
     //   mBloomAlphaRise[k] = 1 - exp(-6 * Bloom * mBloomStagger[k])
     float mBloomAlphaRise[kStftBins];
 
+    // Space: static per-bin tables (computed once in ctor, never change).
+    // mDecorrPhase[k]: structured (frequency-smoothed) decorrelation phase in [-π,+π].
+    // mFreqWeight[k]:  perceptual weighting — peak ~600 Hz, taper above ~3 kHz.
+    float mDecorrPhase[kStftBins];
+    float mFreqWeight[kStftBins];
+
     // xorshift64 PRNG state — one per channel for independent stereo phase noise.
     uint64_t mPrngL;
     uint64_t mPrngR;
@@ -626,6 +736,7 @@ namespace zaum
     float mBlurAlpha;   // IIR smoothing coefficient: 1 - exp(-6*mBlurAmt)
     float mBloomAmt;    // raw Bloom param 0..1
     float mLastBloom;   // cached previous Bloom value for lazy table recompute
+    float mSpaceAmt;    // inter-channel decorrelation amount 0..1 (block-rate)
 
 #endif  // SWIGLUA
   };
