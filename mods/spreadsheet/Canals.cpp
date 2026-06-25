@@ -27,9 +27,6 @@ namespace stolmine
     float lastInLow;
     float lastInCentre;
     float lastInHigh;
-    // Quality is an audio-rate Inlet — carry the prior frame's last
-    // sample for the 2× OS midpoint interp (same pattern as lastVoct).
-    float lastQuality;
 
     // Per-block post-routing input ring buffer for the overview ply
     // viz. Stored at decimated rate (one sample per ~8 cycles
@@ -53,7 +50,6 @@ namespace stolmine
       lastInLow = 0.0f;
       lastInCentre = 0.0f;
       lastInHigh = 0.0f;
-      lastQuality = 0.0f;
       memset(inputRing, 0, sizeof(inputRing));
       inputRingPos = 0;
       inputRingDecimCounter = 0;
@@ -71,13 +67,13 @@ namespace stolmine
     addInput(mCentreIn);
     addInput(mHighIn);
     addInput(mVOct);
-    addInput(mQuality);     // audio-rate Inlet — per-sample
     addOutput(mOut);
     addOutput(mOutLow);     // FIXED: was missing — sub-out picker silently failed
     addOutput(mOutCentre);  // FIXED
     addOutput(mOutHigh);    // FIXED
     addParameter(mFundamental);
-    addParameter(mSpan);    // block-rate Parameter (audio-rate path rolled back)
+    addParameter(mSpan);
+    addParameter(mQuality);
     addParameter(mOutput);
     addParameter(mMode);
     // Routing options driven by Lua-side branch-state polling.
@@ -122,59 +118,6 @@ namespace stolmine
     return f;
   }
 
-  // Interpolated semitones->ratio. stmlib's SemitonesToRatio truncates
-  // the fractional LUT index (256 steps/semitone, no interpolation),
-  // which audibly QUANTIZES the cutoff/span under audio-rate FM — the
-  // native Sine Osc instead derives frequency with a smooth polynomial
-  // exp (no table, no steps). We linearly interpolate stmlib's low
-  // table to remove the stair-step while keeping its exact node values,
-  // so the hardware-matched self-osc freq calibration is preserved.
-  // Index clamped so hot audio-rate V/Oct can't read the LUT OOB
-  // (stmlib's unsafe variant relied on the caller's freqHz clamp).
-  static inline float semisToRatioSmooth(float semitones)
-  {
-    float pitch = semitones + 128.0f;
-    if (pitch < 0.0f) pitch = 0.0f;
-    if (pitch > 255.999f) pitch = 255.999f;
-    int integral = (int)pitch;
-    float fractional = pitch - (float)integral;
-    float fidx = fractional * 256.0f;
-    int i = (int)fidx;                 // 0..255
-    float t = fidx - (float)i;
-    const float *low = stmlib::lut_pitch_ratio_low;
-    float lo = low[i] + (low[i + 1] - low[i]) * t;   // i+1 <= 256 (257-entry table)
-    return stmlib::lut_pitch_ratio_high[integral] * lo;
-  }
-
-  // C1 soft clamps: identity until within `knee` of the limit, then a
-  // quadratic ease that meets the limit with matched value AND slope.
-  // Replaces hard min/max so a control sweeping THROUGH a limit produces
-  // no derivative-break seam — the native ladder filter keeps its wide
-  // cutoff sweeps seamless precisely because it has no in-band hard
-  // clamps (just a single rail). See planning/canals-audio-rate-mod.md
-  // Phase 5d.
-  static inline float softCeil(float x, float hi, float knee)
-  {
-    float edge = hi - knee;
-    if (x <= edge) return x;
-    if (x >= hi + knee) return hi;
-    float u = x - edge;                       // 0..2·knee
-    return edge + u - u * u * (0.25f / knee);
-  }
-  static inline float softFloor(float x, float lo, float knee)
-  {
-    float edge = lo + knee;
-    if (x >= edge) return x;
-    if (x <= lo - knee) return lo;
-    float u = edge - x;                       // 0..2·knee
-    return edge - u + u * u * (0.25f / knee);
-  }
-  static inline float softClampF(float x, float lo, float hi,
-                                 float kneeLo, float kneeHi)
-  {
-    return softCeil(softFloor(x, lo, kneeLo), hi, kneeHi);
-  }
-
   void Canals::process()
   {
     // PHASE 1 — Per-sample audio-rate parameter modulation.
@@ -197,7 +140,6 @@ namespace stolmine
     float *centreIn = mCentreIn.buffer();
     float *highIn   = mHighIn.buffer();
     float *voct     = mVOct.buffer();
-    float *qualBuf  = mQuality.buffer();  // audio-rate Quality CV
     float *out       = mOut.buffer();
     float *outLow    = mOutLow.buffer();
     float *outCentre = mOutCentre.buffer();
@@ -219,17 +161,40 @@ namespace stolmine
     sBlockState.curUsingAll[2] = !hiPatched && allEn;
 
     // === Block-rate parameter sampling ===
-    // Quality stays audio-rate (read per-sample in the loop; its damping
-    // is derived per-sample inside innerStep). Span is block-rate again
-    // (audio-rate path rolled back per user request): read once here and
-    // its cutoff-spread multiplier derived once per frame. Still uses the
-    // interpolated semitone→ratio so the spread is smooth.
     float fundamental = mFundamental.value();
     float span = CLAMP(0.0f, 1.0f, mSpan.value());
-    float spanMult = semisToRatioSmooth(span * 48.0f);
-    float invSpanMult = 1.0f / spanMult;
+    float quality = CLAMP(-1.0f, 1.0f, mQuality.value());
     float outputPos = CLAMP(0.0f, 3.0f, mOutput.value());
     int mode = CLAMP(0, 1, (int)(mMode.value() + 0.5f));
+
+    // === Block-rate derived constants ===
+    float damping;
+    if (quality < 0.0f)
+    {
+      damping = 1.0f / 0.7071f;
+    }
+    else if (quality < 0.9f)
+    {
+      float t = quality * (1.0f / 0.9f);
+      float qMag = 0.7071f + t * t * t * 49.3f;
+      damping = 1.0f / qMag;
+    }
+    else
+    {
+      // Top decile: damping ramps from r≈0.02 (q≈50) through 0 into
+      // -0.15. Calibrated for the pseudoSaturate curve (sharper knee,
+      // larger limit cycles at given damping) — produces CTR self-osc
+      // amplitude ~1.12 matching hardware while keeping 3rd harmonic
+      // at -33 dB (vs hardware -31 dB).
+      float t = (quality - 0.9f) * 10.0f;
+      damping = 0.02f * (1.0f - t) + (-0.15f) * t;
+    }
+
+    float antiRes = (quality < 0.0f) ? -quality : 0.0f;
+
+    float spanSemitones = span * 48.0f;
+    float spanMult = stmlib::SemitonesToRatio(spanSemitones);
+    float invSpanMult = 1.0f / spanMult;
 
     float pos = outputPos;
     float wL, wC, wH;
@@ -267,7 +232,6 @@ namespace stolmine
     float prevXL = s.lastInLow;
     float prevXC = s.lastInCentre;
     float prevXH = s.lastInHigh;
-    float prevQual = s.lastQuality;
 
     // Input ring-buffer decimation rate — hardcoded so the scope
     // timebase doesn't track Fundamental. User preference: keep the
@@ -276,71 +240,38 @@ namespace stolmine
     // entries = 512 audio samples ≈ 10.7 ms.
     s.inputRingDecimRate = 2;
 
-    // Internal-step helper: takes (v, quality, x) at the internal sample
+    // Internal-step helper: takes (v, x) at the internal sample
     // time, configures all 6 SVFs, processes, returns raw vL/vC/vH
     // pre-NaN-clamp. Run twice per output sample (midpoint + current).
-    // Quality arrives per-sample (audio-rate Inlet), so its damping is
-    // derived here per internal step (2× OS headroom). spanMult /
-    // invSpanMult are block-rate (Span is a Parameter again) and captured
-    // by reference.
-    auto innerStep = [&](float v, float quality,
+    auto innerStep = [&](float v,
                          float xL, float xC, float xH,
                          float &vL, float &vC, float &vH)
     {
-      // Quality → damping curve (per-sample; was block-rate).
-      float damping;
-      if (quality < 0.0f)
-      {
-        damping = 1.0f / 0.7071f;
-      }
-      else if (quality < 0.9f)
-      {
-        float t = quality * (1.0f / 0.9f);
-        float qMag = 0.7071f + t * t * t * 49.3f;
-        damping = 1.0f / qMag;
-      }
-      else
-      {
-        // Top decile: damping ramps from r≈0.02 (q≈50) through 0 into
-        // -0.15. Calibrated for the pseudoSaturate curve (sharper knee,
-        // larger limit cycles at given damping) — produces CTR self-osc
-        // amplitude ~1.12 matching hardware while keeping 3rd harmonic
-        // at -33 dB (vs hardware -31 dB).
-        float t = (quality - 0.9f) * 10.0f;
-        damping = 0.02f * (1.0f - t) + (-0.15f) * t;
-      }
-      float antiRes = (quality < 0.0f) ? -quality : 0.0f;
-
-      // spanMult / invSpanMult are block-rate (captured by reference).
-
-      // Cutoff derivation at this internal sample time.
+      // Cutoff derivation at this internal sample time
       float totalSemis = v * 120.0f + fundamental;
-      float freqHz = 261.63f * semisToRatioSmooth(totalSemis);
+      float freqHz = 261.63f * stmlib::SemitonesToRatio(totalSemis);
+      if (freqHz < 20.0f) freqHz = 20.0f;
+      if (freqHz > 20000.0f) freqHz = 20000.0f;
       float lowHz = freqHz * invSpanMult;
       float highHz = freqHz * spanMult;
+      if (lowHz < 20.0f) lowHz = 20.0f;
+      if (highHz > 20000.0f) highHz = 20000.0f;
 
-      // Normalized cutoffs, each soft-clamped into the SVF-safe band
-      // [~96 Hz, ~20 kHz] (at the 96 kHz internal rate). One C1 soft-knee
-      // per band REPLACES the old hard Hz+normalized clamp cascade: when
-      // a wide Span sweep drove the LOW band into the 96 Hz floor and the
-      // HIGH band into the 20 kHz ceiling, each hard clamp was a
-      // derivative-break "seam" that popped. The soft-knee eases into the
-      // same rails. (semisToRatioSmooth already bounds freqHz, so the
-      // products can't overflow before the clamp.) [lo,hi] preserve the
-      // old effective range exactly; knees are well inside it.
-      const float fLo = 0.001f;                  // ~96 Hz
-      const float fHi = 20000.0f * kInvSR_OS;    // ~0.2083 = 20 kHz
-      const float fKneeLo = 0.0006f;
-      const float fKneeHi = 0.030f;
-      float lowF  = softClampF(lowHz  * kInvSR_OS, fLo, fHi, fKneeLo, fKneeHi);
-      float ctrF  = softClampF(freqHz * kInvSR_OS, fLo, fHi, fKneeLo, fKneeHi);
-      float highF = softClampF(highHz * kInvSR_OS, fLo, fHi, fKneeLo, fKneeHi);
+      float lowF = lowHz * kInvSR_OS;
+      if (lowF < 0.001f) lowF = 0.001f;
+      if (lowF > 0.499f) lowF = 0.499f;
+      float ctrF = freqHz * kInvSR_OS;
+      if (ctrF < 0.001f) ctrF = 0.001f;
+      if (ctrF > 0.499f) ctrF = 0.499f;
+      float highF = highHz * kInvSR_OS;
+      if (highF < 0.001f) highF = 0.001f;
+      if (highF > 0.499f) highF = 0.499f;
 
-      // Frequency-compensated damping. Soft-knee the ratio ceiling too —
-      // the old >4 hard clamp stepped resonance directly (the most
-      // audible Span seam). knee=1 eases from ratio 3 up to 4.
-      float ratioLow  = softCeil(ctrF / lowF,  4.0f, 1.0f);
-      float ratioHigh = softCeil(ctrF / highF, 4.0f, 1.0f);
+      // Frequency-compensated damping
+      float ratioLow = ctrF / lowF;
+      if (ratioLow > 4.0f) ratioLow = 4.0f;
+      float ratioHigh = ctrF / highF;
+      if (ratioHigh > 4.0f) ratioHigh = 4.0f;
       float dampLowF = damping * ratioLow;
       float dampHighF = damping * ratioHigh;
 
@@ -417,15 +348,12 @@ namespace stolmine
       if (fabsf(xCurrH) < 1.18e-23f) xCurrH = 1.18e-17f;
 
       float vCurr = voct[i];
-      // Quality per-sample (audio-rate Inlet). Span is block-rate.
-      float qualCurr = CLAMP(-1.0f, 1.0f, qualBuf[i]);
 
       // Internal sample A: midpoint between prev and current
       // (linear interp at the upsampled 96 kHz timeline). Per-block
       // interpolation keeps each block's continuity coherent even
       // as routing changes between blocks.
       float vMid = (prevV + vCurr) * 0.5f;
-      float qualMid = (prevQual + qualCurr) * 0.5f;
       float xMidL = (prevXL + xCurrL) * 0.5f;
       float xMidC = (prevXC + xCurrC) * 0.5f;
       float xMidH = (prevXH + xCurrH) * 0.5f;
@@ -434,11 +362,11 @@ namespace stolmine
       if (fabsf(xMidH) < 1.18e-23f) xMidH = 1.18e-17f;
 
       float vL_a, vC_a, vH_a;
-      innerStep(vMid, qualMid, xMidL, xMidC, xMidH, vL_a, vC_a, vH_a);
+      innerStep(vMid, xMidL, xMidC, xMidH, vL_a, vC_a, vH_a);
 
       // Internal sample B: current sample
       float vL_b, vC_b, vH_b;
-      innerStep(vCurr, qualCurr, xCurrL, xCurrC, xCurrH, vL_b, vC_b, vH_b);
+      innerStep(vCurr, xCurrL, xCurrC, xCurrH, vL_b, vC_b, vH_b);
 
       // Decimation: simple [1/2, 1/2] kernel = average of pair.
       // -3 dB at host-rate Fs/4 (= 12 kHz at 48k host). A sharper
@@ -462,7 +390,6 @@ namespace stolmine
       out[i] = SistersSvf::fastTanh(mix);
 
       prevV  = vCurr;
-      prevQual = qualCurr;
       prevXL = xCurrL;
       prevXC = xCurrC;
       prevXH = xCurrH;
@@ -471,7 +398,6 @@ namespace stolmine
     // Carry the last samples to the next frame so the first sample's
     // midpoint interpolation has a valid history.
     s.lastVoct      = prevV;
-    s.lastQuality   = prevQual;
     s.lastInLow     = prevXL;
     s.lastInCentre  = prevXC;
     s.lastInHigh    = prevXH;

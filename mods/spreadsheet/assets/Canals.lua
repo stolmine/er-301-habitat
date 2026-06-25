@@ -118,22 +118,16 @@ function Canals:onLoadGraph(channelCount)
   tie(op, "Fundamental", fundamental, "Out")
   self:addMonoBranch("fundamental", fundamental, "In", fundamental, "Out")
 
-  -- Span (block-rate: ParameterAdapter + tie). The audio-rate path was
-  -- rolled back per user request — Span's wide exponential cutoff
-  -- leverage made audio-rate sweeps pop. CV still modulates at block
-  -- rate. See planning/canals-audio-rate-mod.md Phase 5f.
+  -- Span
   local span = self:addObject("span", app.ParameterAdapter())
   span:hardSet("Bias", 0.25)
   tie(op, "Span", span, "Out")
   self:addMonoBranch("span", span, "In", span, "Out")
 
-  -- Quality (audio-rate: GainBias Out -> Inlet, read per-sample in C++).
-  local quality = self:addObject("quality", app.GainBias())
-  quality:hardSet("Gain", 0.0)   -- CV opt-in: no modulation depth until dialed up
+  -- Quality
+  local quality = self:addObject("quality", app.ParameterAdapter())
   quality:hardSet("Bias", 0.0)
-  local qualityRange = self:addObject("qualityRange", app.MinMax())
-  connect(quality, "Out", qualityRange, "In")
-  connect(quality, "Out", op, "Quality")
+  tie(op, "Quality", quality, "Out")
   self:addMonoBranch("quality", quality, "In", quality, "Out")
 
   -- Output fader (drives sub-out 1+2 morph content; sub-outs 3-5
@@ -263,7 +257,7 @@ function Canals:onLoadViews()
       description   = "Quality",
       branch        = self.branches.quality,
       gainbias      = self.objects.quality,
-      range         = self.objects.qualityRange,
+      range         = self.objects.quality,
       biasMap       = Encoder.getMap("[-1,1]"),
       biasPrecision = 2,
       initialBias   = 0.0

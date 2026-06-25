@@ -800,3 +800,29 @@ KEPT (not Span-specific, benefit V/Oct FM + Quality): the interpolated
 `semisToRatioSmooth` (de-quantized cutoff/spread) and the C1 soft-knee
 clamps (`softClampF`/`softCeil`). The high-freq aliasing / halfband-
 decimator research item still stands for the remaining V/Oct-FM artifact.
+
+### Phase 5g — FULL REVERT of the audio-rate Canals work, 2.8.1.12
+
+User A/B'd the released 2.8.1 (pre-audio-rate) against 2.8.1.11 on
+hardware: the original has NO stepping on V/Oct or Span; the current
+build did. So one of the "kept" cutoff-path changes (the interpolated
+semitone→ratio and/or the C1 soft-knee clamps) introduced audible
+stepping despite analysis saying they were smoother. Decision: revert
+Canals entirely.
+
+`git checkout 3bdd2d4 -- Canals.cpp Canals.h assets/Canals.lua` →
+byte-identical to the 2.8.1 release. Verified the shipped 2.8.1.12 pkg's
+Canals == the original 2.8.1 pkg. This drops ALL the Phase 5 work:
+audio-rate Quality, interpolated LUT, soft-knee clamps, Span slew —
+everything. Canals is back to: block-rate Span+Quality (ParameterAdapter),
+per-sample V/Oct + 2× OS (which predates this work, from 2.7.1.18-20),
+truncated stmlib LUT, hard clamps. SistersSvf.h was never touched.
+
+Kept (unrelated, in the same package version): Parfait/Compressor
+per-band mod-routing fix and the ModeSelector discrete-encoder scheme.
+
+Lesson: the soft-knee/LUT-interp "improvements" looked smoother on paper
+but changed the voicing and added stepping in practice. Do not re-apply
+to Canals without an A/B on hardware first. The audio-rate-Inlet pattern
+itself remains valid (native Sine Osc) — it just isn't worth it for this
+filter's wide exponential cutoff leverage.
