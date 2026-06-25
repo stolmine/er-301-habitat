@@ -1,5 +1,18 @@
 // zaum::STFTSpectral
 //
+// BUILD SUB-PHASE 0.2.0.15 — Diffuseness-by-prominence: per-bin Space decorrelation
+//   weighted by bin prominence — partials frontal, noise diffuse; intrinsic to Space,
+//   no new param. After bloomState[k] is finalized each hop, compute a wide boxcar
+//   moving-average localRef[k] (half-width ~8 bins) as the "neighborhood floor." Each
+//   complex bin's Space offset is scaled by diffuse = lerp(1, promW, kPromBlend) where
+//   promW = clamp(1 - (ratio-1)*kPromSlope, 0, 1), ratio = bloomState[k]/(localRef[k]+eps).
+//   Strong tonal partials (ratio>>1) → promW→0 → diffuse→0 → Space offset ~0 → stays
+//   centered/frontal. Weak/noise bins (ratio~1) → promW→1 → diffuse→1 → full Space
+//   offset → spreads wide/diffuse. Space=0 → mSpaceAmt=0 → offset=0 → bit-identical to
+//   0.2.0.14 regardless of prominence. kPromBlend=0 → uniform Space (identical to
+//   0.2.0.14 behavior). Also carries forward 0.2.0.14 Distance-max tuning:
+//   kITDGMax 4800 / kWetDelayLen 6144, kDistanceWetExp 0.5, kAirAbsMax 0.90.
+//
 // BUILD SUB-PHASE 0.2.0.14 — Distance macro (repurposing inert Predelay slot):
 //   ITDG wet-predelay + HF air-absorption + DRR wet-bias; one knob 0..1.
 //   Distance=0 → bit-identical to 0.2.0.13.
@@ -174,6 +187,21 @@ namespace zaum
   // adjacent bins while preserving reasonable per-bin structure.
   static const int   kSpaceDecorrSmooth = 6;
 
+  // Diffuseness-by-prominence: per-bin Space decorrelation weighted by spectral prominence.
+  // localRef[k] = boxcar moving-average of bloomState (half-width kPromBoxHalf bins).
+  // ratio   = bloomState[k] / (localRef[k] + eps)   — partials >> 1, noise floor ≈ 1.
+  // promW   = clamp(1 - (ratio-1)*kPromSlope, 0, 1) — partial→0, flat/noise→1.
+  // diffuse = 1 + kPromBlend*(promW - 1)            — lerp(1, promW, kPromBlend).
+  // kPromBlend=0 → diffuse=1 everywhere → uniform Space (== 0.2.0.14 behavior).
+  // kPromBlend=1 → full prominence weighting (partials frontal, noise diffuse).
+  // kPromSlope controls how fast a tonal peak suppresses its decorrelation:
+  //   slope=1: ratio=2 (partial 6dB above floor) → promW=0 (fully frontal).
+  //   slope=0.5: ratio=3 (partial ~10dB above floor) → promW=0.
+  // Ear-tuning knobs: kPromSlope, kPromBlend, kPromBoxHalf.
+  static const int   kPromBoxHalf = 8;      // localRef boxcar half-width (bins)
+  static const float kPromSlope   = 1.0f;   // sensitivity: ratio-1=1 → promW=0
+  static const float kPromBlend   = 1.0f;   // 0=uniform (old), 1=full prominence weighting
+
   // Distance macro: three correlated cues from one 0..1 knob.
   //
   // 1. ITDG (initial time-delay gap): wet delay line inserted AFTER the governor,
@@ -181,8 +209,8 @@ namespace zaum
   //    At Distance=1 → ~75 ms gap between dry arrival and reverb onset.
   //    kITDGMax = 3600 samples ≈ 75 ms at 48 kHz.  Ear-tune: raise for a longer
   //    gap at Distance=1, lower for a shorter gap.
-  static const int   kWetDelayLen = 4096;   // ≈ 85 ms at 48 kHz; must be > kITDGMax
-  static const int   kITDGMax     = 3600;   // ≈ 75 ms at 48 kHz
+  static const int   kWetDelayLen = 6144;   // ≈ 128 ms at 48 kHz; must be > kITDGMax
+  static const int   kITDGMax     = 4800;   // ≈ 100 ms at 48 kHz
 
   // 2. HF air-absorption tilt on the wet (applied to synth magnitude, not accum).
   //    mAirAbsCurve[k] ∈ [0,1]: ~0 below kAirAbsHz, ramps smoothly to kAirAbsMax
@@ -191,7 +219,7 @@ namespace zaum
   //    kAirAbsHz: frequency below which absorption is ~0.  Ear-tune: lower
   //    (e.g. 2000) for darker absorb; raise (e.g. 6000) for brighter-sounding air.
   static const float kAirAbsHz  = 4000.0f;  // absorption corner frequency
-  static const float kAirAbsMax = 0.85f;    // max attenuation fraction at Distance=1, Nyquist
+  static const float kAirAbsMax = 0.90f;    // max attenuation fraction at Distance=1, Nyquist
 
   // 3. DRR wet-bias: boost the wet relative to the unchanged dry.
   //    mWetBias = 10^(distance * kDistanceWetExp).
@@ -199,7 +227,7 @@ namespace zaum
   //    At Distance=0.5 → 10^(0.5*0.4) = 10^0.2 ≈ +4 dB.
   //    At Distance=1.0 → 10^0.4 ≈ +8 dB.
   //    Keep modest: raising too high over-saturates the governor.  Ear-tune.
-  static const float kDistanceWetExp = 0.4f;  // dB-exponent: ~+8 dB max at Distance=1
+  static const float kDistanceWetExp = 0.5f;  // dB-exponent: ~+10 dB max at Distance=1
 
   // Default Distance (0.25 = gently present; default sound shifts from 0.2.0.13
   // by design.  Distance=0 remains bit-identical to 0.2.0.13 at any time).
@@ -706,6 +734,33 @@ namespace zaum
       }
 
       // -----------------------------------------------------------------------
+      // PASS 2b — LocalRef boxcar: wide moving-average of bloomState for prominence.
+      //
+      // O(N) running-sum boxcar, half-width kPromBoxHalf bins. Edge bins clamped
+      // (window shrinks at the edges — no OOB access). Shared L/R scratch mLocalRef[].
+      // bloomState[] is READ ONLY here — no modification.
+      // -----------------------------------------------------------------------
+      {
+        const int H = kPromBoxHalf;
+        // Build initial running sum for k=0 window: bins [0 .. min(H, kNyq)]
+        float rsum = 0.0f;
+        int   rcnt = 0;
+        const int initEnd = (H < kNyq) ? H : kNyq;
+        for (int j = 0; j <= initEnd; ++j) { rsum += bloomState[j]; ++rcnt; }
+        mLocalRef[0] = (rcnt > 0) ? rsum / (float)rcnt : 0.0f;
+        // Slide window across bins 1..kNyq
+        for (int k = 1; k <= kNyq; ++k) {
+          // Remove departing left edge: j = k - H - 1
+          const int jOld = k - H - 1;
+          if (jOld >= 0) { rsum -= bloomState[jOld]; --rcnt; }
+          // Add arriving right edge: j = k + H
+          const int jNew = k + H;
+          if (jNew <= kNyq) { rsum += bloomState[jNew]; ++rcnt; }
+          mLocalRef[k] = (rcnt > 0) ? rsum / (float)rcnt : 0.0f;
+        }
+      }
+
+      // -----------------------------------------------------------------------
       // PASS 3 — Synth: synthesize ifft_in from bloomState + stored phase + PRNG xi.
       //
       // DC and Nyquist: real-only, sign from phaseScratch (no PRNG).
@@ -722,14 +777,30 @@ namespace zaum
       // and R (+spaceSign=-1). Static per-bin table → same every hop (temporally
       // coherent → no line broadening); opposite sign between channels → drives
       // inter-channel correlation toward 0 → width/envelopment. Space=0 → 0.
+      //
+      // Diffuseness-by-prominence: the Space offset is further scaled by `diffuse`,
+      // derived from each bin's prominence relative to its spectral neighborhood.
+      //   ratio   = bloomState[k] / (mLocalRef[k] + eps)
+      //   promW   = clamp(1 - (ratio-1)*kPromSlope, 0, 1)  — partial→0, noise→1
+      //   diffuse = 1 + kPromBlend*(promW - 1)              — lerp(1→promW)
+      // kPromBlend=0 → diffuse=1 → uniform Space (0.2.0.14 behavior).
+      // Space=0 → mSpaceAmt=0 → offset=0 → bit-identical to 0.2.0.14.
+      const float kEps = 1e-9f;
       const float spaceAmtSigned = mSpaceAmt * spaceSign;
       for (int k = 1; k < kNyq; ++k) {
         // xorshift64 inline (Marsaglia 2003) — avoids ODR collision with APFTank.h
         prng ^= prng << 13; prng ^= prng >> 7; prng ^= prng << 17;
         // Map upper 24 bits → float [-pi, pi)
         const float xi  = ((float)(prng >> 40) * (1.0f / 8388608.0f) - 1.0f) * (float)M_PI;
+
+        // Prominence weighting: suppress Space offset for tonal (prominent) bins.
+        const float ratio  = bloomState[k] / (mLocalRef[k] + kEps);
+        const float promW_ = 1.0f - (ratio - 1.0f) * kPromSlope;
+        const float promW  = (promW_ < 0.0f) ? 0.0f : (promW_ > 1.0f) ? 1.0f : promW_;
+        const float diffuse = 1.0f + kPromBlend * (promW - 1.0f);
+
         const float phi = mPhaseScratch[k] + V * xi
-                        + spaceAmtSigned * mFreqWeight[k] * mDecorrPhase[k];
+                        + spaceAmtSigned * mFreqWeight[k] * diffuse * mDecorrPhase[k];
 
         // Spray: per-bin magnitude noise injection (synth-stage only — bloomState
         // is untouched, so no accumulator feedback). sprayEps=0 → m = bloomState[k].
@@ -811,6 +882,11 @@ namespace zaum
     // mAirAbsCurve[k] ∈ [0, kAirAbsMax]: 0 below kAirAbsHz, linear ramp to
     // kAirAbsMax at Nyquist.  Synth-stage only; bloomState/accum untouched.
     float mAirAbsCurve[kStftBins];
+
+    // Prominence localRef scratch (shared L/R, overwritten each hop after Bloom pass).
+    // mLocalRef[k] = wide boxcar moving-average of bloomState[k] (half-width kPromBoxHalf).
+    // Used in the Synth pass to weight Space decorrelation by per-bin prominence.
+    float mLocalRef[kStftBins];
 
     // Distance: wet delay line for ITDG (initial time-delay gap).
     // Filled sample-by-sample with the governor output; read back mITDGSamples later.
