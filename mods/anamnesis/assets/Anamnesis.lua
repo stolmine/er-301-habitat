@@ -62,6 +62,11 @@ function Anamnesis:onLoadGraph(channelCount)
   tie(op, "Diffusion", diffusion, "Out")
   self:addMonoBranch("diffusion", diffusion, "In", diffusion, "Out")
 
+  local density = self:addObject("density", app.ParameterAdapter())
+  density:hardSet("Bias", 0.5)
+  tie(op, "Density", density, "Out")
+  self:addMonoBranch("density", density, "In", density, "Out")
+
   local mix = self:addObject("mix", app.ParameterAdapter())
   mix:hardSet("Bias", 0.4)
   tie(op, "Mix", mix, "Out")
@@ -94,7 +99,7 @@ function Anamnesis:onLoadViews()
     },
     diffusion = GainBias {
       button = "diff",
-      description = "Diffusion -- input allpass smear (sparse->dense)",
+      description = "Diffusion -- input allpass smear",
       branch = self.branches.diffusion,
       gainbias = self.objects.diffusion,
       range = self.objects.diffusion,
@@ -102,6 +107,17 @@ function Anamnesis:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.6
+    },
+    density = GainBias {
+      button = "dens",
+      description = "Density -- plexus: sparse combs/taps <-> dense FDN wash (alpha-morph)",
+      branch = self.branches.density,
+      gainbias = self.objects.density,
+      range = self.objects.density,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.5
     },
     mix = GainBias {
       button = "mix",
@@ -115,7 +131,7 @@ function Anamnesis:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "size", "decay", "diffusion", "mix" },
+    expanded = { "size", "decay", "diffusion", "density", "mix" },
     collapsed = {}
   }
 end
