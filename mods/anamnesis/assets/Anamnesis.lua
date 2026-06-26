@@ -67,6 +67,11 @@ function Anamnesis:onLoadGraph(channelCount)
   tie(op, "Density", density, "Out")
   self:addMonoBranch("density", density, "In", density, "Out")
 
+  local mod = self:addObject("mod", app.ParameterAdapter())
+  mod:hardSet("Bias", 0.3)
+  tie(op, "Mod", mod, "Out")
+  self:addMonoBranch("mod", mod, "In", mod, "Out")
+
   local mix = self:addObject("mix", app.ParameterAdapter())
   mix:hardSet("Bias", 0.4)
   tie(op, "Mix", mix, "Out")
@@ -119,6 +124,17 @@ function Anamnesis:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.5
     },
+    mod = GainBias {
+      button = "mod",
+      description = "Mod -- FDN delay modulation (de-metallic / lush chorus)",
+      branch = self.branches.mod,
+      gainbias = self.objects.mod,
+      range = self.objects.mod,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.3
+    },
     mix = GainBias {
       button = "mix",
       description = "Mix -- dry/wet",
@@ -131,7 +147,7 @@ function Anamnesis:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "size", "decay", "diffusion", "density", "mix" },
+    expanded = { "size", "decay", "diffusion", "density", "mod", "mix" },
     collapsed = {}
   }
 end

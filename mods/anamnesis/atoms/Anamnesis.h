@@ -5,6 +5,9 @@
 // cross-fed and Spiral-governed. Internal-stereo (one object, shared
 // coherent L/R field).
 //
+// Phase 1.4 (0.1.0.5): adds per-line FDN delay modulation (Mod) -- slow
+// decorrelated sub-Hz LFOs break standing waves / metallic ringing and
+// add lush chorus, the FDN-liveliness step. Builds on:
 // Phase 1.3 (0.1.0.4): the spatial field, BOTH stages of the Moorer
 // separation that resolves the Network cascade-FDN postmortem, plus the
 // Erbe-Verb alpha-matrix morph -- the complete "plexus" axis.
@@ -72,6 +75,7 @@ namespace anamnesis
       addParameter(mDecay);
       addParameter(mDiffusion);
       addParameter(mDensity);
+      addParameter(mMod);
       addParameter(mMix);
 
       memset(mLine, 0, sizeof(mLine));
@@ -84,6 +88,7 @@ namespace anamnesis
       mT60Z = 2.0f;
       mDiffGZ = 0.4f;
       mDensityZ = 0.5f;
+      mModZ = 0.3f;
       mInit = false;
 
       // Per-tap pan (equal-power ping-pong), gain (decay with delay),
@@ -100,6 +105,13 @@ namespace anamnesis
         mTapLfoPhase[i] = (float)i * 0.37f;
         mTapLfoHz[i] = 0.30f + 0.08f * (float)i;       // ~0.3..1.2 Hz
       }
+      // Per-line FDN delay-modulation LFOs (decorrelated, sub-Hz): break
+      // standing waves / metallic ringing and add lush chorus.
+      for (int i = 0; i < kFdnN; i++)
+      {
+        mFdnLfoPhase[i] = (float)i * 0.61f;
+        mFdnLfoHz[i] = 0.50f + 0.13f * (float)i;       // ~0.5..1.4 Hz
+      }
     }
 
     virtual ~Anamnesis() {}
@@ -114,6 +126,7 @@ namespace anamnesis
     od::Parameter mDecay{"Decay", 0.5f};
     od::Parameter mDiffusion{"Diffusion", 0.6f};
     od::Parameter mDensity{"Density", 0.5f};
+    od::Parameter mMod{"Mod", 0.3f};
     od::Parameter mMix{"Mix", 0.4f};
 
     inline void ensureFlushToZero()
@@ -163,17 +176,19 @@ namespace anamnesis
       float decayN = clampf(mDecay.value(), 0.0f, 1.0f);
       float diffN = clampf(mDiffusion.value(), 0.0f, 1.0f);
       float density = clampf(mDensity.value(), 0.0f, 1.0f);
+      float modN = clampf(mMod.value(), 0.0f, 1.0f);
       float mix = clampf(mMix.value(), 0.0f, 1.0f);
 
       const float sizeScaleTgt = kSizeMin + sizeN * (kSizeMax - kSizeMin);
       const float t60Tgt = 0.2f * powf(100.0f, decayN); // 0.2..20 s
       const float diffGTgt = diffN * 0.75f;
 
-      if (!mInit) { mSizeScaleZ = sizeScaleTgt; mT60Z = t60Tgt; mDiffGZ = diffGTgt; mDensityZ = density; mInit = true; }
+      if (!mInit) { mSizeScaleZ = sizeScaleTgt; mT60Z = t60Tgt; mDiffGZ = diffGTgt; mDensityZ = density; mModZ = modN; mInit = true; }
       const float aBlk = 1.0f - expf(-(float)FRAMELENGTH / (fs * 0.030f));
       mT60Z     += aBlk * (t60Tgt - mT60Z);
       mDiffGZ   += aBlk * (diffGTgt - mDiffGZ);
       mDensityZ += aBlk * (density - mDensityZ);
+      mModZ     += aBlk * (modN - mModZ);
       const float aSize = 1.0f - expf(-1.0f / (fs * 0.040f)); // per-sample REPITCH glide
 
       // Stage 2 per-line Jot decay gain (block-rate; slow-moving).
@@ -200,6 +215,9 @@ namespace anamnesis
       float lfoInc[kTapN];
       for (int i = 0; i < kTapN; i++) lfoInc[i] = 2.0f * kPi * mTapLfoHz[i] / fs;
       const float kJitDepth = 2.5f; // samples
+      float fdnLfoInc[kFdnN];
+      for (int i = 0; i < kFdnN; i++) fdnLfoInc[i] = 2.0f * kPi * mFdnLfoHz[i] / fs;
+      const float modDepth = mModZ * 18.0f; // up to ~18 samples
 
       for (int n = 0; n < FRAMELENGTH; n++)
       {
@@ -245,7 +263,9 @@ namespace anamnesis
         float r[kFdnN], s = 0.0f;
         for (int i = 0; i < kFdnN; i++)
         {
-          float L = (float)kFdnBase[i] * mSizeScaleZ;
+          mFdnLfoPhase[i] += fdnLfoInc[i];
+          if (mFdnLfoPhase[i] > 2.0f * kPi) mFdnLfoPhase[i] -= 2.0f * kPi;
+          float L = (float)kFdnBase[i] * mSizeScaleZ + modDepth * sinf(mFdnLfoPhase[i]);
           if (L < 1.0f) L = 1.0f;
           if (L > (float)(kFdnBufLen - 2)) L = (float)(kFdnBufLen - 2);
           r[i] = readLine(i, L);
@@ -290,7 +310,8 @@ namespace anamnesis
     int   mTapWr;
     float mPanL[kTapN], mPanR[kTapN], mTapGain[kTapN];
     float mTapLfoPhase[kTapN], mTapLfoHz[kTapN];
-    float mSizeScaleZ, mT60Z, mDiffGZ, mDensityZ;
+    float mFdnLfoPhase[kFdnN], mFdnLfoHz[kFdnN];
+    float mSizeScaleZ, mT60Z, mDiffGZ, mDensityZ, mModZ;
     bool  mInit = false;
     bool  mFzSet = false;
 #endif
