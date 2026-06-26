@@ -16,7 +16,8 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
-local OptionControl = require "Unit.ViewControl.OptionControl"
+local OptionControl = require "Unit.MenuControl.OptionControl"
+local MenuHeader = require "Unit.MenuControl.Header"
 
 local floatMap = function(min, max)
   local map = app.LinearDialMap(min, max)
@@ -65,20 +66,10 @@ function Anamnesis:onLoadGraph(channelCount)
   tie(op, "Speed", speed, "Out")
   self:addMonoBranch("speed", speed, "In", speed, "Out")
 
-  local sense = self:addObject("sense", app.ParameterAdapter())
-  sense:hardSet("Bias", 0.5)
-  tie(op, "Sense", sense, "Out")
-  self:addMonoBranch("sense", sense, "In", sense, "Out")
-
   local freeze = self:addObject("freeze", app.Comparator())
   freeze:setToggleMode()
   connect(freeze, "Out", op, "Freeze")
   self:addMonoBranch("freeze", freeze, "In", freeze, "Out")
-
-  local trig = self:addObject("trig", app.Comparator())
-  trig:setTriggerMode()
-  connect(trig, "Out", op, "Trig")
-  self:addMonoBranch("trig", trig, "In", trig, "Out")
 
   local size = self:addObject("size", app.ParameterAdapter())
   size:hardSet("Bias", 0.5)
@@ -115,11 +106,6 @@ function Anamnesis:onLoadGraph(channelCount)
   tie(op, "Clock", clock, "Out")
   self:addMonoBranch("clock", clock, "In", clock, "Out")
 
-  local grit = self:addObject("grit", app.ParameterAdapter())
-  grit:hardSet("Bias", 0.5)
-  tie(op, "Grit", grit, "Out")
-  self:addMonoBranch("grit", grit, "In", grit, "Out")
-
   local mix = self:addObject("mix", app.ParameterAdapter())
   mix:hardSet("Bias", 0.4)
   tie(op, "Mix", mix, "Out")
@@ -143,12 +129,6 @@ end
 
 function Anamnesis:onLoadViews()
   return {
-    mode = OptionControl {
-      button = "mode",
-      description = "Looper mode (Tape=var-speed / Stretch=time-stretch / Env=auto-slice)",
-      option = self.objects.op:getOption("Mode"),
-      choices = { "Tape", "Stretch", "Env" }
-    },
     length = GainBias {
       button = "len",
       description = "Length -- loop length (~20 ms .. 2 s)",
@@ -176,23 +156,6 @@ function Anamnesis:onLoadViews()
       description = "Freeze -- hold the loop (toggle / gate)",
       branch = self.branches.freeze,
       comparator = self.objects.freeze
-    },
-    trig = Gate {
-      button = "trig",
-      description = "Trig -- re-trigger / capture from now (clock for rhythmic stutter)",
-      branch = self.branches.trig,
-      comparator = self.objects.trig
-    },
-    sense = GainBias {
-      button = "sens",
-      description = "Sense -- Env-mode transient sensitivity (auto-slice threshold)",
-      branch = self.branches.sense,
-      gainbias = self.objects.sense,
-      range = self.objects.sense,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.5
     },
     size = GainBias {
       button = "size",
@@ -271,23 +234,6 @@ function Anamnesis:onLoadViews()
       biasPrecision = 2,
       initialBias = 1.0
     },
-    clockmode = OptionControl {
-      button = "clkm",
-      description = "Clock mode (Steps = harmonized detents / Smooth = continuous glide)",
-      option = self.objects.op:getOption("ClockMode"),
-      choices = { "Steps", "Smooth" }
-    },
-    grit = GainBias {
-      button = "grit",
-      description = "Grit -- clean interp (0) .. ZOH (0.5) .. broken bitcrush (1)",
-      branch = self.branches.grit,
-      gainbias = self.objects.grit,
-      range = self.objects.grit,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.5
-    },
     mix = GainBias {
       button = "mix",
       description = "Mix -- dry/wet",
@@ -333,9 +279,36 @@ function Anamnesis:onLoadViews()
       initialBias = 0.5
     }
   }, {
-    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "regen", "clock", "clockmode", "grit", "mix", "source", "directloop", "spread" },
+    expanded = { "length", "speed", "freeze", "size", "decay", "diffusion", "density", "mod", "regen", "clock", "mix", "source", "directloop", "spread" },
     collapsed = {}
   }
+end
+
+function Anamnesis:onShowMenu(objects, branches)
+  return {
+    looperHeader = MenuHeader { description = "Looper" },
+    mode = OptionControl {
+      description = "Mode",
+      option = objects.op:getOption("Mode"),
+      choices = { "Tape", "Stretch", "Env" }
+    },
+    sense = OptionControl {
+      description = "Env sensitivity",
+      option = objects.op:getOption("Sense"),
+      choices = { "Low", "Med", "High" }
+    },
+    clockHeader = MenuHeader { description = "Clock" },
+    clockmode = OptionControl {
+      description = "Clock mode",
+      option = objects.op:getOption("ClockMode"),
+      choices = { "Steps", "Smooth" }
+    },
+    grit = OptionControl {
+      description = "Grit",
+      option = objects.op:getOption("Grit"),
+      choices = { "Clean", "Normal", "Broken" }
+    }
+  }, { "looperHeader", "mode", "sense", "clockHeader", "clockmode", "grit" }
 end
 
 return Anamnesis

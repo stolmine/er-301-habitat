@@ -4,6 +4,10 @@
 // with a continuously-morphing spatial field, cross-fed and Spiral-governed.
 // Internal-stereo (one object, shared coherent L/R field).
 //
+// Phase 5.1 (0.2.0.21): UI consolidation step 1 -- config MENU. Mode, ClockMode,
+//   Sense (3-level Low/Med/High), Grit (3-choice Clean/Normal/Broken) become unit-
+//   menu Options (Sense+Grit discretized from knobs). Trig removed -- re-trigger
+//   is now Env-implicit only. Surface drops from 19 to 14 flat plies.
 // Phase 4.2 (0.2.0.20): the ROUTER. Source (field reverberates input 0 .. loop
 //   1), DirectLoop (clean ZOH-held glitched loop blended to output), Spread
 //   (mid/side stereo width). Defaults (1 / 0 / 0.5) keep the prior sound.
@@ -128,12 +132,10 @@ namespace anamnesis
       addInput(mInL);
       addInput(mInR);
       addInput(mFreeze);
-      addInput(mTrig);
       addOutput(mOutL);
       addOutput(mOutR);
       addParameter(mLength);
       addParameter(mSpeed);
-      addParameter(mSense);
       addParameter(mSize);
       addParameter(mDecay);
       addParameter(mDiffusion);
@@ -141,7 +143,6 @@ namespace anamnesis
       addParameter(mMod);
       addParameter(mRegen);
       addParameter(mClock);
-      addParameter(mGrit);
       addParameter(mMix);
       addParameter(mSource);
       addParameter(mDirectLoop);
@@ -152,6 +153,12 @@ namespace anamnesis
       addOption(mClockMode);
       mClockMode.set(1);            // 1 = Steps (harmonized), 2 = Smooth (glide)
       mClockMode.enableSerialization();
+      addOption(mSense);
+      mSense.set(2);                // 1=Low 2=Med 3=High (Env sensitivity)
+      mSense.enableSerialization();
+      addOption(mGrit);
+      mGrit.set(2);                 // 1=Clean(0) 2=Normal(0.5) 3=Broken(1)
+      mGrit.enableSerialization();
 
       memset(mLoopBuf, 0, sizeof(mLoopBuf));
       memset(mLine, 0, sizeof(mLine));
@@ -199,13 +206,11 @@ namespace anamnesis
     od::Inlet     mInL{"In L"};
     od::Inlet     mInR{"In R"};
     od::Inlet     mFreeze{"Freeze"};        // gate/toggle: hold the loop
-    od::Inlet     mTrig{"Trig"};            // trigger: re-anchor playback to "now"
     od::Outlet    mOutL{"Out L"};
     od::Outlet    mOutR{"Out R"};
 
     od::Parameter mLength{"Length", 0.4f};
     od::Parameter mSpeed{"Speed", 1.0f};    // bipolar -2..2x rate; 1.0 = +1x
-    od::Parameter mSense{"Sense", 0.5f};    // Env-mode transient sensitivity
     od::Parameter mSize{"Size", 0.5f};
     od::Parameter mDecay{"Decay", 0.5f};
     od::Parameter mDiffusion{"Diffusion", 0.6f};
@@ -213,14 +218,15 @@ namespace anamnesis
     od::Parameter mMod{"Mod", 0.3f};
     od::Parameter mRegen{"Regen", 0.0f};    // cross-feedback: field wet -> looper input
     od::Parameter mClock{"Clock", 1.0f};    // 1 = full rate; down = slower/lower/grittier
-    od::Parameter mGrit{"Grit", 0.5f};      // clean(0) <- interp | ZOH -> broken(1) bitcrush
     od::Parameter mMix{"Mix", 0.4f};
     // Router
     od::Parameter mSource{"Source", 1.0f};      // field source: 0 input .. 1 loop
     od::Parameter mDirectLoop{"DirectLoop", 0.0f}; // clean loop blended to output
     od::Parameter mSpread{"Spread", 0.5f};      // width: 0 mono .. 0.5 normal .. 1 wide
-    od::Option    mMode{"Mode"};            // 1=Tape (var-speed), 2=Stretch (granular)
-    od::Option    mClockMode{"ClockMode"};  // 1=Steps (harmonized), 2=Smooth (glide)
+    od::Option    mMode{"Mode"};            // 1=Tape, 2=Stretch, 3=Env
+    od::Option    mClockMode{"ClockMode"};  // 1=Steps, 2=Smooth
+    od::Option    mSense{"Sense"};          // 1=Low, 2=Med, 3=High (Env sensitivity)
+    od::Option    mGrit{"Grit"};            // 1=Clean(0), 2=Normal(0.5), 3=Broken(1)
 
     inline void ensureFlushToZero()
     {
@@ -284,13 +290,11 @@ namespace anamnesis
 
       // ---- controls ----
       const float *fzBuf = mFreeze.buffer();
-      const float *trigBuf = mTrig.buffer();
       const int    mode = mMode.value();
       const bool   stretchMode = (mode == 2);
       const bool   envMode = (mode == 3);
       float lengthN = clampf(mLength.value(), 0.0f, 1.0f);
       float speedN  = clampf(mSpeed.value(), -kSpeedMax, kSpeedMax);  // bipolar rate
-      float senseN  = clampf(mSense.value(), 0.0f, 1.0f);
       float sizeN   = clampf(mSize.value(), 0.0f, 1.0f);
       float decayN  = clampf(mDecay.value(), 0.0f, 1.0f);
       float diffN   = clampf(mDiffusion.value(), 0.0f, 1.0f);
@@ -320,7 +324,8 @@ namespace anamnesis
       // fast exceeds slow * threshMult. Sense raises sensitivity (lowers it).
       const float envFastDecay = expf(-1.0f / (fs * 0.015f));        // 15 ms
       const float envSlowA     = 1.0f - expf(-1.0f / (fs * 0.150f)); // 150 ms
-      const float threshMult   = 4.0f - senseN * 2.8f;               // sens 0->4x, 1->1.2x
+      int senseV = mSense.value();
+      const float threshMult   = (senseV <= 1) ? 4.0f : (senseV == 2 ? 2.5f : 1.5f); // Low/Med/High
       const int   envRefr      = (int)(0.05f * fs);                  // 50 ms refractory
       // dynamic anti-alias LP from the (steady-state) target speed
       float aspd = targetSpeed < 0.0f ? -targetSpeed : targetSpeed;
@@ -383,7 +388,8 @@ namespace anamnesis
       const float Rcur = mRcurZ;
       // Grit: 0..0.5 crossfades clean linear-interp -> broken ZOH reconstruction;
       // 0.5..1 adds bit-crush. 0.5 = ZOH only (matches pre-Grit behavior).
-      const float gritN = clampf(mGrit.value(), 0.0f, 1.0f);
+      int gritV = mGrit.value();
+      const float gritN = (gritV <= 1) ? 0.0f : (gritV == 2 ? 0.5f : 1.0f); // Clean/Normal/Broken
       float reconBroken = gritN * 2.0f;        if (reconBroken > 1.0f) reconBroken = 1.0f;
       float crushAmt    = gritN * 2.0f - 1.0f; if (crushAmt < 0.0f)    crushAmt = 0.0f;
       const float crushLevels = powf(2.0f, 16.0f - crushAmt * 10.0f); // 16-bit .. 6-bit
@@ -453,12 +459,11 @@ namespace anamnesis
         // Capture/re-trigger: a rising edge restarts playback from "now"
         // (read = the live write head -> plays the last Length window from
         // its start). Clock it for rhythmic stutter.
-        bool trigHigh = trigBuf[n] >= 0.5f;
-        bool fire = (trigHigh && !mTrigPrev);
+        bool fire = false;
         if (envMode && mEnvRefractory <= 0 && mEnvFast > mEnvSlow * threshMult && ax > kEnvFloor)
         {
           fire = true;
-          mEnvRefractory = envRefr;             // auto-trigger from input transient
+          mEnvRefractory = envRefr;             // Env auto-trigger from input transient
         }
         if (mEnvRefractory > 0) mEnvRefractory--;
         if (fire)
@@ -472,7 +477,6 @@ namespace anamnesis
           mCaptureHold = true;                   // hold the snapshot (momentary capture)
           mCaptureTimer = Lint > captureMin ? Lint : captureMin;
         }
-        mTrigPrev = trigHigh;
 
         float looperOut;
         if (stretchMode)
@@ -662,7 +666,6 @@ namespace anamnesis
     float mRetrigPhase, mOldReadPos;
     float mEnvFast, mEnvSlow;
     int   mEnvRefractory;
-    bool  mTrigPrev = false;
     bool  mCaptureHold;
     float mCaptureHoldZ;
     int   mCaptureTimer;
