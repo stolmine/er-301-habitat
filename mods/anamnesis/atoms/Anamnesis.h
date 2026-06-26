@@ -138,19 +138,28 @@ namespace anamnesis
       const float diffGTgt = diffN * 0.75f;             // allpass coef
 
       if (!mInit) { mSizeScaleZ = sizeScaleTgt; mT60Z = t60Tgt; mDiffGZ = diffGTgt; mInit = true; }
-      const float a = 1.0f - expf(-(float)FRAMELENGTH / (fs * 0.030f)); // ~30 ms
-      mSizeScaleZ += a * (sizeScaleTgt - mSizeScaleZ);
-      mT60Z       += a * (t60Tgt - mT60Z);
-      mDiffGZ     += a * (diffGTgt - mDiffGZ);
+      // T60 and Diffusion smooth per block (they do not zipper). SIZE is
+      // smoothed PER SAMPLE inside the loop instead: a per-block step in
+      // delay length is the zipper source. Gliding the read pointer per
+      // sample is the Pecto-style REPITCH fix -- the tail Doppler-glides
+      // during a Size sweep (tape / Erbe-Verb character), on-brand with
+      // the Mood "sample-rate = pitch+length" identity. (Network's FADE
+      // crossfade avoids repitch but is awkward in a recirculating FDN;
+      // we want the glide here.)
+      const float aBlk = 1.0f - expf(-(float)FRAMELENGTH / (fs * 0.030f)); // ~30 ms
+      mT60Z   += aBlk * (t60Tgt - mT60Z);
+      mDiffGZ += aBlk * (diffGTgt - mDiffGZ);
+      const float aSize = 1.0f - expf(-1.0f / (fs * 0.040f)); // per-sample, ~40 ms
 
-      // per-line current delay length + Jot decay gain
-      float len[kFdnN], g[kFdnN];
+      // Per-line Jot decay gain from the current (block-start) size. The
+      // gain moves slowly, so a per-block recompute is fine even though
+      // the read length glides per sample below.
+      float g[kFdnN];
       for (int i = 0; i < kFdnN; i++)
       {
         float L = (float)kFdnBase[i] * mSizeScaleZ;
         if (L < 1.0f) L = 1.0f;
         if (L > (float)(kFdnBufLen - 2)) L = (float)(kFdnBufLen - 2);
-        len[i] = L;
         float gi = powf(10.0f, -3.0f * L / (fs * mT60Z));
         if (gi > 0.9999f) gi = 0.9999f;   // never reach/exceed lossless
         g[i] = gi;
@@ -161,6 +170,9 @@ namespace anamnesis
 
       for (int n = 0; n < FRAMELENGTH; n++)
       {
+        // per-sample Size glide (REPITCH; removes the per-block zipper)
+        mSizeScaleZ += aSize * (sizeScaleTgt - mSizeScaleZ);
+
         const float dryL = inL[n];
         const float dryR = inR[n];
 
@@ -180,9 +192,16 @@ namespace anamnesis
           x = y;
         }
 
-        // ---- read 8 lines, Householder mix, inject, write ----
+        // ---- read 8 lines (per-sample glided delay), Householder, inject ----
         float r[kFdnN], s = 0.0f;
-        for (int i = 0; i < kFdnN; i++) { r[i] = readLine(i, len[i]); s += r[i]; }
+        for (int i = 0; i < kFdnN; i++)
+        {
+          float L = (float)kFdnBase[i] * mSizeScaleZ;
+          if (L < 1.0f) L = 1.0f;
+          if (L > (float)(kFdnBufLen - 2)) L = (float)(kFdnBufLen - 2);
+          r[i] = readLine(i, L);
+          s += r[i];
+        }
 
         for (int i = 0; i < kFdnN; i++)
         {
