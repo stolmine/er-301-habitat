@@ -16,6 +16,7 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
+local OptionControl = require "Unit.ViewControl.OptionControl"
 
 local floatMap = function(min, max)
   local map = app.LinearDialMap(min, max)
@@ -101,6 +102,12 @@ end
 
 function Anamnesis:onLoadViews()
   return {
+    mode = OptionControl {
+      button = "mode",
+      description = "Looper mode (Tape = var-speed / Stretch = time-stretch)",
+      option = self.objects.op:getOption("Mode"),
+      choices = { "Tape", "Stretch" }
+    },
     length = GainBias {
       button = "len",
       description = "Length -- loop length (~20 ms .. 2 s)",
@@ -196,7 +203,7 @@ function Anamnesis:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "length", "speed", "freeze", "size", "decay", "diffusion", "density", "mod", "mix" },
+    expanded = { "mode", "length", "speed", "freeze", "size", "decay", "diffusion", "density", "mod", "mix" },
     collapsed = {}
   }
 end

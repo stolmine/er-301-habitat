@@ -4,6 +4,11 @@
 // with a continuously-morphing spatial field, cross-fed and Spiral-governed.
 // Internal-stereo (one object, shared coherent L/R field).
 //
+// Phase 2.3 (0.2.0.6): adds STRETCH mode (granular time-stretch) + a Mode
+//   selector (Tape / Stretch). In Stretch the source playhead moves at the
+//   TIME rate (Speed) while grains replay at UNITY pitch -> time and pitch
+//   decouple (slow / reverse a held fragment without repitching it). 4-grain
+//   Hann overlap-add (LUT). Builds on:
 // Phase 2.2 (0.2.0.3): FREEZE as a toggle gate + smooth Speed/Length.
 //   Freeze is a 0/1 gate inlet (Comparator toggle / CV) with a fast
 //   declick ramp: fz=0 live replace (Tape), fz=1 frozen hold. Speed and
@@ -31,6 +36,7 @@
 
 #include <od/config.h>
 #include <od/objects/Object.h>
+#include <od/objects/Option.h>
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
@@ -45,6 +51,12 @@ namespace anamnesis
   static const float kLoopMinSec = 0.02f;
   static const float kLoopMaxSec = 2.0f;
   static const float kSeamXf = 64.0f;       // loop-seam declick window (samples)
+
+  // ---- Stretch (granular time-stretch: time and pitch decoupled) ----
+  static const int   kStretchGrains = 4;
+  static const float kGrainDur = 3000.0f;   // grain length ~62.5 ms @48k
+  static const float kGrainHop = 1500.0f;   // spawn interval = 50% overlap
+  static const int   kHannLutN = 1024;
   // discrete musical Speed steps (Mood-style), stalled at center
   static const int   kSpeedSteps = 9;
   static const float kSpeedLut[kSpeedSteps] =
@@ -85,6 +97,9 @@ namespace anamnesis
       addParameter(mDensity);
       addParameter(mMod);
       addParameter(mMix);
+      addOption(mMode);
+      mMode.set(1);                 // default Tape (1=Tape, 2=Stretch)
+      mMode.enableSerialization();
 
       memset(mLoopBuf, 0, sizeof(mLoopBuf));
       memset(mLine, 0, sizeof(mLine));
@@ -93,6 +108,10 @@ namespace anamnesis
       memset(mTapBuf, 0, sizeof(mTapBuf));
       mLoopWr = 0; mLoopReadPos = 0.0f; mLoopLpZ = 0.0f;
       mSpeedZ = 1.0f; mLoopLenZ = 24000.0f; mFreezeZ = 0.0f;
+      mStretchHead = 0.0f; mGrainSpawnCtr = 0;
+      for (int i = 0; i < kStretchGrains; i++) { mGrainActive[i] = false; mGrainPos[i] = 0.0f; mGrainEnvPh[i] = 0.0f; }
+      for (int i = 0; i < kHannLutN; i++)
+        mHannLut[i] = 0.5f - 0.5f * cosf(2.0f * kPi * (float)i / (float)(kHannLutN - 1));
       mWr = 0; mTapWr = 0;
       mSizeScaleZ = 1.0f; mT60Z = 2.0f; mDiffGZ = 0.4f; mDensityZ = 0.5f; mModZ = 0.3f;
       mInit = false;
@@ -133,6 +152,7 @@ namespace anamnesis
     od::Parameter mDensity{"Density", 0.5f};
     od::Parameter mMod{"Mod", 0.3f};
     od::Parameter mMix{"Mix", 0.4f};
+    od::Option    mMode{"Mode"};            // 1=Tape (var-speed), 2=Stretch (granular)
 
     inline void ensureFlushToZero()
     {
@@ -196,6 +216,7 @@ namespace anamnesis
 
       // ---- controls ----
       const float *fzBuf = mFreeze.buffer();
+      const bool stretchMode = (mMode.value() == 2);
       float lengthN = clampf(mLength.value(), 0.0f, 1.0f);
       float speedN  = clampf(mSpeed.value(), -1.0f, 1.0f);  // bipolar
       float sizeN   = clampf(mSize.value(), 0.0f, 1.0f);
@@ -272,32 +293,66 @@ namespace anamnesis
         int Lint = (int)Lf;
         if (Lint < 64) Lint = 64; else if (Lint > kLoopBufLen) Lint = kLoopBufLen;
 
-        // Keep the read pointer in [0, Lf) ROBUSTLY: bounded (no while-loop
-        // that could spin forever on an Inf) and NaN/Inf-proof (a (int)NaN
-        // index would read out of bounds). The guard against a Speed/Length
-        // change ever wedging or silencing the DSP.
-        if (!(mLoopReadPos >= 0.0f && mLoopReadPos < Lf))
-        {
-          if (!isfinitef(mLoopReadPos)) mLoopReadPos = 0.0f;
-          else { mLoopReadPos = fmodf(mLoopReadPos, Lf); if (mLoopReadPos < 0.0f) mLoopReadPos += Lf; }
-        }
-        if (mLoopWr >= Lint) mLoopWr %= Lint;
-
-        // Freeze TOGGLE gate (0/1) with a fast declick ramp
+        // Freeze TOGGLE gate (0/1) + sound-on-sound capture (both modes).
         float fzTarget = (fzBuf[n] >= 0.5f) ? 1.0f : 0.0f;
         mFreezeZ += aFreeze * (fzTarget - mFreezeZ);
-
-        // sound-on-sound write: fz=0 live replace, fz=1 frozen hold
+        if (mLoopWr >= Lint) mLoopWr %= Lint;
         mLoopBuf[mLoopWr] = mFreezeZ * mLoopBuf[mLoopWr] + (1.0f - mFreezeZ) * xIn;
         mLoopWr++; if (mLoopWr >= Lint) mLoopWr = 0;
-        float lp = readLoopHermite(mLoopReadPos, Lint);
-        // loop-seam declick: raised-cosine duck within kSeamXf of the wrap
-        float dseam = mLoopReadPos < (Lf - mLoopReadPos) ? mLoopReadPos : (Lf - mLoopReadPos);
-        if (dseam < kSeamXf) lp *= 0.5f - 0.5f * cosf(kPi * dseam / kSeamXf);
-        mLoopReadPos += mSpeedZ;                 // wrapped at the top of next iteration
-        mLoopLpZ += aLoopLp * (lp - mLoopLpZ);   // dynamic AA LP
-        if (!isfinitef(mLoopLpZ)) mLoopLpZ = 0.0f;
-        float looperOut = mLoopLpZ;              // <- field input (finite firewall)
+
+        float looperOut;
+        if (stretchMode)
+        {
+          // ---- STRETCH: granular time-stretch. The source playhead moves
+          // at the TIME rate (mSpeedZ); each grain replays at UNITY pitch,
+          // so time and pitch decouple (slow without dropping pitch). ----
+          mStretchHead += mSpeedZ;
+          if (!(mStretchHead >= 0.0f && mStretchHead < Lf))
+          {
+            if (!isfinitef(mStretchHead)) mStretchHead = 0.0f;
+            else { mStretchHead = fmodf(mStretchHead, Lf); if (mStretchHead < 0.0f) mStretchHead += Lf; }
+          }
+          if (--mGrainSpawnCtr <= 0)
+          {
+            int g = 0; bool found = false;
+            for (int i = 0; i < kStretchGrains; i++) if (!mGrainActive[i]) { g = i; found = true; break; }
+            if (!found) { float mx = -1.0f; for (int i = 0; i < kStretchGrains; i++) if (mGrainEnvPh[i] > mx) { mx = mGrainEnvPh[i]; g = i; } }
+            mGrainPos[g] = mStretchHead;
+            mGrainEnvPh[g] = 0.0f;
+            mGrainActive[g] = true;
+            mGrainSpawnCtr = (int)kGrainHop;
+          }
+          float out = 0.0f;
+          const float envInc = 1.0f / kGrainDur;
+          for (int g = 0; g < kStretchGrains; g++)
+          {
+            if (!mGrainActive[g]) continue;
+            int hi = (int)(mGrainEnvPh[g] * (float)(kHannLutN - 1));
+            if (hi < 0) hi = 0; else if (hi >= kHannLutN) hi = kHannLutN - 1;
+            out += readLoopHermite(mGrainPos[g], Lint) * mHannLut[hi];
+            mGrainPos[g] += 1.0f;                 // unity pitch
+            if (mGrainPos[g] >= Lf) mGrainPos[g] -= Lf;
+            mGrainEnvPh[g] += envInc;
+            if (mGrainEnvPh[g] >= 1.0f) mGrainActive[g] = false;
+          }
+          looperOut = out;
+        }
+        else
+        {
+          // ---- TAPE: single-head variable-speed (pitch+time coupled). ----
+          if (!(mLoopReadPos >= 0.0f && mLoopReadPos < Lf))
+          {
+            if (!isfinitef(mLoopReadPos)) mLoopReadPos = 0.0f;
+            else { mLoopReadPos = fmodf(mLoopReadPos, Lf); if (mLoopReadPos < 0.0f) mLoopReadPos += Lf; }
+          }
+          float lp = readLoopHermite(mLoopReadPos, Lint);
+          float dseam = mLoopReadPos < (Lf - mLoopReadPos) ? mLoopReadPos : (Lf - mLoopReadPos);
+          if (dseam < kSeamXf) lp *= 0.5f - 0.5f * cosf(kPi * dseam / kSeamXf);
+          mLoopReadPos += mSpeedZ;
+          mLoopLpZ += aLoopLp * (lp - mLoopLpZ); // dynamic AA LP
+          looperOut = mLoopLpZ;
+        }
+        if (!isfinitef(looperOut)) looperOut = 0.0f;   // finite firewall to field
 
         // ================= STAGE 1: sparse feedforward taps =================
         mTapBuf[mTapWr] = looperOut;
@@ -376,6 +431,11 @@ namespace anamnesis
     float mLoopBuf[kLoopBufLen];
     int   mLoopWr;
     float mLoopReadPos, mLoopLpZ, mFreezeZ, mSpeedZ, mLoopLenZ;
+    float mStretchHead;
+    float mGrainPos[kStretchGrains], mGrainEnvPh[kStretchGrains];
+    bool  mGrainActive[kStretchGrains];
+    int   mGrainSpawnCtr;
+    float mHannLut[kHannLutN];
     float mLine[kFdnN][kFdnBufLen];
     float mAp[kApN][kApMax];
     int   mApWr[kApN];
