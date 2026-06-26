@@ -18,6 +18,7 @@ local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
 local OptionControl = require "Unit.MenuControl.OptionControl"
 local MenuHeader = require "Unit.MenuControl.Header"
+local AnamSubControl = require "anamnesis.AnamSubControl"
 
 local floatMap = function(min, max)
   local map = app.LinearDialMap(min, max)
@@ -131,7 +132,7 @@ function Anamnesis:onLoadViews()
   return {
     length = GainBias {
       button = "len",
-      description = "Length -- loop length (~20 ms .. 2 s)",
+      description = "Length",
       branch = self.branches.length,
       gainbias = self.objects.length,
       range = self.objects.length,
@@ -142,7 +143,7 @@ function Anamnesis:onLoadViews()
     },
     speed = GainBias {
       button = "spd",
-      description = "Speed -- bipolar rate -2..2x (Tape:pitch / Stretch:time); 0=stall",
+      description = "Speed",
       branch = self.branches.speed,
       gainbias = self.objects.speed,
       range = self.objects.speed,
@@ -153,90 +154,59 @@ function Anamnesis:onLoadViews()
     },
     freeze = Gate {
       button = "frz",
-      description = "Freeze -- hold the loop (toggle / gate)",
+      description = "Freeze",
       branch = self.branches.freeze,
       comparator = self.objects.freeze
     },
-    size = GainBias {
+    field = AnamSubControl {
       button = "size",
-      description = "Size -- field extent / delay-line lengths (room->hall)",
+      description = "Size",
       branch = self.branches.size,
       gainbias = self.objects.size,
       range = self.objects.size,
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.5
+      initialBias = 0.5,
+      subs = {
+        { param = self.objects.decay:getParameter("Bias"), button = "dcy", map = zeroOneMap, precision = 2 },
+        { param = self.objects.mod:getParameter("Bias"),   button = "mod", map = zeroOneMap, precision = 2 },
+        { param = self.objects.regen:getParameter("Bias"), button = "rgn", map = zeroOneMap, precision = 2 }
+      }
     },
-    decay = GainBias {
-      button = "dcy",
-      description = "Decay -- RT60 (size-independent, ~0.2..20 s)",
-      branch = self.branches.decay,
-      gainbias = self.objects.decay,
-      range = self.objects.decay,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.5
-    },
-    diffusion = GainBias {
-      button = "diff",
-      description = "Diffusion -- input allpass smear",
-      branch = self.branches.diffusion,
-      gainbias = self.objects.diffusion,
-      range = self.objects.diffusion,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.6
-    },
-    density = GainBias {
+    density = AnamSubControl {
       button = "dens",
-      description = "Density -- plexus: sparse combs/taps <-> dense FDN wash (alpha-morph)",
+      description = "Density",
       branch = self.branches.density,
       gainbias = self.objects.density,
       range = self.objects.density,
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.5
+      initialBias = 0.5,
+      subs = {
+        { param = self.objects.diffusion:getParameter("Bias"), button = "diff", map = zeroOneMap, precision = 2 }
+      }
     },
-    mod = GainBias {
-      button = "mod",
-      description = "Mod -- FDN delay modulation (de-metallic / lush chorus)",
-      branch = self.branches.mod,
-      gainbias = self.objects.mod,
-      range = self.objects.mod,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.3
-    },
-    regen = GainBias {
-      button = "rgn",
-      description = "Regen -- cross-feedback: field tail re-loops into the looper (Spiral-governed)",
-      branch = self.branches.regen,
-      gainbias = self.objects.regen,
-      range = self.objects.regen,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.0
-    },
-    clock = GainBias {
+    overview = AnamSubControl {
       button = "clk",
-      description = "Clock -- internal rate; down = slower+lower+grittier wet (1=full)",
+      description = "Clock",
       branch = self.branches.clock,
       gainbias = self.objects.clock,
       range = self.objects.clock,
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 1.0
+      initialBias = 1.0,
+      subs = {
+        { param = self.objects.source:getParameter("Bias"),     button = "src",  map = zeroOneMap, precision = 2 },
+        { param = self.objects.directloop:getParameter("Bias"), button = "dir",  map = zeroOneMap, precision = 2 },
+        { param = self.objects.spread:getParameter("Bias"),     button = "sprd", map = zeroOneMap, precision = 2 }
+      }
     },
     mix = GainBias {
       button = "mix",
-      description = "Mix -- dry/wet",
+      description = "Mix",
       branch = self.branches.mix,
       gainbias = self.objects.mix,
       range = self.objects.mix,
@@ -245,41 +215,8 @@ function Anamnesis:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.4
     },
-    source = GainBias {
-      button = "src",
-      description = "Source -- field reverberates input (0) .. loop (1)",
-      branch = self.branches.source,
-      gainbias = self.objects.source,
-      range = self.objects.source,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 1.0
-    },
-    directloop = GainBias {
-      button = "dir",
-      description = "DirectLoop -- clean glitched loop blended to the output",
-      branch = self.branches.directloop,
-      gainbias = self.objects.directloop,
-      range = self.objects.directloop,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.0
-    },
-    spread = GainBias {
-      button = "sprd",
-      description = "Spread -- stereo width (0 mono / 0.5 normal / 1 wide)",
-      branch = self.branches.spread,
-      gainbias = self.objects.spread,
-      range = self.objects.spread,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.5
-    }
   }, {
-    expanded = { "length", "speed", "freeze", "size", "decay", "diffusion", "density", "mod", "regen", "clock", "mix", "source", "directloop", "spread" },
+    expanded = { "length", "speed", "freeze", "field", "density", "overview", "mix" },
     collapsed = {}
   }
 end

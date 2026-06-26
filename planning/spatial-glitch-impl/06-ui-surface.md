@@ -1,8 +1,34 @@
 # 06 — UI surface (Phase 5): LOCKED layout
 
-Status: **LOCKED 2026-06-26.** Folds the flat dev controls (dev 0.2.0.20) into a
-6-ply surface + a config menu. Build order: **organization first (plies + subs +
-menu), animated visualization after.**
+Status: **LOCKED 2026-06-26; UI build IN PROGRESS (dev 0.2.0.24).** Folds the flat
+dev controls into a 6-ply surface + a config menu. Build order: **organization first
+(plies + subs + menu), animated visualization after.**
+
+## BUILD PROGRESS / RESUME HERE (Phase 5)
+- **Step 1 DONE (0.2.0.21):** config MENU via `onShowMenu` -- Mode, Sense (3-level
+  Low/Med/High), ClockMode, Grit (3-choice Clean/Normal/Broken) are unit-menu
+  Options (Sense+Grit discretized from knobs in the atom). **Trig removed** (atom
+  inlet + manual fire gone; re-trigger is Env-implicit only).
+- **Step 2 DONE (0.2.0.22-24):** the shift-row SUB-CONTROL. Built reusable
+  **`mods/anamnesis/assets/AnamSubControl.lua`** (canonical Pattern A per
+  `planning/shift-handling.md`, modeled on spreadsheet `DriveControl`; tap-shift
+  toggles main<->param sub-display, sub-buttons focus readouts, shift+sub = keyboard)
+  + self-contained **`mods/anamnesis/assets/ShiftHelpers.lua`** (no cross-pkg require).
+  Applied to: **Size** (main) + Decay/Mod/Regen subs; **Density** (main) + Diffuse sub;
+  **Clock/overview** (main) + Source/DirLoop/Spread subs. Titles trimmed to 1-2 words.
+- **Current surface = 7 plies:** Length, Speed, Freeze, Size, Density, Clock, Mix.
+- **NEXT / PENDING:**
+  1. **Looper ply** (Speed/Length) -- the locked spec wants NO main (viz-as-main +
+     Speed/Length subs), which needs an EncoderControl-with-graphic base, not the
+     GainBias-based AnamSubControl. Left Speed+Length FLAT for now. OPEN DECISION:
+     (a) keep flat until the viz, or (b) stopgap Speed-main + Length-sub now (-> 6 plies).
+  2. **Animated VIZ phase** (all-viz/animated): overview/plexus visualizer (Clock ply),
+     looper playhead (Looper ply), animated mains. project_bias_indication: dotted
+     bias-line overlay on viz plies. feedback_clock_control (LaretClockControl) if a
+     clock viz is wanted.
+- **Subs lose dedicated CV** (buried params via readout); the mains keep their CV
+  branch. Acceptable per the design (subs = less-performed). Atom unchanged since
+  0.2.0.21 -- this phase is Lua/UI only.
 
 ## Final 6-ply live surface
 
