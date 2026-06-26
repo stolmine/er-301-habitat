@@ -105,6 +105,11 @@ function Anamnesis:onLoadGraph(channelCount)
   tie(op, "Mod", mod, "Out")
   self:addMonoBranch("mod", mod, "In", mod, "Out")
 
+  local regen = self:addObject("regen", app.ParameterAdapter())
+  regen:hardSet("Bias", 0.0)
+  tie(op, "Regen", regen, "Out")
+  self:addMonoBranch("regen", regen, "In", regen, "Out")
+
   local clock = self:addObject("clock", app.ParameterAdapter())
   clock:hardSet("Bias", 1.0)
   tie(op, "Clock", clock, "Out")
@@ -229,6 +234,17 @@ function Anamnesis:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.3
     },
+    regen = GainBias {
+      button = "rgn",
+      description = "Regen -- cross-feedback: field tail re-loops into the looper (Spiral-governed)",
+      branch = self.branches.regen,
+      gainbias = self.objects.regen,
+      range = self.objects.regen,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
+    },
     clock = GainBias {
       button = "clk",
       description = "Clock -- internal rate; down = slower+lower+grittier wet (1=full)",
@@ -269,7 +285,7 @@ function Anamnesis:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "clock", "clockmode", "grit", "mix" },
+    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "regen", "clock", "clockmode", "grit", "mix" },
     collapsed = {}
   }
 end

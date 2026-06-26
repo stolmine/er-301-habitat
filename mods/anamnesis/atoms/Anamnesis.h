@@ -4,6 +4,13 @@
 // with a continuously-morphing spatial field, cross-fed and Spiral-governed.
 // Internal-stereo (one object, shared coherent L/R field).
 //
+// Phase 4.1 (0.2.0.19): looper<->field CROSS-FEEDBACK (Regen). The governed
+//   field wet re-enters the looper input, so the reverb tail is re-looped /
+//   re-glitched / re-reverbed -- the controllable-runaway fusion. DC-blocked +
+//   Spiral governor. Petrichor-informed depth: drive past unity (kRegenMax) and
+//   a low-density Spiral (kFbGovD) that stays LINEAR until hot then soft-bounds,
+//   so the loop can build toward self-oscillation without blowing up. (Pauses
+//   while frozen: a held loop takes no new feedback.) Builds on:
 // Phase 3.3 (0.2.0.17): smooth-glide CLOCK. A ClockMode option (Steps / Smooth):
 //   Steps snaps R to the harmonized LUT (crisp detents); Smooth uses a continuous
 //   R = 16^(1-Clock), glided per block, so sweeping Clock glides reverb / grit /
@@ -84,6 +91,12 @@ namespace anamnesis
   // steps. R=1 = full rate (no effect). Lower = longer + lower + grittier. ----
   static const int kClockSteps = 8;
   static const int kClockR[kClockSteps] = {1, 2, 3, 4, 6, 8, 12, 16};
+
+  // Cross-feedback: drive headroom past unity + a low-density Spiral so the
+  // loop stays LINEAR until genuinely hot, then soft-bounds (Petrichor-style:
+  // build freely, clip only when hot). Bound = +/-1/kFbGovD.
+  static const float kRegenMax = 1.8f;
+  static const float kFbGovD   = 0.4f;
   static const float kRetrigFadeMs = 4.0f;   // re-trigger crossfade length (ms)
   static const float kEnvFloor = 0.003f;     // Env-mode auto-trigger floor (~-50 dB)
 
@@ -123,6 +136,7 @@ namespace anamnesis
       addParameter(mDiffusion);
       addParameter(mDensity);
       addParameter(mMod);
+      addParameter(mRegen);
       addParameter(mClock);
       addParameter(mGrit);
       addParameter(mMix);
@@ -145,6 +159,7 @@ namespace anamnesis
       mCaptureHold = false; mCaptureHoldZ = 0.0f; mCaptureTimer = 0;
       mClockPhase = 0.0f; mWetL = 0.0f; mWetR = 0.0f; mRecRateRef = 1.0f;
       mWetPrevL = 0.0f; mWetPrevR = 0.0f; mRcurZ = 1.0f;
+      mWetFb = 0.0f; mFbDcX1 = 0.0f; mFbDcY1 = 0.0f;
       for (int i = 0; i < kStretchGrains; i++) { mGrainActive[i] = false; mGrainPos[i] = 0.0f; mGrainEnvPh[i] = 0.0f; }
       for (int i = 0; i < kHannLutN; i++)
         mHannLut[i] = 0.5f - 0.5f * cosf(2.0f * kPi * (float)i / (float)(kHannLutN - 1));
@@ -189,6 +204,7 @@ namespace anamnesis
     od::Parameter mDiffusion{"Diffusion", 0.6f};
     od::Parameter mDensity{"Density", 0.5f};
     od::Parameter mMod{"Mod", 0.3f};
+    od::Parameter mRegen{"Regen", 0.0f};    // cross-feedback: field wet -> looper input
     od::Parameter mClock{"Clock", 1.0f};    // 1 = full rate; down = slower/lower/grittier
     od::Parameter mGrit{"Grit", 0.5f};      // clean(0) <- interp | ZOH -> broken(1) bitcrush
     od::Parameter mMix{"Mix", 0.4f};
@@ -269,6 +285,7 @@ namespace anamnesis
       float diffN   = clampf(mDiffusion.value(), 0.0f, 1.0f);
       float density = clampf(mDensity.value(), 0.0f, 1.0f);
       float modN    = clampf(mMod.value(), 0.0f, 1.0f);
+      float regenN  = clampf(mRegen.value(), 0.0f, 1.0f);
       float mix     = clampf(mMix.value(), 0.0f, 1.0f);
 
       // Looper targets -- smoothed PER-SAMPLE below so Speed/Length glide
@@ -370,8 +387,15 @@ namespace anamnesis
           mWetPrevL = mWetL; mWetPrevR = mWetR;   // previous step (for clean interp)
           mSizeScaleZ += aSize * (sizeScaleTgt - mSizeScaleZ);
 
+          // cross-feedback: the governed field wet re-enters the looper input,
+          // so the reverb tail gets re-looped / re-glitched / re-reverbed. DC-
+          // blocked + Spiral-governed -> sings into saturation, not runaway.
+          float fbDC = mWetFb - mFbDcX1 + 0.999f * mFbDcY1;
+          mFbDcX1 = mWetFb; mFbDcY1 = fbDC;
+          float fb = spiralSat(fbDC * (regenN * kRegenMax), kFbGovD);
+
         // ================= MICRO-LOOPER (Tape): capture + var-speed read =====
-        const float xIn = (dryL + dryR) * 0.5f;
+        const float xIn = (dryL + dryR) * 0.5f + fb;
 
         // envelope follower (drives Env-mode auto-trigger)
         float ax = xIn < 0.0f ? -xIn : xIn;
@@ -564,6 +588,8 @@ namespace anamnesis
         // ============ DENSITY crossfade: sparse taps <-> dense FDN ============
         mWetL = tapL + mDensityZ * (fdnL - tapL);
         mWetR = tapR + mDensityZ * (fdnR - tapR);
+        mWetFb = (mWetL + mWetR) * 0.5f;             // cross-feedback tap (next step)
+        if (!isfinitef(mWetFb)) mWetFb = 0.0f;
         } // ---- end CLOCK sub-engine step ----
 
         // reconstruct wet at Fs -- Grit crossfades clean linear-interp <-> broken
@@ -588,6 +614,14 @@ namespace anamnesis
     {
       return (v == v) && (v <= 3.0e38f) && (v >= -3.0e38f);
     }
+    // Spiral governor (sin-clipper): unity at small x, soft-bounds to +/-1/d.
+    static inline float spiralSat(float x, float d)
+    {
+      float a = (x < 0.0f ? -x : x) * d;
+      if (a > 1.57079633f) a = 1.57079633f;   // pi/2
+      float s = sinf(a) / d;
+      return x < 0.0f ? -s : s;
+    }
 
     // ---- state ----
     float mLoopBuf[kLoopBufLen];
@@ -608,6 +642,7 @@ namespace anamnesis
     float mClockPhase, mWetL, mWetR, mWetPrevL, mWetPrevR;
     float mRecRateRef;   // clock R at which the buffered content was recorded
     float mRcurZ;        // current (possibly glided) clock R
+    float mWetFb, mFbDcX1, mFbDcY1;   // cross-feedback signal + DC-blocker state
     float mLine[kFdnN][kFdnBufLen];
     float mAp[kApN][kApMax];
     int   mApWr[kApN];
