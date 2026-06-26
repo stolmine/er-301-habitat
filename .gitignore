@@ -8,3 +8,7 @@ er-301
 # reference; never tracked. The architectural context this draws on
 # lives in stolmine repo's docs/planning/redesign/ series instead.
 docs/dev-rig-procedures.md
+
+# Python bytecode cache (reference harnesses)
+__pycache__/
+*.pyc
