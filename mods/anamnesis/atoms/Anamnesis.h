@@ -4,6 +4,11 @@
 // with a continuously-morphing spatial field, cross-fed and Spiral-governed.
 // Internal-stereo (one object, shared coherent L/R field).
 //
+// Phase 3.1 (0.2.0.13): the global CLOCK. The looper+field sub-engine advances
+//   at a reduced internal rate Fc = Fs/R (R snaps to musical steps 1..16) via a
+//   fire-gate; the wet is ZOH-held between steps. One knob -> reverb + loop +
+//   glides all lengthen together, plus lo-fi grit; dry + Mix stay full-rate.
+//   R=1 (Clock max) = full rate. Clean<->broken + smooth glide are 3.2 / 3.3.
 // Phase 2.4c (0.2.0.12): MOMENTARY CAPTURE on trigger -- a fire (manual Trig
 //   or Env onset) briefly holds recording (~one slice, auto-release) so the
 //   re-triggered window is a clean FROZEN snapshot that loops -> crisp
@@ -66,6 +71,11 @@ namespace anamnesis
   static const float kGrainHop = 1500.0f;   // spawn interval = 50% overlap
   static const int   kHannLutN = 1024;
   static const float kSpeedMax = 2.0f;       // bipolar Speed range +/-2x
+
+  // ---- global CLOCK: reduced internal rate Fc = Fs/R, R snaps to musical
+  // steps. R=1 = full rate (no effect). Lower = longer + lower + grittier. ----
+  static const int kClockSteps = 8;
+  static const int kClockR[kClockSteps] = {1, 2, 3, 4, 6, 8, 12, 16};
   static const float kRetrigFadeMs = 4.0f;   // re-trigger crossfade length (ms)
   static const float kEnvFloor = 0.003f;     // Env-mode auto-trigger floor (~-50 dB)
 
@@ -105,6 +115,7 @@ namespace anamnesis
       addParameter(mDiffusion);
       addParameter(mDensity);
       addParameter(mMod);
+      addParameter(mClock);
       addParameter(mMix);
       addOption(mMode);
       mMode.set(1);                 // default Tape (1=Tape, 2=Stretch)
@@ -120,6 +131,7 @@ namespace anamnesis
       mStretchHead = 0.0f; mGrainSpawnCtr = 0; mRetrigPhase = 1.0f; mOldReadPos = 0.0f;
       mEnvFast = 0.0f; mEnvSlow = 0.0f; mEnvRefractory = 0;
       mCaptureHold = false; mCaptureHoldZ = 0.0f; mCaptureTimer = 0;
+      mClockPhase = 0.0f; mWetL = 0.0f; mWetR = 0.0f; mRecRateRef = 1.0f;
       for (int i = 0; i < kStretchGrains; i++) { mGrainActive[i] = false; mGrainPos[i] = 0.0f; mGrainEnvPh[i] = 0.0f; }
       for (int i = 0; i < kHannLutN; i++)
         mHannLut[i] = 0.5f - 0.5f * cosf(2.0f * kPi * (float)i / (float)(kHannLutN - 1));
@@ -164,6 +176,7 @@ namespace anamnesis
     od::Parameter mDiffusion{"Diffusion", 0.6f};
     od::Parameter mDensity{"Density", 0.5f};
     od::Parameter mMod{"Mod", 0.3f};
+    od::Parameter mClock{"Clock", 1.0f};    // 1 = full rate; down = slower/lower/grittier
     od::Parameter mMix{"Mix", 0.4f};
     od::Option    mMode{"Mode"};            // 1=Tape (var-speed), 2=Stretch (granular)
 
@@ -302,12 +315,25 @@ namespace anamnesis
       for (int i = 0; i < kFdnN; i++) fdnLfoInc[i] = 2.0f * kPi * mFdnLfoHz[i] / fs;
       const float modDepth = mModZ * 18.0f;
 
+      // global CLOCK: decimation factor R (musical steps); R=1 = full rate.
+      int clockIdx = (int)((1.0f - clampf(mClock.value(), 0.0f, 1.0f)) * (kClockSteps - 1) + 0.5f);
+      if (clockIdx < 0) clockIdx = 0; else if (clockIdx >= kClockSteps) clockIdx = kClockSteps - 1;
+      const float clockInc = 1.0f / (float)kClockR[clockIdx];
+      const float Rcur = (float)kClockR[clockIdx];
+
       for (int n = 0; n < FRAMELENGTH; n++)
       {
-        mSizeScaleZ += aSize * (sizeScaleTgt - mSizeScaleZ);
-
         const float dryL = inL[n];
         const float dryR = inR[n];
+
+        // ---- global CLOCK: advance the looper+field sub-engine once every R
+        // output samples, so reverb/loop/glides all lengthen together; the wet
+        // is ZOH-held between steps (bit-identical at R=1, lo-fi grit below). ----
+        mClockPhase += clockInc;
+        if (mClockPhase >= 1.0f)
+        {
+          mClockPhase -= 1.0f;
+          mSizeScaleZ += aSize * (sizeScaleTgt - mSizeScaleZ);
 
         // ================= MICRO-LOOPER (Tape): capture + var-speed read =====
         const float xIn = (dryL + dryR) * 0.5f;
@@ -334,6 +360,15 @@ namespace anamnesis
         if (mCaptureTimer > 0 && --mCaptureTimer == 0) mCaptureHold = false;
         mCaptureHoldZ += aCapture * ((mCaptureHold ? 1.0f : 0.0f) - mCaptureHoldZ);
         float effFreeze = 1.0f - (1.0f - mFreezeZ) * (1.0f - mCaptureHoldZ);
+        // Clock-invariant freeze: lock a reference to the rate the buffer is
+        // recorded at. While recording (effFreeze < 0.5) hard-set it to the
+        // current clock; while frozen, HARD-HOLD it (no leak -- a one-pole here
+        // asymptotes and slowly slews the pitch back). The read advance is
+        // scaled by Rcur/recordedRate so a held sound keeps its CAPTURED pitch
+        // wherever the clock moves (live -> factor 1, identical); the clock then
+        // only morphs grit + reverb around it.
+        if (effFreeze < 0.5f) mRecRateRef = Rcur;
+        const float clockComp = Rcur / mRecRateRef;
         if (mLoopWr >= Lint) mLoopWr %= Lint;
         mLoopBuf[mLoopWr] = effFreeze * mLoopBuf[mLoopWr] + (1.0f - effFreeze) * xIn;
         mLoopWr++; if (mLoopWr >= Lint) mLoopWr = 0;
@@ -368,7 +403,7 @@ namespace anamnesis
           // ---- STRETCH: granular time-stretch. The source playhead moves
           // at the TIME rate (mSpeedZ); each grain replays at UNITY pitch,
           // so time and pitch decouple (slow without dropping pitch). ----
-          mStretchHead += mSpeedZ;
+          mStretchHead += mSpeedZ * clockComp;
           if (!(mStretchHead >= 0.0f && mStretchHead < Lf))
           {
             if (!isfinitef(mStretchHead)) mStretchHead = 0.0f;
@@ -392,7 +427,7 @@ namespace anamnesis
             int hi = (int)(mGrainEnvPh[g] * (float)(kHannLutN - 1));
             if (hi < 0) hi = 0; else if (hi >= kHannLutN) hi = kHannLutN - 1;
             out += readLoopHermite(mGrainPos[g], Lint) * mHannLut[hi];
-            mGrainPos[g] += 1.0f;                 // unity pitch
+            mGrainPos[g] += clockComp;            // unity pitch (clock-compensated)
             if (mGrainPos[g] >= Lf) mGrainPos[g] -= Lf;
             mGrainEnvPh[g] += envInc;
             if (mGrainEnvPh[g] >= 1.0f) mGrainActive[g] = false;
@@ -413,7 +448,7 @@ namespace anamnesis
           float newS = readLoopHermite(mLoopReadPos, Lint);
           float dseam = mLoopReadPos < (Lf - mLoopReadPos) ? mLoopReadPos : (Lf - mLoopReadPos);
           if (dseam < kSeamXf) newS *= 0.5f - 0.5f * cosf(kPi * dseam / kSeamXf);
-          mLoopReadPos += mSpeedZ;
+          mLoopReadPos += mSpeedZ * clockComp;
 
           float lp;
           if (mRetrigPhase < 1.0f)
@@ -424,7 +459,7 @@ namespace anamnesis
               else { mOldReadPos = fmodf(mOldReadPos, Lf); if (mOldReadPos < 0.0f) mOldReadPos += Lf; }
             }
             float oldS = readLoopHermite(mOldReadPos, Lint);
-            mOldReadPos += mSpeedZ;
+            mOldReadPos += mSpeedZ * clockComp;
             mRetrigPhase += retrigInc;
             if (mRetrigPhase > 1.0f) mRetrigPhase = 1.0f;
             lp = oldS + (newS - oldS) * mRetrigPhase;  // linear crossfade old->new
@@ -492,11 +527,14 @@ namespace anamnesis
         mWr++; if (mWr >= kFdnBufLen) mWr = 0;
 
         // ============ DENSITY crossfade: sparse taps <-> dense FDN ============
-        float wetL = tapL + mDensityZ * (fdnL - tapL);
-        float wetR = tapR + mDensityZ * (fdnR - tapR);
+        mWetL = tapL + mDensityZ * (fdnL - tapL);
+        mWetR = tapR + mDensityZ * (fdnR - tapR);
+        } // ---- end CLOCK sub-engine step ----
 
-        outL[n] = dryL + mix * (wetL - dryL);
-        outR[n] = dryR + mix * (wetR - dryR);
+        // reconstruct the wet at Fs (ZOH hold between sub-engine steps), then
+        // mix against the full-rate clean dry.
+        outL[n] = dryL + mix * (mWetL - dryL);
+        outR[n] = dryR + mix * (mWetR - dryR);
       }
     }
 
@@ -525,6 +563,8 @@ namespace anamnesis
     bool  mCaptureHold;
     float mCaptureHoldZ;
     int   mCaptureTimer;
+    float mClockPhase, mWetL, mWetR;
+    float mRecRateRef;   // clock R at which the buffered content was recorded
     float mLine[kFdnN][kFdnBufLen];
     float mAp[kApN][kApMax];
     int   mApWr[kApN];

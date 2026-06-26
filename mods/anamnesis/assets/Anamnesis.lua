@@ -105,6 +105,11 @@ function Anamnesis:onLoadGraph(channelCount)
   tie(op, "Mod", mod, "Out")
   self:addMonoBranch("mod", mod, "In", mod, "Out")
 
+  local clock = self:addObject("clock", app.ParameterAdapter())
+  clock:hardSet("Bias", 1.0)
+  tie(op, "Clock", clock, "Out")
+  self:addMonoBranch("clock", clock, "In", clock, "Out")
+
   local mix = self:addObject("mix", app.ParameterAdapter())
   mix:hardSet("Bias", 0.4)
   tie(op, "Mix", mix, "Out")
@@ -219,6 +224,17 @@ function Anamnesis:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.3
     },
+    clock = GainBias {
+      button = "clk",
+      description = "Clock -- internal rate; down = slower+lower+grittier wet (1=full)",
+      branch = self.branches.clock,
+      gainbias = self.objects.clock,
+      range = self.objects.clock,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 1.0
+    },
     mix = GainBias {
       button = "mix",
       description = "Mix -- dry/wet",
@@ -231,7 +247,7 @@ function Anamnesis:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "mix" },
+    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "clock", "mix" },
     collapsed = {}
   }
 end
