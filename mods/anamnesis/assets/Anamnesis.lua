@@ -240,6 +240,12 @@ function Anamnesis:onLoadViews()
       biasPrecision = 2,
       initialBias = 1.0
     },
+    clockmode = OptionControl {
+      button = "clkm",
+      description = "Clock mode (Steps = harmonized detents / Smooth = continuous glide)",
+      option = self.objects.op:getOption("ClockMode"),
+      choices = { "Steps", "Smooth" }
+    },
     grit = GainBias {
       button = "grit",
       description = "Grit -- clean interp (0) .. ZOH (0.5) .. broken bitcrush (1)",
@@ -263,7 +269,7 @@ function Anamnesis:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "clock", "grit", "mix" },
+    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "clock", "clockmode", "grit", "mix" },
     collapsed = {}
   }
 end

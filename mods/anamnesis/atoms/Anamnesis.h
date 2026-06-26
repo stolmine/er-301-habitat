@@ -4,6 +4,10 @@
 // with a continuously-morphing spatial field, cross-fed and Spiral-governed.
 // Internal-stereo (one object, shared coherent L/R field).
 //
+// Phase 3.3 (0.2.0.17): smooth-glide CLOCK. A ClockMode option (Steps / Smooth):
+//   Steps snaps R to the harmonized LUT (crisp detents); Smooth uses a continuous
+//   R = 16^(1-Clock), glided per block, so sweeping Clock glides reverb / grit /
+//   loop-length instead of stepping. Builds on:
 // Phase 3.2 (0.2.0.16): clean<->broken GRIT axis. Grit crossfades the wet
 //   reconstruction clean linear-interp (0) -> broken ZOH (0.5), then adds
 //   bit-crush (0.5->1, to ~6-bit). Default 0.5 = ZOH only = the pre-Grit
@@ -125,6 +129,9 @@ namespace anamnesis
       addOption(mMode);
       mMode.set(1);                 // default Tape (1=Tape, 2=Stretch)
       mMode.enableSerialization();
+      addOption(mClockMode);
+      mClockMode.set(1);            // 1 = Steps (harmonized), 2 = Smooth (glide)
+      mClockMode.enableSerialization();
 
       memset(mLoopBuf, 0, sizeof(mLoopBuf));
       memset(mLine, 0, sizeof(mLine));
@@ -137,7 +144,7 @@ namespace anamnesis
       mEnvFast = 0.0f; mEnvSlow = 0.0f; mEnvRefractory = 0;
       mCaptureHold = false; mCaptureHoldZ = 0.0f; mCaptureTimer = 0;
       mClockPhase = 0.0f; mWetL = 0.0f; mWetR = 0.0f; mRecRateRef = 1.0f;
-      mWetPrevL = 0.0f; mWetPrevR = 0.0f;
+      mWetPrevL = 0.0f; mWetPrevR = 0.0f; mRcurZ = 1.0f;
       for (int i = 0; i < kStretchGrains; i++) { mGrainActive[i] = false; mGrainPos[i] = 0.0f; mGrainEnvPh[i] = 0.0f; }
       for (int i = 0; i < kHannLutN; i++)
         mHannLut[i] = 0.5f - 0.5f * cosf(2.0f * kPi * (float)i / (float)(kHannLutN - 1));
@@ -186,6 +193,7 @@ namespace anamnesis
     od::Parameter mGrit{"Grit", 0.5f};      // clean(0) <- interp | ZOH -> broken(1) bitcrush
     od::Parameter mMix{"Mix", 0.4f};
     od::Option    mMode{"Mode"};            // 1=Tape (var-speed), 2=Stretch (granular)
+    od::Option    mClockMode{"ClockMode"};  // 1=Steps (harmonized), 2=Smooth (glide)
 
     inline void ensureFlushToZero()
     {
@@ -322,11 +330,23 @@ namespace anamnesis
       for (int i = 0; i < kFdnN; i++) fdnLfoInc[i] = 2.0f * kPi * mFdnLfoHz[i] / fs;
       const float modDepth = mModZ * 18.0f;
 
-      // global CLOCK: decimation factor R (musical steps); R=1 = full rate.
-      int clockIdx = (int)((1.0f - clampf(mClock.value(), 0.0f, 1.0f)) * (kClockSteps - 1) + 0.5f);
-      if (clockIdx < 0) clockIdx = 0; else if (clockIdx >= kClockSteps) clockIdx = kClockSteps - 1;
-      const float clockInc = 1.0f / (float)kClockR[clockIdx];
-      const float Rcur = (float)kClockR[clockIdx];
+      // global CLOCK decimation factor R. Steps mode snaps to the harmonized
+      // LUT (crisp detents); Smooth mode uses a continuous R, glided per block.
+      const float clockN = clampf(mClock.value(), 0.0f, 1.0f);
+      if (mClockMode.value() == 2)
+      {
+        const float targetR = powf(16.0f, 1.0f - clockN);   // continuous 1..16
+        const float aClock = 1.0f - expf(-(float)FRAMELENGTH / (fs * 0.040f));
+        mRcurZ += aClock * (targetR - mRcurZ);
+      }
+      else
+      {
+        int clockIdx = (int)((1.0f - clockN) * (kClockSteps - 1) + 0.5f);
+        if (clockIdx < 0) clockIdx = 0; else if (clockIdx >= kClockSteps) clockIdx = kClockSteps - 1;
+        mRcurZ = (float)kClockR[clockIdx];
+      }
+      const float clockInc = 1.0f / mRcurZ;
+      const float Rcur = mRcurZ;
       // Grit: 0..0.5 crossfades clean linear-interp -> broken ZOH reconstruction;
       // 0.5..1 adds bit-crush. 0.5 = ZOH only (matches pre-Grit behavior).
       const float gritN = clampf(mGrit.value(), 0.0f, 1.0f);
@@ -587,6 +607,7 @@ namespace anamnesis
     int   mCaptureTimer;
     float mClockPhase, mWetL, mWetR, mWetPrevL, mWetPrevR;
     float mRecRateRef;   // clock R at which the buffered content was recorded
+    float mRcurZ;        // current (possibly glided) clock R
     float mLine[kFdnN][kFdnBufLen];
     float mAp[kApN][kApMax];
     int   mApWr[kApN];
