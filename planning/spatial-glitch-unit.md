@@ -17,6 +17,10 @@ Source research and full control inventory: `planning/mood-mkii-architecture.md`
   L/R state, so one internal-stereo object, not dual instances.
 - **Do not clone a generic wet channel.** The "wet" engine is the
   Network-descendant spatial field, which is where we push past Network.
+- **Control surface: 6 plies x 3 subs each** (see Control hierarchy). Regen/
+  Feedback promoted to its own top ply; Character is one global macro; both
+  engines mode-switch with adaptive per-mode semantics; the field's Mode is
+  the topology selector.
 
 ## Why CM4-only (feasibility prediction)
 
@@ -54,41 +58,59 @@ length + pitch + grit) warps both engines together. Fusion lives in the
 signal flow + feedback + shared grit, while the two control groups stay
 distinct (pedal conceit).
 
-## Control hierarchy
+## Control hierarchy (6 plies, 3 subs each - fits M1..M6 exactly)
 
-Top level (5 plies), economical:
-1. **Looper gate** - rising edge captures / re-triggers the slice (clockable
-   for rhythmic stutter); hold = overdub. Submenu beneath.
-2. **Field gate** - freeze / latch the spatial field (gateable for momentary
-   holds). Submenu beneath.
-3. **Routing** - the field<->looper coupling.
-4. **Clock** - the global sample-rate / grit axis (the soul).
-5. **Mix** - dry/wet.
+Revised 2026-06-25. The original 5-sub engine submenus did not factor into
+clean 3-wide shift rows, so Regen/Feedback was promoted to its own top ply.
+Result: six top plies, each with exactly three sub-params on its shift row.
+No multi-row expansion needed for control.
 
-Looper submenu (mode-dependent semantics):
-- **Length** - captured window size (CLOCK-scaled).
-- **Speed** - playback speed + direction, discrete, reverse through a Stalled
-  center to forward. The glitch core.
-- **Mode** - Env / Tape / Stretch (dynamics-gated slice / continuous loop /
-  time-stretch). Reconfigures capture behavior; Sensitivity folds into Env.
-- **Fade** - loop persistence / sound-on-sound decay (full = freeze/infinite);
-  also the looper's self-feedback amount.
-- **Character** - looper-side degradation (CLASSIC deterioration: bit/alias/
-  decay on the captured loop).
+1. **Looper** (gate main: capture / re-trigger; clockable for rhythmic
+   stutter; hold = overdub)
+   - Length - captured window size (CLOCK-scaled)
+   - Speed - playback speed + direction, discrete, reverse through a Stalled
+     center to forward (the glitch core)
+   - Mode - Env / Tape / Stretch (dynamics-gated slice / continuous loop /
+     time-stretch); Sensitivity folds into Env
+2. **Field** (gate main: freeze / latch)
+   - Size - field extent / decay / delay time
+   - Diffusion - how aggressively fragments smear into a wash
+   - Mode - the topology set (sparse discrete taps / dense FDN / plexus); this
+     is where "farther than Network" lives, as the field's mode selector, so
+     it costs no extra slot; Size + Diffusion adapt per topology
+3. **Regen** (master feedback macro main: scales all three toward singing /
+   runaway; Spiral-governed so it saturates instead of clipping)
+   - Loop Fade - looper self-feedback / sound-on-sound persistence
+     (full = freeze/infinite)
+   - Field Feedback - spatial field regeneration
+   - Cross-feedback - field output recirculated back into the looper (the
+     fusion coupling amount)
+4. **Clock** (global sample-rate / grit main: the soul)
+   - Smooth - stepped (harmonized) vs continuous
+   - Range - sample-rate span / step coarseness
+   - Character - one global color/degradation axis (clean <-> broken: the
+     CLASSIC deterioration, collapsed from per-engine into one macro)
+5. **Mix** (dry/wet main)
+   - Dry-kill - remove dry (100% wet)
+   - Trails - bypass spillover
+   - Balance - looper/field level balance
+6. **Routing** (field source / coupling main)
+   - Source balance - field fed by loops vs input vs both
+   - Direct-loop - clean micro-loop blend through the field
+   - Spread - stereo imaging width
 
-Field submenu:
-- **Size** - field extent / decay / delay time.
-- **Diffusion** - how aggressively fragments smear into a wash.
-- **Topology** - sparse discrete taps -> dense FDN -> plexus/network field.
-  The "farther than Network" continuum (replaces Reverb/Delay/Slip modes).
-- **Feedback** - field regeneration, Spiral-governed so runaway sings.
-- **Tone** - hi-cut / damping. (Stereo spread/width -> this ply's shift row.)
+The three moves that make it factor:
+- Regen promoted to top with its own 3 subs (pulls Loop Fade + Field Feedback
+  out of the engine submenus and adds the cross-feedback coupling). The most
+  performable axis in a spatial-glitch box earns top-level prominence.
+- Character collapsed from per-engine (looper degradation + field tone) into
+  ONE global Character sub on the Clock ply (the grit/tone home).
+- Mode made symmetric: both engines mode-switch with per-mode adaptive
+  semantics (pedal conceit); the field's Mode IS the topology selector.
 
-Shift sub-rows on the three top-level utility plies:
-- **Routing**: field-source balance (loops vs input vs both), field->looper
-  feedback amount, direct-loop blend.
-- **Clock**: Smooth (stepped vs continuous), range.
-- **Mix**: dry-kill, trails, level balance. (Global Character may live here.)
+Gates: the two engine plies have gate mains (CV-triggerable - clock the loop
+capture, gate the field freeze) with their 3 subs on the shift row. The other
+four plies are knob mains with 3 subs each.
 
 ## Open questions / next steps
 
@@ -97,10 +119,16 @@ Shift sub-rows on the three top-level utility plies:
   er-301 rpidev branch (reference_redesign_docs) so sizing is fact, not
   estimate.
 - **Design the mode-dependent control adaptation**: exactly how each engine's
-  submenu relabels and reranges per mode (the Mood-style per-mode semantics),
-  and how that reads on the 301 ply/sub-display surface.
-- **Topology axis design**: the sparse-taps -> FDN -> plexus morph; relate to
-  the Network cascade-FDN postmortem (what to reuse vs avoid).
+  three subs relabel/rerange per mode (looper Env/Tape/Stretch; field topology
+  set), Mood-style, and how that reads on the 301 sub-display surface.
+- **Topology set design** (now the Field Mode selector): the sparse-taps ->
+  dense FDN -> plexus options; relate to the Network cascade-FDN postmortem
+  (what to reuse vs avoid). Decide whether it is 3 discrete modes or a few
+  with per-mode-adaptive Size/Diffusion.
+- **Viz placement**: six control plies use all M-buttons, so a Network-style
+  plexus/field visualization is the EXPANDED view of the Field ply (M-hold),
+  not a 7th ply. Decide if that is acceptable or if a dedicated overview ply
+  is wanted (which would mean consolidating two control plies).
 - **Fusion + feedback governor specifics**: the looper->field->looper loop,
   the Spiral placement, denormal/runaway guards.
 - **Buffer/memory budget at CM4**: loop buffers (2x, stereo, overdub layers)
