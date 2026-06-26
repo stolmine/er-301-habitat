@@ -4,12 +4,18 @@
 // with a continuously-morphing spatial field, cross-fed and Spiral-governed.
 // Internal-stereo (one object, shared coherent L/R field).
 //
-// Phase 2.1 (0.2.0.1): adds the micro-LOOPER front-end (Tape mode core).
+// Phase 2.2 (0.2.0.3): FREEZE as a toggle gate + smooth Speed/Length.
+//   Freeze is a 0/1 gate inlet (Comparator toggle / CV) with a fast
+//   declick ramp: fz=0 live replace (Tape), fz=1 frozen hold. Speed and
+//   Length now GLIDE per-sample (REPITCH-style) -- stepping Speed slides
+//   the pitch, changing Length resizes the loop smoothly, no zipper.
+//   Raised-cosine loop-seam declick so the frozen loop does not tick.
+//   Builds on:
+// Phase 2.1 (0.2.0.1): the micro-LOOPER front-end (Tape mode core).
 //   Always-listening circular capture; Hermite variable-speed playback
 //   with a discrete musical Speed LUT (reverse / stalled / forward); a
 //   dynamic anti-alias LP for fast reads. The looper output FEEDS the
-//   field -- the room is built from the glitched fragments. Overdub/fade/
-//   freeze = 2.2, Stretch = 2.3, Env = 2.4 (99-build-order.md).
+//   field. Stretch = 2.3, Env = 2.4 (99-build-order.md).
 //
 // Phase 1 (complete) -- the spatial field:
 //   STAGE 1 sparse FEEDFORWARD early-reflection taps (addressable "glitch"
@@ -38,6 +44,7 @@ namespace anamnesis
   static const int   kLoopBufLen = 96000;   // 2 s @ 48k (mono capture)
   static const float kLoopMinSec = 0.02f;
   static const float kLoopMaxSec = 2.0f;
+  static const float kSeamXf = 64.0f;       // loop-seam declick window (samples)
   // discrete musical Speed steps (Mood-style), stalled at center
   static const int   kSpeedSteps = 9;
   static const float kSpeedLut[kSpeedSteps] =
@@ -67,6 +74,7 @@ namespace anamnesis
     {
       addInput(mInL);
       addInput(mInR);
+      addInput(mFreeze);
       addOutput(mOutL);
       addOutput(mOutR);
       addParameter(mLength);
@@ -84,6 +92,7 @@ namespace anamnesis
       memset(mApWr, 0, sizeof(mApWr));
       memset(mTapBuf, 0, sizeof(mTapBuf));
       mLoopWr = 0; mLoopReadPos = 0.0f; mLoopLpZ = 0.0f;
+      mSpeedZ = 1.0f; mLoopLenZ = 24000.0f; mFreezeZ = 0.0f;
       mWr = 0; mTapWr = 0;
       mSizeScaleZ = 1.0f; mT60Z = 2.0f; mDiffGZ = 0.4f; mDensityZ = 0.5f; mModZ = 0.3f;
       mInit = false;
@@ -112,11 +121,12 @@ namespace anamnesis
 #ifndef SWIGLUA
     od::Inlet     mInL{"In L"};
     od::Inlet     mInR{"In R"};
+    od::Inlet     mFreeze{"Freeze"};        // gate/toggle: hold the loop
     od::Outlet    mOutL{"Out L"};
     od::Outlet    mOutR{"Out R"};
 
     od::Parameter mLength{"Length", 0.4f};
-    od::Parameter mSpeed{"Speed", 0.75f};   // 0.75 -> LUT idx 6 -> 1.0x fwd
+    od::Parameter mSpeed{"Speed", 0.5f};    // bipolar -1..1: 0.5 -> +1.0x fwd
     od::Parameter mSize{"Size", 0.5f};
     od::Parameter mDecay{"Decay", 0.5f};
     od::Parameter mDiffusion{"Diffusion", 0.6f};
@@ -185,8 +195,9 @@ namespace anamnesis
       const float fs = (float)globalConfig.sampleRate;
 
       // ---- controls ----
+      const float *fzBuf = mFreeze.buffer();
       float lengthN = clampf(mLength.value(), 0.0f, 1.0f);
-      float speedN  = clampf(mSpeed.value(), 0.0f, 1.0f);
+      float speedN  = clampf(mSpeed.value(), -1.0f, 1.0f);  // bipolar
       float sizeN   = clampf(mSize.value(), 0.0f, 1.0f);
       float decayN  = clampf(mDecay.value(), 0.0f, 1.0f);
       float diffN   = clampf(mDiffusion.value(), 0.0f, 1.0f);
@@ -194,32 +205,27 @@ namespace anamnesis
       float modN    = clampf(mMod.value(), 0.0f, 1.0f);
       float mix     = clampf(mMix.value(), 0.0f, 1.0f);
 
-      // looper loop length + discrete speed (block-rate; speed steps are
-      // instant by design -- a tape-speed change, no click).
-      int Lint = (int)((kLoopMinSec + lengthN * (kLoopMaxSec - kLoopMinSec)) * fs);
-      if (Lint < 64) Lint = 64;
-      if (Lint > kLoopBufLen) Lint = kLoopBufLen;
-      const float Lf = (float)Lint;
-      if (mLoopWr >= Lint) mLoopWr %= Lint;
-      if (mLoopReadPos >= Lf) mLoopReadPos = fmodf(mLoopReadPos, Lf);
-      if (mLoopReadPos < 0.0f) mLoopReadPos = 0.0f;
-      int sidx = (int)(speedN * (kSpeedSteps - 1) + 0.5f);
+      // Looper targets -- smoothed PER-SAMPLE below so Speed/Length glide
+      // (no zipper; a tape-speed slide between the discrete steps).
+      float targetLen = (kLoopMinSec + lengthN * (kLoopMaxSec - kLoopMinSec)) * fs;
+      if (targetLen < 64.0f) targetLen = 64.0f;
+      if (targetLen > (float)kLoopBufLen) targetLen = (float)kLoopBufLen;
+      // bipolar -1..1 -> 9-step LUT (-1 -> idx0 = -4x, 0 -> idx4 = stall, +1 -> idx8 = +4x)
+      int sidx = (int)((speedN + 1.0f) * 0.5f * (kSpeedSteps - 1) + 0.5f);
       if (sidx < 0) sidx = 0; if (sidx >= kSpeedSteps) sidx = kSpeedSteps - 1;
-      const float speed = kSpeedLut[sidx];
-      // dynamic anti-alias LP: transparent for |speed|<=1, rolls off for fast reads
-      float aspd = speed < 0.0f ? -speed : speed;
+      const float targetSpeed = kSpeedLut[sidx];
+      const float aLoopGlide = 1.0f - expf(-1.0f / (fs * 0.040f)); // Speed/Length glide
+      const float aFreeze    = 1.0f - expf(-1.0f / (fs * 0.015f)); // toggle declick ramp
+      // dynamic anti-alias LP from the (steady-state) target speed
+      float aspd = targetSpeed < 0.0f ? -targetSpeed : targetSpeed;
       float aLoopLp = 1.0f;
-      if (aspd > 1.0f)
-      {
-        float fc = 0.5f / aspd;                // normalized cutoff
-        aLoopLp = 1.0f - expf(-2.0f * kPi * fc);
-      }
+      if (aspd > 1.0f) { float fc = 0.5f / aspd; aLoopLp = 1.0f - expf(-2.0f * kPi * fc); }
 
       const float sizeScaleTgt = kSizeMin + sizeN * (kSizeMax - kSizeMin);
       const float t60Tgt = 0.2f * powf(100.0f, decayN);
       const float diffGTgt = diffN * 0.75f;
 
-      if (!mInit) { mSizeScaleZ = sizeScaleTgt; mT60Z = t60Tgt; mDiffGZ = diffGTgt; mDensityZ = density; mModZ = modN; mInit = true; }
+      if (!mInit) { mSizeScaleZ = sizeScaleTgt; mT60Z = t60Tgt; mDiffGZ = diffGTgt; mDensityZ = density; mModZ = modN; mLoopLenZ = targetLen; mSpeedZ = targetSpeed; mInit = true; }
       const float aBlk = 1.0f - expf(-(float)FRAMELENGTH / (fs * 0.030f));
       mT60Z     += aBlk * (t60Tgt - mT60Z);
       mDiffGZ   += aBlk * (diffGTgt - mDiffGZ);
@@ -258,14 +264,40 @@ namespace anamnesis
 
         // ================= MICRO-LOOPER (Tape): capture + var-speed read =====
         const float xIn = (dryL + dryR) * 0.5f;
-        mLoopBuf[mLoopWr] = xIn;                 // always-listening capture
+
+        // per-sample Speed/Length glide (REPITCH-style; no zipper)
+        mLoopLenZ += aLoopGlide * (targetLen - mLoopLenZ);
+        mSpeedZ   += aLoopGlide * (targetSpeed - mSpeedZ);
+        const float Lf = mLoopLenZ;              // >= 64 (glides between clamped targets)
+        int Lint = (int)Lf;
+        if (Lint < 64) Lint = 64; else if (Lint > kLoopBufLen) Lint = kLoopBufLen;
+
+        // Keep the read pointer in [0, Lf) ROBUSTLY: bounded (no while-loop
+        // that could spin forever on an Inf) and NaN/Inf-proof (a (int)NaN
+        // index would read out of bounds). The guard against a Speed/Length
+        // change ever wedging or silencing the DSP.
+        if (!(mLoopReadPos >= 0.0f && mLoopReadPos < Lf))
+        {
+          if (!isfinitef(mLoopReadPos)) mLoopReadPos = 0.0f;
+          else { mLoopReadPos = fmodf(mLoopReadPos, Lf); if (mLoopReadPos < 0.0f) mLoopReadPos += Lf; }
+        }
+        if (mLoopWr >= Lint) mLoopWr %= Lint;
+
+        // Freeze TOGGLE gate (0/1) with a fast declick ramp
+        float fzTarget = (fzBuf[n] >= 0.5f) ? 1.0f : 0.0f;
+        mFreezeZ += aFreeze * (fzTarget - mFreezeZ);
+
+        // sound-on-sound write: fz=0 live replace, fz=1 frozen hold
+        mLoopBuf[mLoopWr] = mFreezeZ * mLoopBuf[mLoopWr] + (1.0f - mFreezeZ) * xIn;
         mLoopWr++; if (mLoopWr >= Lint) mLoopWr = 0;
         float lp = readLoopHermite(mLoopReadPos, Lint);
-        mLoopReadPos += speed;
-        while (mLoopReadPos >= Lf) mLoopReadPos -= Lf;
-        while (mLoopReadPos < 0.0f) mLoopReadPos += Lf;
+        // loop-seam declick: raised-cosine duck within kSeamXf of the wrap
+        float dseam = mLoopReadPos < (Lf - mLoopReadPos) ? mLoopReadPos : (Lf - mLoopReadPos);
+        if (dseam < kSeamXf) lp *= 0.5f - 0.5f * cosf(kPi * dseam / kSeamXf);
+        mLoopReadPos += mSpeedZ;                 // wrapped at the top of next iteration
         mLoopLpZ += aLoopLp * (lp - mLoopLpZ);   // dynamic AA LP
-        const float looperOut = mLoopLpZ;        // <- field input
+        if (!isfinitef(mLoopLpZ)) mLoopLpZ = 0.0f;
+        float looperOut = mLoopLpZ;              // <- field input (finite firewall)
 
         // ================= STAGE 1: sparse feedforward taps =================
         mTapBuf[mTapWr] = looperOut;
@@ -343,7 +375,7 @@ namespace anamnesis
     // ---- state ----
     float mLoopBuf[kLoopBufLen];
     int   mLoopWr;
-    float mLoopReadPos, mLoopLpZ;
+    float mLoopReadPos, mLoopLpZ, mFreezeZ, mSpeedZ, mLoopLenZ;
     float mLine[kFdnN][kFdnBufLen];
     float mAp[kApN][kApMax];
     int   mApWr[kApN];

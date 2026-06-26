@@ -15,6 +15,7 @@ local libanamnesis = require "anamnesis.libanamnesis"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Gate = require "Unit.ViewControl.Gate"
 
 local floatMap = function(min, max)
   local map = app.LinearDialMap(min, max)
@@ -23,6 +24,11 @@ local floatMap = function(min, max)
 end
 
 local zeroOneMap = floatMap(0, 1)
+
+-- Bipolar Speed map: -1 .. +1, snapping in 0.25 steps onto the 9 discrete
+-- tape-speed detents (-4x rev .. stall .. +4x fwd).
+local speedMap = app.LinearDialMap(-1, 1)
+speedMap:setSteps(0.25, 0.25, 0.25, 0.25)
 
 local Anamnesis = Class {}
 Anamnesis:include(Unit)
@@ -53,9 +59,14 @@ function Anamnesis:onLoadGraph(channelCount)
   self:addMonoBranch("length", length, "In", length, "Out")
 
   local speed = self:addObject("speed", app.ParameterAdapter())
-  speed:hardSet("Bias", 0.75)
+  speed:hardSet("Bias", 0.5)
   tie(op, "Speed", speed, "Out")
   self:addMonoBranch("speed", speed, "In", speed, "Out")
+
+  local freeze = self:addObject("freeze", app.Comparator())
+  freeze:setToggleMode()
+  connect(freeze, "Out", op, "Freeze")
+  self:addMonoBranch("freeze", freeze, "In", freeze, "Out")
 
   local size = self:addObject("size", app.ParameterAdapter())
   size:hardSet("Bias", 0.5)
@@ -103,14 +114,20 @@ function Anamnesis:onLoadViews()
     },
     speed = GainBias {
       button = "spd",
-      description = "Speed -- tape speed/dir, 9 steps (-4 .. stall .. +4)",
+      description = "Speed -- bipolar tape speed/dir: -1=x4 rev, 0=stall, +1=x4 fwd",
       branch = self.branches.speed,
       gainbias = self.objects.speed,
       range = self.objects.speed,
-      biasMap = zeroOneMap,
+      biasMap = speedMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.75
+      initialBias = 0.5
+    },
+    freeze = Gate {
+      button = "frz",
+      description = "Freeze -- hold the loop (toggle / gate)",
+      branch = self.branches.freeze,
+      comparator = self.objects.freeze
     },
     size = GainBias {
       button = "size",
@@ -179,7 +196,7 @@ function Anamnesis:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "length", "speed", "size", "decay", "diffusion", "density", "mod", "mix" },
+    expanded = { "length", "speed", "freeze", "size", "decay", "diffusion", "density", "mod", "mix" },
     collapsed = {}
   }
 end
