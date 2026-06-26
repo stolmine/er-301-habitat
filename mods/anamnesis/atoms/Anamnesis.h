@@ -57,10 +57,7 @@ namespace anamnesis
   static const float kGrainDur = 3000.0f;   // grain length ~62.5 ms @48k
   static const float kGrainHop = 1500.0f;   // spawn interval = 50% overlap
   static const int   kHannLutN = 1024;
-  // discrete musical Speed steps (Mood-style), stalled at center
-  static const int   kSpeedSteps = 9;
-  static const float kSpeedLut[kSpeedSteps] =
-    {-4.0f, -2.0f, -1.0f, -0.5f, 0.0f, 0.5f, 1.0f, 2.0f, 4.0f};
+  static const float kSpeedMax = 2.0f;       // bipolar Speed range +/-2x
 
   // ---- Stage 2 FDN ----
   static const int kFdnN = 8;
@@ -145,7 +142,7 @@ namespace anamnesis
     od::Outlet    mOutR{"Out R"};
 
     od::Parameter mLength{"Length", 0.4f};
-    od::Parameter mSpeed{"Speed", 0.5f};    // bipolar -1..1: 0.5 -> +1.0x fwd
+    od::Parameter mSpeed{"Speed", 1.0f};    // bipolar -2..2x rate; 1.0 = +1x
     od::Parameter mSize{"Size", 0.5f};
     od::Parameter mDecay{"Decay", 0.5f};
     od::Parameter mDiffusion{"Diffusion", 0.6f};
@@ -218,7 +215,7 @@ namespace anamnesis
       const float *fzBuf = mFreeze.buffer();
       const bool stretchMode = (mMode.value() == 2);
       float lengthN = clampf(mLength.value(), 0.0f, 1.0f);
-      float speedN  = clampf(mSpeed.value(), -1.0f, 1.0f);  // bipolar
+      float speedN  = clampf(mSpeed.value(), -kSpeedMax, kSpeedMax);  // bipolar rate
       float sizeN   = clampf(mSize.value(), 0.0f, 1.0f);
       float decayN  = clampf(mDecay.value(), 0.0f, 1.0f);
       float diffN   = clampf(mDiffusion.value(), 0.0f, 1.0f);
@@ -231,10 +228,10 @@ namespace anamnesis
       float targetLen = (kLoopMinSec + lengthN * (kLoopMaxSec - kLoopMinSec)) * fs;
       if (targetLen < 64.0f) targetLen = 64.0f;
       if (targetLen > (float)kLoopBufLen) targetLen = (float)kLoopBufLen;
-      // bipolar -1..1 -> 9-step LUT (-1 -> idx0 = -4x, 0 -> idx4 = stall, +1 -> idx8 = +4x)
-      int sidx = (int)((speedN + 1.0f) * 0.5f * (kSpeedSteps - 1) + 0.5f);
-      if (sidx < 0) sidx = 0; if (sidx >= kSpeedSteps) sidx = kSpeedSteps - 1;
-      const float targetSpeed = kSpeedLut[sidx];
+      // The Speed value IS the rate multiplier: -2..+2x. Tape -> pitch,
+      // Stretch -> time; 0 = stall. Continuous (dial clicks in 0.25 steps,
+      // so 0.5x / 1x / 2x land on detents).
+      const float targetSpeed = speedN;
       const float aLoopGlide = 1.0f - expf(-1.0f / (fs * 0.040f)); // Speed/Length glide
       const float aFreeze    = 1.0f - expf(-1.0f / (fs * 0.015f)); // toggle declick ramp
       // dynamic anti-alias LP from the (steady-state) target speed
