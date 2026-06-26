@@ -58,6 +58,7 @@ namespace anamnesis
   static const float kGrainHop = 1500.0f;   // spawn interval = 50% overlap
   static const int   kHannLutN = 1024;
   static const float kSpeedMax = 2.0f;       // bipolar Speed range +/-2x
+  static const float kRetrigFadeMs = 4.0f;   // re-trigger crossfade length (ms)
 
   // ---- Stage 2 FDN ----
   static const int kFdnN = 8;
@@ -84,6 +85,7 @@ namespace anamnesis
       addInput(mInL);
       addInput(mInR);
       addInput(mFreeze);
+      addInput(mTrig);
       addOutput(mOutL);
       addOutput(mOutR);
       addParameter(mLength);
@@ -105,7 +107,7 @@ namespace anamnesis
       memset(mTapBuf, 0, sizeof(mTapBuf));
       mLoopWr = 0; mLoopReadPos = 0.0f; mLoopLpZ = 0.0f;
       mSpeedZ = 1.0f; mLoopLenZ = 24000.0f; mFreezeZ = 0.0f;
-      mStretchHead = 0.0f; mGrainSpawnCtr = 0;
+      mStretchHead = 0.0f; mGrainSpawnCtr = 0; mRetrigPhase = 1.0f; mOldReadPos = 0.0f;
       for (int i = 0; i < kStretchGrains; i++) { mGrainActive[i] = false; mGrainPos[i] = 0.0f; mGrainEnvPh[i] = 0.0f; }
       for (int i = 0; i < kHannLutN; i++)
         mHannLut[i] = 0.5f - 0.5f * cosf(2.0f * kPi * (float)i / (float)(kHannLutN - 1));
@@ -138,6 +140,7 @@ namespace anamnesis
     od::Inlet     mInL{"In L"};
     od::Inlet     mInR{"In R"};
     od::Inlet     mFreeze{"Freeze"};        // gate/toggle: hold the loop
+    od::Inlet     mTrig{"Trig"};            // trigger: re-anchor playback to "now"
     od::Outlet    mOutL{"Out L"};
     od::Outlet    mOutR{"Out R"};
 
@@ -213,6 +216,7 @@ namespace anamnesis
 
       // ---- controls ----
       const float *fzBuf = mFreeze.buffer();
+      const float *trigBuf = mTrig.buffer();
       const bool stretchMode = (mMode.value() == 2);
       float lengthN = clampf(mLength.value(), 0.0f, 1.0f);
       float speedN  = clampf(mSpeed.value(), -kSpeedMax, kSpeedMax);  // bipolar rate
@@ -234,6 +238,7 @@ namespace anamnesis
       const float targetSpeed = speedN;
       const float aLoopGlide = 1.0f - expf(-1.0f / (fs * 0.040f)); // Speed/Length glide
       const float aFreeze    = 1.0f - expf(-1.0f / (fs * 0.015f)); // toggle declick ramp
+      const float retrigInc  = 1.0f / (kRetrigFadeMs * 0.001f * fs); // re-trigger attack
       // dynamic anti-alias LP from the (steady-state) target speed
       float aspd = targetSpeed < 0.0f ? -targetSpeed : targetSpeed;
       float aLoopLp = 1.0f;
@@ -297,6 +302,21 @@ namespace anamnesis
         mLoopBuf[mLoopWr] = mFreezeZ * mLoopBuf[mLoopWr] + (1.0f - mFreezeZ) * xIn;
         mLoopWr++; if (mLoopWr >= Lint) mLoopWr = 0;
 
+        // Capture/re-trigger: a rising edge restarts playback from "now"
+        // (read = the live write head -> plays the last Length window from
+        // its start). Clock it for rhythmic stutter.
+        bool trigHigh = trigBuf[n] >= 0.5f;
+        if (trigHigh && !mTrigPrev)
+        {
+          mOldReadPos = mLoopReadPos;            // old Tape head keeps its trajectory
+          mLoopReadPos = (float)mLoopWr;         // new head jumps to "now"
+          mStretchHead = (float)mLoopWr;         // re-anchor the Stretch source
+          mGrainSpawnCtr = 0;                    // spawn a fresh grain now; DON'T kill
+                                                 // old grains -> they fade out (overlap)
+          mRetrigPhase = stretchMode ? 1.0f : 0.0f; // Tape crossfades; Stretch self-overlaps
+        }
+        mTrigPrev = trigHigh;
+
         float looperOut;
         if (stretchMode)
         {
@@ -336,17 +356,37 @@ namespace anamnesis
         }
         else
         {
-          // ---- TAPE: single-head variable-speed (pitch+time coupled). ----
+          // ---- TAPE: variable-speed head, with a two-head CROSSFADE on
+          // re-trigger -- the old head keeps its trajectory and fades out
+          // while the new head fades in (complementary gains -> constant
+          // amplitude, no onset dip; the Clouds freeze-loop structure). ----
           if (!(mLoopReadPos >= 0.0f && mLoopReadPos < Lf))
           {
             if (!isfinitef(mLoopReadPos)) mLoopReadPos = 0.0f;
             else { mLoopReadPos = fmodf(mLoopReadPos, Lf); if (mLoopReadPos < 0.0f) mLoopReadPos += Lf; }
           }
-          float lp = readLoopHermite(mLoopReadPos, Lint);
+          float newS = readLoopHermite(mLoopReadPos, Lint);
           float dseam = mLoopReadPos < (Lf - mLoopReadPos) ? mLoopReadPos : (Lf - mLoopReadPos);
-          if (dseam < kSeamXf) lp *= 0.5f - 0.5f * cosf(kPi * dseam / kSeamXf);
+          if (dseam < kSeamXf) newS *= 0.5f - 0.5f * cosf(kPi * dseam / kSeamXf);
           mLoopReadPos += mSpeedZ;
-          mLoopLpZ += aLoopLp * (lp - mLoopLpZ); // dynamic AA LP
+
+          float lp;
+          if (mRetrigPhase < 1.0f)
+          {
+            if (!(mOldReadPos >= 0.0f && mOldReadPos < Lf))
+            {
+              if (!isfinitef(mOldReadPos)) mOldReadPos = 0.0f;
+              else { mOldReadPos = fmodf(mOldReadPos, Lf); if (mOldReadPos < 0.0f) mOldReadPos += Lf; }
+            }
+            float oldS = readLoopHermite(mOldReadPos, Lint);
+            mOldReadPos += mSpeedZ;
+            mRetrigPhase += retrigInc;
+            if (mRetrigPhase > 1.0f) mRetrigPhase = 1.0f;
+            lp = oldS + (newS - oldS) * mRetrigPhase;  // linear crossfade old->new
+          }
+          else lp = newS;
+
+          mLoopLpZ += aLoopLp * (lp - mLoopLpZ);       // dynamic AA LP
           looperOut = mLoopLpZ;
         }
         if (!isfinitef(looperOut)) looperOut = 0.0f;   // finite firewall to field
@@ -433,6 +473,8 @@ namespace anamnesis
     bool  mGrainActive[kStretchGrains];
     int   mGrainSpawnCtr;
     float mHannLut[kHannLutN];
+    float mRetrigPhase, mOldReadPos;
+    bool  mTrigPrev = false;
     float mLine[kFdnN][kFdnBufLen];
     float mAp[kApN][kApMax];
     int   mApWr[kApN];

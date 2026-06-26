@@ -70,6 +70,11 @@ function Anamnesis:onLoadGraph(channelCount)
   connect(freeze, "Out", op, "Freeze")
   self:addMonoBranch("freeze", freeze, "In", freeze, "Out")
 
+  local trig = self:addObject("trig", app.Comparator())
+  trig:setTriggerMode()
+  connect(trig, "Out", op, "Trig")
+  self:addMonoBranch("trig", trig, "In", trig, "Out")
+
   local size = self:addObject("size", app.ParameterAdapter())
   size:hardSet("Bias", 0.5)
   tie(op, "Size", size, "Out")
@@ -136,6 +141,12 @@ function Anamnesis:onLoadViews()
       description = "Freeze -- hold the loop (toggle / gate)",
       branch = self.branches.freeze,
       comparator = self.objects.freeze
+    },
+    trig = Gate {
+      button = "trig",
+      description = "Trig -- re-trigger / capture from now (clock for rhythmic stutter)",
+      branch = self.branches.trig,
+      comparator = self.objects.trig
     },
     size = GainBias {
       button = "size",
@@ -204,7 +215,7 @@ function Anamnesis:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "mode", "length", "speed", "freeze", "size", "decay", "diffusion", "density", "mod", "mix" },
+    expanded = { "mode", "length", "speed", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "mix" },
     collapsed = {}
   }
 end
