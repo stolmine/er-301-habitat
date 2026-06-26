@@ -110,6 +110,11 @@ function Anamnesis:onLoadGraph(channelCount)
   tie(op, "Clock", clock, "Out")
   self:addMonoBranch("clock", clock, "In", clock, "Out")
 
+  local grit = self:addObject("grit", app.ParameterAdapter())
+  grit:hardSet("Bias", 0.5)
+  tie(op, "Grit", grit, "Out")
+  self:addMonoBranch("grit", grit, "In", grit, "Out")
+
   local mix = self:addObject("mix", app.ParameterAdapter())
   mix:hardSet("Bias", 0.4)
   tie(op, "Mix", mix, "Out")
@@ -235,6 +240,17 @@ function Anamnesis:onLoadViews()
       biasPrecision = 2,
       initialBias = 1.0
     },
+    grit = GainBias {
+      button = "grit",
+      description = "Grit -- clean interp (0) .. ZOH (0.5) .. broken bitcrush (1)",
+      branch = self.branches.grit,
+      gainbias = self.objects.grit,
+      range = self.objects.grit,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.5
+    },
     mix = GainBias {
       button = "mix",
       description = "Mix -- dry/wet",
@@ -247,7 +263,7 @@ function Anamnesis:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "clock", "mix" },
+    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "clock", "grit", "mix" },
     collapsed = {}
   }
 end

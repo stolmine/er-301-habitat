@@ -4,6 +4,10 @@
 // with a continuously-morphing spatial field, cross-fed and Spiral-governed.
 // Internal-stereo (one object, shared coherent L/R field).
 //
+// Phase 3.2 (0.2.0.16): clean<->broken GRIT axis. Grit crossfades the wet
+//   reconstruction clean linear-interp (0) -> broken ZOH (0.5), then adds
+//   bit-crush (0.5->1, to ~6-bit). Default 0.5 = ZOH only = the pre-Grit
+//   sound (bit-identical at Clock=1). Builds on:
 // Phase 3.1 (0.2.0.13): the global CLOCK. The looper+field sub-engine advances
 //   at a reduced internal rate Fc = Fs/R (R snaps to musical steps 1..16) via a
 //   fire-gate; the wet is ZOH-held between steps. One knob -> reverb + loop +
@@ -116,6 +120,7 @@ namespace anamnesis
       addParameter(mDensity);
       addParameter(mMod);
       addParameter(mClock);
+      addParameter(mGrit);
       addParameter(mMix);
       addOption(mMode);
       mMode.set(1);                 // default Tape (1=Tape, 2=Stretch)
@@ -132,6 +137,7 @@ namespace anamnesis
       mEnvFast = 0.0f; mEnvSlow = 0.0f; mEnvRefractory = 0;
       mCaptureHold = false; mCaptureHoldZ = 0.0f; mCaptureTimer = 0;
       mClockPhase = 0.0f; mWetL = 0.0f; mWetR = 0.0f; mRecRateRef = 1.0f;
+      mWetPrevL = 0.0f; mWetPrevR = 0.0f;
       for (int i = 0; i < kStretchGrains; i++) { mGrainActive[i] = false; mGrainPos[i] = 0.0f; mGrainEnvPh[i] = 0.0f; }
       for (int i = 0; i < kHannLutN; i++)
         mHannLut[i] = 0.5f - 0.5f * cosf(2.0f * kPi * (float)i / (float)(kHannLutN - 1));
@@ -177,6 +183,7 @@ namespace anamnesis
     od::Parameter mDensity{"Density", 0.5f};
     od::Parameter mMod{"Mod", 0.3f};
     od::Parameter mClock{"Clock", 1.0f};    // 1 = full rate; down = slower/lower/grittier
+    od::Parameter mGrit{"Grit", 0.5f};      // clean(0) <- interp | ZOH -> broken(1) bitcrush
     od::Parameter mMix{"Mix", 0.4f};
     od::Option    mMode{"Mode"};            // 1=Tape (var-speed), 2=Stretch (granular)
 
@@ -320,6 +327,13 @@ namespace anamnesis
       if (clockIdx < 0) clockIdx = 0; else if (clockIdx >= kClockSteps) clockIdx = kClockSteps - 1;
       const float clockInc = 1.0f / (float)kClockR[clockIdx];
       const float Rcur = (float)kClockR[clockIdx];
+      // Grit: 0..0.5 crossfades clean linear-interp -> broken ZOH reconstruction;
+      // 0.5..1 adds bit-crush. 0.5 = ZOH only (matches pre-Grit behavior).
+      const float gritN = clampf(mGrit.value(), 0.0f, 1.0f);
+      float reconBroken = gritN * 2.0f;        if (reconBroken > 1.0f) reconBroken = 1.0f;
+      float crushAmt    = gritN * 2.0f - 1.0f; if (crushAmt < 0.0f)    crushAmt = 0.0f;
+      const float crushLevels = powf(2.0f, 16.0f - crushAmt * 10.0f); // 16-bit .. 6-bit
+      const float crushInv = 1.0f / crushLevels;
 
       for (int n = 0; n < FRAMELENGTH; n++)
       {
@@ -333,6 +347,7 @@ namespace anamnesis
         if (mClockPhase >= 1.0f)
         {
           mClockPhase -= 1.0f;
+          mWetPrevL = mWetL; mWetPrevR = mWetR;   // previous step (for clean interp)
           mSizeScaleZ += aSize * (sizeScaleTgt - mSizeScaleZ);
 
         // ================= MICRO-LOOPER (Tape): capture + var-speed read =====
@@ -531,10 +546,17 @@ namespace anamnesis
         mWetR = tapR + mDensityZ * (fdnR - tapR);
         } // ---- end CLOCK sub-engine step ----
 
-        // reconstruct the wet at Fs (ZOH hold between sub-engine steps), then
-        // mix against the full-rate clean dry.
-        outL[n] = dryL + mix * (mWetL - dryL);
-        outR[n] = dryR + mix * (mWetR - dryR);
+        // reconstruct wet at Fs -- Grit crossfades clean linear-interp <-> broken
+        // ZOH, then bit-crushes. t = fraction since the last sub-engine step.
+        const float ct = mClockPhase;
+        float wL = mWetPrevL + (mWetL - mWetPrevL) * ct;
+        float wR = mWetPrevR + (mWetR - mWetPrevR) * ct;
+        wL += reconBroken * (mWetL - wL);
+        wR += reconBroken * (mWetR - wR);
+        wL = floorf(wL * crushLevels + 0.5f) * crushInv;
+        wR = floorf(wR * crushLevels + 0.5f) * crushInv;
+        outL[n] = dryL + mix * (wL - dryL);
+        outR[n] = dryR + mix * (wR - dryR);
       }
     }
 
@@ -563,7 +585,7 @@ namespace anamnesis
     bool  mCaptureHold;
     float mCaptureHoldZ;
     int   mCaptureTimer;
-    float mClockPhase, mWetL, mWetR;
+    float mClockPhase, mWetL, mWetR, mWetPrevL, mWetPrevR;
     float mRecRateRef;   // clock R at which the buffered content was recorded
     float mLine[kFdnN][kFdnBufLen];
     float mAp[kApN][kApMax];
