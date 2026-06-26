@@ -65,6 +65,11 @@ function Anamnesis:onLoadGraph(channelCount)
   tie(op, "Speed", speed, "Out")
   self:addMonoBranch("speed", speed, "In", speed, "Out")
 
+  local sense = self:addObject("sense", app.ParameterAdapter())
+  sense:hardSet("Bias", 0.5)
+  tie(op, "Sense", sense, "Out")
+  self:addMonoBranch("sense", sense, "In", sense, "Out")
+
   local freeze = self:addObject("freeze", app.Comparator())
   freeze:setToggleMode()
   connect(freeze, "Out", op, "Freeze")
@@ -110,9 +115,9 @@ function Anamnesis:onLoadViews()
   return {
     mode = OptionControl {
       button = "mode",
-      description = "Looper mode (Tape = var-speed / Stretch = time-stretch)",
+      description = "Looper mode (Tape=var-speed / Stretch=time-stretch / Env=auto-slice)",
       option = self.objects.op:getOption("Mode"),
-      choices = { "Tape", "Stretch" }
+      choices = { "Tape", "Stretch", "Env" }
     },
     length = GainBias {
       button = "len",
@@ -147,6 +152,17 @@ function Anamnesis:onLoadViews()
       description = "Trig -- re-trigger / capture from now (clock for rhythmic stutter)",
       branch = self.branches.trig,
       comparator = self.objects.trig
+    },
+    sense = GainBias {
+      button = "sens",
+      description = "Sense -- Env-mode transient sensitivity (auto-slice threshold)",
+      branch = self.branches.sense,
+      gainbias = self.objects.sense,
+      range = self.objects.sense,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.5
     },
     size = GainBias {
       button = "size",
@@ -215,7 +231,7 @@ function Anamnesis:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "mode", "length", "speed", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "mix" },
+    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "mix" },
     collapsed = {}
   }
 end

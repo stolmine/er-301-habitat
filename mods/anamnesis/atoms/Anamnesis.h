@@ -4,6 +4,14 @@
 // with a continuously-morphing spatial field, cross-fed and Spiral-governed.
 // Internal-stereo (one object, shared coherent L/R field).
 //
+// Phase 2.4c (0.2.0.12): MOMENTARY CAPTURE on trigger -- a fire (manual Trig
+//   or Env onset) briefly holds recording (~one slice, auto-release) so the
+//   re-triggered window is a clean FROZEN snapshot that loops -> crisp
+//   stutter / beat-repeat instead of a moving-target judder. Builds on:
+// Phase 2.4 (0.2.0.11): Trig capture/re-trigger gate (two-head crossfade
+//   declick) + ENV mode -- a fast/slow peak-follower transient detector
+//   auto-fires the re-trigger on input onsets (Sense = threshold), so the
+//   loop re-slices itself to playing dynamics. Builds on:
 // Phase 2.3 (0.2.0.6): adds STRETCH mode (granular time-stretch) + a Mode
 //   selector (Tape / Stretch). In Stretch the source playhead moves at the
 //   TIME rate (Speed) while grains replay at UNITY pitch -> time and pitch
@@ -59,6 +67,7 @@ namespace anamnesis
   static const int   kHannLutN = 1024;
   static const float kSpeedMax = 2.0f;       // bipolar Speed range +/-2x
   static const float kRetrigFadeMs = 4.0f;   // re-trigger crossfade length (ms)
+  static const float kEnvFloor = 0.003f;     // Env-mode auto-trigger floor (~-50 dB)
 
   // ---- Stage 2 FDN ----
   static const int kFdnN = 8;
@@ -90,6 +99,7 @@ namespace anamnesis
       addOutput(mOutR);
       addParameter(mLength);
       addParameter(mSpeed);
+      addParameter(mSense);
       addParameter(mSize);
       addParameter(mDecay);
       addParameter(mDiffusion);
@@ -108,6 +118,8 @@ namespace anamnesis
       mLoopWr = 0; mLoopReadPos = 0.0f; mLoopLpZ = 0.0f;
       mSpeedZ = 1.0f; mLoopLenZ = 24000.0f; mFreezeZ = 0.0f;
       mStretchHead = 0.0f; mGrainSpawnCtr = 0; mRetrigPhase = 1.0f; mOldReadPos = 0.0f;
+      mEnvFast = 0.0f; mEnvSlow = 0.0f; mEnvRefractory = 0;
+      mCaptureHold = false; mCaptureHoldZ = 0.0f; mCaptureTimer = 0;
       for (int i = 0; i < kStretchGrains; i++) { mGrainActive[i] = false; mGrainPos[i] = 0.0f; mGrainEnvPh[i] = 0.0f; }
       for (int i = 0; i < kHannLutN; i++)
         mHannLut[i] = 0.5f - 0.5f * cosf(2.0f * kPi * (float)i / (float)(kHannLutN - 1));
@@ -146,6 +158,7 @@ namespace anamnesis
 
     od::Parameter mLength{"Length", 0.4f};
     od::Parameter mSpeed{"Speed", 1.0f};    // bipolar -2..2x rate; 1.0 = +1x
+    od::Parameter mSense{"Sense", 0.5f};    // Env-mode transient sensitivity
     od::Parameter mSize{"Size", 0.5f};
     od::Parameter mDecay{"Decay", 0.5f};
     od::Parameter mDiffusion{"Diffusion", 0.6f};
@@ -217,9 +230,12 @@ namespace anamnesis
       // ---- controls ----
       const float *fzBuf = mFreeze.buffer();
       const float *trigBuf = mTrig.buffer();
-      const bool stretchMode = (mMode.value() == 2);
+      const int    mode = mMode.value();
+      const bool   stretchMode = (mode == 2);
+      const bool   envMode = (mode == 3);
       float lengthN = clampf(mLength.value(), 0.0f, 1.0f);
       float speedN  = clampf(mSpeed.value(), -kSpeedMax, kSpeedMax);  // bipolar rate
+      float senseN  = clampf(mSense.value(), 0.0f, 1.0f);
       float sizeN   = clampf(mSize.value(), 0.0f, 1.0f);
       float decayN  = clampf(mDecay.value(), 0.0f, 1.0f);
       float diffN   = clampf(mDiffusion.value(), 0.0f, 1.0f);
@@ -239,6 +255,14 @@ namespace anamnesis
       const float aLoopGlide = 1.0f - expf(-1.0f / (fs * 0.040f)); // Speed/Length glide
       const float aFreeze    = 1.0f - expf(-1.0f / (fs * 0.015f)); // toggle declick ramp
       const float retrigInc  = 1.0f / (kRetrigFadeMs * 0.001f * fs); // re-trigger attack
+      const float aCapture   = 1.0f - expf(-1.0f / (fs * 0.004f));   // capture-hold ramp
+      const int   captureMin = (int)(0.2f * fs);                     // min hold (~200 ms)
+      // Env-mode transient detector: fast peak vs slow average; trigger when
+      // fast exceeds slow * threshMult. Sense raises sensitivity (lowers it).
+      const float envFastDecay = expf(-1.0f / (fs * 0.015f));        // 15 ms
+      const float envSlowA     = 1.0f - expf(-1.0f / (fs * 0.150f)); // 150 ms
+      const float threshMult   = 4.0f - senseN * 2.8f;               // sens 0->4x, 1->1.2x
+      const int   envRefr      = (int)(0.05f * fs);                  // 50 ms refractory
       // dynamic anti-alias LP from the (steady-state) target speed
       float aspd = targetSpeed < 0.0f ? -targetSpeed : targetSpeed;
       float aLoopLp = 1.0f;
@@ -288,6 +312,11 @@ namespace anamnesis
         // ================= MICRO-LOOPER (Tape): capture + var-speed read =====
         const float xIn = (dryL + dryR) * 0.5f;
 
+        // envelope follower (drives Env-mode auto-trigger)
+        float ax = xIn < 0.0f ? -xIn : xIn;
+        mEnvFast = ax > mEnvFast ? ax : mEnvFast * envFastDecay;
+        mEnvSlow += envSlowA * (ax - mEnvSlow);
+
         // per-sample Speed/Length glide (REPITCH-style; no zipper)
         mLoopLenZ += aLoopGlide * (targetLen - mLoopLenZ);
         mSpeedZ   += aLoopGlide * (targetSpeed - mSpeedZ);
@@ -298,15 +327,29 @@ namespace anamnesis
         // Freeze TOGGLE gate (0/1) + sound-on-sound capture (both modes).
         float fzTarget = (fzBuf[n] >= 0.5f) ? 1.0f : 0.0f;
         mFreezeZ += aFreeze * (fzTarget - mFreezeZ);
+        // momentary capture: a trigger holds recording for ~one slice so the
+        // re-triggered window is a CLEAN frozen snapshot (crisp stutter, not a
+        // moving-target judder); auto-releases unless re-fired. Combines with
+        // the manual Freeze toggle.
+        if (mCaptureTimer > 0 && --mCaptureTimer == 0) mCaptureHold = false;
+        mCaptureHoldZ += aCapture * ((mCaptureHold ? 1.0f : 0.0f) - mCaptureHoldZ);
+        float effFreeze = 1.0f - (1.0f - mFreezeZ) * (1.0f - mCaptureHoldZ);
         if (mLoopWr >= Lint) mLoopWr %= Lint;
-        mLoopBuf[mLoopWr] = mFreezeZ * mLoopBuf[mLoopWr] + (1.0f - mFreezeZ) * xIn;
+        mLoopBuf[mLoopWr] = effFreeze * mLoopBuf[mLoopWr] + (1.0f - effFreeze) * xIn;
         mLoopWr++; if (mLoopWr >= Lint) mLoopWr = 0;
 
         // Capture/re-trigger: a rising edge restarts playback from "now"
         // (read = the live write head -> plays the last Length window from
         // its start). Clock it for rhythmic stutter.
         bool trigHigh = trigBuf[n] >= 0.5f;
-        if (trigHigh && !mTrigPrev)
+        bool fire = (trigHigh && !mTrigPrev);
+        if (envMode && mEnvRefractory <= 0 && mEnvFast > mEnvSlow * threshMult && ax > kEnvFloor)
+        {
+          fire = true;
+          mEnvRefractory = envRefr;             // auto-trigger from input transient
+        }
+        if (mEnvRefractory > 0) mEnvRefractory--;
+        if (fire)
         {
           mOldReadPos = mLoopReadPos;            // old Tape head keeps its trajectory
           mLoopReadPos = (float)mLoopWr;         // new head jumps to "now"
@@ -314,6 +357,8 @@ namespace anamnesis
           mGrainSpawnCtr = 0;                    // spawn a fresh grain now; DON'T kill
                                                  // old grains -> they fade out (overlap)
           mRetrigPhase = stretchMode ? 1.0f : 0.0f; // Tape crossfades; Stretch self-overlaps
+          mCaptureHold = true;                   // hold the snapshot (momentary capture)
+          mCaptureTimer = Lint > captureMin ? Lint : captureMin;
         }
         mTrigPrev = trigHigh;
 
@@ -474,7 +519,12 @@ namespace anamnesis
     int   mGrainSpawnCtr;
     float mHannLut[kHannLutN];
     float mRetrigPhase, mOldReadPos;
+    float mEnvFast, mEnvSlow;
+    int   mEnvRefractory;
     bool  mTrigPrev = false;
+    bool  mCaptureHold;
+    float mCaptureHoldZ;
+    int   mCaptureTimer;
     float mLine[kFdnN][kFdnBufLen];
     float mAp[kApN][kApMax];
     int   mApWr[kApN];
