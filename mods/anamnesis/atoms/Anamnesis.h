@@ -1,34 +1,25 @@
 // anamnesis::Anamnesis
 //
-// Spatial-glitch instrument (CM4-only): a short-buffer micro-looper
-// fused with a continuously-morphing spatial field via a global CLOCK,
-// cross-fed and Spiral-governed. Internal-stereo (one object, shared
-// coherent L/R field).
+// Spatial-glitch instrument (CM4-only): a short-buffer micro-looper fused
+// with a continuously-morphing spatial field, cross-fed and Spiral-governed.
+// Internal-stereo (one object, shared coherent L/R field).
 //
-// Phase 1.4 (0.1.0.5): adds per-line FDN delay modulation (Mod) -- slow
-// decorrelated sub-Hz LFOs break standing waves / metallic ringing and
-// add lush chorus, the FDN-liveliness step. Builds on:
-// Phase 1.3 (0.1.0.4): the spatial field, BOTH stages of the Moorer
-// separation that resolves the Network cascade-FDN postmortem, plus the
-// Erbe-Verb alpha-matrix morph -- the complete "plexus" axis.
-//   STAGE 1 -- sparse FEEDFORWARD early-reflection taps off their own
-//     buffer (NEVER in a feedback loop): N addressable taps, ping-pong
-//     pan, light decorrelating jitter. The "glitchy/addressable" pole.
-//   STAGE 2 -- unitary N=8 FDN tail, per-line Jot T60 decay (size-
-//     independent; offline-validated) + 4-stage Schroeder input diffuser.
-//   DENSITY (the plexus macro) drives BOTH: (a) crossfade Stage-1 taps ->
-//     Stage-2 FDN, AND (b) the FDN feedback matrix A(a) = I - a*(2/N)11^T
-//     from identity (a=0: 8 independent combs, sparse looping modes) to
-//     full Householder (a=1: dense diffuse wash). So the WHOLE field
-//     travels sparse->dense, not just the tap/wash balance.
-// Size glides per-sample (REPITCH) so sweeps Doppler-glide, no zipper.
+// Phase 2.1 (0.2.0.1): adds the micro-LOOPER front-end (Tape mode core).
+//   Always-listening circular capture; Hermite variable-speed playback
+//   with a discrete musical Speed LUT (reverse / stalled / forward); a
+//   dynamic anti-alias LP for fast reads. The looper output FEEDS the
+//   field -- the room is built from the glitched fragments. Overdub/fade/
+//   freeze = 2.2, Stretch = 2.3, Env = 2.4 (99-build-order.md).
 //
-// DESIGN LAW (postmortem): the FDN loop stays UNITARY; the sparse taps
-// are FEEDFORWARD only, never a weighted tap-sum inside the loop.
+// Phase 1 (complete) -- the spatial field:
+//   STAGE 1 sparse FEEDFORWARD early-reflection taps (addressable "glitch"
+//     pole); STAGE 2 unitary N=8 FDN tail, per-line Jot T60 (size-indep.,
+//     rig-validated) + Schroeder input diffuser; DENSITY = the plexus macro
+//     (tap<->FDN crossfade + Erbe-Verb A(a)=I-a(2/N)11^T matrix morph);
+//     per-line delay MOD (de-metallic). Size glides per-sample (REPITCH).
 //
-// Looper, CLOCK, and cross-feedback arrive in later phases per
-// planning/spatial-glitch-impl/99-build-order.md. No third-party
-// branding per feedback_no_third_party_branding.
+// DESIGN LAW (postmortem): the FDN loop stays UNITARY; sparse taps are
+// FEEDFORWARD only. No third-party branding per feedback_no_third_party_branding.
 
 #pragma once
 
@@ -43,24 +34,31 @@ namespace anamnesis
 
   static const float kPi = 3.14159265358979f;
 
+  // ---- Looper ----
+  static const int   kLoopBufLen = 96000;   // 2 s @ 48k (mono capture)
+  static const float kLoopMinSec = 0.02f;
+  static const float kLoopMaxSec = 2.0f;
+  // discrete musical Speed steps (Mood-style), stalled at center
+  static const int   kSpeedSteps = 9;
+  static const float kSpeedLut[kSpeedSteps] =
+    {-4.0f, -2.0f, -1.0f, -0.5f, 0.0f, 0.5f, 1.0f, 2.0f, 4.0f};
+
   // ---- Stage 2 FDN ----
   static const int kFdnN = 8;
   static const int kFdnBase[kFdnN] = {1669, 1987, 2311, 2833, 3299, 3671, 4049, 4447};
   static const float kSizeMin   = 0.25f;
   static const float kSizeMax   = 2.0f;
-  static const int   kFdnBufLen = 9000;   // > 4447 * kSizeMax
+  static const int   kFdnBufLen = 9000;
 
-  // input diffuser: 4 series Schroeder allpasses
   static const int kApN = 4;
   static const int kApLen[kApN] = {113, 211, 337, 449};
   static const int kApMax = 449;
 
   // ---- Stage 1 sparse taps ----
   static const int kTapN = 12;
-  // base tap delays (samples @ size 1.0), ~20..400 ms, irregular spacing
   static const int kTapBase[kTapN] =
     {960, 1597, 2311, 3001, 4099, 5273, 6571, 8089, 9743, 12101, 15307, 19211};
-  static const int kTapBufLen = 39000;    // > 19211 * kSizeMax
+  static const int kTapBufLen = 39000;
 
   class Anamnesis : public od::Object
   {
@@ -71,6 +69,8 @@ namespace anamnesis
       addInput(mInR);
       addOutput(mOutL);
       addOutput(mOutR);
+      addParameter(mLength);
+      addParameter(mSpeed);
       addParameter(mSize);
       addParameter(mDecay);
       addParameter(mDiffusion);
@@ -78,39 +78,32 @@ namespace anamnesis
       addParameter(mMod);
       addParameter(mMix);
 
+      memset(mLoopBuf, 0, sizeof(mLoopBuf));
       memset(mLine, 0, sizeof(mLine));
       memset(mAp, 0, sizeof(mAp));
       memset(mApWr, 0, sizeof(mApWr));
       memset(mTapBuf, 0, sizeof(mTapBuf));
-      mWr = 0;
-      mTapWr = 0;
-      mSizeScaleZ = 1.0f;
-      mT60Z = 2.0f;
-      mDiffGZ = 0.4f;
-      mDensityZ = 0.5f;
-      mModZ = 0.3f;
+      mLoopWr = 0; mLoopReadPos = 0.0f; mLoopLpZ = 0.0f;
+      mWr = 0; mTapWr = 0;
+      mSizeScaleZ = 1.0f; mT60Z = 2.0f; mDiffGZ = 0.4f; mDensityZ = 0.5f; mModZ = 0.3f;
       mInit = false;
 
-      // Per-tap pan (equal-power ping-pong), gain (decay with delay),
-      // and a slow decorrelated jitter LFO (breaks comb among taps).
       for (int i = 0; i < kTapN; i++)
       {
         float side = (i & 1) ? 1.0f : -1.0f;
         float spread = 0.30f + 0.70f * (float)i / (float)(kTapN - 1);
-        float pan = side * spread;                    // -1..+1
-        float ang = (pan * 0.5f + 0.5f) * (kPi * 0.5f); // 0..pi/2
+        float pan = side * spread;
+        float ang = (pan * 0.5f + 0.5f) * (kPi * 0.5f);
         mPanL[i] = cosf(ang);
         mPanR[i] = sinf(ang);
-        mTapGain[i] = expf(-1.8f * (float)i / (float)(kTapN - 1)); // 1..~0.16
+        mTapGain[i] = expf(-1.8f * (float)i / (float)(kTapN - 1));
         mTapLfoPhase[i] = (float)i * 0.37f;
-        mTapLfoHz[i] = 0.30f + 0.08f * (float)i;       // ~0.3..1.2 Hz
+        mTapLfoHz[i] = 0.30f + 0.08f * (float)i;
       }
-      // Per-line FDN delay-modulation LFOs (decorrelated, sub-Hz): break
-      // standing waves / metallic ringing and add lush chorus.
       for (int i = 0; i < kFdnN; i++)
       {
         mFdnLfoPhase[i] = (float)i * 0.61f;
-        mFdnLfoHz[i] = 0.50f + 0.13f * (float)i;       // ~0.5..1.4 Hz
+        mFdnLfoHz[i] = 0.50f + 0.13f * (float)i;
       }
     }
 
@@ -122,6 +115,8 @@ namespace anamnesis
     od::Outlet    mOutL{"Out L"};
     od::Outlet    mOutR{"Out R"};
 
+    od::Parameter mLength{"Length", 0.4f};
+    od::Parameter mSpeed{"Speed", 0.75f};   // 0.75 -> LUT idx 6 -> 1.0x fwd
     od::Parameter mSize{"Size", 0.5f};
     od::Parameter mDecay{"Decay", 0.5f};
     od::Parameter mDiffusion{"Diffusion", 0.6f};
@@ -136,11 +131,28 @@ namespace anamnesis
       {
         uint64_t fpcr;
         __asm__ volatile("mrs %0, fpcr" : "=r"(fpcr));
-        fpcr |= (1ull << 24); // FZ
+        fpcr |= (1ull << 24);
         __asm__ volatile("msr fpcr, %0" : : "r"(fpcr));
         mFzSet = true;
       }
 #endif
+    }
+
+    // 4-point Hermite (Catmull-Rom) read of the loop buffer.
+    inline float readLoopHermite(float rp, int L)
+    {
+      int i1 = (int)rp;
+      float frac = rp - (float)i1;
+      int i0 = i1 - 1; if (i0 < 0) i0 += L;
+      int i2 = i1 + 1; if (i2 >= L) i2 -= L;
+      int i3 = i1 + 2; if (i3 >= L) i3 -= L;
+      float xm1 = mLoopBuf[i0], x0 = mLoopBuf[i1], x1 = mLoopBuf[i2], x2 = mLoopBuf[i3];
+      float c = (x1 - xm1) * 0.5f;
+      float v = x0 - x1;
+      float w = c + v;
+      float a = w + v + (x2 - x0) * 0.5f;
+      float bneg = w + a;
+      return ((a * frac - bneg) * frac + c) * frac + x0;
     }
 
     inline float readLine(int i, float d)
@@ -172,15 +184,39 @@ namespace anamnesis
 
       const float fs = (float)globalConfig.sampleRate;
 
-      float sizeN = clampf(mSize.value(), 0.0f, 1.0f);
-      float decayN = clampf(mDecay.value(), 0.0f, 1.0f);
-      float diffN = clampf(mDiffusion.value(), 0.0f, 1.0f);
+      // ---- controls ----
+      float lengthN = clampf(mLength.value(), 0.0f, 1.0f);
+      float speedN  = clampf(mSpeed.value(), 0.0f, 1.0f);
+      float sizeN   = clampf(mSize.value(), 0.0f, 1.0f);
+      float decayN  = clampf(mDecay.value(), 0.0f, 1.0f);
+      float diffN   = clampf(mDiffusion.value(), 0.0f, 1.0f);
       float density = clampf(mDensity.value(), 0.0f, 1.0f);
-      float modN = clampf(mMod.value(), 0.0f, 1.0f);
-      float mix = clampf(mMix.value(), 0.0f, 1.0f);
+      float modN    = clampf(mMod.value(), 0.0f, 1.0f);
+      float mix     = clampf(mMix.value(), 0.0f, 1.0f);
+
+      // looper loop length + discrete speed (block-rate; speed steps are
+      // instant by design -- a tape-speed change, no click).
+      int Lint = (int)((kLoopMinSec + lengthN * (kLoopMaxSec - kLoopMinSec)) * fs);
+      if (Lint < 64) Lint = 64;
+      if (Lint > kLoopBufLen) Lint = kLoopBufLen;
+      const float Lf = (float)Lint;
+      if (mLoopWr >= Lint) mLoopWr %= Lint;
+      if (mLoopReadPos >= Lf) mLoopReadPos = fmodf(mLoopReadPos, Lf);
+      if (mLoopReadPos < 0.0f) mLoopReadPos = 0.0f;
+      int sidx = (int)(speedN * (kSpeedSteps - 1) + 0.5f);
+      if (sidx < 0) sidx = 0; if (sidx >= kSpeedSteps) sidx = kSpeedSteps - 1;
+      const float speed = kSpeedLut[sidx];
+      // dynamic anti-alias LP: transparent for |speed|<=1, rolls off for fast reads
+      float aspd = speed < 0.0f ? -speed : speed;
+      float aLoopLp = 1.0f;
+      if (aspd > 1.0f)
+      {
+        float fc = 0.5f / aspd;                // normalized cutoff
+        aLoopLp = 1.0f - expf(-2.0f * kPi * fc);
+      }
 
       const float sizeScaleTgt = kSizeMin + sizeN * (kSizeMax - kSizeMin);
-      const float t60Tgt = 0.2f * powf(100.0f, decayN); // 0.2..20 s
+      const float t60Tgt = 0.2f * powf(100.0f, decayN);
       const float diffGTgt = diffN * 0.75f;
 
       if (!mInit) { mSizeScaleZ = sizeScaleTgt; mT60Z = t60Tgt; mDiffGZ = diffGTgt; mDensityZ = density; mModZ = modN; mInit = true; }
@@ -189,9 +225,8 @@ namespace anamnesis
       mDiffGZ   += aBlk * (diffGTgt - mDiffGZ);
       mDensityZ += aBlk * (density - mDensityZ);
       mModZ     += aBlk * (modN - mModZ);
-      const float aSize = 1.0f - expf(-1.0f / (fs * 0.040f)); // per-sample REPITCH glide
+      const float aSize = 1.0f - expf(-1.0f / (fs * 0.040f));
 
-      // Stage 2 per-line Jot decay gain (block-rate; slow-moving).
       float g[kFdnN];
       for (int i = 0; i < kFdnN; i++)
       {
@@ -203,33 +238,37 @@ namespace anamnesis
         g[i] = gi;
       }
       const float apG = mDiffGZ;
-      // Erbe-Verb alpha-morph: A(a) = I - a*(2/N)*11^T, a = Density.
-      // a=0 -> identity (8 independent combs, sparse looping modes);
-      // a=1 -> full Householder (dense diffuse wash). Contraction at all
-      // a (stable), lossless on the 7 differential reverb modes.
       const float fMixA = mDensityZ * 2.0f / (float)kFdnN;
       const float kFdnWetGain = 0.5f;
       const float kTapWetGain = 0.35f;
 
-      // tap jitter LFO increments (per sample)
       float lfoInc[kTapN];
       for (int i = 0; i < kTapN; i++) lfoInc[i] = 2.0f * kPi * mTapLfoHz[i] / fs;
-      const float kJitDepth = 2.5f; // samples
+      const float kJitDepth = 2.5f;
       float fdnLfoInc[kFdnN];
       for (int i = 0; i < kFdnN; i++) fdnLfoInc[i] = 2.0f * kPi * mFdnLfoHz[i] / fs;
-      const float modDepth = mModZ * 18.0f; // up to ~18 samples
+      const float modDepth = mModZ * 18.0f;
 
       for (int n = 0; n < FRAMELENGTH; n++)
       {
-        // per-sample Size glide (REPITCH; removes per-block zipper)
         mSizeScaleZ += aSize * (sizeScaleTgt - mSizeScaleZ);
 
         const float dryL = inL[n];
         const float dryR = inR[n];
-        const float xRaw = (dryL + dryR) * 0.5f;
+
+        // ================= MICRO-LOOPER (Tape): capture + var-speed read =====
+        const float xIn = (dryL + dryR) * 0.5f;
+        mLoopBuf[mLoopWr] = xIn;                 // always-listening capture
+        mLoopWr++; if (mLoopWr >= Lint) mLoopWr = 0;
+        float lp = readLoopHermite(mLoopReadPos, Lint);
+        mLoopReadPos += speed;
+        while (mLoopReadPos >= Lf) mLoopReadPos -= Lf;
+        while (mLoopReadPos < 0.0f) mLoopReadPos += Lf;
+        mLoopLpZ += aLoopLp * (lp - mLoopLpZ);   // dynamic AA LP
+        const float looperOut = mLoopLpZ;        // <- field input
 
         // ================= STAGE 1: sparse feedforward taps =================
-        mTapBuf[mTapWr] = xRaw;                   // write raw input
+        mTapBuf[mTapWr] = looperOut;
         float tapL = 0.0f, tapR = 0.0f;
         for (int i = 0; i < kTapN; i++)
         {
@@ -247,8 +286,8 @@ namespace anamnesis
         mTapWr++; if (mTapWr >= kTapBufLen) mTapWr = 0;
 
         // ================= STAGE 2: unitary FDN tail =================
-        float x = xRaw;
-        for (int k = 0; k < kApN; k++)            // 4-stage Schroeder diffuser
+        float x = looperOut;
+        for (int k = 0; k < kApN; k++)
         {
           int idx = mApWr[k];
           float zD = mAp[k][idx];
@@ -273,7 +312,7 @@ namespace anamnesis
         }
         for (int i = 0; i < kFdnN; i++)
         {
-          float mixed = r[i] - fMixA * s;         // alpha-morph: I(0) -> Householder(1)
+          float mixed = r[i] - fMixA * s;
           float w = x + g[i] * mixed;
           if (!isfinitef(w)) w = 0.0f;
           if (w > 8.0f) w = 8.0f; else if (w < -8.0f) w = -8.0f;
@@ -302,6 +341,9 @@ namespace anamnesis
     }
 
     // ---- state ----
+    float mLoopBuf[kLoopBufLen];
+    int   mLoopWr;
+    float mLoopReadPos, mLoopLpZ;
     float mLine[kFdnN][kFdnBufLen];
     float mAp[kApN][kApMax];
     int   mApWr[kApN];

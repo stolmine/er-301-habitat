@@ -47,6 +47,16 @@ function Anamnesis:onLoadGraph(channelCount)
     connect(self, "In1", op, "In R")
   end
 
+  local length = self:addObject("length", app.ParameterAdapter())
+  length:hardSet("Bias", 0.4)
+  tie(op, "Length", length, "Out")
+  self:addMonoBranch("length", length, "In", length, "Out")
+
+  local speed = self:addObject("speed", app.ParameterAdapter())
+  speed:hardSet("Bias", 0.75)
+  tie(op, "Speed", speed, "Out")
+  self:addMonoBranch("speed", speed, "In", speed, "Out")
+
   local size = self:addObject("size", app.ParameterAdapter())
   size:hardSet("Bias", 0.5)
   tie(op, "Size", size, "Out")
@@ -80,6 +90,28 @@ end
 
 function Anamnesis:onLoadViews()
   return {
+    length = GainBias {
+      button = "len",
+      description = "Length -- loop length (~20 ms .. 2 s)",
+      branch = self.branches.length,
+      gainbias = self.objects.length,
+      range = self.objects.length,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.4
+    },
+    speed = GainBias {
+      button = "spd",
+      description = "Speed -- tape speed/dir, 9 steps (-4 .. stall .. +4)",
+      branch = self.branches.speed,
+      gainbias = self.objects.speed,
+      range = self.objects.speed,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.75
+    },
     size = GainBias {
       button = "size",
       description = "Size -- field extent / delay-line lengths (room->hall)",
@@ -147,7 +179,7 @@ function Anamnesis:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "size", "decay", "diffusion", "density", "mod", "mix" },
+    expanded = { "length", "speed", "size", "decay", "diffusion", "density", "mod", "mix" },
     collapsed = {}
   }
 end
