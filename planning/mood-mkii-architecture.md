@@ -194,3 +194,91 @@ parameters. Decide which axes are macros, which are sub-params, which are
 menu/dip-style toggles, and what the multi-out taps should be.
 Cross-references: planning/network-* docs, project_alias_synthesis_paradigm,
 the Mirror design docs, feedback_spiral_feedback_governor.
+
+## 6. Complete control inventory (from the official MIDI manual, CC map)
+
+Authoritative and exhaustive. Symbol key: water-drop = Wet channel, open
+circle = Micro-Looper channel. CC numbers given for reference.
+
+### A. Front panel (physical)
+
+Knobs (7):
+- TIME (CC14) - Wet: Reverb decay/size, Delay time, Slip refresh rate
+- MIX (CC15) - dry/wet blend
+- LENGTH (CC16) - Looper: Env slice size, Tape loop length, Stretch slice size
+- MODIFY [wet] (CC17) - Reverb smear, Delay feedback, Slip speed+direction
+- CLOCK (CC18) - global sample rate (tone+length+quality); stepped
+  2k/3k/4k/6k/8k/12k/16k/24k/32k/48k/64k
+- MODIFY [looper] (CC19) - Tape speed+direction, Stretch amount+direction
+  (the glitch knob)
+- RAMP SPEED (CC20) - rate of the movement/ramp LFO
+
+Three-way toggles (3):
+- Wet Channel mode (CC21): Reverb / Delay / Slip
+- Routing (CC22): Input / Micro-Looper+Input / Micro-Looper only (what the
+  Wet channel processes; only active when both channels on)
+- Micro-Looper mode (CC23): Env / Tape / Stretch
+
+Footswitches (2, tap + hold):
+- Micro-Looper FS: tap = bypass/engage (CC102), hold = Overdub (CC106)
+- Wet FS: tap = bypass/engage (CC103), hold = Freeze (CC105)
+- Both: Tap Tempo (CC107/93); both-on-powerup = set MIDI channel; both + PC
+  = save preset; a combo opens the Hidden Menu (CC104)
+
+Preset toggle (2-way): preset slot 1 (right) / slot 2 (left).
+
+### B. Dip switches (two banks of 8 = 16)
+
+Left bank - Ramping / Expression (assigns the ramp LFO + expression pedal):
+- TIME (61), MODIFY-wet (62), CLOCK (63), MODIFY-looper (64), LENGTH (65) -
+  enable ramp/exp on that knob
+- BOUNCE (66) - bounce/ping-pong movement
+- SWEEP (67) - B vs T sweep shape (exact meaning not in the MIDI map)
+- POLARITY (68) - F vs R (forward / reverse ramp polarity)
+
+Right bank - Customize:
+- CLASSIC (71) - restore original lo-fi character (per-subsystem degradation)
+- MISO (72) - Mono In Stereo Out behavior (inferred from name)
+- SPREAD (73) - stereo spread enable
+- DRY KILL (74) - remove dry signal (100% wet)
+- TRAILS (75) - bypass trails / spillover
+- LATCH (76) - latch vs momentary (used for Freeze)
+- NO DUB (77) - mute loop output during overdub (original hold-to-record)
+- SMOOTH (78) - remove CLOCK stepping for continuous sweep
+
+### C. Hidden menu options (reachable on pedal, also MIDI)
+
+- STEREO WIDTH (CC24)
+- RAMPING WAVEFORM (CC25) - 5 shapes (up ramp / down ramp / triangle /
+  square / random)
+- FADE (CC26) - loop fade-out speed
+- TONE (CC27) - hi-cut / tone
+- LEVEL BALANCE (CC28) - balance between channels
+- DIRECT MICRO-LOOP (CC29) - blend clean micro-loop through the wet side
+- SYNC (CC31) - sync routing: looper>wet / no sync / wet>looper
+- SPREAD (CC32) - which channel gets the spread: wet only / both / looper only
+- BUFFER LENGTH (CC33) - Half (like MkI) / Full (2x). This is the real 2x
+  toggle; the named 5-mode buffer the research killed does not exist.
+
+### D. MIDI-only (no front-panel control)
+
+Global / misc: MIDI Clock Ignore (51), Stop Ramping (52), Clock Division wet
+(53), Clock Division looper (54), True Bypass Mode (55), Factory Reset (56),
+Expression Over MIDI (100), MIDI Reset (110), Preset Save (111); Program
+Change preset recall/save across 122 slots, PC0 = Live mode.
+
+Synth Mode (entirely MIDI): Enter (any MIDI note) / Exit (CC59 or move Clock);
+Output Type (CC58: Open / On-Off / ADSR); Attack (80), Decay (81), Sustain
+(82), Release (83); Octave Transpose (CC57: +1..+9 octaves); Portamento (84);
+Pitch Bend (+/- 4 semitones); Mod Wheel (CC1). Transposes by shifting the
+Clock in semitones; velocity-sensitive; saved globally.
+
+Totals: 7 knobs, 3 toggles, 2 footswitches + preset toggle, 16 dip switches,
+9 hidden-menu options, ~20 MIDI-only parameters (incl. full Synth Mode).
+
+### Correction to Section 2
+
+STEREO WIDTH (CC24) and SPREAD (CC32 / dip 73) DO exist as hidden options /
+dip switches; the earlier refutation only killed a mis-framed claim, not the
+controls themselves. BUFFER LENGTH (Half/Full) is likewise real; only the
+"five named buffer modes" framing was false.
