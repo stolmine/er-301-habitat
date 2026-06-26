@@ -124,6 +124,21 @@ function Anamnesis:onLoadGraph(channelCount)
   mix:hardSet("Bias", 0.4)
   tie(op, "Mix", mix, "Out")
   self:addMonoBranch("mix", mix, "In", mix, "Out")
+
+  local source = self:addObject("source", app.ParameterAdapter())
+  source:hardSet("Bias", 1.0)
+  tie(op, "Source", source, "Out")
+  self:addMonoBranch("source", source, "In", source, "Out")
+
+  local directloop = self:addObject("directloop", app.ParameterAdapter())
+  directloop:hardSet("Bias", 0.0)
+  tie(op, "DirectLoop", directloop, "Out")
+  self:addMonoBranch("directloop", directloop, "In", directloop, "Out")
+
+  local spread = self:addObject("spread", app.ParameterAdapter())
+  spread:hardSet("Bias", 0.5)
+  tie(op, "Spread", spread, "Out")
+  self:addMonoBranch("spread", spread, "In", spread, "Out")
 end
 
 function Anamnesis:onLoadViews()
@@ -283,9 +298,42 @@ function Anamnesis:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.4
+    },
+    source = GainBias {
+      button = "src",
+      description = "Source -- field reverberates input (0) .. loop (1)",
+      branch = self.branches.source,
+      gainbias = self.objects.source,
+      range = self.objects.source,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 1.0
+    },
+    directloop = GainBias {
+      button = "dir",
+      description = "DirectLoop -- clean glitched loop blended to the output",
+      branch = self.branches.directloop,
+      gainbias = self.objects.directloop,
+      range = self.objects.directloop,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
+    },
+    spread = GainBias {
+      button = "sprd",
+      description = "Spread -- stereo width (0 mono / 0.5 normal / 1 wide)",
+      branch = self.branches.spread,
+      gainbias = self.objects.spread,
+      range = self.objects.spread,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.5
     }
   }, {
-    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "regen", "clock", "clockmode", "grit", "mix" },
+    expanded = { "mode", "length", "speed", "sense", "freeze", "trig", "size", "decay", "diffusion", "density", "mod", "regen", "clock", "clockmode", "grit", "mix", "source", "directloop", "spread" },
     collapsed = {}
   }
 end

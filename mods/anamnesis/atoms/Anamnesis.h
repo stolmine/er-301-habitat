@@ -4,6 +4,9 @@
 // with a continuously-morphing spatial field, cross-fed and Spiral-governed.
 // Internal-stereo (one object, shared coherent L/R field).
 //
+// Phase 4.2 (0.2.0.20): the ROUTER. Source (field reverberates input 0 .. loop
+//   1), DirectLoop (clean ZOH-held glitched loop blended to output), Spread
+//   (mid/side stereo width). Defaults (1 / 0 / 0.5) keep the prior sound.
 // Phase 4.1 (0.2.0.19): looper<->field CROSS-FEEDBACK (Regen). The governed
 //   field wet re-enters the looper input, so the reverb tail is re-looped /
 //   re-glitched / re-reverbed -- the controllable-runaway fusion. DC-blocked +
@@ -140,6 +143,9 @@ namespace anamnesis
       addParameter(mClock);
       addParameter(mGrit);
       addParameter(mMix);
+      addParameter(mSource);
+      addParameter(mDirectLoop);
+      addParameter(mSpread);
       addOption(mMode);
       mMode.set(1);                 // default Tape (1=Tape, 2=Stretch)
       mMode.enableSerialization();
@@ -160,6 +166,7 @@ namespace anamnesis
       mClockPhase = 0.0f; mWetL = 0.0f; mWetR = 0.0f; mRecRateRef = 1.0f;
       mWetPrevL = 0.0f; mWetPrevR = 0.0f; mRcurZ = 1.0f;
       mWetFb = 0.0f; mFbDcX1 = 0.0f; mFbDcY1 = 0.0f;
+      mSourceZ = 1.0f; mDirectLoopZ = 0.0f; mSpreadZ = 0.5f; mLoopOutHeld = 0.0f;
       for (int i = 0; i < kStretchGrains; i++) { mGrainActive[i] = false; mGrainPos[i] = 0.0f; mGrainEnvPh[i] = 0.0f; }
       for (int i = 0; i < kHannLutN; i++)
         mHannLut[i] = 0.5f - 0.5f * cosf(2.0f * kPi * (float)i / (float)(kHannLutN - 1));
@@ -208,6 +215,10 @@ namespace anamnesis
     od::Parameter mClock{"Clock", 1.0f};    // 1 = full rate; down = slower/lower/grittier
     od::Parameter mGrit{"Grit", 0.5f};      // clean(0) <- interp | ZOH -> broken(1) bitcrush
     od::Parameter mMix{"Mix", 0.4f};
+    // Router
+    od::Parameter mSource{"Source", 1.0f};      // field source: 0 input .. 1 loop
+    od::Parameter mDirectLoop{"DirectLoop", 0.0f}; // clean loop blended to output
+    od::Parameter mSpread{"Spread", 0.5f};      // width: 0 mono .. 0.5 normal .. 1 wide
     od::Option    mMode{"Mode"};            // 1=Tape (var-speed), 2=Stretch (granular)
     od::Option    mClockMode{"ClockMode"};  // 1=Steps (harmonized), 2=Smooth (glide)
 
@@ -287,6 +298,9 @@ namespace anamnesis
       float modN    = clampf(mMod.value(), 0.0f, 1.0f);
       float regenN  = clampf(mRegen.value(), 0.0f, 1.0f);
       float mix     = clampf(mMix.value(), 0.0f, 1.0f);
+      float sourceN = clampf(mSource.value(), 0.0f, 1.0f);
+      float directN = clampf(mDirectLoop.value(), 0.0f, 1.0f);
+      float spreadN = clampf(mSpread.value(), 0.0f, 1.0f);
 
       // Looper targets -- smoothed PER-SAMPLE below so Speed/Length glide
       // (no zipper; a tape-speed slide between the discrete steps).
@@ -323,6 +337,9 @@ namespace anamnesis
       mDiffGZ   += aBlk * (diffGTgt - mDiffGZ);
       mDensityZ += aBlk * (density - mDensityZ);
       mModZ     += aBlk * (modN - mModZ);
+      mSourceZ     += aBlk * (sourceN - mSourceZ);
+      mDirectLoopZ += aBlk * (directN - mDirectLoopZ);
+      mSpreadZ     += aBlk * (spreadN - mSpreadZ);
       const float aSize = 1.0f - expf(-1.0f / (fs * 0.040f));
 
       float g[kFdnN];
@@ -395,7 +412,8 @@ namespace anamnesis
           float fb = spiralSat(fbDC * (regenN * kRegenMax), kFbGovD);
 
         // ================= MICRO-LOOPER (Tape): capture + var-speed read =====
-        const float xIn = (dryL + dryR) * 0.5f + fb;
+        const float rawIn = (dryL + dryR) * 0.5f;
+        const float xIn = rawIn + fb;
 
         // envelope follower (drives Env-mode auto-trigger)
         float ax = xIn < 0.0f ? -xIn : xIn;
@@ -529,9 +547,12 @@ namespace anamnesis
           looperOut = mLoopLpZ;
         }
         if (!isfinitef(looperOut)) looperOut = 0.0f;   // finite firewall to field
+        mLoopOutHeld = looperOut;                       // for the direct-loop blend
+        // Router Source: the field reverberates input (0) .. loop (1).
+        const float fieldIn = rawIn + mSourceZ * (looperOut - rawIn);
 
         // ================= STAGE 1: sparse feedforward taps =================
-        mTapBuf[mTapWr] = looperOut;
+        mTapBuf[mTapWr] = fieldIn;
         float tapL = 0.0f, tapR = 0.0f;
         for (int i = 0; i < kTapN; i++)
         {
@@ -549,7 +570,7 @@ namespace anamnesis
         mTapWr++; if (mTapWr >= kTapBufLen) mTapWr = 0;
 
         // ================= STAGE 2: unitary FDN tail =================
-        float x = looperOut;
+        float x = fieldIn;
         for (int k = 0; k < kApN; k++)
         {
           int idx = mApWr[k];
@@ -601,8 +622,14 @@ namespace anamnesis
         wR += reconBroken * (mWetR - wR);
         wL = floorf(wL * crushLevels + 0.5f) * crushInv;
         wR = floorf(wR * crushLevels + 0.5f) * crushInv;
-        outL[n] = dryL + mix * (wL - dryL);
-        outR[n] = dryR + mix * (wR - dryR);
+        // Router Spread: mid/side width (0 mono, 0.5 normal, 1 wide).
+        const float mid = (wL + wR) * 0.5f;
+        const float side = (wL - wR) * 0.5f * (mSpreadZ * 2.0f);
+        wL = mid + side; wR = mid - side;
+        // Router DirectLoop: clean (ZOH-held) glitched loop blended in.
+        const float dl = mDirectLoopZ * mLoopOutHeld;
+        outL[n] = dryL + mix * (wL - dryL) + dl;
+        outR[n] = dryR + mix * (wR - dryR) + dl;
       }
     }
 
@@ -643,6 +670,7 @@ namespace anamnesis
     float mRecRateRef;   // clock R at which the buffered content was recorded
     float mRcurZ;        // current (possibly glided) clock R
     float mWetFb, mFbDcX1, mFbDcY1;   // cross-feedback signal + DC-blocker state
+    float mSourceZ, mDirectLoopZ, mSpreadZ, mLoopOutHeld;   // Router
     float mLine[kFdnN][kFdnBufLen];
     float mAp[kApN][kApMax];
     int   mApWr[kApN];
