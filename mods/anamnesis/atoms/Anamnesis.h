@@ -75,6 +75,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
+#include "AnamField.h"   // shared all-over-viz field + ripple constants
 
 namespace anamnesis
 {
@@ -106,6 +107,10 @@ namespace anamnesis
   static const float kFbGovD   = 0.4f;
   static const float kRetrigFadeMs = 4.0f;   // re-trigger crossfade length (ms)
   static const float kEnvFloor = 0.003f;     // Env-mode auto-trigger floor (~-50 dB)
+
+  // Rain-on-pond ripple pool: one droplet spawns per loop cycle (read wrap),
+  // drips into the all-over field, bends every ply's flow lines (07-allover-viz.md).
+  static const int kVizMaxDrops = 12;
 
   // ---- Stage 2 FDN ----
   static const int kFdnN = 8;
@@ -180,6 +185,8 @@ namespace anamnesis
       mWr = 0; mTapWr = 0;
       mSizeScaleZ = 1.0f; mT60Z = 2.0f; mDiffGZ = 0.4f; mDensityZ = 0.5f; mModZ = 0.3f;
       mInit = false;
+      for (int i = 0; i < kVizMaxDrops; i++) { mDropAge[i] = -1.0f; mDropAmp[i] = 1.0f; }
+      mDropPrevRead = 0.0f;
 
       for (int i = 0; i < kTapN; i++)
       {
@@ -247,6 +254,15 @@ namespace anamnesis
     float vizLoopLen()     { return mLoopLenZ; }
     float vizBuffer(int i) { if (i < 0) i = 0; else if (i >= kLoopBufLen) i = kLoopBufLen - 1;
                              return mLoopBuf[i]; }
+    // Rain-on-pond droplets (age < 0 = inactive). Read by every ply's graphic to
+    // bend the flow lines (the pond is shared, so a drop bends across ply seams).
+    int   vizMaxDrops()       { return kVizMaxDrops; }
+    float vizDropX(int i)     { return mDropX[i]; }
+    float vizDropY(int i)     { return mDropY[i]; }
+    float vizDropAge(int i)   { return mDropAge[i]; }
+    float vizDropSpeed(int i) { return mDropSpeed[i]; }
+    float vizDropPhase(int i) { return mDropPhase[i]; }
+    float vizDropAmp(int i)   { return mDropAmp[i]; }
 
     inline void ensureFlushToZero()
     {
@@ -412,6 +428,27 @@ namespace anamnesis
       // AnamFieldGraphic so the all-over image stays in sync. Wrapped to bound float.
       mVizPhase += (float)FRAMELENGTH / fs * (6.2831853f * 0.20f) / Rcur;
       if (mVizPhase > 6.2831853f * 1024.0f) mVizPhase -= 6.2831853f * 1024.0f;
+
+      // Rain: age the active droplets (real seconds), retire the expired, and
+      // spawn one per completed loop cycle (read-pointer wrap since last block).
+      {
+        const float vizDt = (float)FRAMELENGTH / fs;
+        for (int i = 0; i < kVizMaxDrops; i++)
+        {
+          if (mDropAge[i] >= 0.0f)
+          {
+            mDropAge[i] += vizDt;
+            if (mDropAge[i] > anamnesis::field::kRippleLife) mDropAge[i] = -1.0f;
+          }
+        }
+        // A completed loop cycle = the active read head jumping by more than half
+        // the loop (works in any mode/direction: Tape/Env use mLoopReadPos,
+        // Stretch the source head; a normal per-block advance is tiny).
+        const float curRead = stretchMode ? mStretchHead : mLoopReadPos;
+        if (mLoopLenZ > 2.0f && fabsf(curRead - mDropPrevRead) > 0.5f * mLoopLenZ)
+          spawnDrop();
+        mDropPrevRead = curRead;
+      }
       // Grit: 0..0.5 crossfades clean linear-interp -> broken ZOH reconstruction;
       // 0.5..1 adds bit-crush. 0.5 = ZOH only (matches pre-Grit behavior).
       int gritV = mGrit.value();
@@ -680,6 +717,30 @@ namespace anamnesis
       return x < 0.0f ? -s : s;
     }
 
+    // Spawn a rain droplet: free slot else oldest; random epicenter within the
+    // Looper ply, with per-drop speed + phase jitter (avoids a mechanical look).
+    void spawnDrop()
+    {
+      int slot = 0; float oldest = -1.0f;
+      for (int i = 0; i < kVizMaxDrops; i++)
+      {
+        if (mDropAge[i] < 0.0f) { slot = i; oldest = -1.0f; break; }
+        if (mDropAge[i] > oldest) { oldest = mDropAge[i]; slot = i; }
+      }
+      mDropRng = mDropRng * 1664525u + 1013904223u; float ux = (float)((mDropRng >> 9) & 0x7fffff) / 8388607.0f;
+      mDropRng = mDropRng * 1664525u + 1013904223u; float uy = (float)((mDropRng >> 9) & 0x7fffff) / 8388607.0f;
+      mDropRng = mDropRng * 1664525u + 1013904223u; float uc = (float)((mDropRng >> 9) & 0x7fffff) / 8388607.0f;
+      mDropX[slot] = ux * 42.0f;             // content-x within the Looper ply (0..42)
+      mDropY[slot] = 6.0f + uy * 52.0f;      // within the 64px column
+      mDropAge[slot] = 0.0f;
+      mDropSpeed[slot] = 22.0f + uc * 20.0f; // 22..42 px/s: slow rings -> traceable expansion
+      mDropPhase[slot] = ux * 6.2831853f;
+      // Ripple size tracks the loudness of this loop capture (fast peak), with a
+      // baseline so quiet loops still drip.
+      float lvl = mEnvFast * 4.0f; if (lvl > 1.0f) lvl = 1.0f;
+      mDropAmp[slot] = 0.5f + 0.5f * lvl;
+    }
+
     // ---- state ----
     float mLoopBuf[kLoopBufLen];
     int   mLoopWr;
@@ -699,6 +760,13 @@ namespace anamnesis
     float mRecRateRef;   // clock R at which the buffered content was recorded
     float mRcurZ;        // current (possibly glided) clock R
     float mVizPhase = 0.0f;   // all-over flow-field animation phase (07-allover-viz.md)
+    // Rain-on-pond ripple pool. age < 0 = inactive slot. Epicenters in content
+    // pixels (x within the Looper ply's 0..42, y 0..63); age in seconds.
+    float mDropX[kVizMaxDrops], mDropY[kVizMaxDrops], mDropAge[kVizMaxDrops];
+    float mDropSpeed[kVizMaxDrops], mDropPhase[kVizMaxDrops];
+    float mDropAmp[kVizMaxDrops];   // ripple size = loudness of that loop capture
+    uint32_t mDropRng = 0x1234567u;
+    float mDropPrevRead = 0.0f;   // read pos last block, for loop-wrap spawn
     float mWetFb, mFbDcX1, mFbDcY1;   // cross-feedback signal + DC-blocker state
     float mSourceZ, mDirectLoopZ, mSpreadZ, mLoopOutHeld;   // Router
     float mLine[kFdnN][kFdnBufLen];

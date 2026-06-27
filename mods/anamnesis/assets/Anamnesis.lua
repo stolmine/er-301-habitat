@@ -148,6 +148,7 @@ function Anamnesis:onLoadViews()
       op = self.objects.op,
       canvasIndex = 0,
       canvasCount = 6,
+      feature = 1, -- kLooper: raindrop ripples
       defaultParamMode = true,
       subs = {
         { param = self.objects.speed:getParameter("Bias"),  button = "spd", col = 1, map = speedMap,  precision = 2 },

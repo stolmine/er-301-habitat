@@ -59,20 +59,59 @@ namespace anamnesis
       const float phase = mpOp ? mpOp->vizPhase() : 0.0f;
       const int n = field::kStreamlines;
 
+      // Cache the active rain droplets once (epicenters in content-x / column-y),
+      // so the per-point bend loop touches locals, not the op pointer.
+      int nd = 0;
+      float dX[kVizMaxDrops], dY[kVizMaxDrops], dAge[kVizMaxDrops];
+      float dC[kVizMaxDrops], dPh[kVizMaxDrops], dAmp[kVizMaxDrops];
+      if (mpOp)
+      {
+        for (int i = 0; i < kVizMaxDrops; i++)
+        {
+          const float age = mpOp->vizDropAge(i);
+          if (age < 0.0f)
+            continue;
+          dX[nd] = mpOp->vizDropX(i);
+          dY[nd] = mpOp->vizDropY(i);
+          dAge[nd] = age;
+          dC[nd] = mpOp->vizDropSpeed(i);
+          dPh[nd] = mpOp->vizDropPhase(i);
+          dAmp[nd] = mpOp->vizDropAmp(i);
+          nd++;
+        }
+      }
+
+      // Each flow line is sampled at control points every kCtrlStep px (the
+      // expensive flow + rain evals), then Catmull-Rom interpolated to per-pixel
+      // y -> smooth curves, cheap enough to scale the line count.
+      const int cstep = field::kCtrlStep;
+      const int mctrl = (w - 1) / cstep + 4; // incl one margin each side
+      float ctrl[40];
       for (int s = 0; s < n; s++)
       {
         const float yb = field::baseline(s, n, h);
+        for (int i = 0; i < mctrl; i++)
+        {
+          const float cx = (float)(x0 + (i - 1) * cstep);
+          float y0 = yb + field::flow(cx, yb, phase);
+          // Rain bends the line: each droplet's wavefront Y push, scaled by its
+          // capture loudness. Shared pond -> drops bend across ply seams.
+          for (int d = 0; d < nd; d++)
+            y0 += dAmp[d] * field::rippleDispY(cx - dX[d], y0 - dY[d], dAge[d], dC[d], dPh[d]);
+          ctrl[i] = y0;
+        }
         int prevPy = -1000;
         for (int lx = 0; lx < w; lx++)
         {
-          const float cx = (float)(x0 + lx);
-          float yy = yb + field::flow(cx, yb, phase);
-          if (yy < 0.0f)
-            yy = 0.0f;
-          else if (yy > (float)(h - 1))
-            yy = (float)(h - 1);
+          const int seg = lx / cstep;
+          const float t = (float)(lx - seg * cstep) / (float)cstep;
+          float y = field::catmull(ctrl[seg], ctrl[seg + 1], ctrl[seg + 2], ctrl[seg + 3], t);
+          if (y < 0.0f)
+            y = 0.0f;
+          else if (y > (float)(h - 1))
+            y = (float)(h - 1);
           const int px = left + lx;
-          const int py = bot + (int)(yy + 0.5f);
+          const int py = bot + (int)(y + 0.5f);
           // Connect to the previous column so each streamline is unbroken.
           if (prevPy > -1000 && prevPy != py)
           {
@@ -86,6 +125,45 @@ namespace anamnesis
           }
           prevPy = py;
         }
+      }
+
+      // Per-ply feature motif, composed on top of the shared current.
+      switch (mFeature)
+      {
+      case field::feature::kLooper:
+        drawLooper(fb, left, bot, w, x0);
+        break;
+      default:
+        break;
+      }
+    }
+
+    // ---- feature renderers ----
+
+    // Looper: the impact splash. A bright fleck at each young droplet whose
+    // epicenter falls in this ply's content window (the ring's line-bending is
+    // already applied pond-wide above). Fades over the drop's first ~0.35 s.
+    void drawLooper(od::FrameBuffer &fb, int left, int bot, int w, int x0)
+    {
+      if (!mpOp)
+        return;
+      for (int i = 0; i < kVizMaxDrops; i++)
+      {
+        const float age = mpOp->vizDropAge(i);
+        if (age < 0.0f || age > 0.35f)
+          continue;
+        const float ex = mpOp->vizDropX(i);
+        if (ex < (float)x0 || ex >= (float)(x0 + w))
+          continue;
+        const int px = left + (int)(ex - (float)x0);
+        const int py = bot + (int)(mpOp->vizDropY(i) + 0.5f);
+        float bright = 1.0f - age / 0.35f;
+        int c = (int)(GRAY7 + (WHITE - GRAY7) * bright);
+        if (c < GRAY7)
+          c = GRAY7;
+        else if (c > WHITE)
+          c = WHITE;
+        fb.fillCircle(c, px, py, 1);
       }
     }
 #endif
