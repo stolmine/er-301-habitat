@@ -52,6 +52,14 @@ namespace anamnesis
     static const int kStreamlines = 12;
     static const int kCtrlStep    = 4;
 
+    // Streamline illumination (4-bit gray, 0..15). Base brightness scales with
+    // Mix (dry = faint pond, wet = kBaseBright); droplet ring GLOW adds on top,
+    // so ripples read as gradated brightness over the lines (visible rings at
+    // full wet). Bending (geometry) stays independent of Mix.
+    static const float kBaseBright = 12.0f; // streamline brightness at full Mix
+    static const float kBaseDim    = 4.0f;  // streamline brightness at Mix = 0
+    static const float kGlowGain   = 1.0f;  // droplet ring illumination over lines
+
     // ---- Rain-on-pond ripples. A drop radiates as a TRAVELLING WAVE-TRAIN, not
     // a standing vibration: a few smooth Gaussian crests move outward together
     // (radii R, R-lambda, R-2lambda; R = c*age), so each surface point feels each
@@ -65,7 +73,7 @@ namespace anamnesis
     static const float kRippleFan    = 4.0f;  // crests added per second of age (train fans out)
     static const int   kRippleMaxCrests = 6;
     static const float kRippleTrail  = 0.66f; // amplitude ratio per trailing crest
-    static const float kRippleTau    = 0.85f; // temporal decay (s); life = 3*tau (slow linger)
+    static const float kRippleTau    = 1.20f; // temporal decay (s); life = 3*tau (long linger -> drops overlap & interact)
     static const float kRippleA0     = 8.0f;  // train source amplitude (tune w/ kRippleD)
     static const float kRippleD      = 2.4f;  // displacement gain (overall ripple strength)
     static const float kRippleEps    = 1.0f;  // r singularity guard (px)
@@ -101,32 +109,38 @@ namespace anamnesis
       return amp * h;
     }
 
-    // Vertical (Y) displacement from one droplet to a flow-line point at offset
-    // (dx,dy): impact transient + dispersive primary train + one knock-on train,
-    // pushed radially. Cheap front reject; impact stays central.
-    inline float rippleDispY(float dx, float dy, float age, float c, float phase)
+    // One droplet's effect on a flow-line point at offset (dx,dy): BEND (radial
+    // Y push -> geometry) and GLOW (the ring height -> illumination over the
+    // line). impact transient + dispersive primary train + one knock-on train.
+    struct RippleHit { float bend; float glow; };
+    inline RippleHit rippleEval(float dx, float dy, float age, float c)
     {
+      RippleHit out;
+      out.bend = 0.0f;
+      out.glow = 0.0f;
       const float r2 = dx * dx + dy * dy;
       const float R = c * age;
       const float rhi = R + 3.0f * kRippleSigma;
-      if (age >= kImpactT && r2 > rhi * rhi) return 0.0f; // ahead of the front
+      if (age >= kImpactT && r2 > rhi * rhi) return out; // ahead of the front
       const float r = sqrtf(r2) + kRippleEps;
 
-      float h = 0.0f;
+      float impact = 0.0f;
       if (age < kImpactT) // the plop: crater dips, jet rebounds, then gone
       {
         const float nn = age / kImpactT;
         const float crater = -expf(-(r * r) / (kImpactCraterW * kImpactCraterW)) * (1.0f - nn);
         const float jet = expf(-(r * r) / (kImpactJetW * kImpactJetW)) * sinf(3.14159265f * nn);
-        h += kImpactA * (crater + 0.6f * jet) * expf(-age / kImpactT);
+        impact = kImpactA * (crater + 0.6f * jet) * expf(-age / kImpactT);
       }
-      h += crestTrain(r, R, age, kRippleA0, kRippleLambda); // primary train
-      if (age > kSecDelay)                                  // knock-on train
+      float train = crestTrain(r, R, age, kRippleA0, kRippleLambda); // primary
+      if (age > kSecDelay)                                           // knock-on
       {
         const float a2 = age - kSecDelay;
-        h += crestTrain(r, c * a2, a2, kRippleA0 * kSecAmp, kRippleLambda * kSecLam);
+        train += crestTrain(r, c * a2, a2, kRippleA0 * kSecAmp, kRippleLambda * kSecLam);
       }
-      return kRippleD * h * (dy / r);
+      out.bend = kRippleD * (impact + train) * (dy / r); // radial geometry push
+      out.glow = train > 0.0f ? train : 0.0f;            // ring crests illuminate
+      return out;
     }
 
     // Content-stride between ply slices: 42px ply + 1px SpottedStrip gap.

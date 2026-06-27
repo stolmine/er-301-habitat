@@ -110,7 +110,7 @@ namespace anamnesis
 
   // Rain-on-pond ripple pool: one droplet spawns per loop cycle (read wrap),
   // drips into the all-over field, bends every ply's flow lines (07-allover-viz.md).
-  static const int kVizMaxDrops = 12;
+  static const int kVizMaxDrops = 16;
 
   // ---- Stage 2 FDN ----
   static const int kFdnN = 8;
@@ -263,6 +263,7 @@ namespace anamnesis
     float vizDropSpeed(int i) { return mDropSpeed[i]; }
     float vizDropPhase(int i) { return mDropPhase[i]; }
     float vizDropAmp(int i)   { return mDropAmp[i]; }
+    float vizMix()            { return mMix.value(); }
 
     inline void ensureFlushToZero()
     {
@@ -426,7 +427,10 @@ namespace anamnesis
       // Viz animation phase: the flow-field's "current". Advances per block;
       // speed ~ 1/R so a slower CLOCK slows the whole pond. Shared by every ply's
       // AnamFieldGraphic so the all-over image stays in sync. Wrapped to bound float.
-      mVizPhase += (float)FRAMELENGTH / fs * (6.2831853f * 0.20f) / Rcur;
+      // Freeze STOPS the flow motion only (the lines hold their shape) -- droplet
+      // instancing + influence continue, so a frozen pond keeps being rained on.
+      const float vizFreeze = 1.0f - (1.0f - mFreezeZ) * (1.0f - mCaptureHoldZ);
+      mVizPhase += (1.0f - vizFreeze) * (float)FRAMELENGTH / fs * (6.2831853f * 0.20f) / Rcur;
       if (mVizPhase > 6.2831853f * 1024.0f) mVizPhase -= 6.2831853f * 1024.0f;
 
       // Rain: age the active droplets (real seconds), retire the expired, and

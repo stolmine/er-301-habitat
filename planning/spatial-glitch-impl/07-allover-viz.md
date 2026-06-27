@@ -1,77 +1,98 @@
-# 07 — All-over viz: "Pond of Recollection" (Phase 5b)
+# 07 — All-over viz: "Pond of Recollection" (Phase 5b) — DESIGN
 
-Status: **LOCKED 2026-06-27.** Supersedes the per-ply viz idea in `06-ui-surface.md`.
-One continuous flowing image painted across Anamnesis's whole main-display ply
-strip; each ply is a disturbance in a single shared field. Resolves the open
-Looper-ply blocker (every ply now has a field-slice main; Looper's subs = Speed/Length).
+Status: **concept LOCKED 2026-06-27; model REVISED 2026-06-27 (all-effects-global).**
+Supersedes the per-ply viz idea in `06-ui-surface.md`. Implementation detail +
+tuning constants live in **`08-viz-implementation.md`**; this doc is the *what/why*.
 
 ## The concept
-A continuous **streamline flow-field** — a sea of memory — spanning all 6 plies,
-read left→right as signal/time flow. Each ply *is* a feature in that one field.
-Bold black/white line-art (refs in `~/Downloads/vizref/anamnesis`: flow streamlines
-#1, pond ripples #5, field-warped-by-objects #7).
+One continuous **streamline flow-field** — a pond / sea of memory — painted across
+Anamnesis's whole main-display ply strip (256×64). It reads left→right as signal
+flow. Bold black/white line-art (refs `~/Downloads/vizref/anamnesis`: flow
+streamlines #1, pond ripples #5, field-warped-by-objects #7). The **Looper rains
+drops** into the pond; rings expand, **bend and illuminate** the flow lines.
 
-| Ply (target order) | Field feature | Driven by |
-|---|---|---|
-| **1 Clock** (Overview) | global current: streamline velocity + spacing; **grit shatters lines into dashes** | Clock R (`mRcurZ`), Grit |
-| **2 Looper** | **raindrop ripples** from the playhead, expanding + drifting downstream; buffer wave bends the rings | playhead, loop fill, Speed dir, mode |
-| **3 Freeze** | the flowing field **crystallizes to ice** (a still-point) | `effFreeze` |
-| **4 Size** | a **vortex/eddy** whose radius = room size | Size amt |
-| **5 Density** | sparse discrete ripple-centers → dense **interfering moiré wash** | Density amt |
-| **6 Mix** | field **fades (dry)** or **floods the frame (wet)** | Mix amt |
+## Model decision: effects are GLOBAL, on orthogonal channels (revised)
+The original plan localized one feature per ply (vortex on Size ply, crystal on
+Freeze ply, …). **Revised:** because the pond is ONE surface, every parameter's
+visual pervades the WHOLE field. Plies differ only by *which control is focused*
+(sub-display + active-ply emphasis), not by owning a feature. This stays legible
+only if **each effect rides a distinct, separable visual channel** (the legibility
+contract — never let two effects fight over the same channel):
 
-The **active ply's feature brightens** while you edit it (the reborn
-`project_bias_indication` — region lights up instead of a dotted line).
+| Channel | Effect |
+|---|---|
+| line **bending** (geometry) | rain ripples (Looper) |
+| line **brightness / glow** | Mix (base level) + droplet ring illumination |
+| **motion** (flow advance) | Clock tempo; **Freeze halts it** |
+| line **count / branching** | Density |
+| line **softness / blur** | Diffusion |
+| slow **wander** | Mod |
+| **persistence** (ripple/flow linger) | Decay |
+| **stroke break-up** (dashes) | Grit |
+| **horizontal width** | Spread |
 
-## Why it's feasible (architecture facts, verified 2026-06-27)
-- Main display **256×64**; ViewControls laid as a horizontal `SpottedStrip` of
-  **42px columns + 1px gap**; focused ply snaps to a detent, strip pans at **55 FPS**.
-- **Seams align by construction:** each ply gets a fixed `canvasIndex 0..N-1` and
-  renders content-X ∈ `[i*43, i*43+42]` of one shared field f(X,y,t,state). Slice i's
-  right edge == slice i+1's left edge because both evaluate the same f at the same X.
-- Graphics are **not clipped** to their column → strokes bleed across the 1px gap;
-  organic flow swallows the seam.
-- **Panning is free:** field is painted into each graphic's local pixels, so it slides
-  with the strip when the focused ply centers ("camera across a mural").
-- **Cheap:** line-art (≈10–30 strokes/ply, ~6 plies visible) at 55fps is trivial on the A72.
+## Param → lever map (the full intent)
 
-## Scope / honest limits
-- **All 6 plies share one field-graphic base** (incl. Freeze gate + Mix) — required for
-  an unbroken image. One reusable renderer + `canvasIndex`, folded into the existing
-  `AnamSubControl` interaction model.
-- **"All-over" = the main 256-wide strip only.** The right **sub-display (128×64)** still
-  holds Speed/Length readouts + sub-buttons (separate screen). Optional later: echo the
-  field faintly behind the readouts.
-- Mural spans Anamnesis's own contiguous plies; begins/ends at the unit boundary (framed).
+**LOOPER → the rain** (geometry/bending channel)
+- **Length** → rain rate + drop size (loop period). **Speed** → impact energy +
+  ripple drift direction (sign), 0 = drops hang. **Regen** → feedback turbulence
+  (ripples breed ripples → churn near self-osc). **Mode** → drop character
+  (Tape clean / Stretch smeared / Env transient-triggered). **Sense** → Env trigger
+  readiness.
 
-## Architecture
-- **Atom getters (C++-only, inside `#ifndef SWIGLUA`):** add public inline getters to
-  `Anamnesis.h` reading the smoothed state — `getVizPhase()` (monotonic phase advanced in
-  process(), sample-clock based → shared anim sync, flow speed = clock), `getPlayheadNorm()`,
-  `getLoopFill()`, `getFreezeAmt()` (store `effFreeze`), `getClockR()`, `getSizeAmt()`,
-  `getDensityAmt()`, `getEnv()`, `getModeV()`, `getBufferSample(int)`. No od::Output needed —
-  the C++ graphic holds `Anamnesis*` and calls getters directly (Helicase pattern).
-- **`AnamFieldGraphic.h`** (new, subclasses `od::Graphic`, SWIG-exposed like
-  HelicasePhaseGraphic): ctor `(left,bottom,w,h)` + `follow(Anamnesis*)` + `setCanvas(index,count)`
-  + `setFeature(kind)`. `draw()` (SWIGLUA-guarded) renders this slice of the shared streamline
-  field + its feature. Field math in a small header `AnamField.h` (shared, header-only) so the
-  graphic stays readable.
-- **`AnamFieldControl.lua`** (new): GainBias subclass = AnamSubControl's interaction model with
-  the main graphic swapped to `libanamnesis.AnamFieldGraphic` (setControlGraphic + setMainCursorController);
-  carries `canvasIndex`/`feature`/`subs`. A **Gate variant** for Freeze. Migrate all plies to it.
+**FIELD → the water body** (aggregate surface character; each subparam shapes it)
+- **Size** → flow feature scale (swell wavelength/amplitude). **Decay** → persistence
+  (ripple τ + flow linger). **Diffusion** → fuzz/scatter (crisp ↔ hazy). **Density**
+  → line count + interference (sparse combs ↔ dense moiré; branch/absorb). **Mod** →
+  slow organic wander of the lines.
 
-## Build phases (each → make + manual pkg copy to front/ER-301/packages + audition + commit)
-- **A — Foundation:** atom getters + `mVizPhase`; `AnamFieldGraphic` + `AnamField` skeleton;
-  SWIG-expose; build. **Milestone: a static flowing streamline field rendering continuously
-  across all plies, seams aligned** (no per-ply features yet). Proves the mechanism.
-- **B — Consolidate to 6 plies on the field base:** Clock→ply1; new Looper ply (field main +
-  Speed/Length subs); drop standalone Length/Speed plies; Freeze as field-Gate. Whole surface
-  on `AnamFieldControl`, continuous field everywhere.
-- **C — Per-ply features:** ripples (Looper, buffer-warped), vortex (Size), crystal (Freeze),
-  moiré (Density), flow-rate/grit-dashes (Clock), fade/flood (Mix). Wire to live getters.
-- **D — Polish:** active-ply brightening, animation tuning, CPU profile on CM4 (Phase 6 overlap).
+**CLOCK → global time + lo-fi**
+- **Clock** → global tempo (flow + ripple expansion speed; flow ∝ 1/R). **Grit** →
+  stroke break-up (continuous → dashed → pixel-quantized). **ClockMode** → tempo
+  quantization (Steps/Smooth).
 
-## Open / deferred
-- Exact streamline count, baseline spacing, ripple ring count — tune in Phase A/C.
-- Whether `getVizPhase` is sample-accurate global or per-block; start per-block.
-- Sub-display field echo — deferred (optional polish).
+**ROUTER / OUTPUT → framing** (global modulations)
+- **Mix** → brightness/contrast (dry faint ↔ wet vivid; base to ~12/15). **Spread**
+  → horizontal width/symmetry. **Source** → excitation character (live-input chop ↔
+  discrete loop drops). **DirectLoop** → crisp dry overlay layer.
+
+**FREEZE → state freeze**
+- Stops the **flow motion only** (lines hold their shape); droplet instancing +
+  influence (bend/glow) continue → a frozen pond still being rained on. NOT a
+  global crystallize (that competed with everything).
+
+### Active-ply emphasis (editing feedback)
+Global effects risk feeling disconnected from the knob. Mitigation (pending): the
+focused ply **brightens / its local region shows the strongest version** of that
+effect, so you get a "you are here" anchor while the effect still pervades the pond.
+(Reborn `project_bias_indication`.)
+
+## Why it's feasible (verified 2026-06-27)
+- ViewControls are a horizontal `SpottedStrip` of **42px columns + 1px gap**,
+  panning at **55 FPS**; graphics aren't clipped.
+- **Seams align by construction:** each ply has a fixed `canvasIndex`; it renders
+  content-X of one shared field f(X,y,t,state). Control points sit on a GLOBAL grid
+  (multiples of `kCtrlStep`) so neighbours sample identical points at the seam.
+- **All 6 plies share one field renderer** (incl. the Freeze gate) — required for an
+  unbroken image. `AnamFieldControl` = `AnamSubControl` + field main; `AnamFieldGate`
+  = `Gate` + field main (stock ComparatorView orphaned; freeze via the sub-display).
+- **"All-over" = the main 256-wide strip only.** The sub-display (128×64) holds the
+  readouts.
+
+## Build status (2026-06-27)
+- **A Foundation — DONE.** Flowing field across all plies, seams aligned.
+- **B Consolidate to 6 plies — DONE.** Looper(Speed+Length default subs s1/s3),
+  Freeze(field-Gate), Size, Density, Clock, Mix; Clock→ply-1 reorder still pending.
+- **C Effects — IN PROGRESS:**
+  - **Rain ripples DONE** (dev 0.2.0.37): physical drop model — impact transient
+    (crater→jet) + dispersive fanning train + knock-on; pond-wide bending. See 08.
+  - **Brightness + Freeze + lifetime DONE** (dev 0.2.0.40): Mix→base brightness,
+    droplet rings illuminate the lines, Freeze stops flow only, longer drop life.
+  - **NEXT: Density → branch/absorb** (spec in 08), then Diffusion, Mod, Decay,
+    Clock-tempo polish, Grit, then Spread/Source/DirectLoop (weak — make subtle).
+- **D Polish — pending:** active-ply emphasis, CPU profile on CM4 (Phase 6).
+
+## Open questions
+- Default Mix 0.4 → base brightness ~7/15 (dim). Raise `kBaseDim` floor or decouple?
+- Clock→ply-1 reorder (target 6-ply order) not yet applied.
+- Spread/Source/DirectLoop visual channels are weak — may stay subtle or defer.

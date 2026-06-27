@@ -58,12 +58,14 @@ namespace anamnesis
 
       const float phase = mpOp ? mpOp->vizPhase() : 0.0f;
       const int n = field::kStreamlines;
+      const float mixN = mpOp ? mpOp->vizMix() : 1.0f;
+      // Base streamline brightness scales with Mix; droplet glow adds on top.
+      const float baseB = field::kBaseDim + (field::kBaseBright - field::kBaseDim) * mixN;
 
-      // Cache the active rain droplets once (epicenters in content-x / column-y),
-      // so the per-point bend loop touches locals, not the op pointer.
+      // Cache the active rain droplets once (epicenters in content-x / column-y).
       int nd = 0;
       float dX[kVizMaxDrops], dY[kVizMaxDrops], dAge[kVizMaxDrops];
-      float dC[kVizMaxDrops], dPh[kVizMaxDrops], dAmp[kVizMaxDrops];
+      float dC[kVizMaxDrops], dAmp[kVizMaxDrops];
       if (mpOp)
       {
         for (int i = 0; i < kVizMaxDrops; i++)
@@ -75,7 +77,6 @@ namespace anamnesis
           dY[nd] = mpOp->vizDropY(i);
           dAge[nd] = age;
           dC[nd] = mpOp->vizDropSpeed(i);
-          dPh[nd] = mpOp->vizDropPhase(i);
           dAmp[nd] = mpOp->vizDropAmp(i);
           nd++;
         }
@@ -85,48 +86,70 @@ namespace anamnesis
       // expensive flow + rain evals), then Catmull-Rom interpolated to per-pixel
       // y -> smooth curves, cheap enough to scale the line count.
       const int cstep = field::kCtrlStep;
-      const int mctrl = (w - 1) / cstep + 4; // incl one margin each side
-      float ctrl[40];
+      // GLOBAL control grid: control points sit at multiples of cstep in CONTENT
+      // x, shared by every ply. The 43px ply stride isn't a multiple of cstep, so
+      // a ply-relative grid would misalign at seams and the spline would break
+      // where a ripple bends it. Sharing the grid -> neighbours sample identical
+      // control points at the boundary -> one continuous curve across the seam.
+      const int g0 = x0 / cstep - 1;        // first grid index (one margin before)
+      const int gLast = (x0 + w) / cstep + 2; // covers the 1px bridge column too
+      int mctrl = gLast - g0 + 1;
+      if (mctrl > 40) mctrl = 40;
+      float ctrlY[40], ctrlB[40]; // control-point y (bent) and ring glow
+      // Bridge the 1px SpottedStrip gap: every ply but the last draws one extra
+      // content column (px = left+w) so the continuous curve crosses into the
+      // next ply with no hairline seam. The last ply stops at its own edge.
+      const int wext = (mIndex < mCount - 1) ? 1 : 0;
       for (int s = 0; s < n; s++)
       {
         const float yb = field::baseline(s, n, h);
         for (int i = 0; i < mctrl; i++)
         {
-          const float cx = (float)(x0 + (i - 1) * cstep);
+          const float cx = (float)((g0 + i) * cstep); // global grid content-x
           float y0 = yb + field::flow(cx, yb, phase);
-          // Rain bends the line: each droplet's wavefront Y push, scaled by its
-          // capture loudness. Shared pond -> drops bend across ply seams.
+          float glow = 0.0f;
+          // Rain BENDS (geometry) and GLOWS (illumination) the line, each scaled
+          // by its capture loudness. Shared pond -> drops cross ply seams.
           for (int d = 0; d < nd; d++)
-            y0 += dAmp[d] * field::rippleDispY(cx - dX[d], y0 - dY[d], dAge[d], dC[d], dPh[d]);
-          ctrl[i] = y0;
+          {
+            const field::RippleHit hit = field::rippleEval(cx - dX[d], y0 - dY[d], dAge[d], dC[d]);
+            y0 += dAmp[d] * hit.bend;
+            glow += dAmp[d] * hit.glow;
+          }
+          ctrlY[i] = y0;
+          ctrlB[i] = glow;
         }
         float prevY = -1000.0f;
-        for (int lx = 0; lx < w; lx++)
+        for (int lx = 0; lx < w + wext; lx++)
         {
-          const int seg = lx / cstep;
-          const float t = (float)(lx - seg * cstep) / (float)cstep;
-          float y = field::catmull(ctrl[seg], ctrl[seg + 1], ctrl[seg + 2], ctrl[seg + 3], t);
+          const int cx = x0 + lx;
+          const int seg = cx / cstep;         // global grid segment
+          const int idx = seg - g0;            // index of this segment's p1 in ctrl
+          const float t = (float)(cx - seg * cstep) / (float)cstep;
+          float y = field::catmull(ctrlY[idx - 1], ctrlY[idx], ctrlY[idx + 1], ctrlY[idx + 2], t);
+          float glow = field::catmull(ctrlB[idx - 1], ctrlB[idx], ctrlB[idx + 1], ctrlB[idx + 2], t);
           if (y < 0.0f)
             y = 0.0f;
           else if (y > (float)(h - 1))
             y = (float)(h - 1);
+          // Brightness: Mix-scaled base + droplet ring glow (visible rings wet).
+          float bf = baseB + glow * field::kGlowGain * mixN;
+          if (bf < 0.0f) bf = 0.0f; else if (bf > 15.0f) bf = 15.0f;
+          const int bri = (int)(bf + 0.5f);
           const int px = left + lx;
-          // Anti-aliased: split brightness across the two straddling pixels so the
-          // curve reads sub-pixel-smooth (the display is grayscale 0..15).
+          // sqrt-coverage anti-alias: crisp bright core, smooth sub-pixel edge.
           const int yi = (int)y;
           const float f = y - (float)yi;
-          // sqrt coverage: keeps a crisp, bright core at the sub-pixel crossover
-          // (linear 50/50 split reads soft) while staying smooth between pixels.
-          fb.pixel((int)(WHITE * sqrtf(1.0f - f) + 0.5f), px, bot + yi);
+          fb.pixel((int)(bri * sqrtf(1.0f - f) + 0.5f), px, bot + yi);
           if (yi + 1 < h)
-            fb.pixel((int)(WHITE * sqrtf(f) + 0.5f), px, bot + yi + 1);
+            fb.pixel((int)(bri * sqrtf(f) + 0.5f), px, bot + yi + 1);
           // Solid-fill steep gaps to the previous column so the line is unbroken.
           if (prevY > -999.0f)
           {
             const int a = (int)(prevY < y ? prevY : y);
             const int b = (int)(prevY < y ? y : prevY);
             for (int yy = a + 1; yy < b; yy++)
-              fb.pixel(WHITE, px, bot + yy);
+              fb.pixel(bri, px, bot + yy);
           }
           prevY = y;
         }
