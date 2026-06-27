@@ -19,6 +19,7 @@ local Gate = require "Unit.ViewControl.Gate"
 local OptionControl = require "Unit.MenuControl.OptionControl"
 local MenuHeader = require "Unit.MenuControl.Header"
 local AnamSubControl = require "anamnesis.AnamSubControl"
+local AnamFieldControl = require "anamnesis.AnamFieldControl"
 
 local floatMap = function(min, max)
   local map = app.LinearDialMap(min, max)
@@ -130,27 +131,28 @@ end
 
 function Anamnesis:onLoadViews()
   return {
-    length = GainBias {
-      button = "len",
-      description = "Length",
-      branch = self.branches.length,
-      gainbias = self.objects.length,
-      range = self.objects.length,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.4
-    },
-    speed = GainBias {
-      button = "spd",
-      description = "Speed",
+    -- Looper ply: no single main -- Speed (bipolar -2..2x: pitch/time, reverse,
+    -- stall) and Length (loop window) are BOTH shown as subs by default
+    -- (defaultParamMode); tap spd/len to pick which the encoder edits. The field
+    -- is the main visual. Speed keeps the control's CV branch.
+    looper = AnamFieldControl {
+      button = "loop",
+      description = "Loop",
       branch = self.branches.speed,
       gainbias = self.objects.speed,
       range = self.objects.speed,
       biasMap = speedMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 1.0
+      initialBias = 1.0,
+      op = self.objects.op,
+      canvasIndex = 0,
+      canvasCount = 6,
+      defaultParamMode = true,
+      subs = {
+        { param = self.objects.speed:getParameter("Bias"),  button = "spd", col = 1, map = speedMap,  precision = 2 },
+        { param = self.objects.length:getParameter("Bias"), button = "len", col = 3, map = zeroOneMap, precision = 2 }
+      }
     },
     freeze = Gate {
       button = "frz",
@@ -158,7 +160,7 @@ function Anamnesis:onLoadViews()
       branch = self.branches.freeze,
       comparator = self.objects.freeze
     },
-    field = AnamSubControl {
+    field = AnamFieldControl {
       button = "size",
       description = "Size",
       branch = self.branches.size,
@@ -168,13 +170,16 @@ function Anamnesis:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.5,
+      op = self.objects.op,
+      canvasIndex = 2,
+      canvasCount = 6,
       subs = {
         { param = self.objects.decay:getParameter("Bias"), button = "dcy", map = zeroOneMap, precision = 2 },
         { param = self.objects.mod:getParameter("Bias"),   button = "mod", map = zeroOneMap, precision = 2 },
         { param = self.objects.regen:getParameter("Bias"), button = "rgn", map = zeroOneMap, precision = 2 }
       }
     },
-    density = AnamSubControl {
+    density = AnamFieldControl {
       button = "dens",
       description = "Density",
       branch = self.branches.density,
@@ -184,11 +189,14 @@ function Anamnesis:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.5,
+      op = self.objects.op,
+      canvasIndex = 3,
+      canvasCount = 6,
       subs = {
         { param = self.objects.diffusion:getParameter("Bias"), button = "diff", map = zeroOneMap, precision = 2 }
       }
     },
-    overview = AnamSubControl {
+    overview = AnamFieldControl {
       button = "clk",
       description = "Clock",
       branch = self.branches.clock,
@@ -198,13 +206,16 @@ function Anamnesis:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 1.0,
+      op = self.objects.op,
+      canvasIndex = 4,
+      canvasCount = 6,
       subs = {
         { param = self.objects.source:getParameter("Bias"),     button = "src",  map = zeroOneMap, precision = 2 },
         { param = self.objects.directloop:getParameter("Bias"), button = "dir",  map = zeroOneMap, precision = 2 },
         { param = self.objects.spread:getParameter("Bias"),     button = "sprd", map = zeroOneMap, precision = 2 }
       }
     },
-    mix = GainBias {
+    mix = AnamFieldControl {
       button = "mix",
       description = "Mix",
       branch = self.branches.mix,
@@ -213,10 +224,13 @@ function Anamnesis:onLoadViews()
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.4
+      initialBias = 0.4,
+      op = self.objects.op,
+      canvasIndex = 5,
+      canvasCount = 6
     },
   }, {
-    expanded = { "length", "speed", "freeze", "field", "density", "overview", "mix" },
+    expanded = { "looper", "freeze", "field", "density", "overview", "mix" },
     collapsed = {}
   }
 end

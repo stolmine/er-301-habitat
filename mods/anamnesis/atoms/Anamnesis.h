@@ -228,6 +228,26 @@ namespace anamnesis
     od::Option    mSense{"Sense"};          // 1=Low, 2=Med, 3=High (Env sensitivity)
     od::Option    mGrit{"Grit"};            // 1=Clean(0), 2=Normal(0.5), 3=Broken(1)
 
+    // ---- viz getters: the "Pond of Recollection" all-over field reads these
+    // (C++-only; AnamFieldGraphic holds an Anamnesis* and calls them directly --
+    // not SWIG-wrapped, like the rest of this guarded block). All derived from the
+    // existing smoothed state; the lone new member is mVizPhase (advanced/block).
+    // planning/spatial-glitch-impl/07-allover-viz.md
+    float vizPhase()       { return mVizPhase; }
+    float vizPlayhead()    { return mLoopLenZ > 1.0f ? mLoopReadPos / mLoopLenZ : 0.0f; }
+    float vizStretchHead() { return mLoopLenZ > 1.0f ? mStretchHead / mLoopLenZ : 0.0f; }
+    float vizFreeze()      { return 1.0f - (1.0f - mFreezeZ) * (1.0f - mCaptureHoldZ); }
+    float vizClockR()      { return mRcurZ; }
+    float vizSize()        { float s = (mSizeScaleZ - kSizeMin) / (kSizeMax - kSizeMin);
+                             return s < 0.0f ? 0.0f : (s > 1.0f ? 1.0f : s); }
+    float vizDensity()     { return mDensityZ; }
+    float vizEnv()         { return mEnvFast; }
+    int   vizMode()        { return mMode.value(); }
+    float vizGrit()        { int v = mGrit.value(); return v <= 1 ? 0.0f : (v == 2 ? 0.5f : 1.0f); }
+    float vizLoopLen()     { return mLoopLenZ; }
+    float vizBuffer(int i) { if (i < 0) i = 0; else if (i >= kLoopBufLen) i = kLoopBufLen - 1;
+                             return mLoopBuf[i]; }
+
     inline void ensureFlushToZero()
     {
 #if defined(__aarch64__)
@@ -386,6 +406,12 @@ namespace anamnesis
       }
       const float clockInc = 1.0f / mRcurZ;
       const float Rcur = mRcurZ;
+
+      // Viz animation phase: the flow-field's "current". Advances per block;
+      // speed ~ 1/R so a slower CLOCK slows the whole pond. Shared by every ply's
+      // AnamFieldGraphic so the all-over image stays in sync. Wrapped to bound float.
+      mVizPhase += (float)FRAMELENGTH / fs * (6.2831853f * 0.20f) / Rcur;
+      if (mVizPhase > 6.2831853f * 1024.0f) mVizPhase -= 6.2831853f * 1024.0f;
       // Grit: 0..0.5 crossfades clean linear-interp -> broken ZOH reconstruction;
       // 0.5..1 adds bit-crush. 0.5 = ZOH only (matches pre-Grit behavior).
       int gritV = mGrit.value();
@@ -672,6 +698,7 @@ namespace anamnesis
     float mClockPhase, mWetL, mWetR, mWetPrevL, mWetPrevR;
     float mRecRateRef;   // clock R at which the buffered content was recorded
     float mRcurZ;        // current (possibly glided) clock R
+    float mVizPhase = 0.0f;   // all-over flow-field animation phase (07-allover-viz.md)
     float mWetFb, mFbDcX1, mFbDcY1;   // cross-feedback signal + DC-blocker state
     float mSourceZ, mDirectLoopZ, mSpreadZ, mLoopOutHeld;   // Router
     float mLine[kFdnN][kFdnBufLen];

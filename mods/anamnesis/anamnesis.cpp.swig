@@ -4,7 +4,9 @@
 %{
 #undef SWIGLUA
 #include "atoms/Anamnesis.h"
+#include "AnamFieldGraphic.h"
 #define SWIGLUA
 %}
 
 %include "atoms/Anamnesis.h"
+%include "AnamFieldGraphic.h"

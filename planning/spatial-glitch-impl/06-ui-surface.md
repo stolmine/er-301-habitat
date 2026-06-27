@@ -17,15 +17,16 @@ dev controls into a 6-ply surface + a config menu. Build order: **organization f
   Applied to: **Size** (main) + Decay/Mod/Regen subs; **Density** (main) + Diffuse sub;
   **Clock/overview** (main) + Source/DirLoop/Spread subs. Titles trimmed to 1-2 words.
 - **Current surface = 7 plies:** Length, Speed, Freeze, Size, Density, Clock, Mix.
-- **NEXT / PENDING:**
-  1. **Looper ply** (Speed/Length) -- the locked spec wants NO main (viz-as-main +
-     Speed/Length subs), which needs an EncoderControl-with-graphic base, not the
-     GainBias-based AnamSubControl. Left Speed+Length FLAT for now. OPEN DECISION:
-     (a) keep flat until the viz, or (b) stopgap Speed-main + Length-sub now (-> 6 plies).
-  2. **Animated VIZ phase** (all-viz/animated): overview/plexus visualizer (Clock ply),
-     looper playhead (Looper ply), animated mains. project_bias_indication: dotted
-     bias-line overlay on viz plies. feedback_clock_control (LaretClockControl) if a
-     clock viz is wanted.
+- **NEXT / PENDING:** SUPERSEDED 2026-06-27 by the all-over viz decision ->
+  **`07-allover-viz.md`** ("Pond of Recollection"). The per-ply viz + Looper-ply-decision
+  below are obsolete: the all-over flow-field gives every ply a field-slice main, so the
+  Looper ply's main becomes the ripple-field (Speed/Length as subs) and viz + 6-ply
+  consolidation merge into one build (phases A-D in 07). Original pending notes kept for
+  history:
+  1. ~~**Looper ply** -- viz-as-main + Speed/Length subs; (a) keep flat or (b) Speed-main
+     stopgap.~~ Resolved by 07 (field-slice main).
+  2. ~~**Animated VIZ phase** -- per-ply visualizers, dotted bias-line overlay.~~ Replaced
+     by the single all-over field; bias indication = active-ply brightening.
 - **Subs lose dedicated CV** (buried params via readout); the mains keep their CV
   branch. Acceptable per the design (subs = less-performed). Atom unchanged since
   0.2.0.21 -- this phase is Lua/UI only.

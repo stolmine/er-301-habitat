@@ -35,18 +35,34 @@ function AnamSubControl:init(args)
   self.normalSubGraphic = self.subGraphic
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
+  -- Each sub may name an explicit column (sub.col, 1..3) to leave gaps;
+  -- otherwise it falls on its list position. Readouts/names are keyed by the
+  -- COLUMN so subReleased(col) and the SubButton index line up.
   self.subReadouts = {}
   self.subNames = {}
   for i, sub in ipairs(args.subs or {}) do
+    local c = sub.col or i
     local g = app.Readout(0, 0, ply, 10)
     g:setParameter(sub.param)
     g:setAttributes(sub.units or app.unitNone, sub.map)
     g:setPrecision(sub.precision or 2)
-    g:setCenter(cols[i], center4)
+    g:setCenter(cols[c], center4)
     self.paramSubGraphic:addChild(g)
-    self.paramSubGraphic:addChild(app.SubButton(sub.button, i))
-    self.subReadouts[i] = g
-    self.subNames[i] = sub.button
+    self.paramSubGraphic:addChild(app.SubButton(sub.button, c))
+    self.subReadouts[c] = g
+    self.subNames[c] = sub.button
+  end
+
+  -- "Flat subs" plies (e.g. Looper = Speed + Length, no single main): start in
+  -- param mode so BOTH readouts show by default, with the encoder on sub 1. The
+  -- shift-toggle + spot-exit are suppressed below so it never drops to a stock
+  -- main fader (there is none). Guarded by defaultParamMode -> normal plies are
+  -- unaffected.
+  if args.defaultParamMode then
+    self.defaultParamMode = true
+    self.defaultSubIndex = (args.subs[1] and args.subs[1].col) or 1
+    self.paramModeDefaultSub = self.subReadouts[self.defaultSubIndex]
+    self:setParamMode(true)
   end
 end
 
@@ -67,7 +83,10 @@ end
 function AnamSubControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
-  if self.paramMode then self:setSubCursorController(self.paramModeDefaultSub) end
+  if self.paramMode then
+    self:setSubCursorController(self.paramModeDefaultSub)
+    if self.defaultParamMode then self.paramFocusedReadout = self.subReadouts[self.defaultSubIndex] end
+  end
 end
 
 function AnamSubControl:onCursorLeave(spot)
@@ -100,7 +119,9 @@ function AnamSubControl:shiftReleased()
         return true
       end
     end
-    self:setParamMode(not self.paramMode)
+    if not self.defaultParamMode then
+      self:setParamMode(not self.paramMode)
+    end
   end
   self.shiftHeld = false
   self.shiftSnapshot = nil
@@ -108,7 +129,7 @@ function AnamSubControl:shiftReleased()
 end
 
 function AnamSubControl:spotReleased(spot, shifted)
-  if self.paramMode then
+  if self.paramMode and not self.defaultParamMode then
     self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
     self:setParamMode(false)
