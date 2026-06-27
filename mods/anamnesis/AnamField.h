@@ -49,8 +49,42 @@ namespace anamnesis
     // obvious collective motion); kept easy to retune. Control points every
     // kCtrlStep px are Catmull-Rom interpolated to per-pixel y, so the per-line
     // cost (flow + ripple evals) stays low even as the count grows.
-    static const int kStreamlines = 12;
-    static const int kCtrlStep    = 4;
+    static const int kStreamMin = 7;   // line count at Density 0
+    static const int kStreamMax = 20;  // line count at Density 1 (also the array cap)
+    static const int kCtrlStep  = 4;
+
+    // Build the line-activation layout (normalized baselines in [0,1]): the first
+    // kStreamMin are evenly spaced (always on); each later line bisects the LARGEST
+    // current gap (fills evenly) and records its PARENT (lower neighbour) so it can
+    // branch out from / absorb back into it as Density crosses its activation.
+    inline void buildLineLayout(float *target, float *parent)
+    {
+      float active[kStreamMax + 4];
+      int count = 0;
+      for (int i = 0; i < kStreamMin; i++)
+      {
+        const float p = ((float)i + 0.5f) / (float)kStreamMin;
+        target[i] = p;
+        parent[i] = p; // base lines: no branch
+        active[count++] = p;
+      }
+      for (int m = kStreamMin; m < kStreamMax; m++)
+      {
+        int gi = 0;
+        float gbest = -1.0f;
+        for (int a = 0; a + 1 < count; a++)
+        {
+          const float g = active[a + 1] - active[a];
+          if (g > gbest) { gbest = g; gi = a; }
+        }
+        const float mid = 0.5f * (active[gi] + active[gi + 1]);
+        target[m] = mid;
+        parent[m] = active[gi]; // branch from the lower neighbour
+        for (int a = count; a > gi + 1; a--) active[a] = active[a - 1];
+        active[gi + 1] = mid;
+        count++;
+      }
+    }
 
     // Streamline illumination (4-bit gray, 0..15). Base brightness scales with
     // Mix (dry = faint pond, wet = kBaseBright); droplet ring GLOW adds on top,

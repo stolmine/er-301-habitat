@@ -57,10 +57,36 @@ namespace anamnesis
       const int x0 = mIndex * field::kStride; // content-x of this slice's left edge
 
       const float phase = mpOp ? mpOp->vizPhase() : 0.0f;
-      const int n = field::kStreamlines;
       const float mixN = mpOp ? mpOp->vizMix() : 1.0f;
       // Base streamline brightness scales with Mix; droplet glow adds on top.
       const float baseB = field::kBaseDim + (field::kBaseBright - field::kBaseDim) * mixN;
+
+      // Density -> line count with branch/absorb. Static layout (computed once):
+      // even-bisection baselines + each line's parent. nActive = kStreamMin +
+      // density*(kStreamMax-kStreamMin); render the full lines plus ONE branching
+      // line that lerps out from its parent (split) / back (absorb) by the
+      // fraction and fades by its alpha. All plies share density+layout -> seams hold.
+      static bool sLayoutInit = false;
+      static float sLineTarget[field::kStreamMax], sLineParent[field::kStreamMax];
+      if (!sLayoutInit) { field::buildLineLayout(sLineTarget, sLineParent); sLayoutInit = true; }
+      float density = mpOp ? mpOp->vizDensity() : 0.5f;
+      if (density < 0.0f) density = 0.0f; else if (density > 1.0f) density = 1.0f;
+      const float kf = (float)field::kStreamMin + density * (float)(field::kStreamMax - field::kStreamMin);
+      const int nActive = (int)kf;
+      float linePos[field::kStreamMax + 1], lineAlpha[field::kStreamMax + 1];
+      int n = 0;
+      const int nFull = nActive < field::kStreamMax ? nActive : field::kStreamMax;
+      for (int s = 0; s < nFull; s++) { linePos[n] = sLineTarget[s]; lineAlpha[n] = 1.0f; n++; }
+      if (nActive < field::kStreamMax)
+      {
+        const float a = kf - (float)nActive; // branching progress 0..1
+        if (a > 0.01f)
+        {
+          linePos[n] = sLineParent[nActive] + (sLineTarget[nActive] - sLineParent[nActive]) * a;
+          lineAlpha[n] = a;
+          n++;
+        }
+      }
 
       // Cache the active rain droplets once (epicenters in content-x / column-y).
       int nd = 0;
@@ -102,7 +128,8 @@ namespace anamnesis
       const int wext = (mIndex < mCount - 1) ? 1 : 0;
       for (int s = 0; s < n; s++)
       {
-        const float yb = field::baseline(s, n, h);
+        const float yb = linePos[s] * (float)h;
+        const float la = lineAlpha[s]; // branch/absorb fade
         for (int i = 0; i < mctrl; i++)
         {
           const float cx = (float)((g0 + i) * cstep); // global grid content-x
@@ -132,9 +159,9 @@ namespace anamnesis
             y = 0.0f;
           else if (y > (float)(h - 1))
             y = (float)(h - 1);
-          // Brightness: Mix-scaled base + droplet ring glow (glow not Mix-scaled,
-          // so rings stay high-contrast against the lines at any wet level).
-          float bf = baseB + glow * field::kGlowGain;
+          // Brightness: (Mix-scaled base + droplet ring glow) faded by the line's
+          // branch/absorb alpha. Glow not Mix-scaled -> rings stay high-contrast.
+          float bf = (baseB + glow * field::kGlowGain) * la;
           if (bf < 0.0f) bf = 0.0f; else if (bf > 15.0f) bf = 15.0f;
           const int bri = (int)(bf + 0.5f);
           const int px = left + lx;
