@@ -15,11 +15,11 @@ local libanamnesis = require "anamnesis.libanamnesis"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
-local Gate = require "Unit.ViewControl.Gate"
 local OptionControl = require "Unit.MenuControl.OptionControl"
 local MenuHeader = require "Unit.MenuControl.Header"
 local AnamSubControl = require "anamnesis.AnamSubControl"
 local AnamFieldControl = require "anamnesis.AnamFieldControl"
+local AnamFieldGate = require "anamnesis.AnamFieldGate"
 
 local floatMap = function(min, max)
   local map = app.LinearDialMap(min, max)
@@ -154,11 +154,14 @@ function Anamnesis:onLoadViews()
         { param = self.objects.length:getParameter("Bias"), button = "len", col = 3, map = zeroOneMap, precision = 2 }
       }
     },
-    freeze = Gate {
+    freeze = AnamFieldGate {
       button = "frz",
       description = "Freeze",
       branch = self.branches.freeze,
-      comparator = self.objects.freeze
+      comparator = self.objects.freeze,
+      op = self.objects.op,
+      canvasIndex = 1,
+      canvasCount = 6
     },
     field = AnamFieldControl {
       button = "size",
