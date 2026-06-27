@@ -59,40 +59,74 @@ namespace anamnesis
     // in-place carrier buzz. Amplitude ~ 1/sqrt(r) (energy spread round the
     // growing circle) * exp(-age/tau) (viscous decay). The flow lines bow around
     // the crest radii -> implied expanding concentric circles; drops superpose.
-    static const int   kRippleCrests = 3;     // leading crest + 2 trailing rings
-    static const float kRippleLambda = 11.0f; // spacing between crests (px)
+    static const float kRippleLambda = 11.0f; // base crest spacing (px)
     static const float kRippleSigma  = 3.2f;  // crest width (px); < lambda so distinct
-    static const float kRippleTrail  = 0.62f; // amplitude ratio per trailing crest
+    static const float kRippleSpread = 0.16f; // outer crests spaced wider (fake dispersion)
+    static const float kRippleFan    = 4.0f;  // crests added per second of age (train fans out)
+    static const int   kRippleMaxCrests = 6;
+    static const float kRippleTrail  = 0.66f; // amplitude ratio per trailing crest
     static const float kRippleTau    = 0.85f; // temporal decay (s); life = 3*tau (slow linger)
-    static const float kRippleA0     = 8.0f;  // source amplitude (tune w/ kRippleD)
-    static const float kRippleD      = 1.5f;  // displacement gain (overall ripple strength)
+    static const float kRippleA0     = 8.0f;  // train source amplitude (tune w/ kRippleD)
+    static const float kRippleD      = 2.4f;  // displacement gain (overall ripple strength)
     static const float kRippleEps    = 1.0f;  // r singularity guard (px)
     static const float kRippleLife   = 3.0f * kRippleTau;
+    // Impact transient ("the plop"): a short, strong CENTRAL crater (-) that
+    // releases into a rebound jet (+), seeding the first ring. Lives ~kImpactT s.
+    static const float kImpactT       = 0.12f; // s (~7 frames @55fps)
+    static const float kImpactA       = 6.0f;  // central amplitude (~1.5-2x a ring)
+    static const float kImpactCraterW = 6.0f;  // crater width (px)
+    static const float kImpactJetW    = 3.0f;  // jet width (px)
+    // Knock-on: one delayed, weaker, finer secondary train (jet-rebound droplet).
+    static const float kSecDelay      = 0.18f; // s after impact
+    static const float kSecAmp        = 0.40f; // amplitude scale
+    static const float kSecLam        = 0.70f; // wavelength scale (finer)
 
-    // Vertical (Y) displacement contributed by one droplet to a flow-line point
-    // at offset (dx,dy) from the epicenter. Sum of smooth crests (no carrier) ->
-    // a clean passing swell. 0 outside the train's band (squared-dist reject).
+    // A dispersive crest train: the crest COUNT grows with age and the spacing
+    // widens outward, so the ring pattern fans out over time (cheap dispersion).
+    // Smooth Gaussian crests only (no carrier) -> each passes a point once.
+    inline float crestTrain(float r, float R, float age, float a0, float lam0)
+    {
+      int nc = 2 + (int)(age * kRippleFan);
+      if (nc > kRippleMaxCrests) nc = kRippleMaxCrests;
+      const float inv2s2 = 1.0f / (2.0f * kRippleSigma * kRippleSigma);
+      const float amp = (a0 / sqrtf(r)) * expf(-age / kRippleTau);
+      float h = 0.0f, g = 1.0f, rc = R;
+      for (int i = 0; i < nc; i++)
+      {
+        const float wf = r - rc;
+        h += g * expf(-(wf * wf) * inv2s2);
+        g *= kRippleTrail;
+        rc -= lam0 * (1.0f + kRippleSpread * (float)i); // next crest back, wider gap
+      }
+      return amp * h;
+    }
+
+    // Vertical (Y) displacement from one droplet to a flow-line point at offset
+    // (dx,dy): impact transient + dispersive primary train + one knock-on train,
+    // pushed radially. Cheap front reject; impact stays central.
     inline float rippleDispY(float dx, float dy, float age, float c, float phase)
     {
       const float r2 = dx * dx + dy * dy;
       const float R = c * age;
-      const float band = 3.0f * kRippleSigma;
-      float rlo = R - (float)(kRippleCrests - 1) * kRippleLambda - band;
-      if (rlo < 0.0f) rlo = 0.0f;
-      const float rhi = R + band;
-      if (r2 > rhi * rhi) return 0.0f;
-      if (rlo > 0.0f && r2 < rlo * rlo) return 0.0f;
+      const float rhi = R + 3.0f * kRippleSigma;
+      if (age >= kImpactT && r2 > rhi * rhi) return 0.0f; // ahead of the front
       const float r = sqrtf(r2) + kRippleEps;
-      const float inv2s2 = 1.0f / (2.0f * kRippleSigma * kRippleSigma);
-      float h = 0.0f, g = 1.0f;
-      for (int j = 0; j < kRippleCrests; j++)
+
+      float h = 0.0f;
+      if (age < kImpactT) // the plop: crater dips, jet rebounds, then gone
       {
-        const float wf = r - (R - (float)j * kRippleLambda);
-        h += g * expf(-(wf * wf) * inv2s2);
-        g *= kRippleTrail;
+        const float nn = age / kImpactT;
+        const float crater = -expf(-(r * r) / (kImpactCraterW * kImpactCraterW)) * (1.0f - nn);
+        const float jet = expf(-(r * r) / (kImpactJetW * kImpactJetW)) * sinf(3.14159265f * nn);
+        h += kImpactA * (crater + 0.6f * jet) * expf(-age / kImpactT);
       }
-      const float A = (kRippleA0 / sqrtf(r)) * expf(-age / kRippleTau);
-      return kRippleD * A * h * (dy / r); // Y component of the radial swell
+      h += crestTrain(r, R, age, kRippleA0, kRippleLambda); // primary train
+      if (age > kSecDelay)                                  // knock-on train
+      {
+        const float a2 = age - kSecDelay;
+        h += crestTrain(r, c * a2, a2, kRippleA0 * kSecAmp, kRippleLambda * kSecLam);
+      }
+      return kRippleD * h * (dy / r);
     }
 
     // Content-stride between ply slices: 42px ply + 1px SpottedStrip gap.

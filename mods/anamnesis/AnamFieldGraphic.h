@@ -100,7 +100,7 @@ namespace anamnesis
             y0 += dAmp[d] * field::rippleDispY(cx - dX[d], y0 - dY[d], dAge[d], dC[d], dPh[d]);
           ctrl[i] = y0;
         }
-        int prevPy = -1000;
+        float prevY = -1000.0f;
         for (int lx = 0; lx < w; lx++)
         {
           const int seg = lx / cstep;
@@ -111,19 +111,24 @@ namespace anamnesis
           else if (y > (float)(h - 1))
             y = (float)(h - 1);
           const int px = left + lx;
-          const int py = bot + (int)(y + 0.5f);
-          // Connect to the previous column so each streamline is unbroken.
-          if (prevPy > -1000 && prevPy != py)
+          // Anti-aliased: split brightness across the two straddling pixels so the
+          // curve reads sub-pixel-smooth (the display is grayscale 0..15).
+          const int yi = (int)y;
+          const float f = y - (float)yi;
+          // sqrt coverage: keeps a crisp, bright core at the sub-pixel crossover
+          // (linear 50/50 split reads soft) while staying smooth between pixels.
+          fb.pixel((int)(WHITE * sqrtf(1.0f - f) + 0.5f), px, bot + yi);
+          if (yi + 1 < h)
+            fb.pixel((int)(WHITE * sqrtf(f) + 0.5f), px, bot + yi + 1);
+          // Solid-fill steep gaps to the previous column so the line is unbroken.
+          if (prevY > -999.0f)
           {
-            const int a = prevPy < py ? prevPy : py;
-            const int b = prevPy < py ? py : prevPy;
-            fb.vline(WHITE, px, a, b);
+            const int a = (int)(prevY < y ? prevY : y);
+            const int b = (int)(prevY < y ? y : prevY);
+            for (int yy = a + 1; yy < b; yy++)
+              fb.pixel(WHITE, px, bot + yy);
           }
-          else
-          {
-            fb.pixel(WHITE, px, py);
-          }
-          prevPy = py;
+          prevY = y;
         }
       }
 
