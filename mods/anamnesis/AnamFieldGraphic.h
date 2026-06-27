@@ -132,8 +132,9 @@ namespace anamnesis
             y = 0.0f;
           else if (y > (float)(h - 1))
             y = (float)(h - 1);
-          // Brightness: Mix-scaled base + droplet ring glow (visible rings wet).
-          float bf = baseB + glow * field::kGlowGain * mixN;
+          // Brightness: Mix-scaled base + droplet ring glow (glow not Mix-scaled,
+          // so rings stay high-contrast against the lines at any wet level).
+          float bf = baseB + glow * field::kGlowGain;
           if (bf < 0.0f) bf = 0.0f; else if (bf > 15.0f) bf = 15.0f;
           const int bri = (int)(bf + 0.5f);
           const int px = left + lx;
@@ -155,15 +156,9 @@ namespace anamnesis
         }
       }
 
-      // Per-ply feature motif, composed on top of the shared current.
-      switch (mFeature)
-      {
-      case field::feature::kLooper:
-        drawLooper(fb, left, bot, w, x0);
-        break;
-      default:
-        break;
-      }
+      // Impact splashes are global now (rain falls across the whole strip), so
+      // every ply draws the flecks for drops whose epicenter is in its window.
+      drawLooper(fb, left, bot, w, x0);
     }
 
     // ---- feature renderers ----

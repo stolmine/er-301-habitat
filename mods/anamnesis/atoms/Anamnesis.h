@@ -734,7 +734,7 @@ namespace anamnesis
       mDropRng = mDropRng * 1664525u + 1013904223u; float ux = (float)((mDropRng >> 9) & 0x7fffff) / 8388607.0f;
       mDropRng = mDropRng * 1664525u + 1013904223u; float uy = (float)((mDropRng >> 9) & 0x7fffff) / 8388607.0f;
       mDropRng = mDropRng * 1664525u + 1013904223u; float uc = (float)((mDropRng >> 9) & 0x7fffff) / 8388607.0f;
-      mDropX[slot] = ux * 42.0f;             // content-x within the Looper ply (0..42)
+      mDropX[slot] = ux * anamnesis::field::kVizStripW; // anywhere across the whole strip
       mDropY[slot] = 6.0f + uy * 52.0f;      // within the 64px column
       mDropAge[slot] = 0.0f;
       mDropSpeed[slot] = 22.0f + uc * 20.0f; // 22..42 px/s: slow rings -> traceable expansion

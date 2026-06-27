@@ -56,9 +56,10 @@ namespace anamnesis
     // Mix (dry = faint pond, wet = kBaseBright); droplet ring GLOW adds on top,
     // so ripples read as gradated brightness over the lines (visible rings at
     // full wet). Bending (geometry) stays independent of Mix.
-    static const float kBaseBright = 12.0f; // streamline brightness at full Mix
-    static const float kBaseDim    = 4.0f;  // streamline brightness at Mix = 0
-    static const float kGlowGain   = 1.0f;  // droplet ring illumination over lines
+    static const float kBaseBright = 9.0f;  // streamline brightness at full Mix
+    static const float kBaseDim    = 3.0f;  // streamline brightness at Mix = 0
+    static const float kGlowGain   = 1.8f;  // droplet ring illumination (NOT Mix-scaled
+                                            // -> rings stay vivid at any wet, high contrast)
 
     // ---- Rain-on-pond ripples. A drop radiates as a TRAVELLING WAVE-TRAIN, not
     // a standing vibration: a few smooth Gaussian crests move outward together
@@ -145,6 +146,9 @@ namespace anamnesis
 
     // Content-stride between ply slices: 42px ply + 1px SpottedStrip gap.
     static const int kStride = 43;
+    // Whole-strip content width: rain falls across all of it (free-reign drops).
+    static const int   kVizPlies  = 6;
+    static const float kVizStripW = (float)(kVizPlies * kStride); // 258px
 
     // Baseline y (px) of streamline s within a height-h column.
     inline float baseline(int s, int n, int h)

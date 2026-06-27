@@ -92,7 +92,11 @@ effect, so you get a "you are here" anchor while the effect still pervades the p
     Clock-tempo polish, Grit, then Spread/Source/DirectLoop (weak — make subtle).
 - **D Polish — pending:** active-ply emphasis, CPU profile on CM4 (Phase 6).
 
-## Open questions
-- Default Mix 0.4 → base brightness ~7/15 (dim). Raise `kBaseDim` floor or decouple?
+## Open questions / future
+- **Literal droplet ring lines at high Mix** (FUTURE, Bram-requested): at high Mix,
+  draw actual expanding ring arcs/lines from each drop (on top of the bend+glow) to
+  further differentiate ripples from line-bending. Deferred — current bend+glow ok.
 - Clock→ply-1 reorder (target 6-ply order) not yet applied.
+- Whole-width rain keeps the per-loop spawn RATE, so each region is sparser — raise
+  rate/pool if it reads too sparse.
 - Spread/Source/DirectLoop visual channels are weak — may stay subtle or defer.
