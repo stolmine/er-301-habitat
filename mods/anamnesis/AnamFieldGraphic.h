@@ -317,16 +317,22 @@ namespace anamnesis
             const float v00 = G[gj * kMetaGW + gi], v10 = G[gj * kMetaGW + gi + 1];
             const float v01 = G[(gj + 1) * kMetaGW + gi], v11 = G[(gj + 1) * kMetaGW + gi + 1];
             const float v = (v00 * (1.0f - fx) + v10 * fx) * (1.0f - fy) + (v01 * (1.0f - fx) + v11 * fx) * fy;
-            if (v > Tcore) fb.pixel(0, px, py); // deep interior: occlude lower-z
-            else if (v > T) // bright rim BAND: buffers the smooth contour from the blocky black fill
+            // No bloom (Diffusion=0): plain 0.2.0.69 fill -> black to the contour,
+            // NO rim band -> clean bubbles. With bloom: black pulls inside to Tcore
+            // and the (T,Tcore] rim band buffers the contour from the blocky fill.
+            const float blackT = bloomOn ? Tcore : T;
+            if (v > blackT) fb.pixel(0, px, py); // interior: occlude lower-z
+            else if (bloomOn && v > T) // bright rim BAND: buffers contour from blocky fill (bloom only)
             {
               if (bubB > fb.readPixel(px, py)) fb.pixel(bubB, px, py);
             }
-            else if (bloomOn && v > bloomLo) // outer band: graded bloom (max-blend)
+            else if (bloomOn && v > bloomLo) // outer band: graded + DITHERED bloom (the soft glow)
             {
-              const float frac = (v - bloomLo) / (T - bloomLo);
-              const float fall = frac * frac * (3.0f - 2.0f * frac); // smoothstep -> eases to 0 at outer edge
-              const int bv = (int)(bloomPeak * fall + 0.5f);
+              // Bayer 4x4 ordered dither -> spreads the 4-bit quantization so the
+              // faint tail reads as a smooth glow, not sparse speckle.
+              static const int bayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
+              const float dith = (float)bayer[(py & 3) * 4 + (px & 3)] * (1.0f / 16.0f);
+              const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + dith);
               if (bv > 0 && bv > fb.readPixel(px, py)) fb.pixel(bv, px, py);
             }
           }

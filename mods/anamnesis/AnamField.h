@@ -104,10 +104,10 @@ namespace anamnesis
     // (the 0.2.0.69 gradient mechanics -- the edge is handled separately by the
     // rim band below).
     // Diffusion drives the bloom RADIUS via an EXPONENTIAL throw (subtle low,
-    // accelerating high), 0 at Diffusion=0. Peak is HELD at the bubble edge
-    // brightness (kBloomGain~1) so the rim joins the glow continuously, and the
-    // falloff is SMOOTHSTEP-shaped so it eases cleanly down to 0 at the outer edge
-    // (no hard cutoff). No dither -- the smooth curve + larger radius carry it.
+    // accelerating high), 0 at Diffusion=0 (-> clean bubbles, the rim band + bloom
+    // both gate off). Peak HELD at the bubble edge brightness (kBloomGain~1) so the
+    // rim joins the glow continuously; linear falloff with Bayer-4x4 ordered DITHER
+    // so the faint tail reads as a smooth soft glow (not sparse 4-bit speckle).
     static const float kBloomBandMax = 0.50f; // max bloom radius (field-units below T) at Diff=1
     static const float kBloomExp     = 1.80f; // exponential throw on Diffusion->bloom radius
     static const float kBloomGain    = 1.00f; // peak as fraction of bubble edge (held -> clean join)
