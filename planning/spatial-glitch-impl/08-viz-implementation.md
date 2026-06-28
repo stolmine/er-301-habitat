@@ -118,11 +118,52 @@ with background (occludes lower-z). **`renderBubbleLevel(L)`** = the metaball en
 **ALL bubble/metaball constants live in `AnamField.h`** (kBub*, kMeta*, kNumPoints,
 kLatch*, kReach*, kAff*, kSub*/point, kCalve*, kFreezeDrift, etc.).
 
-## NEXT — richer bubble physics (the flow + droplet carry)
-The weighted point/affinity field is the groundwork: have the **flow streamlines + the
-droplet ripple field actually shove the bubbles around** (nudge `mBubVx`/position by the
-local `flow()` slope + nearby `rippleEval` bend as they move) so shapes get thrown off
-course over the weighted field. Then revisit Field subsystem channels still pending
-(Diffusion fuzz, Mod wander, Decay persistence, Grit dashes, Clock-tempo polish), the
-active-ply emphasis, Clock→ply-1 reorder, and CM4 CPU profiling (the metaball field +
-per-pixel fill is the heaviest part — profile before shipping).
+## Bubble physics — DONE (0.2.0.62–64)
+Velocity `mBubVx/Vy` relaxes (inertia `kBubResp`) toward a TARGET = buoyant rise + flow
+**streamfunction** carry (`(∂/∂y, −∂/∂x)` of `flow()` → incompressible swirl, bubbles ride
+eddies). Ripple fronts add an **accumulating radial IMPULSE** (Stokes drift: `RippleHit.push`
+× `mDropAmp` × dir, integrated → persistent net outward shove as rings sweep past — a velocity
+TARGET only let them lean then relax, so far bubbles barely moved). `kBubVMax` clamps. Freeze
+still blends to random scatter.
+
+## Size → flow feature scale — DONE (0.2.0.65–67)
+`flow(cx,yb,phase,size)`: spatial terms scale by `fsc` (Size→wavelength: tight↔broad swell,
+~1.25× throw via `kSizeFreq{Tight,Wide}`) + amplitude `asc`. Anchored at `kFlowCenter` via
+`xc = cx − centre` (LINEAR, not abs) so the Size *adjustment* pivots about the strip centre
+(compress/expand from middle) while the flow MOTION stays one-directional. `phase` stays
+outside the sine → tempo unchanged. Global → seams align. (constants `kSize*`, `kFlowCenter`)
+
+## Diffusion → bubble bloom/glow — DONE (0.2.0.68–78)
+A glow around the metaball bubbles (NOT a line blur — links Diffusion+Density+bloom). Final
+pipeline after a long edge/glow-polish journey (rim band → dither → smoothstep field → reverts):
+- **Feathered (AA) interior occlusion:** `pixel *= (1 − clamp((v−T)/kEdgeSoft))` instead of a
+  hard `v>T→black`. Deep interior → black (occludes); near the contour it feathers so the
+  blocky fill never spills a hard pixel past the smooth marching-squares contour → kills the
+  dark sliver with NO rim band (the rim band popped at Diff=0 and seamed vs the glow).
+- **Glow grows from the edge:** peak HELD at edge brightness (`kBloomGain~1` → joins contour
+  seamlessly); Diffusion drives only the RADIUS (`kBloomBandMax`, EXPO `kBloomExp`), so at
+  Diff=0+ it's a sub-pixel ring widening outward → smooth fade-in, no pop. Diff=0 → no glow.
+- **Dither = Interleaved Gradient Noise (Jimenez)**, smoother on gradients than Bayer.
+- Bloom max-blends; back→front composite → lands on z≤ the level, occluded by higher z.
+- *Residual: minor black pop-through at the edge — likely emu-exaggerated; revisit on hardware.*
+- `vizDiffusion` = `mDiffGZ/0.75` (smoothed allpass gain → knob). Constants `kBloom*`, `kEdgeSoft`.
+
+## Mod → slow organic wander — DONE (0.2.0.79–80)
+`flow()` adds `powf(mod,kModExp) · kModDepth · noise::sample(cx·kModSpace, yb·kModSpace +
+phase·kModRate)` — low spatial+temporal freq, EXPO throw, global in cx (seams), driven by
+`mVizPhase` (Freeze halts). Threaded through line render + bubble-physics gradient → whole
+field (lines + bubbles riding it) sways. `vizMod` = `mModZ`. Not size-scaled.
+
+## Decay → ripple persistence — DONE (0.2.0.81)
+`rippleTauOf(decay) = kRippleTau·(1 + (kDecayTauMax−1)·decay^kDecayExp)` — rings fade slower +
+reach further; `crestTrain`/`rippleEval` gained a `tau` param (threaded to all 3 sites: 2
+line-bend + 1 bubble-shove) and the drop retirement (`3·tau`). EXPO throw, capped 2.6×, bounded
+by the fixed 16-drop pool so it can't run to soup. `vizDecay` = raw `mDecay` value.
+
+## NEXT (resume after Bram plays)
+- **Looper rain character:** Speed→impact energy + drift-direction(sign)/0=hang; Length→rate +
+  drop size; Mode→drop character (Tape/Stretch/Env); Regen→turbulence (ripples breed ripples).
+- **Active-ply emphasis** (reborn bias_indication) — RECOMMENDED next; needs focus state passed
+  to the per-ply graphic (Lua ViewControl knows focus → graphic).
+- **Clock→ply-1 reorder**; **Clock→ripple expansion** (drops use fixed `mDropSpeed` today).
+- **Grit SKIPPED** (Bram). **CM4 CPU profile** — metaball per-pixel fill is heaviest.

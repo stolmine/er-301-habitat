@@ -19,17 +19,18 @@ visual pervades the WHOLE field. Plies differ only by *which control is focused*
 only if **each effect rides a distinct, separable visual channel** (the legibility
 contract — never let two effects fight over the same channel):
 
-| Channel | Effect |
-|---|---|
-| line **bending** (geometry) | rain ripples (Looper) |
-| line **brightness / glow** | Mix (base level) + droplet ring illumination |
-| **motion** (flow advance) | Clock tempo; **Freeze halts it** |
-| **bubbles + z-depth** (floating shapes woven through line-bands) | Density |
-| line **softness / blur** | Diffusion |
-| slow **wander** | Mod |
-| **persistence** (ripple/flow linger) | Decay |
-| **stroke break-up** (dashes) | Grit |
-| **horizontal width** | Spread |
+| Channel | Effect | Status (dev 0.2.0.81) |
+|---|---|---|
+| line **bending** (geometry) | rain ripples (Looper) | ✅ done |
+| line **brightness / glow** | Mix (base level) + droplet ring illumination | ✅ done |
+| **motion** (flow advance) | Clock tempo; **Freeze halts it** | ✅ done |
+| **bubbles + z-depth** (floating shapes woven through line-bands) | Density | ✅ done (+ flow/ripple physics) |
+| **flow feature scale** (swell wavelength/amp, centre-pivot) | Size | ✅ done |
+| **bubble bloom / glow** (feathered edge + IGN-dithered halo) | Diffusion | ✅ done |
+| slow **wander** | Mod | ✅ done (expo) |
+| **persistence** (ripple τ + reach) | Decay | ✅ done (expo, pool-bounded) |
+| **stroke break-up** (dashes) | Grit | ⏭ SKIPPED (Bram, 2026-06-28) |
+| **horizontal width** | Spread | ⬜ deferred (weak) |
 
 ## Param → lever map (the full intent)
 
@@ -81,18 +82,30 @@ effect, so you get a "you are here" anchor while the effect still pervades the p
 - **"All-over" = the main 256-wide strip only.** The sub-display (128×64) holds the
   readouts.
 
-## Build status (2026-06-27)
+## Build status (PARKED 2026-06-28 @ dev 0.2.0.81 — Bram playing before more work)
 - **A Foundation — DONE.** Flowing field across all plies, seams aligned.
 - **B Consolidate to 6 plies — DONE.** Looper(Speed+Length default subs s1/s3),
   Freeze(field-Gate), Size, Density, Clock, Mix; Clock→ply-1 reorder still pending.
-- **C Effects — IN PROGRESS:**
-  - **Rain ripples DONE** (dev 0.2.0.37): physical drop model — impact transient
-    (crater→jet) + dispersive fanning train + knock-on; pond-wide bending. See 08.
-  - **Brightness + Freeze + lifetime DONE** (dev 0.2.0.40): Mix→base brightness,
-    droplet rings illuminate the lines, Freeze stops flow only, longer drop life.
-  - **NEXT: Density → branch/absorb** (spec in 08), then Diffusion, Mod, Decay,
-    Clock-tempo polish, Grit, then Spread/Source/DirectLoop (weak — make subtle).
-- **D Polish — pending:** active-ply emphasis, CPU profile on CM4 (Phase 6).
+- **C Effects — most channels DONE** (see 08 for impl detail per channel):
+  - **Rain ripples** (0.2.0.37): impact transient + dispersive fanning train + knock-on.
+  - **Brightness + Freeze + lifetime** (0.2.0.40).
+  - **Density → lava-lamp metaball bubbles** (0.2.0.48–61) + **bubble PHYSICS** (0.2.0.62–64):
+    flow streamfunction carries them + ripple-front Stokes-drift impulses shove them.
+  - **Size → flow feature scale** (0.2.0.65–67): centre-pivot, one-way flow, ~1.25× throw.
+  - **Diffusion → bubble bloom** (0.2.0.68–78): the lava-lamp glow. Long edge/glow polish
+    journey ended at **feathered (AA) black interior + held-peak glow grown from the edge +
+    Interleaved-Gradient-Noise dither** (no rim band). *Residual: minor black pop-through at
+    the edge — likely emu-exaggerated, revisit on hardware.*
+  - **Mod → slow organic flow wander** (0.2.0.79–80): low-freq noise, expo throw.
+  - **Decay → ripple persistence** (0.2.0.81): scales ripple τ + reach, expo, pool-bounded.
+  - **Grit → SKIPPED** (Bram, 2026-06-28). **Spread/Source/DirectLoop** deferred (weak).
+- **D Polish / remaining — PENDING (resume here):**
+  - **Looper rain character:** Speed→impact energy + drift-direction(sign)/0=hang;
+    Length→rate+drop size; Mode→drop character; Regen→turbulence.
+  - **Active-ply emphasis** (reborn bias_indication) — the "you are here" anchor; RECOMMENDED
+    next (all channels are global now, nothing marks the focused control).
+  - **Clock→ply-1 reorder**; **Clock→ripple expansion** (drops use fixed mDropSpeed today).
+  - **CM4 CPU profile** (metaball per-pixel fill is heaviest).
 
 ## Open questions / future
 - **Literal droplet ring lines at high Mix** (FUTURE, Bram-requested): at high Mix,
