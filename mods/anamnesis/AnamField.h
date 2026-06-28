@@ -199,11 +199,11 @@ namespace anamnesis
     // passing ripple fronts (see atom bubble-update). Velocity relaxes toward a
     // TARGET = buoyant rise + flow-carry + ripple-shove, with inertia (kBubResp)
     // so shapes get thrown off course then drift back.
-    static const float kBubResp    = 3.0f;  // velocity relaxation rate (1/s): low =
+    static const float kBubResp    = 2.0f;  // velocity relaxation rate (1/s): low =
                                             // inertial (momentum carries past), high = rigid
     static const float kFlowAdvect = 26.0f; // flow streamfunction gradient -> px/s carry
                                             // (bubbles ride the swirling current)
-    static const float kRipplePush = 1.2f;  // ripple radial magnitude -> px/s shove
+    static const float kRipplePush = 1.5f;  // ripple radial magnitude -> px/s shove
                                             // (x mDropAmp: loud captures throw harder)
     static const float kPushEps    = 2.0f;  // px finite-difference step for flow gradient
     // Bubbles as 2D METABALLS (lava-lamp): per z-LEVEL, a scalar field = animated
