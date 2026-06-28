@@ -267,12 +267,11 @@ namespace anamnesis
       int gh = h / C + 2; if (gh > kMetaGH) gh = kMetaGH;
       const float T = field::kMetaThresh;
       // Diffusion bloom: the field band [bloomLo, T) outside each shape is drawn
-      // as a graded aura (max-blended over already-drawn, lower/equal-z content).
-      // Diffusion sets the RADIUS (0.75x..1.5x); near-edge brightness = bubB so it
-      // joins the contour with no divide, grading to 0 at the outer edge.
-      const float bloomBand = field::kBloomBand *
-        (field::kBloomScaleMin + (field::kBloomScaleMax - field::kBloomScaleMin) * diffuse);
-      const bool  bloomOn   = bloomBand > 0.0f;
+      // as a graded, dithered aura (max-blended over already-drawn lower/equal-z
+      // content). Diffusion sets the RADIUS via an exponential throw (0 -> no
+      // bloom); near-edge brightness = bubB so it joins the contour with no divide.
+      const float bloomBand = field::kBloomBandMax * powf(diffuse, field::kBloomExp);
+      const bool  bloomOn   = bloomBand > 0.0001f;
       const float bloomLo   = T - bloomBand;
       const float bloomPeak = (float)bubB * field::kBloomGain;
 
@@ -318,9 +317,13 @@ namespace anamnesis
             const float v01 = G[(gj + 1) * kMetaGW + gi], v11 = G[(gj + 1) * kMetaGW + gi + 1];
             const float v = (v00 * (1.0f - fx) + v10 * fx) * (1.0f - fy) + (v01 * (1.0f - fx) + v11 * fx) * fy;
             if (v > T) fb.pixel(0, px, py); // interior: occlude lower-z
-            else if (bloomOn && v > bloomLo) // outer band: graded bloom (max-blend)
+            else if (bloomOn && v > bloomLo) // outer band: graded + dithered bloom (max-blend)
             {
-              const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + 0.5f);
+              // Bayer 4x4 ordered dither replaces the +0.5 round -> spreads the
+              // 4-bit quantization across pixels, breaking the contour banding.
+              static const int bayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
+              const float dith = (float)bayer[(py & 3) * 4 + (px & 3)] * (1.0f / 16.0f);
+              const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + dith);
               if (bv > 0 && bv > fb.readPixel(px, py)) fb.pixel(bv, px, py);
             }
           }
