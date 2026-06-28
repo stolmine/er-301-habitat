@@ -36,6 +36,27 @@ namespace anamnesis
 
     inline float fract(float x) { return x - floorf(x); }
 
+    // Stable pseudo-random [0,1) from two ints (dendrite connector sites).
+    inline float hash01(int a, int b)
+    {
+      unsigned int x = (unsigned int)(a * 374761393 + b * 668265263);
+      x = (x ^ (x >> 13)) * 1274126177u;
+      return (float)((x ^ (x >> 16)) & 0xffffff) / 16777216.0f;
+    }
+
+    inline float smooth01(float e0, float e1, float x)
+    {
+      if (e1 <= e0) return x >= e1 ? 1.0f : 0.0f;
+      float t = (x - e0) / (e1 - e0);
+      if (t < 0.0f) t = 0.0f; else if (t > 1.0f) t = 1.0f;
+      return t * t * (3.0f - 2.0f * t);
+    }
+
+    // Dendrite connectors: per-streamline site count grows with Density; each site
+    // fades in over this window past its hash threshold (smooth branch-in).
+    static const float kDendriteFade = 0.18f;
+    static const float kDendriteLean = 3.0f; // px horizontal lean (the "crossing")
+
     // Catmull-Rom through 4 control points -> smooth flow-line interpolation.
     inline float catmull(float p0, float p1, float p2, float p3, float t)
     {
@@ -49,42 +70,20 @@ namespace anamnesis
     // obvious collective motion); kept easy to retune. Control points every
     // kCtrlStep px are Catmull-Rom interpolated to per-pixel y, so the per-line
     // cost (flow + ripple evals) stays low even as the count grows.
-    static const int kStreamMin = 7;   // line count at Density 0
-    static const int kStreamMax = 20;  // line count at Density 1 (also the array cap)
-    static const int kCtrlStep  = 4;
+    static const int kStreamN  = 14;   // fixed streamline count -> 7 pair-bands for z-depth
+    static const int kCtrlStep = 4;
 
-    // Build the line-activation layout (normalized baselines in [0,1]): the first
-    // kStreamMin are evenly spaced (always on); each later line bisects the LARGEST
-    // current gap (fills evenly) and records its PARENT (lower neighbour) so it can
-    // branch out from / absorb back into it as Density crosses its activation.
-    inline void buildLineLayout(float *target, float *parent)
-    {
-      float active[kStreamMax + 4];
-      int count = 0;
-      for (int i = 0; i < kStreamMin; i++)
-      {
-        const float p = ((float)i + 0.5f) / (float)kStreamMin;
-        target[i] = p;
-        parent[i] = p; // base lines: no branch
-        active[count++] = p;
-      }
-      for (int m = kStreamMin; m < kStreamMax; m++)
-      {
-        int gi = 0;
-        float gbest = -1.0f;
-        for (int a = 0; a + 1 < count; a++)
-        {
-          const float g = active[a + 1] - active[a];
-          if (g > gbest) { gbest = g; gi = a; }
-        }
-        const float mid = 0.5f * (active[gi] + active[gi + 1]);
-        target[m] = mid;
-        parent[m] = active[gi]; // branch from the lower neighbour
-        for (int a = count; a > gi + 1; a--) active[a] = active[a - 1];
-        active[gi + 1] = mid;
-        count++;
-      }
-    }
+    // CONNECTIONS (Density): the streamlines stay CLEAN; at drifting nodes along
+    // the strip, a branch GROWS between the two lines bracketing the node as
+    // Density rises (staggered per node). "Growth" (extent) represents a partial /
+    // developing connection -- a stub reaching partway -> a full link; a soft
+    // tip-fade smooths the growing end. Nodes drift with the flow (the axis of
+    // change). L-system bifurcation can layer on later.
+    static const float kConnSpacingX = 30.0f; // node spacing in content-x (px)
+    static const float kConnDrift    = 6.0f;  // node drift speed with flow phase
+    static const float kConnGrowWin  = 0.55f; // density window a branch grows 0..1 over
+    static const float kConnLean     = 5.0f;  // px horizontal lean (organic angle)
+    static const float kConnBow      = 4.0f;  // px curve bow
 
     // Streamline illumination (4-bit gray, 0..15). Base brightness scales with
     // Mix (dry = faint pond, wet = kBaseBright); droplet ring GLOW adds on top,
@@ -183,6 +182,8 @@ namespace anamnesis
     // Whole-strip content width: rain falls across all of it (free-reign drops).
     static const int   kVizPlies  = 6;
     static const float kVizStripW = (float)(kVizPlies * kStride); // 258px
+    static const float kVizColH   = 64.0f; // viz column height (px); bubbles rise across it
+    static const float kBubRise   = 14.0f; // bubble rise speed (px/s)
 
     // Baseline y (px) of streamline s within a height-h column.
     inline float baseline(int s, int n, int h)

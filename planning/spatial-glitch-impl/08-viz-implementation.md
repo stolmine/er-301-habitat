@@ -72,14 +72,29 @@ on CM4** (Phase 6) — the front-reject + age-scaled crest count keep it bounded
 longer lifetimes raise concurrent-drop count. Lever down via `kStreamlines`,
 `kVizMaxDrops`, or `kRippleTau` if needed.
 
-## PENDING — Density → branch/absorb (next)
-Smoothly vary line count 7 (min) → 20 (max) with fluid branch/absorb:
-- Up to 20 target baselines + an **activation priority** by *largest-gap bisection*
-  (first 7 evenly spread, each later line bisects the widest current gap → fills
-  evenly). Precompute the order + each line's PARENT (an adjacent line).
-- Continuous Density → active count `k = 7 + density·13`. Lines below `floor(k)`
-  full; the `floor(k)`-th branches in with progress `frac(k)`.
-- **Fluidity**: a branching line's baseline lerps OUT from its parent to its slot as
-  it fades in (split off); reverse Density → slides back and merges (absorb).
-- All plies use the identical density-driven layout → seams stay aligned.
-- `kStreamlines` becomes the *max* (20); `vizDensity` drives active count.
+## Density → bubbles + z-depth weave (DONE @ 0.2.0.48)
+Fixed **14 streamlines** (`kStreamN`) grouped into **7 pair-BANDS** (band b = lines
+2b, 2b+1). Density spawns **bubbles** woven through the bands by z-depth.
+- **Bubble pool** (atom, `kVizMaxBubbles`=12, all `#ifndef SWIGLUA`): `mBubX`
+  (content-x), `mBubY` (column-y), `mBubZ`, `mBubR` (≤0 inactive), `mBubVx`. Per
+  block: rise (`kBubRise`) + slight drift; spawn toward target `= density·max` on a
+  timer; retire off the top. Getters `vizBub{X,Y,Z,R}(i)`, `vizMaxBubbles`.
+- **Band z permutation** randomized per unit insertion (Fisher-Yates in the atom
+  ctor → `mBandZ[7]`, getter `vizBandZ(b)`). Shared by all plies → consistent depth.
+- **Render = z-ordered painter's composite** (AnamFieldGraphic): build a list of
+  bands (z = `vizBandZ`) + active bubbles (own z), insertion-sort ascending z, draw
+  back→front. `renderBand(b)` draws both lines AND **fills the negative space
+  between the pair with background (0)** → occludes lower-z material. `drawBubble`
+  **fills its disk with background then draws a bright outline** (2 brighter than the
+  lines, `bubB = baseB+2`) → occludes lower-z; both **clipped to the ply window**
+  (`plotClip`) so strip-spanning shapes draw in pieces with correct per-ply z (no
+  cross-ply clobber). `drawLinePix` = the shared sqrt-AA line-pixel helper.
+- Constants: `kStreamN`(14), `kVizColH`(64), `kBubRise`(14), `kVizMaxBubbles`(12),
+  spawn radius 2..6 / drift ±3 / interval 0.25s (in atom `spawnDrop`-adjacent block).
+
+## NEXT — organic bubble shapes (Perlin contour)
+Replace circle outlines with organic blobs: lift the Perlin LUT + marching-squares
+iso-contour engine from `mods/spreadsheet/RaindropGraphic.h` (LUT-baked `sampleNoise`
++ `kSegTable` marching squares). Each bubble = a contour blob sampled from a noise
+field (animated/scrolled), still z-ordered + occluding as now. Then: **wave/droplet
+carry** (nudge bubble x by local flow + ripple as it rises).

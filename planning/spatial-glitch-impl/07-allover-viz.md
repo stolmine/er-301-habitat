@@ -24,7 +24,7 @@ contract — never let two effects fight over the same channel):
 | line **bending** (geometry) | rain ripples (Looper) |
 | line **brightness / glow** | Mix (base level) + droplet ring illumination |
 | **motion** (flow advance) | Clock tempo; **Freeze halts it** |
-| line **count / branching** | Density |
+| **bubbles + z-depth** (floating shapes woven through line-bands) | Density |
 | line **softness / blur** | Diffusion |
 | slow **wander** | Mod |
 | **persistence** (ripple/flow linger) | Decay |
@@ -43,8 +43,10 @@ contract — never let two effects fight over the same channel):
 **FIELD → the water body** (aggregate surface character; each subparam shapes it)
 - **Size** → flow feature scale (swell wavelength/amplitude). **Decay** → persistence
   (ripple τ + flow linger). **Diffusion** → fuzz/scatter (crisp ↔ hazy). **Density**
-  → line count + interference (sparse combs ↔ dense moiré; branch/absorb). **Mod** →
-  slow organic wander of the lines.
+  → **bubbles** (outlined shapes float up through the field; count ∝ Density) woven
+  in front of / behind the streamline **bands** via randomized **z-levels** (real
+  depth). [Dendrite/branch & line-subdivision ideas tried + abandoned 2026-06-27.]
+  **Mod** → slow organic wander of the lines.
 
 **CLOCK → global time + lo-fi**
 - **Clock** → global tempo (flow + ripple expansion speed; flow ∝ 1/R). **Grit** →

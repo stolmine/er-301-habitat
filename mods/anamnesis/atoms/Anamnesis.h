@@ -111,6 +111,9 @@ namespace anamnesis
   // Rain-on-pond ripple pool: one droplet spawns per loop cycle (read wrap),
   // drips into the all-over field, bends every ply's flow lines (07-allover-viz.md).
   static const int kVizMaxDrops = 16;
+  // Bubbles (Density): outlined shapes floating up through the field, woven in
+  // front/behind streamline bands by z (band z randomized per unit insertion).
+  static const int kVizMaxBubbles = 12;
 
   // ---- Stage 2 FDN ----
   static const int kFdnN = 8;
@@ -187,6 +190,18 @@ namespace anamnesis
       mInit = false;
       for (int i = 0; i < kVizMaxDrops; i++) { mDropAge[i] = -1.0f; mDropAmp[i] = 1.0f; }
       mDropPrevRead = 0.0f;
+      // Randomize the band z-levels on insertion (Fisher-Yates) -> each unit
+      // instance weaves bubbles through its bands in its own depth order.
+      const int nb = anamnesis::field::kStreamN / 2;
+      for (int i = 0; i < nb; i++) mBandZ[i] = i;
+      for (int i = nb - 1; i > 0; i--)
+      {
+        mBubRng = mBubRng * 1664525u + 1013904223u;
+        int j = (int)((mBubRng >> 8) % (unsigned)(i + 1));
+        int t = mBandZ[i]; mBandZ[i] = mBandZ[j]; mBandZ[j] = t;
+      }
+      for (int i = 0; i < kVizMaxBubbles; i++) mBubR[i] = 0.0f;
+      mBubSpawnT = 0.0f;
 
       for (int i = 0; i < kTapN; i++)
       {
@@ -264,6 +279,12 @@ namespace anamnesis
     float vizDropPhase(int i) { return mDropPhase[i]; }
     float vizDropAmp(int i)   { return mDropAmp[i]; }
     float vizMix()            { return mMix.value(); }
+    int   vizBandZ(int b)     { return mBandZ[b]; }
+    int   vizMaxBubbles()     { return kVizMaxBubbles; }
+    float vizBubX(int i)      { return mBubX[i]; }
+    float vizBubY(int i)      { return mBubY[i]; }
+    float vizBubZ(int i)      { return mBubZ[i]; }
+    float vizBubR(int i)      { return mBubR[i]; }   // <= 0 = inactive
 
     inline void ensureFlushToZero()
     {
@@ -452,6 +473,41 @@ namespace anamnesis
         if (mLoopLenZ > 2.0f && fabsf(curRead - mDropPrevRead) > 0.5f * mLoopLenZ)
           spawnDrop();
         mDropPrevRead = curRead;
+      }
+
+      // Bubbles: float up + slight drift; spawn toward a Density-set target count.
+      {
+        const float bdt = (float)FRAMELENGTH / fs;
+        const float colH = anamnesis::field::kVizColH;
+        int activeB = 0;
+        for (int i = 0; i < kVizMaxBubbles; i++)
+        {
+          if (mBubR[i] <= 0.0f) continue;
+          mBubY[i] += bdt * anamnesis::field::kBubRise; // upward
+          mBubX[i] += bdt * mBubVx[i];                   // slight horizontal drift
+          if (mBubY[i] > colH + mBubR[i] + 2.0f) { mBubR[i] = 0.0f; continue; }
+          activeB++;
+        }
+        const int target = (int)(density * (float)kVizMaxBubbles + 0.5f);
+        mBubSpawnT -= bdt;
+        if (activeB < target && mBubSpawnT <= 0.0f)
+        {
+          int slot = -1;
+          for (int i = 0; i < kVizMaxBubbles; i++) if (mBubR[i] <= 0.0f) { slot = i; break; }
+          if (slot >= 0)
+          {
+            mBubRng = mBubRng * 1664525u + 1013904223u; float ux = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f;
+            mBubRng = mBubRng * 1664525u + 1013904223u; float uz = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f;
+            mBubRng = mBubRng * 1664525u + 1013904223u; float ur = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f;
+            mBubRng = mBubRng * 1664525u + 1013904223u; float uv = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f;
+            mBubX[slot] = ux * anamnesis::field::kVizStripW;
+            mBubY[slot] = -2.0f;                                       // just below the bottom
+            mBubZ[slot] = uz * (float)(anamnesis::field::kStreamN / 2); // z across the band range
+            mBubR[slot] = 2.0f + ur * 4.0f;                            // radius 2..6
+            mBubVx[slot] = (uv - 0.5f) * 6.0f;                         // small drift px/s
+            mBubSpawnT = 0.25f;                                         // min spawn interval
+          }
+        }
       }
       // Grit: 0..0.5 crossfades clean linear-interp -> broken ZOH reconstruction;
       // 0.5..1 adds bit-crush. 0.5 = ZOH only (matches pre-Grit behavior).
@@ -771,6 +827,12 @@ namespace anamnesis
     float mDropAmp[kVizMaxDrops];   // ripple size = loudness of that loop capture
     uint32_t mDropRng = 0x1234567u;
     float mDropPrevRead = 0.0f;   // read pos last block, for loop-wrap spawn
+    // Bubble pool + the per-unit-instance random band-z permutation (depth weave).
+    int   mBandZ[anamnesis::field::kStreamN / 2];
+    float mBubX[kVizMaxBubbles], mBubY[kVizMaxBubbles], mBubZ[kVizMaxBubbles];
+    float mBubR[kVizMaxBubbles], mBubVx[kVizMaxBubbles];   // mBubR <= 0 = inactive slot
+    uint32_t mBubRng = 0x9e3779b9u;
+    float mBubSpawnT = 0.0f;
     float mWetFb, mFbDcX1, mFbDcY1;   // cross-feedback signal + DC-blocker state
     float mSourceZ, mDirectLoopZ, mSpreadZ, mLoopOutHeld;   // Router
     float mLine[kFdnN][kFdnBufLen];
