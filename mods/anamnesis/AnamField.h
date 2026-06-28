@@ -95,24 +95,16 @@ namespace anamnesis
     static const float kGlowGain   = 1.8f;  // droplet ring illumination (NOT Mix-scaled
                                             // -> rings stay vivid at any wet, high contrast)
     // Diffusion -> a GLOW BLOOM around the Density BUBBLES (links Diffusion +
-    // Density + bloom). The metaball field already falls off smoothly outside the
-    // fill threshold T; that outer band is drawn as a graded aura, MAX-blended so
-    // it only ever brightens. Because the levels composite BACK->FRONT, the bloom
-    // lands over the streamlines + bubbles at z <= the blooming level and is
-    // occluded by higher z (draw order = the z test). Lines stay sharp.
-    // Diffusion=0 -> no bloom (skipped). Both scale with Diffusion 0..1.
-    // Diffusion drives the bloom RADIUS (how far the glow spreads): 0 at
-    // Diffusion=0 (band collapses -> NO bloom) up to kBloomBandMax at Diffusion=1,
-    // with an EXPONENTIAL throw (subtle low, accelerating high). Near-edge
-    // brightness is held at the bubble edge brightness (kBloomGain~1) and grades
-    // to 0 outward, so the bloom joins the contour cleanly. The graded brightness
-    // is ordered-DITHERED (Bayer 4x4) to break 4-bit quantization banding.
-    static const float kBloomBandMax = 0.50f; // max bloom radius (field-units below T) at Diff=1
-                                              // (=T -> bloomLo~0, the widest safe reach: bloom
-                                              // fades to 0 at the field's outer fringe, no flood)
-    static const float kBloomExp     = 1.60f; // exponential throw on Diffusion->bloom (lower =
-                                              // reaches wider earlier in the knob)
-    static const float kBloomGain    = 1.00f; // near-edge brightness as fraction of bubble edge
+    // Density + bloom). The metaball field falls off smoothly outside the fill
+    // threshold T; that outer band [bloomLo, T) is drawn as a graded aura,
+    // MAX-blended so it only ever brightens. Because the levels composite
+    // BACK->FRONT, the bloom lands over streamlines + bubbles at z <= the blooming
+    // level and is occluded by higher z (draw order = the z test). Lines stay
+    // sharp. Diffusion=0 -> no bloom. Both band + brightness scale with Diffusion
+    // (the 0.2.0.69 gradient mechanics -- the edge is handled separately by the
+    // rim band below).
+    static const float kBloomBand = 0.30f; // field-units below T the bloom fades over (x Diff)
+    static const float kBloomGain = 0.75f; // bloom peak as fraction of bubble brightness (x Diff)
     // The per-pixel black FILL (v>T, blocky) and the marching-squares AA contour
     // (smooth) are two independent edges; the blocky fill can spill a pixel PAST
     // the smooth contour -> dark sliver between the bright rim and the bloom. Fix:

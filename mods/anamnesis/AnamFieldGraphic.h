@@ -270,10 +270,9 @@ namespace anamnesis
       // as a graded, dithered aura (max-blended over already-drawn lower/equal-z
       // content). Diffusion sets the RADIUS via an exponential throw (0 -> no
       // bloom); near-edge brightness = bubB so it joins the contour with no divide.
-      const float bloomBand = field::kBloomBandMax * powf(diffuse, field::kBloomExp);
-      const bool  bloomOn   = bloomBand > 0.0001f;
-      const float bloomLo   = T - bloomBand;
-      const float bloomPeak = (float)bubB * field::kBloomGain;
+      const bool  bloomOn   = diffuse > 0.0f;
+      const float bloomLo   = T - field::kBloomBand * diffuse;
+      const float bloomPeak = (float)bubB * field::kBloomGain * diffuse;
       const float Tcore     = T + field::kRimInset; // black fill sits inside the contour (rim buffer)
 
       auto renderBubbleLevel = [&](int L)
@@ -308,29 +307,23 @@ namespace anamnesis
           const float gxf = (float)(x0 + lx) / (float)C - (float)gx0n;
           const int gi = (int)gxf; if (gi < 0 || gi >= gw - 1) continue;
           const float fx = gxf - (float)gi;
-          const float sx = fx * fx * (3.0f - 2.0f * fx); // smoothstep -> C1 across cells (de-facet)
           const int px = left + lx;
           for (int py = bYlo; py < bYhi; py++)
           {
             const float gyf = (float)(py - bot) / (float)C;
             const int gj = (int)gyf; if (gj < 0 || gj >= gh - 1) continue;
             const float fy = gyf - (float)gj;
-            const float sy = fy * fy * (3.0f - 2.0f * fy); // smoothstep (Perlin) -> no cell-edge creases
             const float v00 = G[gj * kMetaGW + gi], v10 = G[gj * kMetaGW + gi + 1];
             const float v01 = G[(gj + 1) * kMetaGW + gi], v11 = G[(gj + 1) * kMetaGW + gi + 1];
-            const float v = (v00 * (1.0f - sx) + v10 * sx) * (1.0f - sy) + (v01 * (1.0f - sx) + v11 * sx) * sy;
+            const float v = (v00 * (1.0f - fx) + v10 * fx) * (1.0f - fy) + (v01 * (1.0f - fx) + v11 * fx) * fy;
             if (v > Tcore) fb.pixel(0, px, py); // deep interior: occlude lower-z
             else if (v > T) // bright rim BAND: buffers the smooth contour from the blocky black fill
             {
               if (bubB > fb.readPixel(px, py)) fb.pixel(bubB, px, py);
             }
-            else if (bloomOn && v > bloomLo) // outer band: graded + dithered bloom (max-blend)
+            else if (bloomOn && v > bloomLo) // outer band: graded bloom (max-blend) -- 0.2.0.69 gradient
             {
-              // Bayer 4x4 ordered dither replaces the +0.5 round -> spreads the
-              // 4-bit quantization across pixels, breaking the contour banding.
-              static const int bayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
-              const float dith = (float)bayer[(py & 3) * 4 + (px & 3)] * (1.0f / 16.0f);
-              const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + dith);
+              const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + 0.5f);
               if (bv > 0 && bv > fb.readPixel(px, py)) fb.pixel(bv, px, py);
             }
           }
