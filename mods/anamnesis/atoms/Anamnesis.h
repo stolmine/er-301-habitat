@@ -285,6 +285,7 @@ namespace anamnesis
     float vizBubY(int i)      { return mBubY[i]; }
     float vizBubZ(int i)      { return mBubZ[i]; }
     float vizBubR(int i)      { return mBubR[i]; }   // <= 0 = inactive
+    float vizBubSeed(int i)   { return mBubSeed[i]; }
 
     inline void ensureFlushToZero()
     {
@@ -502,9 +503,13 @@ namespace anamnesis
             mBubRng = mBubRng * 1664525u + 1013904223u; float uv = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f;
             mBubX[slot] = ux * anamnesis::field::kVizStripW;
             mBubY[slot] = -2.0f;                                       // just below the bottom
-            mBubZ[slot] = uz * (float)(anamnesis::field::kStreamN / 2); // z across the band range
-            mBubR[slot] = 2.0f + ur * 4.0f;                            // radius 2..6
+            int lv = (int)(uz * (float)anamnesis::field::kBubLevels);
+            if (lv >= anamnesis::field::kBubLevels) lv = anamnesis::field::kBubLevels - 1;
+            mBubZ[slot] = (float)lv;                                    // metaball z-LEVEL
+            mBubR[slot] = 3.0f + ur * 7.0f;                            // radius 3..10 (varied)
             mBubVx[slot] = (uv - 0.5f) * 6.0f;                         // small drift px/s
+            mBubRng = mBubRng * 1664525u + 1013904223u;
+            mBubSeed[slot] = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f * 16.0f; // blob seed
             mBubSpawnT = 0.25f;                                         // min spawn interval
           }
         }
@@ -831,6 +836,7 @@ namespace anamnesis
     int   mBandZ[anamnesis::field::kStreamN / 2];
     float mBubX[kVizMaxBubbles], mBubY[kVizMaxBubbles], mBubZ[kVizMaxBubbles];
     float mBubR[kVizMaxBubbles], mBubVx[kVizMaxBubbles];   // mBubR <= 0 = inactive slot
+    float mBubSeed[kVizMaxBubbles];                        // stable per-bubble blob shape seed
     uint32_t mBubRng = 0x9e3779b9u;
     float mBubSpawnT = 0.0f;
     float mWetFb, mFbDcX1, mFbDcY1;   // cross-feedback signal + DC-blocker state

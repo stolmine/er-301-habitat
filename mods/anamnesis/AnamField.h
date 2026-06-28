@@ -12,6 +12,7 @@
 #pragma once
 
 #include <math.h>
+#include "AnamNoise.h" // Perlin LUT for organic bubble blobs
 
 namespace anamnesis
 {
@@ -183,7 +184,21 @@ namespace anamnesis
     static const int   kVizPlies  = 6;
     static const float kVizStripW = (float)(kVizPlies * kStride); // 258px
     static const float kVizColH   = 64.0f; // viz column height (px); bubbles rise across it
-    static const float kBubRise   = 14.0f; // bubble rise speed (px/s)
+    static const float kBubRise   = 9.0f;  // bubble rise speed (px/s, calm)
+    // Bubbles as 2D METABALLS (lava-lamp): per z-LEVEL, a scalar field = animated
+    // FBM noise + Gaussian bumps at the bubbles, traced by marching squares ->
+    // smooth iso-contours that morph + split/join. Bubbles share a level so their
+    // fields merge; levels interleave with the bands by z (depth weave).
+    static const int   kBubLevels     = 3;     // bubble z-levels (interleave w/ bands)
+    static const int   kMetaCell      = 3;     // finer grid -> resolve irregular lobes
+    static const float kMetaThresh    = 0.50f; // iso-contour threshold (lower = bigger blobs)
+    static const float kMetaBumpAmp   = 1.0f;  // Gaussian bump peak per bubble
+    static const float kMetaSigmaK    = 1.30f; // bump sigma = radius * this (wider = bigger)
+    static const float kMetaNoiseGain = 0.95f; // MULTIPLICATIVE noise: shape each bump by the
+                                               // local topography -> irregular/compound + splits
+    static const float kMetaNoiseFreq = 0.11f; // noise spatial freq (more features per blob = lobes)
+    static const float kMetaMorph     = 0.12f; // noise scroll (slow; movement walks the topography)
+    static const float kMetaSlew      = 0.12f; // field temporal slew (gentle morph, no wild jumps)
 
     // Baseline y (px) of streamline s within a height-h column.
     inline float baseline(int s, int n, int h)

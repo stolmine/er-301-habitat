@@ -152,88 +152,152 @@ namespace anamnesis
         }
       };
 
-      // Bubbles (Density): outlined circles, 2 levels brighter than the lines
-      // across the Mix throw, CLIPPED to this ply's window (a strip-spanning
-      // bubble is drawn in pieces by each ply -> correct per-ply z-order, no
-      // cross-ply clobber). Midpoint-circle outline.
+      // Bubbles = 2D METABALLS per z-LEVEL (lava-lamp): a thresholded field (FBM
+      // noise + Gaussian bumps at the level's bubbles) traced by marching squares
+      // -> smooth iso-contours that morph + split/join. 2 levels brighter than the
+      // lines; fill (occlude lower-z) then bright contour. Clipped to the ply.
       int bubB = (int)(baseB + 2.5f);
       if (bubB > 15) bubB = 15;
       const int bXlo = left, bXhi = left + w + wext, bYlo = bot, bYhi = bot + h;
-      auto drawBubble = [&](float bx, float by, float br)
-      {
-        const int cxp = left + (int)(bx - (float)x0 + 0.5f);
-        const int cyp = bot + (int)(by + 0.5f);
-        const int rad = (int)(br + 0.5f);
-        // Fill the interior with background -> occlude lower-z material (bands /
-        // bubbles drawn behind it). Clipped to the ply window.
-        for (int dy = -rad; dy <= rad; dy++)
-        {
-          const int py = cyp + dy;
-          if (py < bYlo || py >= bYhi) continue;
-          const int dx = (int)(sqrtf((float)(rad * rad - dy * dy)) + 0.5f);
-          int xa = cxp - dx; if (xa < bXlo) xa = bXlo;
-          int xb = cxp + dx; if (xb >= bXhi) xb = bXhi - 1;
-          for (int px = xa; px <= xb; px++) fb.pixel(0, px, py);
-        }
-        // Bright outline on top.
-        int xx = rad, yy = 0, err = 1 - rad;
-        while (xx >= yy)
-        {
-          plotClip(fb, cxp + xx, cyp + yy, bubB, bXlo, bXhi, bYlo, bYhi);
-          plotClip(fb, cxp + yy, cyp + xx, bubB, bXlo, bXhi, bYlo, bYhi);
-          plotClip(fb, cxp - yy, cyp + xx, bubB, bXlo, bXhi, bYlo, bYhi);
-          plotClip(fb, cxp - xx, cyp + yy, bubB, bXlo, bXhi, bYlo, bYhi);
-          plotClip(fb, cxp - xx, cyp - yy, bubB, bXlo, bXhi, bYlo, bYhi);
-          plotClip(fb, cxp - yy, cyp - xx, bubB, bXlo, bXhi, bYlo, bYhi);
-          plotClip(fb, cxp + yy, cyp - xx, bubB, bXlo, bXhi, bYlo, bYhi);
-          plotClip(fb, cxp + xx, cyp - yy, bubB, bXlo, bXhi, bYlo, bYhi);
-          yy++;
-          if (err < 0) err += 2 * yy + 1;
-          else { xx--; err += 2 * (yy - xx) + 1; }
-        }
-      };
+      const float bMorph = phase * field::kMetaMorph; // noise scroll (freezes w/ flow)
 
-      // Z-ORDER COMPOSITE: bands (line-pairs, randomized z per unit) + bubbles,
-      // drawn back->front so bubbles weave in front of / behind the bands by z.
-      // Band b = lines 2b, 2b+1 at z = vizBandZ(b); nBands = n/2.
-      const int nBands = n / 2;
-      struct ZItem { float z; int type; int idx; float bx, by, br; };
-      ZItem items[field::kStreamN / 2 + kVizMaxBubbles];
-      int ni = 0;
-      for (int b = 0; b < nBands; b++)
-      {
-        items[ni].z = mpOp ? (float)mpOp->vizBandZ(b) : (float)b;
-        items[ni].type = 0;
-        items[ni].idx = b;
-        ni++;
-      }
+      // Cache active bubbles (content-x / column-y / radius / level).
+      int nb = 0;
+      float bX[kVizMaxBubbles], bY[kVizMaxBubbles], bR[kVizMaxBubbles];
+      int bLvl[kVizMaxBubbles];
+      bool levelUsed[field::kBubLevels];
+      for (int L = 0; L < field::kBubLevels; L++) levelUsed[L] = false;
       if (mpOp)
       {
         for (int i = 0; i < kVizMaxBubbles; i++)
         {
           const float br = mpOp->vizBubR(i);
           if (br <= 0.0f) continue;
-          items[ni].z = mpOp->vizBubZ(i);
-          items[ni].type = 1;
-          items[ni].bx = mpOp->vizBubX(i);
-          items[ni].by = mpOp->vizBubY(i);
-          items[ni].br = br;
-          ni++;
+          bX[nb] = mpOp->vizBubX(i);
+          bY[nb] = mpOp->vizBubY(i);
+          bR[nb] = br;
+          int L = (int)(mpOp->vizBubZ(i) + 0.5f);
+          if (L < 0) L = 0; else if (L >= field::kBubLevels) L = field::kBubLevels - 1;
+          bLvl[nb] = L;
+          levelUsed[L] = true;
+          nb++;
         }
       }
-      for (int a = 1; a < ni; a++) // insertion sort ascending z (back -> front)
+
+      // Marching-squares segment table for OUR convention (config bit1=TL, 2=TR,
+      // 4=BL, 8=BR; edges 0=top,1=right,2=bottom,3=left). Each pair = one segment
+      // between two CROSSING edges. Saddles (6=TR+BL, 9=TL+BR) emit two segments.
+      // (The screensaver's table was for a different ordering -> spurious spikes.)
+      static const int kSeg[16][4] = {
+          {-1, -1, -1, -1}, // 0
+          {0, 3, -1, -1},   // 1  TL
+          {0, 1, -1, -1},   // 2  TR
+          {1, 3, -1, -1},   // 3  TL+TR
+          {2, 3, -1, -1},   // 4  BL
+          {0, 2, -1, -1},   // 5  TL+BL
+          {0, 1, 2, 3},     // 6  TR+BL (saddle)
+          {1, 2, -1, -1},   // 7  TL+TR+BL
+          {1, 2, -1, -1},   // 8  BR
+          {0, 3, 1, 2},     // 9  TL+BR (saddle)
+          {0, 2, -1, -1},   // 10 TR+BR
+          {2, 3, -1, -1},   // 11 TL+TR+BR
+          {1, 3, -1, -1},   // 12 BL+BR
+          {0, 1, -1, -1},   // 13 TL+BL+BR
+          {0, 3, -1, -1},   // 14 TR+BL+BR
+          {-1, -1, -1, -1}};// 15
+      const int C = field::kMetaCell;
+      const int gx0n = x0 / C - 1;        // first grid node (content-x = gx0n*C); global -> seams align
+      int gw = w / C + 4; if (gw > kMetaGW) gw = kMetaGW;
+      int gh = h / C + 2; if (gh > kMetaGH) gh = kMetaGH;
+      const float T = field::kMetaThresh;
+
+      auto renderBubbleLevel = [&](int L)
       {
-        ZItem key = items[a];
-        int j = a - 1;
-        while (j >= 0 && items[j].z > key.z) { items[j + 1] = items[j]; j--; }
-        items[j + 1] = key;
-      }
+        float *G = &mSlewGrid[L * kMetaGW * kMetaGH];
+        for (int j = 0; j < gh; j++) // build the target field, SLEW G toward it
+        {
+          const float cy = (float)(j * C);
+          for (int i = 0; i < gw; i++)
+          {
+            const float cx = (float)((gx0n + i) * C);
+            float bumps = 0.0f;
+            for (int b = 0; b < nb; b++)
+            {
+              if (bLvl[b] != L) continue;
+              const float dx = cx - bX[b], dy = cy - bY[b];
+              float s = bR[b] * field::kMetaSigmaK; if (s < 1.0f) s = 1.0f;
+              bumps += field::kMetaBumpAmp * expf(-(dx * dx + dy * dy) / (2.0f * s * s));
+            }
+            // Each bump SHAPED by the local noise topography (multiplicative): the
+            // edge follows peaks/valleys -> irregular/compound blobs that pinch &
+            // split. Far from bumps (bumps~0) the field stays 0 (no spurious blobs).
+            const float nz = anamnesis::noise::fbm(cx * field::kMetaNoiseFreq + (float)L * 3.1f,
+                                                   cy * field::kMetaNoiseFreq - bMorph);
+            const float f = bumps * (1.0f + field::kMetaNoiseGain * nz);
+            const int idx = j * kMetaGW + i;
+            G[idx] += field::kMetaSlew * (f - G[idx]); // temporal slew -> gentle morph
+          }
+        }
+        for (int lx = 0; lx < w + wext; lx++) // FILL where field > T (occlude lower-z)
+        {
+          const float gxf = (float)(x0 + lx) / (float)C - (float)gx0n;
+          const int gi = (int)gxf; if (gi < 0 || gi >= gw - 1) continue;
+          const float fx = gxf - (float)gi;
+          const int px = left + lx;
+          for (int py = bYlo; py < bYhi; py++)
+          {
+            const float gyf = (float)(py - bot) / (float)C;
+            const int gj = (int)gyf; if (gj < 0 || gj >= gh - 1) continue;
+            const float fy = gyf - (float)gj;
+            const float v00 = G[gj * kMetaGW + gi], v10 = G[gj * kMetaGW + gi + 1];
+            const float v01 = G[(gj + 1) * kMetaGW + gi], v11 = G[(gj + 1) * kMetaGW + gi + 1];
+            const float v = (v00 * (1.0f - fx) + v10 * fx) * (1.0f - fy) + (v01 * (1.0f - fx) + v11 * fx) * fy;
+            if (v > T) fb.pixel(0, px, py);
+          }
+        }
+        for (int j = 0; j < gh - 1; j++) // marching-squares contour (smooth edges)
+          for (int i = 0; i < gw - 1; i++)
+          {
+            const float v00 = G[j * kMetaGW + i], v10 = G[j * kMetaGW + i + 1];
+            const float v01 = G[(j + 1) * kMetaGW + i], v11 = G[(j + 1) * kMetaGW + i + 1];
+            int cfg = 0;
+            if (v00 > T) cfg |= 1;
+            if (v10 > T) cfg |= 2;
+            if (v01 > T) cfg |= 4;
+            if (v11 > T) cfg |= 8;
+            if (cfg == 0 || cfg == 15) continue;
+            const int *sg = kSeg[cfg];
+            float ex[4], ey[4];
+            if (sg[0] == 0 || sg[1] == 0 || sg[2] == 0 || sg[3] == 0) { float t = (T - v00) / (v10 - v00); ex[0] = (float)i + t; ey[0] = (float)j; }
+            if (sg[0] == 1 || sg[1] == 1 || sg[2] == 1 || sg[3] == 1) { float t = (T - v10) / (v11 - v10); ex[1] = (float)(i + 1); ey[1] = (float)j + t; }
+            if (sg[0] == 2 || sg[1] == 2 || sg[2] == 2 || sg[3] == 2) { float t = (T - v01) / (v11 - v01); ex[2] = (float)i + t; ey[2] = (float)(j + 1); }
+            if (sg[0] == 3 || sg[1] == 3 || sg[2] == 3 || sg[3] == 3) { float t = (T - v00) / (v01 - v00); ex[3] = (float)i; ey[3] = (float)j + t; }
+            for (int e = 0; e < 4; e += 2)
+            {
+              if (sg[e] < 0 || sg[e + 1] < 0) continue;
+              const int ax = left + (int)(((float)gx0n + ex[sg[e]]) * C - (float)x0 + 0.5f);
+              const int ay = bot + (int)(ey[sg[e]] * C + 0.5f);
+              const int bx2 = left + (int)(((float)gx0n + ex[sg[e + 1]]) * C - (float)x0 + 0.5f);
+              const int by2 = bot + (int)(ey[sg[e + 1]] * C + 0.5f);
+              drawLineClip(fb, ax, ay, bx2, by2, bubB, bXlo, bXhi, bYlo, bYhi);
+            }
+          }
+      };
+
+      // Z-ORDER COMPOSITE: bands (randomized z) + bubble-LEVELS (each a metaball
+      // field), drawn back->front so the levels weave through the bands by z.
+      const int nBands = n / 2;
+      struct ZItem { float z; int type; int idx; };
+      ZItem items[field::kStreamN / 2 + field::kBubLevels];
+      int ni = 0;
+      for (int b = 0; b < nBands; b++) { items[ni].z = mpOp ? (float)mpOp->vizBandZ(b) : (float)b; items[ni].type = 0; items[ni].idx = b; ni++; }
+      for (int L = 0; L < field::kBubLevels; L++)
+        if (levelUsed[L]) { items[ni].z = ((float)L + 0.5f) * (float)nBands / (float)field::kBubLevels; items[ni].type = 1; items[ni].idx = L; ni++; }
+      for (int a = 1; a < ni; a++) { ZItem key = items[a]; int j = a - 1; while (j >= 0 && items[j].z > key.z) { items[j + 1] = items[j]; j--; } items[j + 1] = key; }
       for (int it = 0; it < ni; it++)
       {
-        if (items[it].type == 0)
-          renderBand(items[it].idx);
-        else
-          drawBubble(items[it].bx, items[it].by, items[it].br);
+        if (items[it].type == 0) renderBand(items[it].idx);
+        else renderBubbleLevel(items[it].idx);
       }
 
       // Impact splashes (front-most): rain flecks for drops in this ply's window.
@@ -265,6 +329,25 @@ namespace anamnesis
     void plotClip(od::FrameBuffer &fb, int px, int py, int color, int xlo, int xhi, int ylo, int yhi)
     {
       if (px >= xlo && px < xhi && py >= ylo && py < yhi) fb.pixel(color, px, py);
+    }
+
+    // Clipped Bresenham line (blob outlines may cross the ply boundary).
+    void drawLineClip(od::FrameBuffer &fb, int x0, int y0, int x1, int y1, int color,
+                      int xlo, int xhi, int ylo, int yhi)
+    {
+      int dx = x1 - x0; if (dx < 0) dx = -dx;
+      int dy = y1 - y0; if (dy < 0) dy = -dy; dy = -dy; // dy <= 0
+      const int sx = x0 < x1 ? 1 : -1;
+      const int sy = y0 < y1 ? 1 : -1;
+      int err = dx + dy;
+      for (;;)
+      {
+        if (x0 >= xlo && x0 < xhi && y0 >= ylo && y0 < yhi) fb.pixel(color, x0, y0);
+        if (x0 == x1 && y0 == y1) break;
+        const int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+      }
     }
 
     // A growing dendrite branch from (ox,oy) toward the neighbour line (+gap),
@@ -327,6 +410,10 @@ namespace anamnesis
     int mIndex = 0;
     int mCount = 1;
     int mFeature = 0;
+    static const int kMetaGW = 24, kMetaGH = 24; // metaball field grid capacity
+    // Per-level SLEWED field, persisted across frames -> gentle morph (the
+    // screensaver smooths its field too). Zero-init: blobs fade in on insert.
+    float mSlewGrid[field::kBubLevels * kMetaGW * kMetaGH] = {};
   };
 
 } // namespace anamnesis
