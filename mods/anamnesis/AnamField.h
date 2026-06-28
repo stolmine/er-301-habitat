@@ -101,8 +101,14 @@ namespace anamnesis
     // lands over the streamlines + bubbles at z <= the blooming level and is
     // occluded by higher z (draw order = the z test). Lines stay sharp.
     // Diffusion=0 -> no bloom (skipped). Both scale with Diffusion 0..1.
-    static const float kBloomBand = 0.30f; // field-units below T the bloom fades over (x Diff)
-    static const float kBloomGain = 0.75f; // bloom peak as fraction of bubble brightness (x Diff)
+    // Diffusion drives the bloom RADIUS (how far the glow spreads), 0.75x at
+    // Diffusion=0 -> 1.5x at Diffusion=1. The near-edge brightness is held at the
+    // bubble edge brightness (kBloomGain~1) and grades to 0 outward, so the bloom
+    // joins the contour cleanly (no bright-edge / bloom divide) at any setting.
+    static const float kBloomBand     = 0.30f; // base bloom radius (field-units below T)
+    static const float kBloomScaleMin = 0.75f; // radius mult at Diffusion=0
+    static const float kBloomScaleMax = 1.50f; // radius mult at Diffusion=1
+    static const float kBloomGain     = 1.00f; // near-edge brightness as fraction of bubble edge
 
     // ---- Rain-on-pond ripples. A drop radiates as a TRAVELLING WAVE-TRAIN, not
     // a standing vibration: a few smooth Gaussian crests move outward together
