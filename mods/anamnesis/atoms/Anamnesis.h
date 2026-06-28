@@ -501,10 +501,18 @@ namespace anamnesis
           const float fdy = anamnesis::field::flow(bx, by + e, mVizPhase)
                           - anamnesis::field::flow(bx, by - e, mVizPhase);
           const float inv2e = anamnesis::field::kFlowAdvect / (2.0f * e);
-          float tvx =  fdy * inv2e;                              // carried-x
-          float tvy =  anamnesis::field::kBubRise - fdx * inv2e; // rise + carried-y
-          // Ripple shove: each active drop pushes the bubble radially (toward the
-          // crater, then out on the jet/rings), scaled by the drop's loudness.
+          const float tvx =  fdy * inv2e;                              // carried-x
+          const float tvy =  anamnesis::field::kBubRise - fdx * inv2e; // rise + carried-y
+          // Relax velocity toward the flow-carry target (inertia). This relaxation
+          // also damps the ripple impulse below, so kicks fade over ~1/kBubResp s.
+          const float resp = anamnesis::field::kBubResp * vdt;
+          mBubVx[i] += resp * (tvx - mBubVx[i]);
+          mBubVy[i] += resp * (tvy - mBubVy[i]);
+          // Ripple IMPULSE (Stokes drift): each active drop's passing crest imparts
+          // an accumulating radial kick (toward the crater, then out on jet/rings),
+          // scaled by loudness. Unlike a velocity target, an impulse leaves NET
+          // outward drift as a ring sweeps past -> expanding rings shove the whole
+          // field, not just the epicenter.
           for (int d = 0; d < kVizMaxDrops; d++)
           {
             if (mDropAge[d] < 0.0f) continue;
@@ -514,13 +522,13 @@ namespace anamnesis
             if (h.push == 0.0f) continue;
             const float rr = sqrtf(ddx * ddx + ddy * ddy) + anamnesis::field::kRippleEps;
             const float k = anamnesis::field::kRipplePush * mDropAmp[d] * h.push / rr;
-            tvx += k * ddx;
-            tvy += k * ddy;
+            mBubVx[i] += vdt * k * ddx;
+            mBubVy[i] += vdt * k * ddy;
           }
-          // Relax velocity toward target (inertia), then freeze-blend to scatter.
-          const float resp = anamnesis::field::kBubResp * vdt;
-          mBubVx[i] += resp * (tvx - mBubVx[i]);
-          mBubVy[i] += resp * (tvy - mBubVy[i]);
+          // Safety clamp (impulses accumulate; keep velocity bounded).
+          const float vcap = anamnesis::field::kBubVMax;
+          if (mBubVx[i] >  vcap) mBubVx[i] =  vcap; else if (mBubVx[i] < -vcap) mBubVx[i] = -vcap;
+          if (mBubVy[i] >  vcap) mBubVy[i] =  vcap; else if (mBubVy[i] < -vcap) mBubVy[i] = -vcap;
           const float fa = mBubSeed[i] * 0.41f;
           const float rvx = cosf(fa) * anamnesis::field::kFreezeDrift;
           const float rvy = sinf(fa) * anamnesis::field::kFreezeDrift;

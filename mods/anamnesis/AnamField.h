@@ -203,8 +203,10 @@ namespace anamnesis
                                             // inertial (momentum carries past), high = rigid
     static const float kFlowAdvect = 26.0f; // flow streamfunction gradient -> px/s carry
                                             // (bubbles ride the swirling current)
-    static const float kRipplePush = 1.5f;  // ripple radial magnitude -> px/s shove
-                                            // (x mDropAmp: loud captures throw harder)
+    static const float kRipplePush = 14.0f; // ripple radial ACCEL gain (impulse/Stokes
+                                            // drift: passing crests accumulate net outward
+                                            // shove; x mDropAmp -> loud captures throw harder)
+    static const float kBubVMax    = 60.0f; // px/s velocity clamp (impulses accumulate)
     static const float kPushEps    = 2.0f;  // px finite-difference step for flow gradient
     // Bubbles as 2D METABALLS (lava-lamp): per z-LEVEL, a scalar field = animated
     // FBM noise + Gaussian bumps at the bubbles, traced by marching squares ->
