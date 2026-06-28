@@ -94,12 +94,15 @@ namespace anamnesis
     static const float kBaseDim    = 3.0f;  // streamline brightness at Mix = 0
     static const float kGlowGain   = 1.8f;  // droplet ring illumination (NOT Mix-scaled
                                             // -> rings stay vivid at any wet, high contrast)
-    // Diffusion -> a GLOW HALO graded out from each streamline (NOT a blur: the
-    // sharp bright core is untouched; dimmer pixels are MAX-blended into the dark
-    // space around lines, fading with distance). Diffusion=0 -> no halo at all
-    // (zero cost, pixel-identical). Both scale with Diffusion 0..1.
-    static const float kHaloRadius = 6.0f;  // max halo reach (px) at Diffusion=1
-    static const float kHaloGain   = 0.60f; // halo peak as fraction of core brightness
+    // Diffusion -> a GLOW BLOOM around the Density BUBBLES (links Diffusion +
+    // Density + bloom). The metaball field already falls off smoothly outside the
+    // fill threshold T; that outer band is drawn as a graded aura, MAX-blended so
+    // it only ever brightens. Because the levels composite BACK->FRONT, the bloom
+    // lands over the streamlines + bubbles at z <= the blooming level and is
+    // occluded by higher z (draw order = the z test). Lines stay sharp.
+    // Diffusion=0 -> no bloom (skipped). Both scale with Diffusion 0..1.
+    static const float kBloomBand = 0.30f; // field-units below T the bloom fades over (x Diff)
+    static const float kBloomGain = 0.75f; // bloom peak as fraction of bubble brightness (x Diff)
 
     // ---- Rain-on-pond ripples. A drop radiates as a TRAVELLING WAVE-TRAIN, not
     // a standing vibration: a few smooth Gaussian crests move outward together

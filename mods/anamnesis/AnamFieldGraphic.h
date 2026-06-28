@@ -67,9 +67,7 @@ namespace anamnesis
       float density = mpOp ? mpOp->vizDensity() : 0.5f;
       if (density < 0.0f) density = 0.0f; else if (density > 1.0f) density = 1.0f;
       const float size = mpOp ? mpOp->vizSize() : 0.5f; // Size -> flow feature scale
-      const float diffuse = mpOp ? mpOp->vizDiffusion() : 0.0f; // Diffusion -> line halo
-      const int   haloR = (int)(field::kHaloRadius * diffuse + 0.5f); // 0 -> no halo
-      const float haloG = field::kHaloGain * diffuse;
+      const float diffuse = mpOp ? mpOp->vizDiffusion() : 0.0f; // Diffusion -> bubble bloom
       const int n = field::kStreamN;
 
       // Cache the active rain droplets once (epicenters in content-x / column-y).
@@ -151,8 +149,8 @@ namespace anamnesis
           const int flo = (int)(y0 < y1 ? y0 : y1) + 1;
           const int fhi = (int)(y0 < y1 ? y1 : y0);
           for (int yy = flo; yy < fhi; yy++) fb.pixel(0, px, bot + yy);
-          drawLinePix(fb, px, bot, h, y0, gl0, baseB, prev0, haloG, haloR);
-          drawLinePix(fb, px, bot, h, y1, gl1, baseB, prev1, haloG, haloR);
+          drawLinePix(fb, px, bot, h, y0, gl0, baseB, prev0);
+          drawLinePix(fb, px, bot, h, y1, gl1, baseB, prev1);
         }
       };
 
@@ -268,6 +266,11 @@ namespace anamnesis
       int gw = w / C + 4; if (gw > kMetaGW) gw = kMetaGW;
       int gh = h / C + 2; if (gh > kMetaGH) gh = kMetaGH;
       const float T = field::kMetaThresh;
+      // Diffusion bloom: the field band [bloomLo, T) outside each shape is drawn
+      // as a graded aura (max-blended over already-drawn, lower/equal-z content).
+      const bool  bloomOn   = diffuse > 0.0f;
+      const float bloomLo   = T - field::kBloomBand * diffuse;
+      const float bloomPeak = (float)bubB * field::kBloomGain * diffuse;
 
       auto renderBubbleLevel = [&](int L)
       {
@@ -310,7 +313,12 @@ namespace anamnesis
             const float v00 = G[gj * kMetaGW + gi], v10 = G[gj * kMetaGW + gi + 1];
             const float v01 = G[(gj + 1) * kMetaGW + gi], v11 = G[(gj + 1) * kMetaGW + gi + 1];
             const float v = (v00 * (1.0f - fx) + v10 * fx) * (1.0f - fy) + (v01 * (1.0f - fx) + v11 * fx) * fy;
-            if (v > T) fb.pixel(0, px, py);
+            if (v > T) fb.pixel(0, px, py); // interior: occlude lower-z
+            else if (bloomOn && v > bloomLo) // outer band: graded bloom (max-blend)
+            {
+              const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + 0.5f);
+              if (bv > 0 && bv > fb.readPixel(px, py)) fb.pixel(bv, px, py);
+            }
           }
         }
         for (int j = 0; j < gh - 1; j++) // marching-squares contour (smooth edges)
@@ -365,8 +373,7 @@ namespace anamnesis
     // ---- feature renderers ----
 
     // One streamline pixel column: sqrt-AA core + solid gap-fill for continuity.
-    void drawLinePix(od::FrameBuffer &fb, int px, int bot, int h, float y, float glow, float baseB, float &prevY,
-                     float haloG = 0.0f, int haloR = 0)
+    void drawLinePix(od::FrameBuffer &fb, int px, int bot, int h, float y, float glow, float baseB, float &prevY)
     {
       float bf = baseB + glow * field::kGlowGain;
       if (bf < 0.0f) bf = 0.0f; else if (bf > 15.0f) bf = 15.0f;
@@ -382,22 +389,6 @@ namespace anamnesis
         for (int yy = a + 1; yy < b; yy++) fb.pixel(bri, px, bot + yy);
       }
       prevY = y;
-      // Diffusion HALO: grade dimmer pixels out from the core, fading with
-      // distance. MAX-blend (only brighten) so the sharp core + brighter
-      // neighbours are never dimmed. haloR=0 (Diffusion=0) -> skipped entirely.
-      if (haloR > 0)
-      {
-        const float peak = bf * haloG;
-        for (int d = 1; d <= haloR; d++)
-        {
-          const int v = (int)(peak * (1.0f - (float)d / (float)(haloR + 1)) + 0.5f);
-          if (v <= 0) break; // monotone decreasing -> nothing fainter follows
-          const int ra = yi - d;     // above the core (yi)
-          const int rb = yi + 1 + d; // below the core (yi+1)
-          if (ra >= 0 && ra < h && v > fb.readPixel(px, bot + ra)) fb.pixel(v, px, bot + ra);
-          if (rb >= 0 && rb < h && v > fb.readPixel(px, bot + rb)) fb.pixel(v, px, bot + rb);
-        }
-      }
     }
 
     // Plot a pixel only inside the clip window (bubbles are clipped to their ply).
