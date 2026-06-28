@@ -200,7 +200,7 @@ namespace anamnesis
         int j = (int)((mBubRng >> 8) % (unsigned)(i + 1));
         int t = mBandZ[i]; mBandZ[i] = mBandZ[j]; mBandZ[j] = t;
       }
-      for (int i = 0; i < kVizMaxBubbles; i++) mBubR[i] = 0.0f;
+      for (int i = 0; i < kVizMaxBubbles; i++) { mBubR[i] = 0.0f; mBubVx[i] = 0.0f; mBubVy[i] = 0.0f; }
       mBubSpawnT = 0.0f;
 
       for (int i = 0; i < kTapN; i++)
@@ -488,13 +488,44 @@ namespace anamnesis
         for (int i = 0; i < kVizMaxBubbles; i++)
         {
           if (mBubR[i] <= 0.0f) continue;
-          // Unfrozen: rise (+ small drift). Frozen: drift in a per-bubble random
-          // direction (from seed) instead of strictly up. Blended by freeze amount.
+          // --- PHYSICS: the bubble is CARRIED by the flow current and SHOVED by
+          // passing ripple fronts. Velocity (mBubVx/Vy) relaxes with inertia
+          // toward a TARGET = buoyant rise + flow-carry + ripple-shove, so shapes
+          // get thrown off course over the weighted field, then drift back. ---
+          const float bx = mBubX[i], by = mBubY[i];
+          // Flow advection: treat flow() as a streamfunction -> incompressible
+          // swirling velocity (d/dy, -d/dx) so bubbles ride eddies, not slide off.
+          const float e = anamnesis::field::kPushEps;
+          const float fdx = anamnesis::field::flow(bx + e, by, mVizPhase)
+                          - anamnesis::field::flow(bx - e, by, mVizPhase);
+          const float fdy = anamnesis::field::flow(bx, by + e, mVizPhase)
+                          - anamnesis::field::flow(bx, by - e, mVizPhase);
+          const float inv2e = anamnesis::field::kFlowAdvect / (2.0f * e);
+          float tvx =  fdy * inv2e;                              // carried-x
+          float tvy =  anamnesis::field::kBubRise - fdx * inv2e; // rise + carried-y
+          // Ripple shove: each active drop pushes the bubble radially (toward the
+          // crater, then out on the jet/rings), scaled by the drop's loudness.
+          for (int d = 0; d < kVizMaxDrops; d++)
+          {
+            if (mDropAge[d] < 0.0f) continue;
+            const float ddx = bx - mDropX[d], ddy = by - mDropY[d];
+            const anamnesis::field::RippleHit h =
+              anamnesis::field::rippleEval(ddx, ddy, mDropAge[d], mDropSpeed[d]);
+            if (h.push == 0.0f) continue;
+            const float rr = sqrtf(ddx * ddx + ddy * ddy) + anamnesis::field::kRippleEps;
+            const float k = anamnesis::field::kRipplePush * mDropAmp[d] * h.push / rr;
+            tvx += k * ddx;
+            tvy += k * ddy;
+          }
+          // Relax velocity toward target (inertia), then freeze-blend to scatter.
+          const float resp = anamnesis::field::kBubResp * vdt;
+          mBubVx[i] += resp * (tvx - mBubVx[i]);
+          mBubVy[i] += resp * (tvy - mBubVy[i]);
           const float fa = mBubSeed[i] * 0.41f;
           const float rvx = cosf(fa) * anamnesis::field::kFreezeDrift;
           const float rvy = sinf(fa) * anamnesis::field::kFreezeDrift;
           const float vx = (1.0f - vizFreeze) * mBubVx[i] + vizFreeze * rvx;
-          const float vy = (1.0f - vizFreeze) * anamnesis::field::kBubRise + vizFreeze * rvy;
+          const float vy = (1.0f - vizFreeze) * mBubVy[i] + vizFreeze * rvy;
           mBubX[i] += vdt * vx;
           mBubY[i] += vdt * vy;
           if (mBubY[i] > colH + mBubR[i] + 2.0f || mBubY[i] < -mBubR[i] - 12.0f ||
@@ -532,6 +563,7 @@ namespace anamnesis
               mBubZ[slot] = mBubZ[parent];                       // same z-level (can interact)
               mBubR[slot] = 3.0f + ur * (mBubR[parent] * 0.5f);  // smaller child
               mBubVx[slot] = mBubVx[parent] + cosf(ang) * 8.0f;  // drift apart
+              mBubVy[slot] = mBubVy[parent] + sinf(ang) * 8.0f;  // (in 2D)
               mBubR[parent] *= 0.82f;                             // parent gives off mass
             }
             else
@@ -543,6 +575,7 @@ namespace anamnesis
               mBubZ[slot] = (float)lv;                                    // metaball z-LEVEL
               mBubR[slot] = 3.0f + ur * 12.0f;                           // radius 3..15 (varied, +1.5x max)
               mBubVx[slot] = (uv - 0.5f) * 6.0f;                         // small drift px/s
+              mBubVy[slot] = anamnesis::field::kBubRise;                 // start rising (physics takes over)
             }
             mBubRng = mBubRng * 1664525u + 1013904223u;
             mBubSeed[slot] = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f * 16.0f; // blob seed
@@ -871,7 +904,7 @@ namespace anamnesis
     // Bubble pool + the per-unit-instance random band-z permutation (depth weave).
     int   mBandZ[anamnesis::field::kStreamN / 2];
     float mBubX[kVizMaxBubbles], mBubY[kVizMaxBubbles], mBubZ[kVizMaxBubbles];
-    float mBubR[kVizMaxBubbles], mBubVx[kVizMaxBubbles];   // mBubR <= 0 = inactive slot
+    float mBubR[kVizMaxBubbles], mBubVx[kVizMaxBubbles], mBubVy[kVizMaxBubbles]; // mBubR <= 0 = inactive
     float mBubSeed[kVizMaxBubbles];                        // stable per-bubble blob shape seed
     uint32_t mBubRng = 0x9e3779b9u;
     float mBubSpawnT = 0.0f;

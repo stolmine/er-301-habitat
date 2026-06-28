@@ -147,12 +147,16 @@ namespace anamnesis
     // One droplet's effect on a flow-line point at offset (dx,dy): BEND (radial
     // Y push -> geometry) and GLOW (the ring height -> illumination over the
     // line). impact transient + dispersive primary train + one knock-on train.
-    struct RippleHit { float bend; float glow; };
+    // bend = vertical (dy/r) component of the radial surface push; glow = ring
+    // illumination; push = the full RADIAL magnitude (for shoving bubbles in 2D,
+    // direction = (dx,dy)/r). bend = push * (dy/r) -> single source of truth.
+    struct RippleHit { float bend; float glow; float push; };
     inline RippleHit rippleEval(float dx, float dy, float age, float c)
     {
       RippleHit out;
       out.bend = 0.0f;
       out.glow = 0.0f;
+      out.push = 0.0f;
       const float r2 = dx * dx + dy * dy;
       const float R = c * age;
       const float rhi = R + 3.0f * kRippleSigma;
@@ -173,8 +177,9 @@ namespace anamnesis
         const float a2 = age - kSecDelay;
         train += crestTrain(r, c * a2, a2, kRippleA0 * kSecAmp, kRippleLambda * kSecLam);
       }
-      out.bend = kRippleD * (impact + train) * (dy / r); // radial geometry push
-      out.glow = train > 0.0f ? train : 0.0f;            // ring crests illuminate
+      out.push = kRippleD * (impact + train);   // radial magnitude (2D bubble shove)
+      out.bend = out.push * (dy / r);           // vertical component -> line geometry
+      out.glow = train > 0.0f ? train : 0.0f;   // ring crests illuminate
       return out;
     }
 
@@ -190,6 +195,17 @@ namespace anamnesis
                                              // (born beside it, drifting away -> own lifetime)
     static const float kFreezeDrift = 9.0f;  // px/s: when FROZEN bubbles drift in random
                                              // directions (from seed) instead of rising up
+    // ---- Bubble PHYSICS: bubbles are carried by the flow current and shoved by
+    // passing ripple fronts (see atom bubble-update). Velocity relaxes toward a
+    // TARGET = buoyant rise + flow-carry + ripple-shove, with inertia (kBubResp)
+    // so shapes get thrown off course then drift back.
+    static const float kBubResp    = 3.0f;  // velocity relaxation rate (1/s): low =
+                                            // inertial (momentum carries past), high = rigid
+    static const float kFlowAdvect = 26.0f; // flow streamfunction gradient -> px/s carry
+                                            // (bubbles ride the swirling current)
+    static const float kRipplePush = 1.2f;  // ripple radial magnitude -> px/s shove
+                                            // (x mDropAmp: loud captures throw harder)
+    static const float kPushEps    = 2.0f;  // px finite-difference step for flow gradient
     // Bubbles as 2D METABALLS (lava-lamp): per z-LEVEL, a scalar field = animated
     // FBM noise + Gaussian bumps at the bubbles, traced by marching squares ->
     // smooth iso-contours that morph + split/join. Bubbles share a level so their
