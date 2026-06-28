@@ -476,21 +476,23 @@ namespace anamnesis
         mDropPrevRead = curRead;
       }
 
-      // Bubbles: float up + slight drift; spawn toward a Density-set target count.
+      // Bubbles: float up + drift. SPEED tied to the CLOCK (vdt) like the rest of
+      // the sim; COUNT tied to Density; a new bubble sometimes CALVES off an
+      // existing one (born beside it, drifting away) so split-offs live on their own.
       {
-        const float bdt = (float)FRAMELENGTH / fs;
+        const float vdt = (float)FRAMELENGTH / fs / mRcurZ; // clock-scaled time step
         const float colH = anamnesis::field::kVizColH;
         int activeB = 0;
         for (int i = 0; i < kVizMaxBubbles; i++)
         {
           if (mBubR[i] <= 0.0f) continue;
-          mBubY[i] += bdt * anamnesis::field::kBubRise; // upward
-          mBubX[i] += bdt * mBubVx[i];                   // slight horizontal drift
+          mBubY[i] += vdt * anamnesis::field::kBubRise; // upward
+          mBubX[i] += vdt * mBubVx[i];                   // horizontal drift
           if (mBubY[i] > colH + mBubR[i] + 2.0f) { mBubR[i] = 0.0f; continue; }
           activeB++;
         }
         const int target = (int)(density * (float)kVizMaxBubbles + 0.5f);
-        mBubSpawnT -= bdt;
+        mBubSpawnT -= vdt;
         if (activeB < target && mBubSpawnT <= 0.0f)
         {
           int slot = -1;
@@ -501,16 +503,40 @@ namespace anamnesis
             mBubRng = mBubRng * 1664525u + 1013904223u; float uz = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f;
             mBubRng = mBubRng * 1664525u + 1013904223u; float ur = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f;
             mBubRng = mBubRng * 1664525u + 1013904223u; float uv = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f;
-            mBubX[slot] = ux * anamnesis::field::kVizStripW;
-            mBubY[slot] = -2.0f;                                       // just below the bottom
-            int lv = (int)(uz * (float)anamnesis::field::kBubLevels);
-            if (lv >= anamnesis::field::kBubLevels) lv = anamnesis::field::kBubLevels - 1;
-            mBubZ[slot] = (float)lv;                                    // metaball z-LEVEL
-            mBubR[slot] = 3.0f + ur * 7.0f;                            // radius 3..10 (varied)
-            mBubVx[slot] = (uv - 0.5f) * 6.0f;                         // small drift px/s
+            mBubRng = mBubRng * 1664525u + 1013904223u; float uc = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f;
+            // Maybe calve off a mature parent.
+            int parent = -1;
+            if (activeB > 0 && uc < anamnesis::field::kCalveProb)
+            {
+              mBubRng = mBubRng * 1664525u + 1013904223u;
+              int pick = (int)((mBubRng >> 9) % (unsigned)kVizMaxBubbles);
+              for (int t = 0; t < kVizMaxBubbles; t++)
+              { int q = (pick + t) % kVizMaxBubbles; if (q != slot && mBubR[q] > 5.0f) { parent = q; break; } }
+            }
+            if (parent >= 0)
+            {
+              const float ang = ux * 6.2831853f;
+              const float off = mBubR[parent] * 1.3f + 3.0f;
+              mBubX[slot] = mBubX[parent] + cosf(ang) * off;
+              mBubY[slot] = mBubY[parent] + sinf(ang) * off;
+              mBubZ[slot] = mBubZ[parent];                       // same z-level (can interact)
+              mBubR[slot] = 3.0f + ur * (mBubR[parent] * 0.5f);  // smaller child
+              mBubVx[slot] = mBubVx[parent] + cosf(ang) * 8.0f;  // drift apart
+              mBubR[parent] *= 0.82f;                             // parent gives off mass
+            }
+            else
+            {
+              mBubX[slot] = ux * anamnesis::field::kVizStripW;
+              mBubY[slot] = -2.0f;                                       // just below the bottom
+              int lv = (int)(uz * (float)anamnesis::field::kBubLevels);
+              if (lv >= anamnesis::field::kBubLevels) lv = anamnesis::field::kBubLevels - 1;
+              mBubZ[slot] = (float)lv;                                    // metaball z-LEVEL
+              mBubR[slot] = 3.0f + ur * 7.0f;                            // radius 3..10 (varied)
+              mBubVx[slot] = (uv - 0.5f) * 6.0f;                         // small drift px/s
+            }
             mBubRng = mBubRng * 1664525u + 1013904223u;
             mBubSeed[slot] = (float)((mBubRng >> 9) & 0x7fffff) / 8388607.0f * 16.0f; // blob seed
-            mBubSpawnT = 0.25f;                                         // min spawn interval
+            mBubSpawnT = anamnesis::field::kBubSpawnInt;
           }
         }
       }

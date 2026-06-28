@@ -184,7 +184,10 @@ namespace anamnesis
     static const int   kVizPlies  = 6;
     static const float kVizStripW = (float)(kVizPlies * kStride); // 258px
     static const float kVizColH   = 64.0f; // viz column height (px); bubbles rise across it
-    static const float kBubRise   = 9.0f;  // bubble rise speed (px/s, calm)
+    static const float kBubRise     = 9.0f;  // bubble rise speed (px/s, calm)
+    static const float kBubSpawnInt = 0.25f; // min interval between spawns (s, clock-scaled)
+    static const float kCalveProb   = 0.40f; // chance a new bubble CALVES off an existing one
+                                             // (born beside it, drifting away -> own lifetime)
     // Bubbles as 2D METABALLS (lava-lamp): per z-LEVEL, a scalar field = animated
     // FBM noise + Gaussian bumps at the bubbles, traced by marching squares ->
     // smooth iso-contours that morph + split/join. Bubbles share a level so their
