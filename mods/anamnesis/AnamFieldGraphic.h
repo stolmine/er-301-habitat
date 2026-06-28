@@ -307,15 +307,17 @@ namespace anamnesis
           const float gxf = (float)(x0 + lx) / (float)C - (float)gx0n;
           const int gi = (int)gxf; if (gi < 0 || gi >= gw - 1) continue;
           const float fx = gxf - (float)gi;
+          const float sx = fx * fx * (3.0f - 2.0f * fx); // smoothstep -> C1 across cells (de-facet)
           const int px = left + lx;
           for (int py = bYlo; py < bYhi; py++)
           {
             const float gyf = (float)(py - bot) / (float)C;
             const int gj = (int)gyf; if (gj < 0 || gj >= gh - 1) continue;
             const float fy = gyf - (float)gj;
+            const float sy = fy * fy * (3.0f - 2.0f * fy); // smoothstep (Perlin) -> no cell-edge creases
             const float v00 = G[gj * kMetaGW + gi], v10 = G[gj * kMetaGW + gi + 1];
             const float v01 = G[(gj + 1) * kMetaGW + gi], v11 = G[(gj + 1) * kMetaGW + gi + 1];
-            const float v = (v00 * (1.0f - fx) + v10 * fx) * (1.0f - fy) + (v01 * (1.0f - fx) + v11 * fx) * fy;
+            const float v = (v00 * (1.0f - sx) + v10 * sx) * (1.0f - sy) + (v01 * (1.0f - sx) + v11 * sx) * sy;
             if (v > T) fb.pixel(0, px, py); // interior: occlude lower-z
             else if (bloomOn && v > bloomLo) // outer band: graded + dithered bloom (max-blend)
             {
