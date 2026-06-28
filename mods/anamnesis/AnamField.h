@@ -311,6 +311,7 @@ namespace anamnesis
     static const float kModDepth = 7.0f;   // px vertical wander at Mod=1
     static const float kModSpace = 0.010f; // wander spatial freq (low -> broad sway)
     static const float kModRate  = 0.16f;  // wander scroll speed (slow, x flow phase)
+    static const float kModExp   = 2.0f;   // exponential throw -> subtle on the low end
     inline float flow(float cx, float yb, float phase, float size, float mod)
     {
       const float fsc = kSizeFreqTight + (kSizeFreqWide - kSizeFreqTight) * size;
@@ -321,8 +322,8 @@ namespace anamnesis
       d += 1.3f * sinf(fsc * (0.115f * xc + yb * 0.090f) - 0.70f * phase);
       d += 0.7f * sinf(fsc * (0.210f * xc) + 1.30f * phase);
       float out = d * asc;
-      if (mod > 0.0f) // slow organic wander (noise ~[-1,1]); not size-scaled
-        out += mod * kModDepth *
+      if (mod > 0.0f) // slow organic wander (noise ~[-1,1]); not size-scaled; expo throw
+        out += powf(mod, kModExp) * kModDepth *
                anamnesis::noise::sample(cx * kModSpace, yb * kModSpace + phase * kModRate);
       return out;
     }
