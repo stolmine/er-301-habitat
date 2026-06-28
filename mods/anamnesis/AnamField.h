@@ -260,13 +260,24 @@ namespace anamnesis
     // content-x `cx`, baseline `yb`, animation `phase`. A sum of traveling
     // sines -> a gentle braided current. Continuous in cx (no per-ply term),
     // so neighboring slices meet exactly at the seam.
-    inline float flow(float cx, float yb, float phase)
+    // Size shapes the FLOW FEATURE SCALE: small Size = tight short-wavelength
+    // ripples; large Size = broad long swells (slightly taller). `size` is the
+    // global vizSize() 0..1, so every ply scales identically -> seams stay
+    // continuous. Only the SPATIAL terms scale (phase stays outside -> motion
+    // speed is unchanged; Size changes feature size, not tempo).
+    static const float kSizeFreqTight = 1.70f; // spatial-freq mult at Size=0 (tight)
+    static const float kSizeFreqWide  = 0.50f; // spatial-freq mult at Size=1 (broad swell)
+    static const float kSizeAmpMin    = 0.85f; // swell amplitude mult at Size=0
+    static const float kSizeAmpMax    = 1.20f; // swell amplitude mult at Size=1
+    inline float flow(float cx, float yb, float phase, float size)
     {
+      const float fsc = kSizeFreqTight + (kSizeFreqWide - kSizeFreqTight) * size;
+      const float asc = kSizeAmpMin + (kSizeAmpMax - kSizeAmpMin) * size;
       float d = 0.0f;
-      d += 2.6f * sinf(0.055f * cx + phase + yb * 0.045f);
-      d += 1.3f * sinf(0.115f * cx - 0.70f * phase + yb * 0.090f);
-      d += 0.7f * sinf(0.210f * cx + 1.30f * phase);
-      return d;
+      d += 2.6f * sinf(fsc * (0.055f * cx + yb * 0.045f) + phase);
+      d += 1.3f * sinf(fsc * (0.115f * cx + yb * 0.090f) - 0.70f * phase);
+      d += 0.7f * sinf(fsc * (0.210f * cx) + 1.30f * phase);
+      return d * asc;
     }
 
   } // namespace field

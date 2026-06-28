@@ -66,6 +66,7 @@ namespace anamnesis
       // (wood-grain / dendrite braid). Passed to weaveDispY per control point.
       float density = mpOp ? mpOp->vizDensity() : 0.5f;
       if (density < 0.0f) density = 0.0f; else if (density > 1.0f) density = 1.0f;
+      const float size = mpOp ? mpOp->vizSize() : 0.5f; // Size -> flow feature scale
       const int n = field::kStreamN;
 
       // Cache the active rain droplets once (epicenters in content-x / column-y).
@@ -117,8 +118,8 @@ namespace anamnesis
         for (int i = 0; i < mctrl; i++)
         {
           const float cx = (float)((g0 + i) * cstep);
-          float y0 = yb0 + field::flow(cx, yb0, phase);
-          float y1 = yb1 + field::flow(cx, yb1, phase);
+          float y0 = yb0 + field::flow(cx, yb0, phase, size);
+          float y1 = yb1 + field::flow(cx, yb1, phase, size);
           float gl0 = 0.0f, gl1 = 0.0f;
           for (int d = 0; d < nd; d++)
           {

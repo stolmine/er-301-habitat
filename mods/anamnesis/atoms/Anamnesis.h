@@ -484,6 +484,7 @@ namespace anamnesis
         const float colH = anamnesis::field::kVizColH;
         const float stripW = anamnesis::field::kVizStripW;
         const float vizFreeze = 1.0f - (1.0f - mFreezeZ) * (1.0f - mCaptureHoldZ);
+        const float vsize = vizSize(); // Size -> flow feature scale (same as graphic)
         int activeB = 0;
         for (int i = 0; i < kVizMaxBubbles; i++)
         {
@@ -496,10 +497,10 @@ namespace anamnesis
           // Flow advection: treat flow() as a streamfunction -> incompressible
           // swirling velocity (d/dy, -d/dx) so bubbles ride eddies, not slide off.
           const float e = anamnesis::field::kPushEps;
-          const float fdx = anamnesis::field::flow(bx + e, by, mVizPhase)
-                          - anamnesis::field::flow(bx - e, by, mVizPhase);
-          const float fdy = anamnesis::field::flow(bx, by + e, mVizPhase)
-                          - anamnesis::field::flow(bx, by - e, mVizPhase);
+          const float fdx = anamnesis::field::flow(bx + e, by, mVizPhase, vsize)
+                          - anamnesis::field::flow(bx - e, by, mVizPhase, vsize);
+          const float fdy = anamnesis::field::flow(bx, by + e, mVizPhase, vsize)
+                          - anamnesis::field::flow(bx, by - e, mVizPhase, vsize);
           const float inv2e = anamnesis::field::kFlowAdvect / (2.0f * e);
           const float tvx =  fdy * inv2e;                              // carried-x
           const float tvy =  anamnesis::field::kBubRise - fdx * inv2e; // rise + carried-y
