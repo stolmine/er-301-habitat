@@ -163,7 +163,7 @@ namespace anamnesis
 
       // Cache active bubbles (content-x / column-y / radius / level).
       int nb = 0;
-      float bX[kVizMaxBubbles], bY[kVizMaxBubbles], bR[kVizMaxBubbles];
+      float bX[kVizMaxBubbles], bY[kVizMaxBubbles], bR[kVizMaxBubbles], bSeed[kVizMaxBubbles];
       int bLvl[kVizMaxBubbles];
       bool levelUsed[field::kBubLevels];
       for (int L = 0; L < field::kBubLevels; L++) levelUsed[L] = false;
@@ -176,6 +176,7 @@ namespace anamnesis
           bX[nb] = mpOp->vizBubX(i);
           bY[nb] = mpOp->vizBubY(i);
           bR[nb] = br;
+          bSeed[nb] = mpOp->vizBubSeed(i);
           int L = (int)(mpOp->vizBubZ(i) + 0.5f);
           if (L < 0) L = 0; else if (L >= field::kBubLevels) L = field::kBubLevels - 1;
           bLvl[nb] = L;
@@ -221,9 +222,18 @@ namespace anamnesis
           const float dx = ptX[p] - bX[b], dy = ptY[p] - bY[b];
           const float d2 = dx * dx + dy * dy;
           if (d2 >= reach2) continue;
-          const float w = 1.0f - field::smooth01(reach * field::kLatchFull, reach, sqrtf(d2)); // full, fade at edge
+          const float w0 = 1.0f - field::smooth01(reach * field::kLatchFull, reach, sqrtf(d2)); // full, fade at edge
+          // Per-bubble AFFINITY: this bubble's attraction to point p (stable from
+          // its seed). Below kAffBias -> not latched, so each bubble ignores some
+          // nearby points (distinct personalities; sets up flow/droplet throws).
+          float aff = 0.5f + 0.5f * anamnesis::noise::sample(bSeed[b] * 0.7f + (float)p * 0.13f, (float)p * 0.31f + 5.0f);
+          aff = (aff - field::kAffBias) / (1.0f - field::kAffBias);
+          if (aff <= 0.0f) continue;
+          const float w = w0 * aff;
           if (w < 0.05f) continue;
-          sbX[nsb] = ptX[p]; sbY[nsb] = ptY[p]; sbR[nsb] = field::kLobeR;
+          // Per-point STRENGTH -> lobe size (some points spawn bigger lobes).
+          const float str = field::kPointStrMin + (1.0f - field::kPointStrMin) * field::hash01(p, 5);
+          sbX[nsb] = ptX[p]; sbY[nsb] = ptY[p]; sbR[nsb] = field::kLobeR * (0.6f + 0.9f * str);
           sbAmp[nsb] = w; sbLvl[nsb] = bLvl[b]; nsb++; lobes++;
         }
       }

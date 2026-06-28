@@ -215,6 +215,10 @@ namespace anamnesis
     static const float kLatchFull      = 0.78f; // lobe at FULL strength out to reach*this, then fades
     // Reach BREATHES with a slow noise -> occasionally extends to grab a distant
     // point (a lobe shoots far out -> more dramatic separation), smoothly.
+    // Per-bubble point weighting: AFFINITY (this bubble's pull to a point, gated by
+    // kAffBias so each ignores some points) and per-point STRENGTH (-> lobe size).
+    static const float kAffBias        = 0.35f; // affinity below this -> point not latched
+    static const float kPointStrMin    = 0.40f; // min per-point strength (lobe size floor)
     static const float kReachVar       = 0.75f; // reach *= 1 + this*noise (breadth of breathing)
     static const float kReachFreq      = 0.04f; // reach-noise spatial freq
     static const float kReachRate      = 0.18f; // reach-noise drift speed (x flow phase)
