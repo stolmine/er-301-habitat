@@ -264,6 +264,8 @@ namespace anamnesis
                              return s < 0.0f ? 0.0f : (s > 1.0f ? 1.0f : s); }
     float vizDensity()     { return mDensityZ; }
     float vizMod()         { return mModZ; } // Mod -> slow organic flow wander
+    float vizDecay()       { float d = mDecay.value(); // Decay -> ripple persistence
+                             return d < 0.0f ? 0.0f : (d > 1.0f ? 1.0f : d); }
     // Diffusion -> line glow/halo. mDiffGZ is the smoothed allpass gain (= knob *
     // 0.75); recover the smoothed 0..1 knob for the viz.
     float vizDiffusion()   { float d = mDiffGZ * (1.0f / 0.75f);
@@ -464,12 +466,14 @@ namespace anamnesis
       // spawn one per completed loop cycle (read-pointer wrap since last block).
       {
         const float vizDt = (float)FRAMELENGTH / fs;
+        // Decay -> longer ripple life (= 3 * persistence-scaled tau).
+        const float dropLife = 3.0f * anamnesis::field::rippleTauOf(vizDecay());
         for (int i = 0; i < kVizMaxDrops; i++)
         {
           if (mDropAge[i] >= 0.0f)
           {
             mDropAge[i] += vizDt;
-            if (mDropAge[i] > anamnesis::field::kRippleLife) mDropAge[i] = -1.0f;
+            if (mDropAge[i] > dropLife) mDropAge[i] = -1.0f;
           }
         }
         // A completed loop cycle = the active read head jumping by more than half
@@ -491,6 +495,7 @@ namespace anamnesis
         const float vizFreeze = 1.0f - (1.0f - mFreezeZ) * (1.0f - mCaptureHoldZ);
         const float vsize = vizSize(); // Size -> flow feature scale (same as graphic)
         const float vmod  = vizMod();  // Mod -> slow flow wander (same as graphic)
+        const float rtau  = anamnesis::field::rippleTauOf(vizDecay()); // Decay -> ripple persistence
         int activeB = 0;
         for (int i = 0; i < kVizMaxBubbles; i++)
         {
@@ -525,7 +530,7 @@ namespace anamnesis
             if (mDropAge[d] < 0.0f) continue;
             const float ddx = bx - mDropX[d], ddy = by - mDropY[d];
             const anamnesis::field::RippleHit h =
-              anamnesis::field::rippleEval(ddx, ddy, mDropAge[d], mDropSpeed[d]);
+              anamnesis::field::rippleEval(ddx, ddy, mDropAge[d], mDropSpeed[d], rtau);
             if (h.push == 0.0f) continue;
             const float rr = sqrtf(ddx * ddx + ddy * ddy) + anamnesis::field::kRippleEps;
             const float k = anamnesis::field::kRipplePush * mDropAmp[d] * h.push / rr;

@@ -138,6 +138,17 @@ namespace anamnesis
     static const float kRippleD      = 2.4f;  // displacement gain (overall ripple strength)
     static const float kRippleEps    = 1.0f;  // r singularity guard (px)
     static const float kRippleLife   = 3.0f * kRippleTau;
+    // Decay -> ripple PERSISTENCE: scales the temporal decay tau, so rings fade
+    // slower and reach further before dissolving (life = 3*tau scales with it).
+    // Expo throw (subtle low end) + capped, and bounded by the fixed drop pool so
+    // it can't run to soup.
+    static const float kDecayTauMax  = 2.6f;  // max tau multiplier at Decay=1
+    static const float kDecayExp     = 1.8f;  // exponential throw (subtle low end)
+    inline float rippleTauOf(float decay)
+    {
+      if (decay <= 0.0f) return kRippleTau;
+      return kRippleTau * (1.0f + (kDecayTauMax - 1.0f) * powf(decay, kDecayExp));
+    }
     // Impact transient ("the plop"): a short, strong CENTRAL crater (-) that
     // releases into a rebound jet (+), seeding the first ring. Lives ~kImpactT s.
     static const float kImpactT       = 0.12f; // s (~7 frames @55fps)
@@ -152,12 +163,12 @@ namespace anamnesis
     // A dispersive crest train: the crest COUNT grows with age and the spacing
     // widens outward, so the ring pattern fans out over time (cheap dispersion).
     // Smooth Gaussian crests only (no carrier) -> each passes a point once.
-    inline float crestTrain(float r, float R, float age, float a0, float lam0)
+    inline float crestTrain(float r, float R, float age, float a0, float lam0, float tau)
     {
       int nc = 2 + (int)(age * kRippleFan);
       if (nc > kRippleMaxCrests) nc = kRippleMaxCrests;
       const float inv2s2 = 1.0f / (2.0f * kRippleSigma * kRippleSigma);
-      const float amp = (a0 / sqrtf(r)) * expf(-age / kRippleTau);
+      const float amp = (a0 / sqrtf(r)) * expf(-age / tau);
       float h = 0.0f, g = 1.0f, rc = R;
       for (int i = 0; i < nc; i++)
       {
@@ -176,7 +187,7 @@ namespace anamnesis
     // illumination; push = the full RADIAL magnitude (for shoving bubbles in 2D,
     // direction = (dx,dy)/r). bend = push * (dy/r) -> single source of truth.
     struct RippleHit { float bend; float glow; float push; };
-    inline RippleHit rippleEval(float dx, float dy, float age, float c)
+    inline RippleHit rippleEval(float dx, float dy, float age, float c, float tau)
     {
       RippleHit out;
       out.bend = 0.0f;
@@ -196,11 +207,11 @@ namespace anamnesis
         const float jet = expf(-(r * r) / (kImpactJetW * kImpactJetW)) * sinf(3.14159265f * nn);
         impact = kImpactA * (crater + 0.6f * jet) * expf(-age / kImpactT);
       }
-      float train = crestTrain(r, R, age, kRippleA0, kRippleLambda); // primary
-      if (age > kSecDelay)                                           // knock-on
+      float train = crestTrain(r, R, age, kRippleA0, kRippleLambda, tau); // primary
+      if (age > kSecDelay)                                                // knock-on
       {
         const float a2 = age - kSecDelay;
-        train += crestTrain(r, c * a2, a2, kRippleA0 * kSecAmp, kRippleLambda * kSecLam);
+        train += crestTrain(r, c * a2, a2, kRippleA0 * kSecAmp, kRippleLambda * kSecLam, tau);
       }
       out.push = kRippleD * (impact + train);   // radial magnitude (2D bubble shove)
       out.bend = out.push * (dy / r);           // vertical component -> line geometry

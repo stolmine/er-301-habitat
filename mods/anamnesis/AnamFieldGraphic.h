@@ -69,6 +69,7 @@ namespace anamnesis
       const float size = mpOp ? mpOp->vizSize() : 0.5f; // Size -> flow feature scale
       const float diffuse = mpOp ? mpOp->vizDiffusion() : 0.0f; // Diffusion -> bubble bloom
       const float vmod = mpOp ? mpOp->vizMod() : 0.0f; // Mod -> slow flow wander
+      const float rtau = field::rippleTauOf(mpOp ? mpOp->vizDecay() : 0.0f); // Decay -> ripple persistence
       const int n = field::kStreamN;
 
       // Cache the active rain droplets once (epicenters in content-x / column-y).
@@ -125,9 +126,9 @@ namespace anamnesis
           float gl0 = 0.0f, gl1 = 0.0f;
           for (int d = 0; d < nd; d++)
           {
-            const field::RippleHit a0 = field::rippleEval(cx - dX[d], y0 - dY[d], dAge[d], dC[d]);
+            const field::RippleHit a0 = field::rippleEval(cx - dX[d], y0 - dY[d], dAge[d], dC[d], rtau);
             y0 += dAmp[d] * a0.bend; gl0 += dAmp[d] * a0.glow;
-            const field::RippleHit a1 = field::rippleEval(cx - dX[d], y1 - dY[d], dAge[d], dC[d]);
+            const field::RippleHit a1 = field::rippleEval(cx - dX[d], y1 - dY[d], dAge[d], dC[d], rtau);
             y1 += dAmp[d] * a1.bend; gl1 += dAmp[d] * a1.glow;
           }
           cY0[i] = y0; cB0[i] = gl0; cY1[i] = y1; cB1[i] = gl1;
