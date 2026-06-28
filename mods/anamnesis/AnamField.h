@@ -304,7 +304,14 @@ namespace anamnesis
     // constant doesn't change travel direction (just a constant phase shift) and
     // cx + center are global -> seams stay continuous.
     static const float kFlowCenter = kVizStripW * 0.5f; // strip centre (Size pivot)
-    inline float flow(float cx, float yb, float phase, float size)
+    // Mod -> a SLOW, BROAD, ORGANIC wander layered on the flow: low-frequency
+    // noise (in cx, so global -> seams align) scrolling slowly (x mVizPhase, so
+    // Freeze halts it too). Distinct channel from the traveling sines -- the whole
+    // field (lines + the bubbles riding it) gently sways. Depth scales with Mod.
+    static const float kModDepth = 7.0f;   // px vertical wander at Mod=1
+    static const float kModSpace = 0.010f; // wander spatial freq (low -> broad sway)
+    static const float kModRate  = 0.16f;  // wander scroll speed (slow, x flow phase)
+    inline float flow(float cx, float yb, float phase, float size, float mod)
     {
       const float fsc = kSizeFreqTight + (kSizeFreqWide - kSizeFreqTight) * size;
       const float asc = kSizeAmpMin + (kSizeAmpMax - kSizeAmpMin) * size;
@@ -313,7 +320,11 @@ namespace anamnesis
       d += 2.6f * sinf(fsc * (0.055f * xc + yb * 0.045f) + phase);
       d += 1.3f * sinf(fsc * (0.115f * xc + yb * 0.090f) - 0.70f * phase);
       d += 0.7f * sinf(fsc * (0.210f * xc) + 1.30f * phase);
-      return d * asc;
+      float out = d * asc;
+      if (mod > 0.0f) // slow organic wander (noise ~[-1,1]); not size-scaled
+        out += mod * kModDepth *
+               anamnesis::noise::sample(cx * kModSpace, yb * kModSpace + phase * kModRate);
+      return out;
     }
 
   } // namespace field

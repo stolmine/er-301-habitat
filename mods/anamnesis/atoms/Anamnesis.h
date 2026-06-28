@@ -263,6 +263,7 @@ namespace anamnesis
     float vizSize()        { float s = (mSizeScaleZ - kSizeMin) / (kSizeMax - kSizeMin);
                              return s < 0.0f ? 0.0f : (s > 1.0f ? 1.0f : s); }
     float vizDensity()     { return mDensityZ; }
+    float vizMod()         { return mModZ; } // Mod -> slow organic flow wander
     // Diffusion -> line glow/halo. mDiffGZ is the smoothed allpass gain (= knob *
     // 0.75); recover the smoothed 0..1 knob for the viz.
     float vizDiffusion()   { float d = mDiffGZ * (1.0f / 0.75f);
@@ -489,6 +490,7 @@ namespace anamnesis
         const float stripW = anamnesis::field::kVizStripW;
         const float vizFreeze = 1.0f - (1.0f - mFreezeZ) * (1.0f - mCaptureHoldZ);
         const float vsize = vizSize(); // Size -> flow feature scale (same as graphic)
+        const float vmod  = vizMod();  // Mod -> slow flow wander (same as graphic)
         int activeB = 0;
         for (int i = 0; i < kVizMaxBubbles; i++)
         {
@@ -501,10 +503,10 @@ namespace anamnesis
           // Flow advection: treat flow() as a streamfunction -> incompressible
           // swirling velocity (d/dy, -d/dx) so bubbles ride eddies, not slide off.
           const float e = anamnesis::field::kPushEps;
-          const float fdx = anamnesis::field::flow(bx + e, by, mVizPhase, vsize)
-                          - anamnesis::field::flow(bx - e, by, mVizPhase, vsize);
-          const float fdy = anamnesis::field::flow(bx, by + e, mVizPhase, vsize)
-                          - anamnesis::field::flow(bx, by - e, mVizPhase, vsize);
+          const float fdx = anamnesis::field::flow(bx + e, by, mVizPhase, vsize, vmod)
+                          - anamnesis::field::flow(bx - e, by, mVizPhase, vsize, vmod);
+          const float fdy = anamnesis::field::flow(bx, by + e, mVizPhase, vsize, vmod)
+                          - anamnesis::field::flow(bx, by - e, mVizPhase, vsize, vmod);
           const float inv2e = anamnesis::field::kFlowAdvect / (2.0f * e);
           const float tvx =  fdy * inv2e;                              // carried-x
           const float tvy =  anamnesis::field::kBubRise - fdx * inv2e; // rise + carried-y
