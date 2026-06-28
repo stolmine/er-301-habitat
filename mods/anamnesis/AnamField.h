@@ -193,12 +193,35 @@ namespace anamnesis
     static const int   kMetaCell      = 3;     // finer grid -> resolve irregular lobes
     static const float kMetaThresh    = 0.50f; // iso-contour threshold (lower = bigger blobs)
     static const float kMetaBumpAmp   = 1.0f;  // Gaussian bump peak per bubble
-    static const float kMetaSigmaK    = 1.30f; // bump sigma = radius * this (wider = bigger)
-    static const float kMetaNoiseGain = 0.95f; // MULTIPLICATIVE noise: shape each bump by the
-                                               // local topography -> irregular/compound + splits
+    static const float kMetaSigmaK    = 1.00f; // bump sigma = radius * this (sharper -> pinches sooner)
+    static const float kMetaNoiseGain = 0.45f; // MULTIPLICATIVE noise edge wobble (sub-bumps do the
+                                               // compounding now, so this is lighter)
     static const float kMetaNoiseFreq = 0.11f; // noise spatial freq (more features per blob = lobes)
+    // Each bubble = a CLUSTER of sub-bumps whose offsets are read from the noise
+    // topography at the bubble (so they "walk the LUT" as it moves) -> compound
+    // blobs that pinch and SPLIT. The compound contour is one iso-line; the field
+    // slew makes the change fluid.
+    // Lobe POINTS: a layer of drifting points (noise-driven, smooth motion). Any
+    // bubble keeps a CORE bump and LATCHES a momentary lobe onto each point within
+    // reach, weighted by distance (smooth fade-in/out). As points drift in/out the
+    // lobes grow & shed -> compound shapes that pinch and SPLIT. Distance (reach)
+    // is the lever; bigger shapes reach further (-> more lobes).
+    static const int   kNumPoints      = 28;    // points in the drifting layer
+    static const float kPointDrift     = 22.0f; // px each point wanders from its base
+    static const float kPointDriftRate = 0.28f; // point drift speed (x flow phase)
+    static const int   kMaxLobes       = 7;     // max lobes a bubble can latch (higher -> fewer cap-swap pops)
+    static const float kLatchK         = 2.00f; // reach = radius * this + base (big -> lobes reach far)
+    static const float kLatchBase      = 7.0f;  // px base reach (small bubbles still latch)
+    static const float kLatchFull      = 0.78f; // lobe at FULL strength out to reach*this, then fades
+    // Reach BREATHES with a slow noise -> occasionally extends to grab a distant
+    // point (a lobe shoots far out -> more dramatic separation), smoothly.
+    static const float kReachVar       = 0.75f; // reach *= 1 + this*noise (breadth of breathing)
+    static const float kReachFreq      = 0.04f; // reach-noise spatial freq
+    static const float kReachRate      = 0.18f; // reach-noise drift speed (x flow phase)
+    static const float kCoreK          = 0.65f; // core bump sigma = radius * this
+    static const float kLobeR          = 3.2f;  // lobe sub-bump radius (px)
     static const float kMetaMorph     = 0.12f; // noise scroll (slow; movement walks the topography)
-    static const float kMetaSlew      = 0.12f; // field temporal slew (gentle morph, no wild jumps)
+    static const float kMetaSlew      = 0.09f; // field temporal slew (gentle morph, no wild jumps)
 
     // Baseline y (px) of streamline s within a height-h column.
     inline float baseline(int s, int n, int h)

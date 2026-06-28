@@ -184,6 +184,50 @@ namespace anamnesis
         }
       }
 
+      // Expand each bubble into a CLUSTER of sub-bumps whose offsets are read from
+      // the noise topography at the bubble -> they walk the LUT as it moves, so the
+      // compound contour pinches and SPLITS. (The "invisible compounded blobs".)
+      // Drifting point layer (content-space, shared by all plies/levels).
+      const int NP = field::kNumPoints;
+      float ptX[field::kNumPoints], ptY[field::kNumPoints];
+      const float ptt = phase * field::kPointDriftRate;
+      const float reacht = phase * field::kReachRate;
+      for (int p = 0; p < NP; p++)
+      {
+        ptX[p] = field::hash01(p, 1) * field::kVizStripW + field::kPointDrift * anamnesis::noise::sample((float)p * 0.37f, ptt);
+        ptY[p] = 6.0f + field::hash01(p, 2) * 52.0f + field::kPointDrift * anamnesis::noise::sample((float)p * 0.37f + 40.0f, ptt + 7.0f);
+      }
+
+      // Each bubble = a CORE bump + momentary lobes latched onto nearby points,
+      // each weighted by distance (smooth fade) -> lobes grow & shed -> splits.
+      const int kSBcap = kVizMaxBubbles * (1 + field::kMaxLobes);
+      int nsb = 0;
+      float sbX[kSBcap], sbY[kSBcap], sbR[kSBcap], sbAmp[kSBcap];
+      int sbLvl[kSBcap];
+      for (int b = 0; b < nb; b++)
+      {
+        if (nsb < kSBcap)
+        {
+          sbX[nsb] = bX[b]; sbY[nsb] = bY[b]; sbR[nsb] = bR[b] * field::kCoreK;
+          sbAmp[nsb] = 1.0f; sbLvl[nsb] = bLvl[b]; nsb++;
+        }
+        const float rnz = anamnesis::noise::sample(bX[b] * field::kReachFreq, bY[b] * field::kReachFreq + reacht);
+        float reach = (bR[b] * field::kLatchK + field::kLatchBase) * (1.0f + field::kReachVar * rnz);
+        if (reach < field::kLatchBase) reach = field::kLatchBase; // breathes -> sometimes grabs far points
+        const float reach2 = reach * reach;
+        int lobes = 0;
+        for (int p = 0; p < NP && lobes < field::kMaxLobes && nsb < kSBcap; p++)
+        {
+          const float dx = ptX[p] - bX[b], dy = ptY[p] - bY[b];
+          const float d2 = dx * dx + dy * dy;
+          if (d2 >= reach2) continue;
+          const float w = 1.0f - field::smooth01(reach * field::kLatchFull, reach, sqrtf(d2)); // full, fade at edge
+          if (w < 0.05f) continue;
+          sbX[nsb] = ptX[p]; sbY[nsb] = ptY[p]; sbR[nsb] = field::kLobeR;
+          sbAmp[nsb] = w; sbLvl[nsb] = bLvl[b]; nsb++; lobes++;
+        }
+      }
+
       // Marching-squares segment table for OUR convention (config bit1=TL, 2=TR,
       // 4=BL, 8=BR; edges 0=top,1=right,2=bottom,3=left). Each pair = one segment
       // between two CROSSING edges. Saddles (6=TR+BL, 9=TL+BR) emit two segments.
@@ -221,12 +265,12 @@ namespace anamnesis
           {
             const float cx = (float)((gx0n + i) * C);
             float bumps = 0.0f;
-            for (int b = 0; b < nb; b++)
+            for (int b = 0; b < nsb; b++)
             {
-              if (bLvl[b] != L) continue;
-              const float dx = cx - bX[b], dy = cy - bY[b];
-              float s = bR[b] * field::kMetaSigmaK; if (s < 1.0f) s = 1.0f;
-              bumps += field::kMetaBumpAmp * expf(-(dx * dx + dy * dy) / (2.0f * s * s));
+              if (sbLvl[b] != L) continue;
+              const float dx = cx - sbX[b], dy = cy - sbY[b];
+              float s = sbR[b] * field::kMetaSigmaK; if (s < 1.0f) s = 1.0f;
+              bumps += sbAmp[b] * field::kMetaBumpAmp * expf(-(dx * dx + dy * dy) / (2.0f * s * s));
             }
             // Each bump SHAPED by the local noise topography (multiplicative): the
             // edge follows peaks/valleys -> irregular/compound blobs that pinch &
@@ -275,11 +319,11 @@ namespace anamnesis
             for (int e = 0; e < 4; e += 2)
             {
               if (sg[e] < 0 || sg[e + 1] < 0) continue;
-              const int ax = left + (int)(((float)gx0n + ex[sg[e]]) * C - (float)x0 + 0.5f);
-              const int ay = bot + (int)(ey[sg[e]] * C + 0.5f);
-              const int bx2 = left + (int)(((float)gx0n + ex[sg[e + 1]]) * C - (float)x0 + 0.5f);
-              const int by2 = bot + (int)(ey[sg[e + 1]] * C + 0.5f);
-              drawLineClip(fb, ax, ay, bx2, by2, bubB, bXlo, bXhi, bYlo, bYhi);
+              const float ax = (float)left + ((float)gx0n + ex[sg[e]]) * (float)C - (float)x0;
+              const float ay = (float)bot + ey[sg[e]] * (float)C;
+              const float bx2 = (float)left + ((float)gx0n + ex[sg[e + 1]]) * (float)C - (float)x0;
+              const float by2 = (float)bot + ey[sg[e + 1]] * (float)C;
+              drawAALineClip(fb, ax, ay, bx2, by2, bubB, bXlo, bXhi, bYlo, bYhi);
             }
           }
       };
@@ -347,6 +391,46 @@ namespace anamnesis
         const int e2 = 2 * err;
         if (e2 >= dy) { err += dy; x0 += sx; }
         if (e2 <= dx) { err += dx; y0 += sy; }
+      }
+    }
+
+    void aaPlot(od::FrameBuffer &fb, int px, int py, float cov, int color,
+                int xlo, int xhi, int ylo, int yhi)
+    {
+      if (cov <= 0.0f || px < xlo || px >= xhi || py < ylo || py >= yhi) return;
+      int c = (int)((float)color * cov + 0.5f);
+      if (c > 15) c = 15;
+      if (c > 0) fb.pixel(c, px, py);
+    }
+
+    // Anti-aliased clipped line (Wu-style) -> the iso-contour edge moves fluidly
+    // sub-pixel instead of jumping a whole pixel as the field morphs.
+    void drawAALineClip(od::FrameBuffer &fb, float x0, float y0, float x1, float y1,
+                        int color, int xlo, int xhi, int ylo, int yhi)
+    {
+      float dx = x1 - x0, dy = y1 - y0;
+      const bool steep = (dy < 0 ? -dy : dy) > (dx < 0 ? -dx : dx);
+      if (steep) { float t = x0; x0 = y0; y0 = t; t = x1; x1 = y1; y1 = t; }
+      if (x0 > x1) { float t = x0; x0 = x1; x1 = t; t = y0; y0 = y1; y1 = t; }
+      dx = x1 - x0; dy = y1 - y0;
+      const float grad = (dx == 0.0f) ? 0.0f : dy / dx;
+      const int ix0 = (int)(x0 + 0.5f), ix1 = (int)(x1 + 0.5f);
+      float y = y0 + grad * ((float)ix0 - x0);
+      for (int x = ix0; x <= ix1; x++)
+      {
+        const int iy = (int)floorf(y);
+        const float fy = y - (float)iy;
+        if (steep)
+        {
+          aaPlot(fb, iy, x, 1.0f - fy, color, xlo, xhi, ylo, yhi);
+          aaPlot(fb, iy + 1, x, fy, color, xlo, xhi, ylo, yhi);
+        }
+        else
+        {
+          aaPlot(fb, x, iy, 1.0f - fy, color, xlo, xhi, ylo, yhi);
+          aaPlot(fb, x, iy + 1, fy, color, xlo, xhi, ylo, yhi);
+        }
+        y += grad;
       }
     }
 
