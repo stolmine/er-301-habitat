@@ -274,6 +274,7 @@ namespace anamnesis
       const bool  bloomOn   = bloomBand > 0.0001f;
       const float bloomLo   = T - bloomBand;
       const float bloomPeak = (float)bubB * field::kBloomGain;
+      const float Tcore     = T + field::kRimInset; // black fill sits inside the contour (rim buffer)
 
       auto renderBubbleLevel = [&](int L)
       {
@@ -318,7 +319,11 @@ namespace anamnesis
             const float v00 = G[gj * kMetaGW + gi], v10 = G[gj * kMetaGW + gi + 1];
             const float v01 = G[(gj + 1) * kMetaGW + gi], v11 = G[(gj + 1) * kMetaGW + gi + 1];
             const float v = (v00 * (1.0f - sx) + v10 * sx) * (1.0f - sy) + (v01 * (1.0f - sx) + v11 * sx) * sy;
-            if (v > T) fb.pixel(0, px, py); // interior: occlude lower-z
+            if (v > Tcore) fb.pixel(0, px, py); // deep interior: occlude lower-z
+            else if (v > T) // bright rim BAND: buffers the smooth contour from the blocky black fill
+            {
+              if (bubB > fb.readPixel(px, py)) fb.pixel(bubB, px, py);
+            }
             else if (bloomOn && v > bloomLo) // outer band: graded + dithered bloom (max-blend)
             {
               // Bayer 4x4 ordered dither replaces the +0.5 round -> spreads the

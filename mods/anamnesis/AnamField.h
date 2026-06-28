@@ -113,6 +113,13 @@ namespace anamnesis
     static const float kBloomExp     = 1.60f; // exponential throw on Diffusion->bloom (lower =
                                               // reaches wider earlier in the knob)
     static const float kBloomGain    = 1.00f; // near-edge brightness as fraction of bubble edge
+    // The per-pixel black FILL (v>T, blocky) and the marching-squares AA contour
+    // (smooth) are two independent edges; the blocky fill can spill a pixel PAST
+    // the smooth contour -> dark sliver between the bright rim and the bloom. Fix:
+    // pull the black fill INWARD to Tcore = T + kRimInset and draw the band
+    // (T, Tcore] as a bright rim (= bubB) buffering the contour from the black, so
+    // black can never reach the smooth edge. Inset sized to buffer ~>=1px.
+    static const float kRimInset     = 0.18f; // field-units the black fill sits inside the contour
 
     // ---- Rain-on-pond ripples. A drop radiates as a TRAVELLING WAVE-TRAIN, not
     // a standing vibration: a few smooth Gaussian crests move outward together
