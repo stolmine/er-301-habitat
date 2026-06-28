@@ -263,6 +263,10 @@ namespace anamnesis
     float vizSize()        { float s = (mSizeScaleZ - kSizeMin) / (kSizeMax - kSizeMin);
                              return s < 0.0f ? 0.0f : (s > 1.0f ? 1.0f : s); }
     float vizDensity()     { return mDensityZ; }
+    // Diffusion -> line glow/halo. mDiffGZ is the smoothed allpass gain (= knob *
+    // 0.75); recover the smoothed 0..1 knob for the viz.
+    float vizDiffusion()   { float d = mDiffGZ * (1.0f / 0.75f);
+                             return d < 0.0f ? 0.0f : (d > 1.0f ? 1.0f : d); }
     float vizEnv()         { return mEnvFast; }
     int   vizMode()        { return mMode.value(); }
     float vizGrit()        { int v = mGrit.value(); return v <= 1 ? 0.0f : (v == 2 ? 0.5f : 1.0f); }

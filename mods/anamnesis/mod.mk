@@ -1,5 +1,5 @@
 PKGNAME ?= anamnesis
-PKGVERSION ?= 0.2.0.67
+PKGVERSION ?= 0.2.0.68
 
 include scripts/env.mk
 

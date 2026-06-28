@@ -94,6 +94,12 @@ namespace anamnesis
     static const float kBaseDim    = 3.0f;  // streamline brightness at Mix = 0
     static const float kGlowGain   = 1.8f;  // droplet ring illumination (NOT Mix-scaled
                                             // -> rings stay vivid at any wet, high contrast)
+    // Diffusion -> a GLOW HALO graded out from each streamline (NOT a blur: the
+    // sharp bright core is untouched; dimmer pixels are MAX-blended into the dark
+    // space around lines, fading with distance). Diffusion=0 -> no halo at all
+    // (zero cost, pixel-identical). Both scale with Diffusion 0..1.
+    static const float kHaloRadius = 6.0f;  // max halo reach (px) at Diffusion=1
+    static const float kHaloGain   = 0.60f; // halo peak as fraction of core brightness
 
     // ---- Rain-on-pond ripples. A drop radiates as a TRAVELLING WAVE-TRAIN, not
     // a standing vibration: a few smooth Gaussian crests move outward together
