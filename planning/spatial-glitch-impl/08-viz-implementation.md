@@ -72,29 +72,57 @@ on CM4** (Phase 6) — the front-reject + age-scaled crest count keep it bounded
 longer lifetimes raise concurrent-drop count. Lever down via `kStreamlines`,
 `kVizMaxDrops`, or `kRippleTau` if needed.
 
-## Density → bubbles + z-depth weave (DONE @ 0.2.0.48)
+## Density → lava-lamp metaball bubbles, woven by z-depth (DONE @ 0.2.0.61)
 Fixed **14 streamlines** (`kStreamN`) grouped into **7 pair-BANDS** (band b = lines
-2b, 2b+1). Density spawns **bubbles** woven through the bands by z-depth.
-- **Bubble pool** (atom, `kVizMaxBubbles`=12, all `#ifndef SWIGLUA`): `mBubX`
-  (content-x), `mBubY` (column-y), `mBubZ`, `mBubR` (≤0 inactive), `mBubVx`. Per
-  block: rise (`kBubRise`) + slight drift; spawn toward target `= density·max` on a
-  timer; retire off the top. Getters `vizBub{X,Y,Z,R}(i)`, `vizMaxBubbles`.
-- **Band z permutation** randomized per unit insertion (Fisher-Yates in the atom
-  ctor → `mBandZ[7]`, getter `vizBandZ(b)`). Shared by all plies → consistent depth.
-- **Render = z-ordered painter's composite** (AnamFieldGraphic): build a list of
-  bands (z = `vizBandZ`) + active bubbles (own z), insertion-sort ascending z, draw
-  back→front. `renderBand(b)` draws both lines AND **fills the negative space
-  between the pair with background (0)** → occludes lower-z material. `drawBubble`
-  **fills its disk with background then draws a bright outline** (2 brighter than the
-  lines, `bubB = baseB+2`) → occludes lower-z; both **clipped to the ply window**
-  (`plotClip`) so strip-spanning shapes draw in pieces with correct per-ply z (no
-  cross-ply clobber). `drawLinePix` = the shared sqrt-AA line-pixel helper.
-- Constants: `kStreamN`(14), `kVizColH`(64), `kBubRise`(14), `kVizMaxBubbles`(12),
-  spawn radius 2..6 / drift ±3 / interval 0.25s (in atom `spawnDrop`-adjacent block).
+2b, 2b+1). Density spawns **metaball bubbles** (marching-squares iso-contours) woven
+through the bands by z-depth. Long iterative journey (circles → Perlin radial blobs →
+metaball field → point-attractor lobes); the LANDED design:
 
-## NEXT — organic bubble shapes (Perlin contour)
-Replace circle outlines with organic blobs: lift the Perlin LUT + marching-squares
-iso-contour engine from `mods/spreadsheet/RaindropGraphic.h` (LUT-baked `sampleNoise`
-+ `kSegTable` marching squares). Each bubble = a contour blob sampled from a noise
-field (animated/scrolled), still z-ordered + occluding as now. Then: **wave/droplet
-carry** (nudge bubble x by local flow + ripple as it rises).
+**Bubble pool (atom, `kVizMaxBubbles`=12, all `#ifndef SWIGLUA`).** `mBubX` (content-x),
+`mBubY` (column-y), `mBubZ` (= metaball z-LEVEL 0..`kBubLevels`-1), `mBubR` (≤0 inactive),
+`mBubVx`, `mBubSeed`. Per block (in the `spawnDrop`-adjacent block in process()):
+- speed via a **clock-scaled step `vdt = FRAMELENGTH/fs/mRcurZ`** (whole bubble system
+  tracks the Clock). Rise `kBubRise`; **Freeze** (`vizFreeze`) blends rise → per-bubble
+  RANDOM direction (`kFreezeDrift`, angle from seed); retire off any edge.
+- spawn toward target **`= density·max`** (count = Density) on `kBubSpawnInt` timer; a
+  new bubble has chance `kCalveProb` to **CALVE** off a mature parent (radius>5): born
+  beside it, drifting away, parent ×0.82 mass → split-offs persist as real bubbles.
+- radius **3..15**, level random. Getters `vizBub{X,Y,Z,R,Seed}(i)`, `vizMaxBubbles`.
+
+**Band z permutation** randomized per unit insertion (Fisher-Yates, atom ctor →
+`mBandZ[7]`, getter `vizBandZ(b)`); shared by all plies → consistent depth.
+
+**Render (AnamFieldGraphic, z-ordered painter's composite).** Items = 7 bands
+(z=`vizBandZ`) + up to `kBubLevels`(3) bubble-LEVELS (z interleaved); insertion-sort
+ascending z, draw back→front. `renderBand` fills the negative space between its pair
+with background (occludes lower-z). **`renderBubbleLevel(L)`** = the metaball engine:
+- **Sub-bump list** per level: each bubble = a **CORE** bump + **lobes LATCHED onto a
+  drifting POINT layer**. Points: `kNumPoints`(28) content-space points, base from
+  `hash01`, drift by noise (`kPointDrift`/`kPointDriftRate`). A bubble latches each
+  point within **reach** (`= R·kLatchK + kLatchBase`, which **breathes** with noise
+  `kReachVar` → occasionally grabs a far point = big separation), weighted by distance
+  (full to `reach·kLatchFull`, then smooth fade → lobes grow & shed → pinch/split).
+  Per-(bubble,point) **affinity** (from `mBubSeed`, below `kAffBias` ignored) +
+  per-point **strength** (`hash01`→lobe size). Capped `kMaxLobes`(7).
+- **Field grid** (cell `kMetaCell`=3, GLOBAL content-aligned → seams) = Σ sub-bumps on
+  level (Gaussian, sigma `R·kMetaSigmaK`) × multiplicative noise edge-wobble
+  (`kMetaNoiseGain`); **temporally SLEWED** into `mSlewGrid` (`kMetaSlew`) for gentle
+  morph. Threshold `kMetaThresh`.
+- **Marching squares** (`kSeg` table — re-derived for OUR corner-bit convention; the
+  lifted screensaver table caused spurious spikes) → **AA contour** (`drawAALineClip`,
+  Wu) so the edge glides sub-pixel. **Per-pixel fill** where field>T occludes lower-z.
+  All **clipped to the ply window** (strip-spanning shapes draw in pieces, correct
+  per-ply z). Brightness `bubB = baseB+2` (2 over the lines).
+- Perlin LUT + `fbm` in **`AnamNoise.h`** (lifted from spreadsheet RaindropGraphic).
+
+**ALL bubble/metaball constants live in `AnamField.h`** (kBub*, kMeta*, kNumPoints,
+kLatch*, kReach*, kAff*, kSub*/point, kCalve*, kFreezeDrift, etc.).
+
+## NEXT — richer bubble physics (the flow + droplet carry)
+The weighted point/affinity field is the groundwork: have the **flow streamlines + the
+droplet ripple field actually shove the bubbles around** (nudge `mBubVx`/position by the
+local `flow()` slope + nearby `rippleEval` bend as they move) so shapes get thrown off
+course over the weighted field. Then revisit Field subsystem channels still pending
+(Diffusion fuzz, Mod wander, Decay persistence, Grit dashes, Clock-tempo polish), the
+active-ply emphasis, Clock→ply-1 reorder, and CM4 CPU profiling (the metaball field +
+per-pixel fill is the heaviest part — profile before shipping).
