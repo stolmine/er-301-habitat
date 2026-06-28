@@ -107,8 +107,11 @@ namespace anamnesis
     // brightness is held at the bubble edge brightness (kBloomGain~1) and grades
     // to 0 outward, so the bloom joins the contour cleanly. The graded brightness
     // is ordered-DITHERED (Bayer 4x4) to break 4-bit quantization banding.
-    static const float kBloomBandMax = 0.45f; // max bloom radius (field-units below T) at Diff=1
-    static const float kBloomExp     = 2.20f; // exponential throw on Diffusion->bloom
+    static const float kBloomBandMax = 0.50f; // max bloom radius (field-units below T) at Diff=1
+                                              // (=T -> bloomLo~0, the widest safe reach: bloom
+                                              // fades to 0 at the field's outer fringe, no flood)
+    static const float kBloomExp     = 1.60f; // exponential throw on Diffusion->bloom (lower =
+                                              // reaches wider earlier in the knob)
     static const float kBloomGain    = 1.00f; // near-edge brightness as fraction of bubble edge
 
     // ---- Rain-on-pond ripples. A drop radiates as a TRAVELLING WAVE-TRAIN, not
