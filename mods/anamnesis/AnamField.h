@@ -265,18 +265,29 @@ namespace anamnesis
     // global vizSize() 0..1, so every ply scales identically -> seams stay
     // continuous. Only the SPATIAL terms scale (phase stays outside -> motion
     // speed is unchanged; Size changes feature size, not tempo).
-    static const float kSizeFreqTight = 1.70f; // spatial-freq mult at Size=0 (tight)
-    static const float kSizeFreqWide  = 0.50f; // spatial-freq mult at Size=1 (broad swell)
+    static const float kSizeFreqTight = 2.13f; // spatial-freq mult at Size=0 (tight; ~1.25x throw)
+    static const float kSizeFreqWide  = 0.40f; // spatial-freq mult at Size=1 (broad swell; ~1.25x throw)
     static const float kSizeAmpMin    = 0.85f; // swell amplitude mult at Size=0
     static const float kSizeAmpMax    = 1.20f; // swell amplitude mult at Size=1
+    // Swells emanate from the strip CENTER: the spatial coordinate is the
+    // (smoothly-rounded) distance from center, so as `phase` advances crests
+    // travel OUTWARD toward both ends (expansion) / INWARD (compression),
+    // symmetric about the middle -- instead of a one-directional left<->right
+    // scroll. `r` is a soft |cx-center| (the eps rounds the focal point so there
+    // is no kink). cx + center are GLOBAL content-x, so all plies agree -> seams
+    // stay continuous.
+    static const float kFlowCenter     = kVizStripW * 0.5f; // strip center (focal point)
+    static const float kFlowCenterSoft = 8.0f;              // px, rounds the focal point
     inline float flow(float cx, float yb, float phase, float size)
     {
       const float fsc = kSizeFreqTight + (kSizeFreqWide - kSizeFreqTight) * size;
       const float asc = kSizeAmpMin + (kSizeAmpMax - kSizeAmpMin) * size;
+      const float xc = cx - kFlowCenter;
+      const float r  = sqrtf(xc * xc + kFlowCenterSoft * kFlowCenterSoft); // smooth |xc|
       float d = 0.0f;
-      d += 2.6f * sinf(fsc * (0.055f * cx + yb * 0.045f) + phase);
-      d += 1.3f * sinf(fsc * (0.115f * cx + yb * 0.090f) - 0.70f * phase);
-      d += 0.7f * sinf(fsc * (0.210f * cx) + 1.30f * phase);
+      d += 2.6f * sinf(fsc * (0.055f * r + yb * 0.045f) - phase);          // outward (expand)
+      d += 1.3f * sinf(fsc * (0.115f * r + yb * 0.090f) + 0.70f * phase);  // inward  (compress)
+      d += 0.7f * sinf(fsc * (0.210f * r) - 1.30f * phase);                // outward (fast)
       return d * asc;
     }
 
