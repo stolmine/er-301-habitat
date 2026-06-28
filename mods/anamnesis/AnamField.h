@@ -103,8 +103,14 @@ namespace anamnesis
     // sharp. Diffusion=0 -> no bloom. Both band + brightness scale with Diffusion
     // (the 0.2.0.69 gradient mechanics -- the edge is handled separately by the
     // rim band below).
-    static const float kBloomBand = 0.30f; // field-units below T the bloom fades over (x Diff)
-    static const float kBloomGain = 0.75f; // bloom peak as fraction of bubble brightness (x Diff)
+    // Diffusion drives the bloom RADIUS via an EXPONENTIAL throw (subtle low,
+    // accelerating high), 0 at Diffusion=0. Peak is HELD at the bubble edge
+    // brightness (kBloomGain~1) so the rim joins the glow continuously, and the
+    // falloff is SMOOTHSTEP-shaped so it eases cleanly down to 0 at the outer edge
+    // (no hard cutoff). No dither -- the smooth curve + larger radius carry it.
+    static const float kBloomBandMax = 0.50f; // max bloom radius (field-units below T) at Diff=1
+    static const float kBloomExp     = 1.80f; // exponential throw on Diffusion->bloom radius
+    static const float kBloomGain    = 1.00f; // peak as fraction of bubble edge (held -> clean join)
     // The per-pixel black FILL (v>T, blocky) and the marching-squares AA contour
     // (smooth) are two independent edges; the blocky fill can spill a pixel PAST
     // the smooth contour -> dark sliver between the bright rim and the bloom. Fix:

@@ -270,9 +270,10 @@ namespace anamnesis
       // as a graded, dithered aura (max-blended over already-drawn lower/equal-z
       // content). Diffusion sets the RADIUS via an exponential throw (0 -> no
       // bloom); near-edge brightness = bubB so it joins the contour with no divide.
-      const bool  bloomOn   = diffuse > 0.0f;
-      const float bloomLo   = T - field::kBloomBand * diffuse;
-      const float bloomPeak = (float)bubB * field::kBloomGain * diffuse;
+      const float bloomBand = field::kBloomBandMax * powf(diffuse, field::kBloomExp); // expo throw
+      const bool  bloomOn   = bloomBand > 0.0001f;
+      const float bloomLo   = T - bloomBand;
+      const float bloomPeak = (float)bubB * field::kBloomGain; // held -> rim joins glow continuously
       const float Tcore     = T + field::kRimInset; // black fill sits inside the contour (rim buffer)
 
       auto renderBubbleLevel = [&](int L)
@@ -321,9 +322,11 @@ namespace anamnesis
             {
               if (bubB > fb.readPixel(px, py)) fb.pixel(bubB, px, py);
             }
-            else if (bloomOn && v > bloomLo) // outer band: graded bloom (max-blend) -- 0.2.0.69 gradient
+            else if (bloomOn && v > bloomLo) // outer band: graded bloom (max-blend)
             {
-              const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + 0.5f);
+              const float frac = (v - bloomLo) / (T - bloomLo);
+              const float fall = frac * frac * (3.0f - 2.0f * frac); // smoothstep -> eases to 0 at outer edge
+              const int bv = (int)(bloomPeak * fall + 0.5f);
               if (bv > 0 && bv > fb.readPixel(px, py)) fb.pixel(bv, px, py);
             }
           }
