@@ -269,25 +269,25 @@ namespace anamnesis
     static const float kSizeFreqWide  = 0.40f; // spatial-freq mult at Size=1 (broad swell; ~1.25x throw)
     static const float kSizeAmpMin    = 0.85f; // swell amplitude mult at Size=0
     static const float kSizeAmpMax    = 1.20f; // swell amplitude mult at Size=1
-    // Swells emanate from the strip CENTER: the spatial coordinate is the
-    // (smoothly-rounded) distance from center, so as `phase` advances crests
-    // travel OUTWARD toward both ends (expansion) / INWARD (compression),
-    // symmetric about the middle -- instead of a one-directional left<->right
-    // scroll. `r` is a soft |cx-center| (the eps rounds the focal point so there
-    // is no kink). cx + center are GLOBAL content-x, so all plies agree -> seams
-    // stay continuous.
-    static const float kFlowCenter     = kVizStripW * 0.5f; // strip center (focal point)
-    static const float kFlowCenterSoft = 8.0f;              // px, rounds the focal point
+    // Flow MOTION stays one-directional (the wave is linear in cx -> a single
+    // left<->right scroll). The Size ADJUSTMENT is anchored at the strip CENTER:
+    // the spatial coordinate is xc = cx - center, so the frequency scaling pivots
+    // about the middle -- at cx=center the scaled spatial term is 0 for ANY Size,
+    // so that column is fixed and features compress toward / expand from the
+    // centre on BOTH sides as Size changes (epicentre of the size effect),
+    // WITHOUT making the continuous flow travel two ways. Offsetting by a global
+    // constant doesn't change travel direction (just a constant phase shift) and
+    // cx + center are global -> seams stay continuous.
+    static const float kFlowCenter = kVizStripW * 0.5f; // strip centre (Size pivot)
     inline float flow(float cx, float yb, float phase, float size)
     {
       const float fsc = kSizeFreqTight + (kSizeFreqWide - kSizeFreqTight) * size;
       const float asc = kSizeAmpMin + (kSizeAmpMax - kSizeAmpMin) * size;
-      const float xc = cx - kFlowCenter;
-      const float r  = sqrtf(xc * xc + kFlowCenterSoft * kFlowCenterSoft); // smooth |xc|
+      const float xc = cx - kFlowCenter; // anchor Size scaling at centre (linear -> one-way flow)
       float d = 0.0f;
-      d += 2.6f * sinf(fsc * (0.055f * r + yb * 0.045f) - phase);          // outward (expand)
-      d += 1.3f * sinf(fsc * (0.115f * r + yb * 0.090f) + 0.70f * phase);  // inward  (compress)
-      d += 0.7f * sinf(fsc * (0.210f * r) - 1.30f * phase);                // outward (fast)
+      d += 2.6f * sinf(fsc * (0.055f * xc + yb * 0.045f) + phase);
+      d += 1.3f * sinf(fsc * (0.115f * xc + yb * 0.090f) - 0.70f * phase);
+      d += 0.7f * sinf(fsc * (0.210f * xc) + 1.30f * phase);
       return d * asc;
     }
 
