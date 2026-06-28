@@ -273,8 +273,8 @@ namespace anamnesis
       const float bloomBand = field::kBloomBandMax * powf(diffuse, field::kBloomExp); // expo throw
       const bool  bloomOn   = bloomBand > 0.0001f;
       const float bloomLo   = T - bloomBand;
-      const float bloomPeak = (float)bubB * field::kBloomGain; // held -> rim joins glow continuously
-      const float Tcore     = T + field::kRimInset; // black fill sits inside the contour (rim buffer)
+      const float bloomPeak = (float)bubB * field::kBloomGain; // held -> glow joins contour continuously
+      const float invEdge   = 1.0f / field::kEdgeSoft; // feathered-black AA slope
 
       auto renderBubbleLevel = [&](int L)
       {
@@ -317,22 +317,18 @@ namespace anamnesis
             const float v00 = G[gj * kMetaGW + gi], v10 = G[gj * kMetaGW + gi + 1];
             const float v01 = G[(gj + 1) * kMetaGW + gi], v11 = G[(gj + 1) * kMetaGW + gi + 1];
             const float v = (v00 * (1.0f - fx) + v10 * fx) * (1.0f - fy) + (v01 * (1.0f - fx) + v11 * fx) * fy;
-            // No bloom (Diffusion=0): plain 0.2.0.69 fill -> black to the contour,
-            // NO rim band -> clean bubbles. With bloom: black pulls inside to Tcore
-            // and the (T,Tcore] rim band buffers the contour from the blocky fill.
-            const float blackT = bloomOn ? Tcore : T;
-            if (v > blackT) fb.pixel(0, px, py); // interior: occlude lower-z
-            else if (bloomOn && v > T) // bright rim BAND: buffers contour from blocky fill (bloom only)
+            if (v > T) // INTERIOR: feathered (AA) black occlusion -- no hard spill past the contour
             {
-              if (bubB > fb.readPixel(px, py)) fb.pixel(bubB, px, py);
+              float cov = (v - T) * invEdge; if (cov > 1.0f) cov = 1.0f; // 0 at edge -> 1 deep inside
+              const int cur = fb.readPixel(px, py);
+              fb.pixel((int)((float)cur * (1.0f - cov) + 0.5f), px, py); // darken toward black
             }
-            else if (bloomOn && v > bloomLo) // outer band: graded + DITHERED bloom (the soft glow)
+            else if (bloomOn && v > bloomLo) // OUTSIDE: held-peak glow, IGN-dithered (the soft glow)
             {
-              // Bayer 4x4 ordered dither -> spreads the 4-bit quantization so the
-              // faint tail reads as a smooth glow, not sparse speckle.
-              static const int bayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
-              const float dith = (float)bayer[(py & 3) * 4 + (px & 3)] * (1.0f / 16.0f);
-              const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + dith);
+              // Interleaved Gradient Noise (Jimenez) -> smooth gradient dither.
+              float ign = 0.06711056f * (float)px + 0.00583715f * (float)py;
+              ign -= floorf(ign); ign = 52.9829189f * ign; ign -= floorf(ign); // -> [0,1)
+              const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + ign);
               if (bv > 0 && bv > fb.readPixel(px, py)) fb.pixel(bv, px, py);
             }
           }

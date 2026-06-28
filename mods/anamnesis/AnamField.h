@@ -94,30 +94,31 @@ namespace anamnesis
     static const float kBaseDim    = 3.0f;  // streamline brightness at Mix = 0
     static const float kGlowGain   = 1.8f;  // droplet ring illumination (NOT Mix-scaled
                                             // -> rings stay vivid at any wet, high contrast)
-    // Diffusion -> a GLOW BLOOM around the Density BUBBLES (links Diffusion +
-    // Density + bloom). The metaball field falls off smoothly outside the fill
-    // threshold T; that outer band [bloomLo, T) is drawn as a graded aura,
-    // MAX-blended so it only ever brightens. Because the levels composite
-    // BACK->FRONT, the bloom lands over streamlines + bubbles at z <= the blooming
-    // level and is occluded by higher z (draw order = the z test). Lines stay
-    // sharp. Diffusion=0 -> no bloom. Both band + brightness scale with Diffusion
-    // (the 0.2.0.69 gradient mechanics -- the edge is handled separately by the
-    // rim band below).
-    // Diffusion drives the bloom RADIUS via an EXPONENTIAL throw (subtle low,
-    // accelerating high), 0 at Diffusion=0 (-> clean bubbles, the rim band + bloom
-    // both gate off). Peak HELD at the bubble edge brightness (kBloomGain~1) so the
-    // rim joins the glow continuously; linear falloff with Bayer-4x4 ordered DITHER
-    // so the faint tail reads as a smooth soft glow (not sparse 4-bit speckle).
-    static const float kBloomBandMax = 0.50f; // max bloom radius (field-units below T) at Diff=1
-    static const float kBloomExp     = 1.80f; // exponential throw on Diffusion->bloom radius
-    static const float kBloomGain    = 1.00f; // peak as fraction of bubble edge (held -> clean join)
-    // The per-pixel black FILL (v>T, blocky) and the marching-squares AA contour
-    // (smooth) are two independent edges; the blocky fill can spill a pixel PAST
-    // the smooth contour -> dark sliver between the bright rim and the bloom. Fix:
-    // pull the black fill INWARD to Tcore = T + kRimInset and draw the band
-    // (T, Tcore] as a bright rim (= bubB) buffering the contour from the black, so
-    // black can never reach the smooth edge. Inset sized to buffer ~>=1px.
-    static const float kRimInset     = 0.18f; // field-units the black fill sits inside the contour
+    // Diffusion -> a GLOW around the Density BUBBLES (links Diffusion + Density +
+    // bloom). The metaball field falls off smoothly outside the fill threshold T;
+    // the band [bloomLo, T) is drawn as a graded aura, MAX-blended so it only ever
+    // brightens. Levels composite BACK->FRONT, so the glow lands over streamlines +
+    // bubbles at z <= the blooming level and is occluded by higher z. Lines stay
+    // sharp.
+    //
+    // EDGE/GLOW pipeline (no rim band -- it popped in at Diff=0 and seamed against
+    // the dithered glow). Instead:
+    //  - INTERIOR occlusion is ANTI-ALIASED ("feathered"): pixel *= (1 - cov),
+    //    cov = clamp((v - T)/kEdgeSoft). Deep interior -> full black (occludes);
+    //    near the contour it feathers, so the blocky fill never spills a hard pixel
+    //    past the smooth marching-squares contour (kills the dark sliver) with NO
+    //    separate rim band. The crisp contour still draws on top as the bright edge.
+    //  - The GLOW PEAK is HELD at the edge brightness (kBloomGain~1) so it joins the
+    //    contour seamlessly; Diffusion drives only the RADIUS (expo throw), so at
+    //    Diff=0+ the glow is a sub-pixel ring hugging the edge and widens OUTWARD
+    //    smoothly -> no pop, smooth fade-in, and a clean edge->glow transition.
+    //  - DITHER is Interleaved Gradient Noise (Jimenez), much smoother on gradients
+    //    than an ordered Bayer matrix -> the faint tail reads as a soft glow, and
+    //    the edge->glow texture transition is seamless.
+    static const float kBloomBandMax = 0.50f; // max glow radius (field-units below T) at Diff=1
+    static const float kBloomExp     = 1.80f; // exponential throw on Diffusion->glow radius
+    static const float kBloomGain    = 1.00f; // glow peak as fraction of bubble edge (held -> clean join)
+    static const float kEdgeSoft     = 0.18f; // field-units over which the interior black feathers (AA)
 
     // ---- Rain-on-pond ripples. A drop radiates as a TRAVELLING WAVE-TRAIN, not
     // a standing vibration: a few smooth Gaussian crests move outward together
