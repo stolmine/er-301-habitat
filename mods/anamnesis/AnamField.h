@@ -188,6 +188,8 @@ namespace anamnesis
     static const float kBubSpawnInt = 0.25f; // min interval between spawns (s, clock-scaled)
     static const float kCalveProb   = 0.40f; // chance a new bubble CALVES off an existing one
                                              // (born beside it, drifting away -> own lifetime)
+    static const float kFreezeDrift = 9.0f;  // px/s: when FROZEN bubbles drift in random
+                                             // directions (from seed) instead of rising up
     // Bubbles as 2D METABALLS (lava-lamp): per z-LEVEL, a scalar field = animated
     // FBM noise + Gaussian bumps at the bubbles, traced by marching squares ->
     // smooth iso-contours that morph + split/join. Bubbles share a level so their

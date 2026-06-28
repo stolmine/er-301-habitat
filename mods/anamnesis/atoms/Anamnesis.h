@@ -482,13 +482,23 @@ namespace anamnesis
       {
         const float vdt = (float)FRAMELENGTH / fs / mRcurZ; // clock-scaled time step
         const float colH = anamnesis::field::kVizColH;
+        const float stripW = anamnesis::field::kVizStripW;
+        const float vizFreeze = 1.0f - (1.0f - mFreezeZ) * (1.0f - mCaptureHoldZ);
         int activeB = 0;
         for (int i = 0; i < kVizMaxBubbles; i++)
         {
           if (mBubR[i] <= 0.0f) continue;
-          mBubY[i] += vdt * anamnesis::field::kBubRise; // upward
-          mBubX[i] += vdt * mBubVx[i];                   // horizontal drift
-          if (mBubY[i] > colH + mBubR[i] + 2.0f) { mBubR[i] = 0.0f; continue; }
+          // Unfrozen: rise (+ small drift). Frozen: drift in a per-bubble random
+          // direction (from seed) instead of strictly up. Blended by freeze amount.
+          const float fa = mBubSeed[i] * 0.41f;
+          const float rvx = cosf(fa) * anamnesis::field::kFreezeDrift;
+          const float rvy = sinf(fa) * anamnesis::field::kFreezeDrift;
+          const float vx = (1.0f - vizFreeze) * mBubVx[i] + vizFreeze * rvx;
+          const float vy = (1.0f - vizFreeze) * anamnesis::field::kBubRise + vizFreeze * rvy;
+          mBubX[i] += vdt * vx;
+          mBubY[i] += vdt * vy;
+          if (mBubY[i] > colH + mBubR[i] + 2.0f || mBubY[i] < -mBubR[i] - 12.0f ||
+              mBubX[i] < -20.0f || mBubX[i] > stripW + 20.0f) { mBubR[i] = 0.0f; continue; }
           activeB++;
         }
         const int target = (int)(density * (float)kVizMaxBubbles + 0.5f);
@@ -531,7 +541,7 @@ namespace anamnesis
               int lv = (int)(uz * (float)anamnesis::field::kBubLevels);
               if (lv >= anamnesis::field::kBubLevels) lv = anamnesis::field::kBubLevels - 1;
               mBubZ[slot] = (float)lv;                                    // metaball z-LEVEL
-              mBubR[slot] = 3.0f + ur * 7.0f;                            // radius 3..10 (varied)
+              mBubR[slot] = 3.0f + ur * 12.0f;                           // radius 3..15 (varied, +1.5x max)
               mBubVx[slot] = (uv - 0.5f) * 6.0f;                         // small drift px/s
             }
             mBubRng = mBubRng * 1664525u + 1013904223u;
