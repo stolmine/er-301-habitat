@@ -1,0 +1,1196 @@
+# er-301-habitat ledger — the single machine-readable source of truth for work items.
+#
+# This file is TRUTH. `planning/TODO.md` is GENERATED from it (`scripts/dev
+# render`) — never hand-edit that doc. The gate (`scripts/dev check`, run before
+# every commit) reconciles this ledger against the code and tests.
+#
+# Each item is one INDEPENDENTLY-VERIFIABLE behavior (the BDG grain: a test, a
+# screenshot, or a gate) — not per-function, not per-subsystem.
+#
+# Habitat is a PACKAGE repo: all code lives under mods/<pkg>/ (9 packages: mi
+# kryos peaks scope spreadsheet biome catchall porcelain house), C++ DSP + a Lua
+# middle layer. Packages already namespace themselves in item-id prefixes
+# (pecto-*, excel-*), so `area` is a concern bucket, not a per-package bucket.
+#
+# Fields:
+#   id      stable kebab slug, unique, immutable (code references it as [hab:<id>])
+#   title   one line
+#   status  todo | wip | done | blocked
+#   area    dsp | units | ui | seq | tooling | docs | infra
+#   rev     integer, bump when the item's intent changes (default 1)
+#   verify  { kind = "test"|"screenshot"|"manual", ref = "<test-case name | png | note>" }
+#           kind="test" is HARD-gated: a `done` item's ref must name a real TEST_CASE.
+#           (No test harness exists yet — tests/ is future work; the stolmine
+#           headless emu is the planned substrate — so use manual/screenshot +
+#           attested until one lands.)
+#   tests   optional list of ADDITIONAL TEST_CASE names this item owns (beyond
+#           verify.ref). Every TEST_CASE in tests/ must be claimed by some item
+#           (verify.ref or tests[]) — you can't add a test without ledgering it.
+#   attested  REQUIRED for a `done` item whose verify.kind is NOT "test": a non-empty
+#           string is a conscious, auditable claim (no silent soft-done). By
+#           convention the line states WHERE it was verified — "emu-verified" vs
+#           "bench-verified on hardware" — since habitat has been burned by
+#           emu-vs-hardware divergence (NEON/AAPCS, package-trig LUT).
+#   anchor  optional; if true, a `done` item must carry a [hab:<id>] tag in the
+#           source tree (mods/<pkg>/)
+#   links   optional { depends_on = [...], supersedes = [...] }
+#   note    optional free text; reference design docs in planning/*.md here (do
+#           NOT ledger a design doc as an item)
+#
+# Tool invocations go through the blessed entrypoint: `scripts/dev {check,render,
+# status,now,commit,...}`. Never write a date from memory — ask `scripts/dev now`.
+
+[[item]]
+id = "infra-ledger-regime"
+title = "Ledger + BDG regime stood up (gate, render, hooks, blessed entrypoint)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "scripts/dev check exits 0; planning/TODO.md renders from ledger" }
+attested = "2026-07-09: ported ledger.py, scripts/dev, gate/stop hooks from er-301-stolmine per planning/ledger-regime-porting-301.md; check+render+status validated clean"
+
+# er-301-habitat backfill fragment — 11-package ER-301 unit collection.
+#
+# Migrated from todo.md (live checkbox tracker, 1414 lines), RELEASE-*.md (9
+# files), planning/*.md (design docs, referenced not ledgered), and git
+# history. Drafted 2026-07-09.
+#
+# Areas: {dsp, units, ui, seq, tooling, docs, infra}. Package name lives in the
+# id prefix (pecto-*, ngoma-*, house-*, ...); area is the concern bucket.
+# No test harness exists → every verify.kind is "manual" or "screenshot"; every
+# `done` item carries `attested` with a git date + sha/release citation.
+# `stamped` is intentionally omitted (written by scripts/dev ledger-append).
+# note fields cite planning/todo-archive.md (todo.md's archived home) or
+# planning/*.md design docs. The bootstrap item infra-ledger-regime is NOT here.
+
+# ─────────────────────────── Part 1: shipped behaviors (done) ───────────────────────────
+
+[[item]]
+id = "mi-ports-shipped"
+title = "Mutable Instruments port suite: Plaits/Clouds/Rings/Grids/Warps/Stratos/Commotio/Marbles T+X"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "instantiate each of the 9 MI units on hardware; confirm engines/modes function (Plaits 24 engines, Clouds gran/delay/spectral, Rings modal, Grids, Warps xmod, Stratos reverb, Commotio exciter at 48k, Marbles T 7 models + X)" }
+attested = "Shipped across the mi package; hardware-verified at the Move-2 consolidation (2026-04-29 commit 8ac31ca) and refined through v2.5.0 (tag da7ed5f, 2026-05-16): Clouds CPU cap + spectral mode + adaptive labels, Marbles clock/silence fixes, OptionControl boolean fixes, Stratos defaults matched to Clouds. am335x NEON tuning in v2.5.0 (Rings modal kernel, Plaits 6-op 2x OS)."
+note = "planning/todo-archive.md '## Mutable Instruments Ports', '## Clouds/Warps/Stratos/Commotio Improvements'. Native stereo inside single op (not dual-instance)."
+
+[[item]]
+id = "mi-package-consolidation"
+title = "8 separate MI port packages consolidated into single `mi` package (shared stmlib, ABI-safe)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "load mi package on hardware; confirm all 9 MI unit ctors resolve (nm libmi.so) and cross-deps (Stratos↔clouds-reverb, Rings↔plaits.EngineSelector) work intra-package; old clouds.X/plaits.X patch refs break with documented migration" }
+attested = "2026-04-29 (Move 2, commit 8ac31ca), shipped v2.4.0 (tag 80edff9, 2026-04-29): 8 packages → mi v1.0.0. Single shared stmlib build, override subdirs for stolmine 48kHz/NEON mods, INCLUDES order puts MOD_DIR first, SYMBOLS=TEST gates STM32 conf. Top-level PROJECTS 16→8. Patch-break accepted + documented in release notes."
+note = "planning/todo-archive.md '## Pre-release scoping' Move 2. Precedent for infra-cross-package-dep-audit."
+
+[[item]]
+id = "peaks-dmc-ports"
+title = "Peaks/DMC port suite: 14 drum/modulation/sequencer/generator units with clock+reset refinements"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "instantiate the peaks units; confirm Tap LFO free-runs + reset input, FmLfo/WsmLfo reset-only, Mini/Mod Sequencer reset inputs, PLO continuous pitch multiplier, bipolar fader correctness" }
+attested = "Shipped in the peaks package (present by v2.0.0, tag 3362265, 2026-04-11); refinements per todo.md Peaks section: Tap LFO phase-reset removal + Clock/Reset split + rate-as-multiplier, sequencer reset inputs, PLO /16x–16x with corrected labels."
+note = "planning/todo-archive.md '## Peaks / DMC Ports'. Open follow-ups tracked in peaks-refinements."
+
+[[item]]
+id = "seq-excel-tracker"
+title = "Excel — 64-step CV tracker sequencer (per-step offset/length/deviation, xform gate, V/Oct out)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "insert Excel; edit steps in the scrollable list, drive clock/reset, confirm playhead + loop + math xform (9 funcs) + offset-range switch (2Vpp/10Vpp) + V/Oct output; quicksave round-trips per-step + xform state" }
+attested = "Shipped in the spreadsheet package (TrackerSeq); serialization + offset-range-scale + playhead-clamp + edit-buffer-sync completed for v2.4.0 (tag 80edff9, 2026-04-29). Playhead-stuck-past-reduced-bound and proportional offset-range-scale fixes landed in the Bugs/Excel pass."
+note = "planning/todo-archive.md '## Sequencer Suite' + 'Bugs/Excel'. Open Excel/Ballot improvements in seq-excel-ballot-improvements."
+
+[[item]]
+id = "seq-ballot-gateseq"
+title = "Ballot — gate sequencer with ratchet (RatchetLen/Vel/Mult) persistence"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "insert Ballot; program gates + ratchets, quicksave/reload; confirm RatchetLen, RatchetVel toggle, and RatchetMult all round-trip and the playhead clamps correctly on stepCount reduce" }
+attested = "Shipped in spreadsheet (GateSeq). Ratchet-persist fix: options rebased to 1/2 convention (0 was CHOICE_UNKNOWN sentinel), enableSerialization() in C++ ctor, RatchetMult round-tripped via ParameterAdapter Bias target/hardSet. Landed in the v2.4.0 serialization pass (tag 80edff9, 2026-04-29)."
+note = "planning/todo-archive.md '## Serialization Audit' + 'Bugs/Ballot'. Open: ballot-gate-width-zero."
+
+[[item]]
+id = "seq-gesture-recorder"
+title = "Gesture Sequencer — continuous gesture recorder/looper with od::Sample buffer + waveform viz"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "insert Gesture; record movement with auto-write sensitivity, confirm erase-under-playhead, output slew, run toggle, reset trigger, waveform display, and Sample.Pool serialization round-trip" }
+attested = "Shipped in the sequencer suite (GestureSeq): 5/10/20s buffer via menu, movement-detection auto-write (Low/Med/High), erase gate, output slew 0-10s, write-indicator diamond. Serialization via Sample.Pool, context views on FeedbackLooper pattern. Present by v2.4.0 (tag 80edff9, 2026-04-29)."
+note = "planning/todo-archive.md '## Sequencer Suite' + '## Serialization Audit'."
+
+[[item]]
+id = "spreadsheet-ngoma"
+title = "Ngoma — analog macro drum voice (sine/tri core, pitch-sweep, grit, shape FM, comp, EQ, xform)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert Ngoma; trigger it, sweep Character/Grit/Shape/Sweep/Punch, confirm the drum voice, cube viz, comp/EQ, and full quicksave round-trip of all 13+ ParameterAdapter biases" }
+attested = "2026-04-23 (commit 11893ad), shipped v2.4.0 (tag 80edff9) then hardened through v2.5.1 (tag 5ff32e1, 2026-05-30): 2x OS osc section (6490e28), hybrid grit topology, phase-FM shape, one-knob comp, bipolar EQ with schema-migration, xform gate ply (e87f97a), expansion views, full serialization. Extensive 2.5.5.92→.119 hardware sound-design + bisect pass."
+note = "planning/drum-voice.md + planning/todo-archive.md '## Ngoma'. Post-2.5.1 hardware-hang regression is the separate blocked item ngoma-hardware-hang."
+
+[[item]]
+id = "catchall-alembic"
+title = "Alembic — sample-trained SOM 4-op PMM matrix synth (dual FM filter, comb, Ferment chaos macro)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert Alembic, load a sample, confirm SOM training drives the voice; sweep Ferment 0→1.5 (clean→trained-chaos→boost), exercise the dual SVF matrix + Pecto-clone comb + output limiter" }
+attested = "Shipped v2.4.0 (tag 80edff9, 2026-04-29) at 2.5.5.164; moved spreadsheet→catchall in Move 1 (commit 7947fcb, 2026-04-29). Phase 5d complete: SOM filter mapping, 24-tap comb clone, Ferment scalar, soft-knee limiter. Hardware-verified."
+note = "planning/alchemy-voice.md. Remaining Phases 6-9 open: alembic-serialization, alembic-userbias-derivations, alembic-phase9-polish, alembic-comb-retrofit."
+
+[[item]]
+id = "spreadsheet-helicase"
+title = "Helicase — 2-op FM oscillator (OPL3 waveforms, discontinuity folder, phase-receptivity sync)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Helicase; sweep carrier shape (OPL3 0-7), fold shapes 8-15, modMix, lin/expo TZFM, phase-receptivity sync (hard/soft/subharmonic); confirm 3 custom viz + discontinuity-click fix on shapes 7/12/15" }
+attested = "First public release v2.1.0 (tag d007c9e, 2026-04-12). Discontinuity-click fix (polyBLEP shapes 7/12, smoothed-abs shape 15, 2x OS hi-fi path) + DC-offset HPF landed in the Bugs/Helicase pass. Serialization + lin/expo option + sync ply all shipped."
+note = "planning/todo-archive.md '## Helicase'. Open: helicase-sync-polyblep, helicase-polish."
+
+[[item]]
+id = "spreadsheet-larets"
+title = "Larets — stepwise multi-effect (dblue-Glitch style) with true internal stereo"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Larets; clock it, confirm stutter/shuffle/bitcrush/downsample/filter/pitch/reverse/distortion steps, global param offset, xform, and matched-slice true-stereo operation" }
+attested = "First public release v2.1.0 (tag d007c9e, 2026-04-12); rebuilt true-stereo (internal ch[2] Object, shared sequencer + CPR detector via max-of-|L|,|R|) shipped v2.5.1 (tag 5ff32e1, 2026-05-30, spreadsheet 2.7.1). Larets Polish pass: pitch-shifter, bitcrush/reverse/comb viz reworks, tape-stop + gate removed."
+note = "planning/larets-stereo.md + planning/todo-archive.md '## Larets Polish'. NOTE: the unchecked spec block under 'Crossover Engine Family / Larets' is a stale pre-build spec — covered by this shipped unit. Open: larets-stutter-shuffle-viz, larets-random-step-advance."
+
+[[item]]
+id = "biome-pecto"
+title = "Pecto — comb resonator (16 tap patterns, 4 slopes, 4 resonator types, NEON 3-pass, zipper-clean)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Pecto; sweep density/comb-size/V-Oct together at high density, confirm no zipper noise or clicks (idx wrap ulp guard) and stereo dual-instance operation" }
+attested = "Shipped in biome; CPU clawback (batch-A + Phase-1 restructure + Phase-2 NEON) took stereo @ density 24 from 50%→~6% CPU. Zipper-noise fixed at 2.5.5.188 (Path-C one-pole baseDelay smoother + idx0 wrap ulp guard + isfinite reset), shipped v2.4.0 (tag 80edff9, 2026-04-29)."
+note = "planning/pecto-zipper.md, feedback_multitap_idx_wrap_ulp + feedback_doppler_basedelay_smoother. Open: pecto-neon-gather-opt, pecto-control-refinements."
+
+[[item]]
+id = "spreadsheet-canals"
+title = "Canals — Three Sisters clone, DSP refresh + 4-input normalling topology; moved biome→spreadsheet"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert spreadsheet.Canals; confirm hardware-matched self-osc, 2x OS, multi-output picker (LP/BP/HP), 4-input + ALL normalling topology with routing-state overview viz; biome.Canals patches need re-point" }
+attested = "Shipped v2.6.1 (tag 3bdd2d4, 2026-06-22, spreadsheet 2.8.1): full rebuild against external ZDF SVF reference + hardware capture corpus, custom overview ply with branch-dive sub-buttons. Moved out of biome (biome 2.2.0.1 removes it). v2.6.0 was cut+retracted; v2.6.1 supersedes."
+note = "planning/canals-*.md. Audio-rate Span/Quality work (2.8.1.6) was reverted at 2.8.1.12. Open tuning: canals-response-tuning, canals-audiorate-and-cpu."
+
+[[item]]
+id = "spreadsheet-mirror"
+title = "Mirror — aliasing-paradigm complex oscillator (wavetable formant + 4-stage crusher, true stereo)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Mirror; scan Shape through 16 wavetable frames, drive the mod-sync + 4-stage crusher (pre-sat / divider S&H / bit-quantize / Nyquist-flip reconstruction), confirm true-stereo phase offset + phosphor overview viz across 6 plies / 8 outlets" }
+attested = "Shipped v2.6.1 (tag 3bdd2d4, 2026-06-22, spreadsheet 2.8.1). Sound-design locked 2026-06-18 (2.7.1.35). Y-reflected phosphor phase-space viz landed 2.7.1.37."
+note = "planning/mirror-unit-design.md, mirror-research-notes.md, mirror-feedback-plan.md. Still codenamed; open: mirror-step-and-viz, mirror-promotion."
+
+[[item]]
+id = "spreadsheet-parfait"
+title = "Parfait — 3-band multiband saturator (7 shapers, SVF morph, comp, FFT spectrum viz)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Parfait; drive each band through the 7 shapers + morph filter + comp, confirm spectrum display; patch CV into a per-band sub-control and confirm it modulates AUDIO (not just the graphic); confirm smooth safety clamp (no splatter at threshold crossings)" }
+attested = "Shipped in spreadsheet. Safety-clamp fix (discontinuous if-tanh → smooth pseudoSaturate15) shipped v2.6.1 (tag 3bdd2d4, ~90 dB cleaner >5 kHz). Per-band sub-param modulation fix (repointed reads Bias→Out) + discrete Type selector shipped v2.6.2 (tag 950fb56, 2026-06-25, spreadsheet 2.8.2)."
+note = "planning/multiband-saturation.md, feedback_subparam_out_vs_bias_modulation. Open: parfait-shaper-oversampling (distortion at low mix / high drive, part (a))."
+
+[[item]]
+id = "spreadsheet-impasto"
+title = "Impasto — 3-band multiband compressor (LR4 crossover, per-band CPR, sidechain, FFT viz)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Impasto; compress each band with sidechain-keyed detection, confirm GR contour viz; patch CV into a per-band sub-control (threshold/ratio/speed/attack/release/weight) and confirm it modulates AUDIO; stereo opR sync on toggle + deserialize" }
+attested = "Shipped in spreadsheet. Stereo opR option-sync on toggle/deserialize fixed 2026-04-12 (commit 52b3213). Per-band sub-param modulation fix (Bias→Out reads) shipped v2.6.2 (tag 950fb56, 2026-06-25, spreadsheet 2.8.2). Full 28-adapter serialization round-trip added."
+note = "planning/todo-archive.md '## Impasto'. Open: impasto-stereo-option-state (saved-state disagreement on toggle-without-reinsert)."
+
+[[item]]
+id = "spreadsheet-filterbank"
+title = "Filterbank (FFB/Tomograph) — parallel fixed filter bank, 2-16 bands, Scala scales, radial viz"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Filterbank; confirm parallel SVF bands, 3 filter types, greedy scale-degree selection (12 builtin + up to 64 .scl), rotate/slew/V-Oct, radial overview viz; a malformed .scl in /scales must not kill unit construction" }
+attested = "Shipped in spreadsheet (full unit hardware-verified 2026-04-01). Overview-viz lobe-positioning fixed via 72-entry cos/sin LUT (commit 77ca47a, 2026-04-13, package .so trig miscomputes on am335x). Scala-parser pcall guard (bad .scl skipped) shipped v2.6.1 (tag 3bdd2d4, 2026-06-22). Fine/coarse readout reversal fixed package-wide."
+note = "feedback_package_trig_lut. Open: filterbank-defaults-and-randomize-gates."
+
+[[item]]
+id = "spreadsheet-rauschen"
+title = "Rauschen — parametric noise, 11 algorithms (White…Lorenz) with SVF morph + phase-space viz"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Rauschen; cycle all 11 algorithms (White/Pink/Dust/Particle/Crackle/Logistic/Henon/Clocked/Velvet/Gendy/Lorenz), sweep X/Y + morph filter with V/Oct, confirm 3D phase-space viz + serialization" }
+attested = "Shipped in spreadsheet. 11 algorithms with per-algo log/quadratic X/Y curves, post-generator SVF morph filter, rotating phase-space viz with phosphor decay. Algorithm-tuning pass complete (Pink normalization, Lorenz sub-stepping, Gendy Levy jumps). Present by v2.5.0 (tag da7ed5f, 2026-05-16)."
+note = "planning/todo-archive.md '## Utilities / Rauschen'. Proves am335x chaos-integration plumbing for multiout-nlc-chaos."
+
+[[item]]
+id = "spreadsheet-petrichor"
+title = "Petrichor (Multitap Delay) — 8-tap Rainmaker-style, per-tap SVF + granular pitch, xform, viz"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Petrichor; distribute taps via grid/skew/stack, per-tap SVF + granular pitch shift + reverse, feedback with tone, xform gate targeting 17 randomization modes, raindrop overview viz; full serialization round-trip" }
+attested = "Shipped in spreadsheet at 20s int16 buffer. Tap macros (vol/pan/cutoff/Q/type), xform gate + depth, Perlin raindrop viz, drift/reverse/grid/stack params, 23-adapter serialization audit all landed. Present by v2.5.0 (tag da7ed5f, 2026-05-16)."
+note = "planning/todo-archive.md '## Multitap Delay'. Open backlog: petrichor-audio-quality, petrichor-tap-macros, petrichor-stereo-and-crossfeed."
+
+[[item]]
+id = "spreadsheet-colmatage"
+title = "Colmatage — block-cutting rhythmic effect unit shipped in spreadsheet"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert Colmatage; confirm block-size/repeat/texture/density/accel cutting behavior and overview viz operate" }
+attested = "Shipped in spreadsheet (mods/spreadsheet/Colmatage.{h,cpp} + ColmatageBlockControl/ColmatageRepeatsControl). Present in the tree by the v2.6.x line (tag 3bdd2d4-era)."
+note = "planning/todo-archive.md 'Bugs/Colmatage'. Open enhancement: colmatage-xform-ply."
+
+[[item]]
+id = "spreadsheet-visadhara"
+title = "Visadhara — clean-room BIA-style drum voice (Skin/Liquid/Metal configs) + Corona viz"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Visadhara; confirm Skin (6-osc additive) / Liquid (additive + pitch env) / Metal (3-op PMM pair) configs, threshold-reflection folder, and Corona overview viz" }
+attested = "Shipped v2.5.0 (tag da7ed5f, 2026-05-16) as a spreadsheet PMM voice; completed through spreadsheet 2.6.2.35 (Corona viz force-clean-rebuild hardware-crash fix at 2.6.2.25, commit 61aa2c4). Reuses jf::four::Voice NEON 4-lane pattern + Helicase polynomial sine."
+note = "planning/bia-clone-scoping.md, visadhara-initial-pass.md. NOTE: unchecked '### Other / Visadhara drum voice' box is the stale pre-build scoping — covered here."
+
+[[item]]
+id = "spreadsheet-jf"
+title = "JF — hex-voiced slope-engine voice (clean-room Just Friends map), shipped as open secret"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert JF; confirm 6-voice NEON slope engine, INTONE morph + RAMP asymmetry + CURVE anchor LUT, TZFM, MIX combiners + OUT crossfade, per-voice trigger inlets + right-to-left cascade, 2-page UI" }
+attested = "Phases 1-5 shipped in the spreadsheet binary as an undocumented open secret at v2.5.0 (tag da7ed5f, 2026-05-16), 2.6.0.13: skeleton→scalar engine→NEON 6-voice+INTONE→RAMP→CURVE→FM→MIX/OUT→trigger cascade."
+note = "planning/just-friends.md, jf-initial-pass.md. Open: jf-phase6-ship (polish/CPU/vanilla-compat/consolidation)."
+
+[[item]]
+id = "scope-units"
+title = "Scope unit family — inline passthrough scopes with timebase, Y-gain, and voltmeter readout"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "insert Scope / Scope 2x / Scope Stereo; confirm MiniScope waveform, timebase (7 stops 1x..64x), Y-gain (5 stops 0.25x..4x), and 3-decimal S3 voltmeter; state persists across quicksave" }
+attested = "Timebase + gain + voltmeter shipped v2.5.1 (tag 5ff32e1, 2026-05-30, scope 1.2.1): header-only ScopeGraphic/ScopeVoltsReadout/ScopeControlBox aped from firmware MiniScope, no firmware changes. Probe reset+warmup on decimation change avoids splice artifacts. Base passthrough scopes shipped earlier (stereo adapt)."
+note = "planning/scope-timebase-gain.md. Open: scope-channel-focus, scope-headerless-research (blocked)."
+
+[[item]]
+id = "scope-spectrogram"
+title = "Spectrogram — inline spectrum analyzer (256-pt pffft, peak-hold + RMS gradient, 2-ply)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "insert Spectrogram; confirm stereo passthrough + L+R-sum FFT analysis with full 20-20kHz Catmull-Rom spline display, peak hold and RMS gradient" }
+attested = "Shipped in the scope package (mods/scope/Spectrogram.cpp): ring buffer + 256-pt pffft extracted from Parfait, 2-ply SpectrogramGraphic. Present by v2.5.1 (tag 5ff32e1, 2026-05-30)."
+note = "planning/todo-archive.md '## Spectrogram'."
+
+[[item]]
+id = "house-aw-reverbs"
+title = "House package — 6 faithful Airwindows reverb ports (kWoodRoom…Galactic), hardware-validated"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert each house reverb (kWoodRoom, WoodenBox, CreamCoat, BrightAmbience3, Verbity, Galactic); confirm audio + CPU roughly matches recorded figures (14-30% stereo Cortex-A8) with hybrid-float where noted" }
+attested = "Shipped house 0.1.0.8 (commit 65fb372, 2026-06-04), each hardware-validated: kWoodRoom (29% double), WoodenBox (14%), CreamCoat (14% hybrid float), BrightAmbience3 (sparse-prime-tap, hybrid-float memory-necessary), Verbity (15-20%), Galactic (25-30%, LFO predelay + L↔R cross-couple). All MIT, AW upstream names per the open-source exception."
+note = "planning/{kwoodroom,woodenbox,creamcoat,brightambience3,verbity,galactic}-port-plan.md, airwindows-reverb-research.md (research 2026-05-30), feedback_aw_atom_port_template. Retrofits: house-hybrid-float-retrofits."
+
+[[item]]
+id = "house-rotcoat"
+title = "RotCoat (codename) — first original-design reverb: multi-world per-line reduced-rate FDN"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert RotCoat; sweep World {1,2,3,4,6,8} + Mulch (per-line rate spread) + Regen + Predelay + Wetness; confirm the multi-world FDN character and the low-World aliasing sound-design corner" }
+attested = "Shipped house 0.1.0.14 (commit 1d55b35, 2026-06-05), hardware-validated. Diverged from the ChromeOxide-per-line plan to a per-line cycleStep multi-world fan; Spiral saturator + per-line one-pole LP as feedback governor. 5-param surface."
+note = "planning/rotcoat-port-plan.md. OPEN sub-task: codename→habitat-native rename before public release (Lath/Cure/Sediment/Patina). Consumes mods/house/atoms/Spiral.h."
+
+[[item]]
+id = "biome-varishape"
+title = "Varishape oscillator + Varishape Voice shipped in biome (POLYBLEP sine→square morph)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert Varishape Osc (raw) and Varishape Voice (with gate+decay env); confirm shape morph sine>tri>saw>square>pulse, PWM, V/Oct, sync, and no crash on delete" }
+attested = "Shipped in biome: stages::VariableShapeOscillator wrapper, V/Oct/f0/shape/sync/level. SWIG delete-crash fixed (private pointers moved outside #ifndef SWIGLUA). Present by v2.0.0 (tag 3362265, 2026-04-11)."
+note = "planning/todo-archive.md '## Biome', '### Varishape Oscillator'."
+
+[[item]]
+id = "biome-constant-random"
+title = "Constant Random — always-running S&H random CV source (rate + slew) in biome"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert Constant Random; confirm white-noise → S&H at adjustable clock rate with output slew smoothing, no gate input needed" }
+attested = "Shipped in biome (mods/biome/ConstantRandom.{h,cpp}), added at v2.4.0 (tag 80edff9, 2026-04-29 — release notes: 'Constant Random utility added to biome')."
+note = "planning/todo-archive.md '### Constant Random'. NOTE: the unchecked spec box there is the stale pre-build spec — covered by this shipped unit."
+
+[[item]]
+id = "biome-flakes"
+title = "Flakes — granular shimmer/freeze feedback looper (C++ rewrite of Shards)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Flakes; confirm 10s int16 buffer, freeze gate, self-modulating delay + feedback, warble LFO, noise injection, dry/wet, dual-instance stereo" }
+attested = "Shipped in catchall (mods/catchall/Flakes.cpp): freeze gate, variable delay + feedback, self-modulation engine, warble, noise, dry/wet; dual-instance stereo. Present by v2.4.0 (tag 80edff9, 2026-04-29)."
+note = "planning/todo-archive.md '## Flakes'. Open tuning vs Shards: flakes-shards-fidelity."
+
+[[item]]
+id = "utility-modulation-units"
+title = "Shipped utility/modulation units: Gated Slew, Integrator, PSR, Gridlock, Spectral Follower, Codescan"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert each: Gated Slew (per-sample limiter, up/both/down), Integrator (accumulator + leak + reset), PSR (pingable scaled random), Gridlock (3-input priority gate router), Spectral Env Follower (BPF + one-pole), Bletchley Park (codescan osc) + Station X (codescan FIR)" }
+attested = "Shipped across biome/stolmine/catchall: GatedSlewLimiter, Integrator (accumulator + leak + reset, ±5V clip), PSR (1-object C++ rewrite), Gridlock (descending-priority latching router), SpectralFollower (RBJ BPF + one-pole), Codescan osc/FIR reading libstolmine.so as wavetable/kernel (hardware-verified). Present by v2.4.0 (tag 80edff9, 2026-04-29)."
+note = "planning/todo-archive.md '## Utilities', '### Bletchley Park', '### Station X', '## Gridlock', '## Spectral Envelope Follower'. Open: station-x-character."
+
+[[item]]
+id = "fx-tilt-djfilter"
+title = "Tilt EQ + DJ Filter shipped (bipolar LP/HP sweep with resonance)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Tilt EQ (spectral tilt) and DJ Filter (bipolar LP/HP sweep + resonance); confirm both process audio as specified" }
+attested = "Shipped in the effects set (Tilt EQ, DJ Filter = mods/stolmine/DJFilter.{h,cpp}). Present by v2.0.0 (tag 3362265, 2026-04-11)."
+note = "planning/todo-archive.md '## Effects'."
+
+[[item]]
+id = "fade-mixer"
+title = "Fade Mixer — 4-input equal-power crossfader with BranchMeter gain/solo/mute controls"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert Fade Mixer; confirm 4 metered inputs with gain + solo/mute, equal-power CV-driven crossfade position, output level, chain-passthrough sum" }
+attested = "Shipped: 4-input crossfader, equal-power fade, CV fade position, output level, BranchMeter per-input controls. Present by v2.4.0 (tag 80edff9, 2026-04-29)."
+note = "planning/todo-archive.md '## Fade Mixer'. Distinct scan-mixer variant is the open blanda-scan-mixer."
+
+[[item]]
+id = "porcelain-chime-v0"
+title = "Chime v0 — first porcelain (microsound/electroacoustic) unit: coupled pulse-excited resonator bank"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert Chime; confirm coupled resonator-bank sound + scale control + energy viz; note the v0 rough edges (impulse shaping, high-Q coupling stability, buried viz)" }
+attested = "Chime v0 shipped 2026-04-14 (commit d3a6206) as the first unit in the new porcelain package. Decent + unique sound with acknowledged rough edges; the whole microsound family was then put ON HOLD to marinate (2026-04-14)."
+note = "docs/microsound-research.md. Family backlog: porcelain-microsound-family."
+
+[[item]]
+id = "controls-optioncontrol-hardening"
+title = "Controls hardening: OptionControl boolean/indexing fixes, bipolar correctness, passthrough Comparators"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "spot-check Plaits/Marbles/Clouds/Gesture OptionControls (boolean=true fix, no off-by-one), bipolar fader defaults, and explicit clock Gate + Comparator on Marbles/Grids/NR/Gesture passthrough units" }
+attested = "Shipped through the Controls Audit / OptionControl Indexing / Passthrough Audit passes (verified on hardware 2026-04-01): boolean OptionControl fix across Plaits/MarblesX/MarblesT/Gesture, bipolar Peaks/DMC fader + default fixes, Warps range clamp, list focus WHITE/GRAY5, value-snapshot shift+home zeroing on Petrichor controls. Present by v2.4.0 (tag 80edff9, 2026-04-29)."
+note = "planning/todo-archive.md '## Controls Audit', '## OptionControl Indexing Audit', '## Passthrough Audit'. Remaining audits open: controls-shift-audit-impl, controls-fader-response-audit, etc."
+
+[[item]]
+id = "infra-vanilla-compat"
+title = "Habitat packages load on vanilla ER-301 firmware (non-stolmine)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "install a habitat package on vanilla ER-301 firmware; confirm units instantiate and function (multi-out units degrade gracefully: primary out wires, extra sub-outs silently inaccessible, no crash)" }
+attested = "Vanilla firmware compatibility validated for habitat packages (todo.md '## Release / Compatibility'); shipped alongside the v0.2.0 habitat line and maintained through the v2.x releases."
+note = "planning/todo-archive.md '## Release / Compatibility'. JF Phase-6 includes a formal vanilla-compat re-test (jf-phase6-ship)."
+
+[[item]]
+id = "infra-serialization-audit"
+title = "Spreadsheet-package serialization + stale-label audit (ParameterAdapter Bias round-trip, updateLabel)"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "quicksave/reload a patch using Excel/Ballot/Etcher/Petrichor/Parfait/Rauschen/Impasto/Helicase/Larets/Tomograph; confirm all ParameterAdapter Biases, options, and derived labels (ModeSelector names, toggle badges) restore correctly" }
+attested = "Completed as a package-wide sweep (v2.4.0-era, tag 80edff9, 2026-04-29): od::Option 1/2 convention, enableSerialization() in C++ ctors, ParameterAdapter target()/hardSet(Bias) round-trip, explicit updateLabel() at end of deserialize. Patterns saved to memory (feedback_serialize_deserialize_pattern)."
+note = "planning/todo-archive.md '## Serialization & stale-label inventory', '## Serialization Audit'."
+
+[[item]]
+id = "tooling-build-defenses"
+title = "am335x build defenses: graphic-vtable lint + NEON-hint lint + -fno-tree-vectorize"
+status = "done"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "tooling"
+verify = { kind = "manual", ref = "run tools/check-graphic-virtual-defs.sh and tools/check-neon-hints.sh on the tree; confirm they flag out-of-line graphic virtuals and NEON hints; confirm -fno-tree-vectorize appended last in am335x CFLAGS across mod.mk files" }
+attested = "Graphic-vtable lint + docs/graphics-authoring-guide.md shipped v2.4.1 (tag 986f982, 2026-05-02) after the Ngoma DrumCubeGraphic insert hard-fault (out-of-line virtual → GCC key-function → non-COMDAT vtable drift). NEON-hint lint (check-neon-hints.sh) + -fno-tree-vectorize defense shipped v2.5.0 (tag da7ed5f, 2026-05-16, Cortex-A8 auto-vectorize traps)."
+note = "feedback_neon_hint_surfaces, feedback_package_version_bump. Supports the open dsp-neon-audit."
+
+# ─────────────────────────── Part 2: open work (todo / blocked) ───────────────────────────
+
+# --- active-unit open behaviors ---
+
+[[item]]
+id = "pecto-neon-gather-opt"
+title = "Pecto: further NEON gather optimization for greedy comb mode"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "profile Pecto stereo @ high density before/after; confirm CPU drops below the current ~6% with no audio change" }
+note = "planning/todo-archive.md 'Bugs/Pecto'. Ideas: (a) merge idx0/idx1 into one 32-bit pair load per tap (idx1=idx0+1 except wrap) with scalar wrap fallback; (b) non-temporal prefetch on far-ahead taps; (c) cache-aligned stride sorting; (d) Q16.16 fixed-point to collapse the int16→float in Pass C. Current ~6% already comfortable; incremental."
+
+[[item]]
+id = "pecto-control-refinements"
+title = "Pecto: Doppler slew sub-param, bipolar feedback, density cap at 12"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "confirm a user-adjustable size-slew knob (5..200ms) changes zipper/pitch-glide tradeoff; feedback control sweeps -1..+1 (phase-inverted negative); density ceiling is 12 with old presets clamping on load" }
+note = "planning/todo-archive.md 'Bugs/Pecto'. (1) mSizeSlew Parameter (log map, default 25ms) driving mFade.setLength per block, surfaced as combSize shift sub-param (AlembicScanControl pattern). (2) bipolar feedback map on Lua ply + signed term in C++ loop, watch positive-only stability assumptions. (3) lower compile-time cap 24→12, verify xform/sorted-reads/graphic respect it, clamp-not-truncate on load."
+
+[[item]]
+id = "ballot-gate-width-zero"
+title = "Ballot: gate width 0 produces a trigger instead of silence — decide desired behavior"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "set a step's gate width to 0; observe whether it emits a trigger or silence; confirm against the decided-correct behavior" }
+note = "planning/todo-archive.md 'Bugs/Ballot'. Open design question: may be intentional (a zero-width still fires a tick) or a bug — decide, then enforce."
+
+[[item]]
+id = "ui-filterlist-type-label-stale"
+title = "FilterListControl type label doesn't refresh when macros change filter type (Tomograph + Petrichor)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "change filter type externally via a macro on Filterbank/Tomograph or Petrichor; confirm the FilterListControl type-label text updates (readout is already correct, label goes stale)" }
+note = "planning/todo-archive.md 'Bugs/Tomograph' + '## Multitap Delay'. Shared FilterListControl class; the readout tracks but the label text doesn't refresh on macro-driven type change."
+
+[[item]]
+id = "impasto-stereo-option-state"
+title = "Impasto: saved stereo option state can disagree with instantiation if toggled without re-insert"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "toggle Impasto's mono/stereo menu option without re-inserting the unit, quicksave/reload; confirm the saved option state matches actual instantiation (currently can diverge)" }
+note = "planning/todo-archive.md 'Bugs/Impasto'. The label re-labels mono/stereo but the persisted state may not match the live dual-instance topology unless re-inserted."
+
+[[item]]
+id = "kryos-load-hang"
+title = "Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware"
+status = "blocked"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert Kryos in the emulator first: if it hangs there it's a DSP bug; if only hardware hangs it's am335x-specific. Then fix and confirm clean insertion on hardware" }
+note = "planning/todo-archive.md 'Bugs/Kryos', '## Kryos'. Blocked pending emu-vs-hardware isolation (needs hardware test). High priority: blocks a multiband spectral-freeze unit (per-band freeze gates on the crossover engine)."
+
+[[item]]
+id = "ui-editmode-border-expanded"
+title = "Edit-mode border vanishes on expanded-graphic + M-hold (user report, needs repro)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "expand any unit's custom graphic (M1-hold), then hold any M button to enter Edit; observe whether the border around the expanded-graphic rectangle disappears; repro in emu first" }
+note = "planning/todo-archive.md 'Bugs/UI / framework' (user report 2026-05-17). Suspected framework-level (firmware draws the expansion-view edit border), not unit-specific. Candidate units: Visadhara/Network/Helicase/Filterbank/Ngoma/Alembic. If framework-level, file upstream (stolmine); if per-Graphic-subclass, fix in package."
+
+[[item]]
+id = "ui-subdisplay-selection-indicator"
+title = "Sub-display selection indicator missing on paramMode ply-to-ply navigation (PINNED)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "navigate between paramMode-bearing Pattern A controls (e.g. Helicase overview-style controls); confirm the sub-display shows a visible highlight on the bias-bound sub-readout where the encoder is editing" }
+note = "planning/todo-archive.md '## Shift audit follow-up' (PINNED 2026-04-22). Two partial fixes (9a821e8 setSubCursorController(nil); d74af56 paramModeDefaultSub) still leave no visible highlight though the value ticks. Suspects: Readout may not render highlight as subCursorController (only SubButton does); main cursor drawn on the other side of the shift key; setSubCursorController cleared downstream; paramSubGraphic coord lookup. Next: instrument Context:onEncoderFocusChanged."
+
+[[item]]
+id = "alembic-serialization"
+title = "Alembic Phase 6: serialize sample ref + trained per-node state + user biases"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "quicksave/reload an Alembic patch; confirm sample reference, 49-float×64-node trained state, uint8 lane indices, wavetable LUT[64][256], and user-bias adapter biases all restore; survives sample-pool absence by reverting to placeholder" }
+note = "planning/alchemy-voice.md + planning/todo-archive.md '## Alembic'. Deferred until Phase 7 params settle so the persisted shape is final on first ship."
+
+[[item]]
+id = "alembic-userbias-derivations"
+title = "Alembic Phases 7-8: per-region user-bias sub-params + Order 2/3 derivations + sample excitation"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "expose the 36 hidden user-bias params as fine fades in expanded view 2 (top-level ply count stays 8); confirm Order-2 gradients (scan-neighbor detune), Order-3 topology metrics (eccentricity→reagent flag), and sample-pointer excitation each audibly earn their complexity" }
+note = "planning/alchemy-voice.md + planning/todo-archive.md '## Alembic'. Phase 7 = re-expose 36 user-bias C++ Parameters. Phase 8 = Order 2 (map gradients→detune), Order 3 (topology→flags), sample-as-node-offset modulator, meta-mapping (feature variance→chaos range, entropy→topology, length→hop, stereo corr→detune asym, DC→matrix bias)."
+
+[[item]]
+id = "alembic-phase9-polish"
+title = "Alembic Phase 9: naming/defaults/mnemonic polish + serial stacked-waveform viz"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "confirm final names/defaults/control labels + sphere-viz refinements, plus a stacked/cascading render of mWavetableLUT[64][256] with active reagent-scan frames lit and neighbors dimmed" }
+note = "planning/todo-archive.md '## Alembic'. Sphere viz = main scan; waveform stack = reagent scan. Could be a per-unit 'wavetable inspector' view supplementing the sphere."
+
+[[item]]
+id = "alembic-comb-retrofit"
+title = "Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "run the Pecto V/Oct + comb-scan double-modulation scenario on Alembic's comb; confirm no zipper/click. Separately: Card→sample A→load, Card→sample B without detach; confirm the scan retrains (currently goes flat)" }
+note = "planning/todo-archive.md '## Alembic'. Comb is a documented Pecto clone → port Path-C one-pole baseDelay smoother + idx0 wrap guard (both NEON+scalar) + isfinite() reset (DC-blocker/fbFilter/sitarEnv). Sample-swap: defer analyzeSample until Sample::isFullyLoaded() or post to a deferred readiness-rechecking task (suspected race vs Sample.Pool async load). Cross-check Petrichor + Larets for the same template."
+
+[[item]]
+id = "ngoma-hardware-hang"
+title = "Ngoma hangs hardware on load (post-2.5.1 regression) — am335x-specific, bisect pending hardware test"
+status = "blocked"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "with 2.5.5.169 (DrumVoice reverted verbatim to working 0dd8870 against current SDK), test insertion on am335x hardware after a rear-card pull; result splits root cause: still-crashes = shared-infra/ABI, works = 117-119+ Ngoma source" }
+note = "planning/todo-archive.md '## Ngoma / BLOCKER'. Narrowed to the xform target control (matches 2.5.5.92-.97 trap). Shipped probes .165-.168 (NEON :64 hints, trigger threshold, branchless dispatch) all still repro. Does NOT reproduce on RPi4/aarch64 emu → am335x-specific. Blocked on user hardware test + FIRMWARE_VERSION (parallel-DSP UnitChain layout changes suspected). Last known-good shipped = 2.5.1."
+
+[[item]]
+id = "ngoma-sound-tuning"
+title = "Ngoma: careful sound-tuning pass (param cross-couplings, per-partial decay, mode ratios, sub-octave)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "audition across the randomize palette; confirm added cross-couplings (Punch↔Sweep, Shape↔SweepTime), per-partial linear-then-exp decay option, smoothstep mode-ratio interp, and Punch/env-gated sub-octave balance improve the voice" }
+note = "planning/todo-archive.md '## Ngoma / fourth tuning pass'. Two couplings already in flight (grit→shapeFM, character→gritNoiseFM). Voice highly sculpted; this is push-further polish."
+
+[[item]]
+id = "ngoma-cpu-optimization"
+title = "Ngoma: CPU optimization round 2 (~33% mono Cortex-A8 idle is steep)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "profile Ngoma mono on am335x before/after; confirm CPU drops meaningfully from ~33% with no audible change" }
+note = "planning/todo-archive.md '## Ngoma / fourth tuning pass'. Candidates: replace per-osc floorf phase-wrap (NEON/int), polynomial EQ tanf, fast_exp2 envelope coeffs, move osc1/2/3 scalar phase to a third NEON quad (alignment-safe storage), split 1x vs 2x OS banks, branchless noise-gain guard, vectorize per-sample envelope across 4 samples."
+
+[[item]]
+id = "ngoma-preset-library"
+title = "Ngoma: per-drum preset library (kick/snare/hat/tom) + default tuning"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "confirm a recallable per-drum preset bank produces recognizable kick/snare/hat/tom from one Ngoma instance; defaults adjusted per hardware listen" }
+note = "planning/todo-archive.md '## Ngoma'. Starting defaults already nudged (commit 06924eb: Punch 0.4, Sweep 18, SweepTime 0.04, Decay 0.25). Preset library deferred pending hardware listen."
+
+[[item]]
+id = "ngoma-viz-and-docs"
+title = "Ngoma: cube viz refinement + documentation refresh"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "confirm cube scaled 0.85x with breathing room, state-driven face-fill textures (Character/Grit/Shape/ampEnv), exaggerated parallax + face-shrink/edge-expand-on-hit; drum-voice.md updated or superseded by the codex reference" }
+note = "planning/drum-voice.md (stale, predates 2.5.5.92→.119) + planning/todo-archive.md '## Ngoma / second tuning pass'. Viz deferred (user-scoped-out of v2 pass). Also fold: UI shift-state respect on V/O + viz plies (paramMode not preserved on those two, unlike other plies) — see controls-shift-audit-impl."
+
+[[item]]
+id = "canals-response-tuning"
+title = "Canals: SPAN/volume/low-band/Q/soft-clip response tuning against hardware capture corpus"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "run the capture batteries (Sets A/B/C in canals-span-volume-capture-checklist.md), derive hardware knob→octave-separation + volume + low-band-retention + Q-decay curves, update the C++ formulae; confirm the SPAN 'feels measurably different' complaint resolves" }
+note = "planning/canals-span-volume-capture-checklist.md, refs/three-sisters-hardware/. SPAN currently linear span*48; volume sim shows ~6x LOW swing (hw flatter); low band lost at high Q (hw retains); want longer resonant decay without gain spike + high-Q gain compensation; tune soft-clip threshold/curve. Audition feedback 2026-06-22."
+
+[[item]]
+id = "canals-audiorate-and-cpu"
+title = "Canals: audio-rate Span-sweep aliasing (halfband decimator) + hardware CPU/NEON pass"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "sweep Span with FREQ parked high; capture + confirm the residual pops (aliasing, not control motion) are gone after replacing the 2-tap [½,½] 2x decimator with a linear-phase halfband FIR; bench am335x CPU (Canals.o must stay scalar / 0 NEON hints)" }
+note = "planning/canals-audio-rate-mod.md (Phases 5-5e shipped 2.8.1.6 then reverted at 2.8.1.12). Aliasing mechanism: high-cutoff resonant peak + in-loop pseudoSaturate harmonics fold through the crude decimator. Options: 7-11-tap halfband (even taps zero), 4x OS (2x CPU), lower HIGH-band soft ceiling, post-decimation one-pole. Deferred-related: Fundamental→Inlet promotion (last block-rate tone control). Then NEON-vectorize if bench demands."
+
+[[item]]
+id = "mirror-step-and-viz"
+title = "Mirror: fine/coarse/super step audit on all controls + custom overview-ply viz"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "confirm each fader's coarse/fine/super steps match musical granularity (Hz = octave/cents/sub-Hz; 0..1 = 0.1/0.01/0.001; Mirror knob approaches the Nyquist-flip region smoothly); confirm a custom overview viz (concentric fire wheels / rubber-band sphere / L-vs-R Lissajous) renders" }
+note = "planning/mirror-unit-design.md (viz section) + planning/todo-archive.md '## Mirror'. Pairs with controls-fader-response-audit. Viz constraints: feedback_no_out_of_line_virtuals, feedback_package_trig_lut, feedback_viz_encoder_capture_architectural."
+
+[[item]]
+id = "mirror-promotion"
+title = "Mirror: final habitat name + Voss-McCartney 1/f drift + wavetable frame-inventory audition"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "pick a non-third-party name (Fold/Refract/Mirage/... or habitat-abstract), decide whether to land 1/f drift before promotion, and audition the 16 simple→exotic frames for perceptual ordering/swaps" }
+note = "planning/mirror-feedback-plan.md, mirror-unit-design.md. Voss-McCartney 1/f drift is the queued native motion source. Rename before promoting out of dev."
+
+[[item]]
+id = "petrichor-audio-quality"
+title = "Petrichor: audio-quality/feedback overhaul + grid-independent skew + tap-timing analysis"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "confirm audible multi-cycle feedback tail (not single-shot decay) at high tap counts without granular artifacts; skew reshapes distribution without direction-flip across grids; document the tap-timing layers with worked examples" }
+note = "planning/todo-archive.md '## Multitap Delay'. Feedback overhaul: audit each attenuation stage (fbFilter LP :783, tone HP :787, Q-comp divisor :778, 0.95 ceiling :516) — round-trip gain too low. Skew: warp normalized t=(g+1)/numGroups then rescale pos=warped*numGroups/grid (fixes grid=16 compression + grid=1 overrun, one-line change). Tap-timing: totalSpan clamp :556 dead-zone, line-592 hard clamp, drift — map into a doc, likely eliminate line-556 clamp once skew is grid-independent. Capped at 8 taps for CPU."
+
+[[item]]
+id = "petrichor-tap-macros"
+title = "Petrichor: CV-modulatable macro filter-cutoff offset + tap-pitch macro + xform spread param"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "confirm a continuous CV-modulatable cutoff-offset shifts all per-tap cutoffs (feedback shift-SD + expansion), a pitch macro adds ±24st on top of per-tap pitch preserving structure, and an xform spread (0=perturb, 1=full range) works" }
+note = "planning/todo-archive.md '## Multitap Delay'. Existing tap macros cover vol/pan/cutoff/type/Q but not a continuous cutoff-offset or pitch. Xform spread deferred previously."
+
+[[item]]
+id = "petrichor-stereo-and-crossfeed"
+title = "Petrichor/Pecto: shared-buffer stereo optimization + cross-feedback matrix (stretch)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "profile Petrichor + Pecto on stereo chains; confirm shared/interleaved buffer processing roughly halves the dual-instance CPU. Stretch: tap N feeds tap M cross-feedback routing" }
+note = "planning/todo-archive.md '## Multitap Delay'. Dual-instance pattern doubles CPU. Also: RaindropGraphic's tileable 64x64 Perlin LUT (bake-at-init + bilinear) is reusable — could be shared to the firmware Voronoi/Perlin screensavers."
+
+[[item]]
+id = "etcher-io-range-and-presets"
+title = "Etcher: change I/O ranges to ±1V + add sine/triangle/user presets + hardware deviation verify"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "confirm Etcher input/output rescaled to ±1V (broader 301 compatibility), sine + triangle + save/restore user presets added, and deviation behavior verified on hardware across all scopes (offset/curve/weight/all)" }
+note = "planning/todo-archive.md '## Etcher'. Current output is 10Vpp (-5..+5V); most 301 controls want ±1V. Audio-rate input already works; transforms + skew-symmetry + SWIG-delete-crash already fixed."
+
+[[item]]
+id = "filterbank-defaults-and-randomize-gates"
+title = "Filterbank: better default gain/Q for immediate audibility + band-list randomize gate controls"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "confirm improved defaults make the bank audible on load; confirm band-list expansion adds gate controls to randomize freq/gain/type across all bands" }
+note = "planning/todo-archive.md '## Filterbank / Remaining'."
+
+[[item]]
+id = "larets-stutter-shuffle-viz"
+title = "Larets: distinguish stutter vs shuffle viz (both read similar at a glance)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "confirm stutter telegraphs a boxed fixed-loop window with repeated contour fragments, and shuffle telegraphs rearranged fragment blocks (shifted or source-color-coded)" }
+note = "planning/todo-archive.md '## Larets Polish'. Both currently use column-level segment swaps and are visually ambiguous."
+
+[[item]]
+id = "larets-random-step-advance"
+title = "Larets: random step-advance mode (Linear/Random/Brownian) — cross-pollinate to Excel/Ballot/Etcher"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "add a step-advance Option; in Random mode confirm the next step is picked uniformly at random from the active range (kaleidoscopic mutation of the step program), complementing the xform data-mutation gate" }
+note = "planning/todo-archive.md '## Larets'. LCG-pick + Option pattern should port to Excel(TrackerSeq)/Ballot(GateSeq)/Etcher; audit downstream consumers that assume monotonic mStep first."
+
+[[item]]
+id = "parfait-shaper-oversampling"
+title = "Parfait: per-band shaper oversampling to kill aliasing audible as mix is lowered at high drive"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "at drive 5.2 with bands at unity, sweep mix down; confirm the 'broken/aliased' character is gone after wrapping applyShaper in 2x OS (4x for Fractal)" }
+note = "planning/todo-archive.md 'Bugs/Parfait'. Part (b) discontinuous safety clamp already fixed (pseudoSaturate15, shipped 2.8.1). Part (a) open: at drive 5.2 effective gain ~27x pushes shaper harmonics above Nyquist that fold back; the clean lerp mix unmasks them as dry pulls level down. Wrap applyShaper (Tube/Diode/TriFold/SineFold/Fractal) in linear-upsample/shape/halfband-decimate. Reference audio ~/Downloads/IMG_9928.mov."
+
+[[item]]
+id = "colmatage-xform-ply"
+title = "Colmatage: add an xform ply (func + paramA/B/scope) for algorithmic cutting randomization"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "add an xform ply mirroring Excel/Ballot/Petrichor; confirm it randomizes/shuffles block-size weights, repeat counts, texture, density, or accel ratio across presets" }
+note = "planning/todo-archive.md 'Bugs/Colmatage'. Open: decide per-phrase vs per-block scope."
+
+[[item]]
+id = "helicase-sync-polyblep"
+title = "Helicase: PolyBLEP at the carrier reset discontinuity on hard sync"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "hard-sync Helicase; confirm the carrier-reset discontinuity is band-limited (no aliasing click) via PolyBLEP" }
+note = "planning/todo-archive.md '## Helicase'. Complements the phase-receptivity sync already shipped."
+
+[[item]]
+id = "helicase-polish"
+title = "Helicase: wider carrier-shape set, more-reactive overview viz, am335x CPU profile"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "audition carrier shapes beyond the OPL3 set; confirm the metaball overview viz responds faster to quick parameter wiggles (brightness/centroid slew, quicker re-zoom); bench Helicase CPU on am335x" }
+note = "planning/todo-archive.md '## Helicase'. Viz candidates: brightness slew 0.1→0.2, centroid 0.10→0.2, min/max contraction 0.01→0.03, per-cluster LFO coupled to brightness, noise responding to disc index/type."
+
+[[item]]
+id = "jf-phase6-ship"
+title = "JF Phase 6: polish + ship (trig-LUT audit, CPU profile, test procedures, vanilla-compat, FM consolidation)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "confirm no package-trig-bug surface (CURVE cosf at construction only), <20% one-core CPU worst-case on hardware, vanilla-fw load (MIX sub-out auto-wires, extra outs silently inaccessible, no crash), and PKGVERSION bump; then document + release" }
+note = "planning/just-friends.md, jf-initial-pass.md. Also v1.x cosmetic: combine FM Depth + FM-in into one ply via custom ViewControl (stock GainBias doesn't fit multiply semantics). Spreadsheet 2.6.0.13 → 2.7.0 on first documented ship."
+
+[[item]]
+id = "blanda-scan-mixer"
+title = "Blanda — 3-input scan mixer (Morph-4-style continuous bell-scan, not a crossover)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert Blanda; confirm 3 audio inputs each with a bell scan-response, global Scan CV + bipolar Focus (width) + per-input Weight/Offset, equal-power unity-sum output, and the unified-across-plies bell-landscape viz" }
+note = "planning/todo-archive.md '## Fade Mixer / Blanda'. Path B (pure mixer + scan fade) chosen. Built in spreadsheet dev (bell landscape, territory-based ghost occlusion 010aec8, skew macro, per-control expansion views, crash-on-delete fix bfd18ca all done) but NOT yet in any release. Bell: coef=0.5(1+cos(clamp(π(scan-offset)/(weight·focusWidth)))), focusWidth=baseline·pow(4,focus). Open: focus baseline default, RxMx follower-mix option (v0.2), mono-vs-stereo, sub-display layout audit."
+
+[[item]]
+id = "station-x-character"
+title = "Station X (codescan FIR): improve output character (currently mostly noise-like filtering)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "sweep Station X scan position + dry/wet; confirm the FIR-kernel filtering produces musically useful character rather than mostly noise" }
+note = "planning/todo-archive.md '### Station X'. Unit ships and works on hardware; character needs attention."
+
+[[item]]
+id = "flakes-shards-fidelity"
+title = "Flakes: tune self-modulation engine to Shards, steeper LP on feedback, evaluate manual-loops fidelity"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "A/B Flakes against the original Shards Lua preset; tune self-mod threshold/envelope-times/mod-depths, add ladder/steeper LP on the feedback path, decide if a manual-loops/sample-playback element is needed for full fidelity" }
+note = "planning/todo-archive.md '## Flakes'."
+
+# --- cross-cutting audits ---
+
+[[item]]
+id = "controls-shift-audit-impl"
+title = "Shift-button behavior audit — implementation phase (spec locked in planning/shift-handling.md)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "per-control checklist in planning/shift-handling.md: PR1 (shiftUsed suppression, drop Pattern-C secondary toggle, unified subGraphic swap, normalize inverted flags to paramMode, session-persist paramMode) across 14 Pattern-A + 3 inverted + 2 Pattern-C controls; PR2 (shift+sub→keyboard) on every Pattern-A subReleased" }
+note = "planning/shift-handling.md (2026-04-21, all 7 decisions locked). Also covers Ngoma UI shift-state regression on V/O + cube-viz plies (paramMode not preserved there unlike other plies). Pecto migration deferred (Decision 6)."
+
+[[item]]
+id = "controls-fader-response-audit"
+title = "Repo-wide fader response audit (dial-map shape, coarse/fine steps, encoder velocity, bias range)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "produce a per-control table (current map → recommended map → reason) across biome/spreadsheet/catchall/mi/peaks/scope/kryos/porcelain; verify dial-map perceptual axis (freq/time=log, gain=exp/dB, mix=linear), proportional steps, comfortable revolution count, and useful-sub-range coverage" }
+note = "planning/todo-archive.md '## Controls Audit'. Likely-bad first pass: frequency controls on LinearDialMap, decay-time linear ms, drive/gain without dB shaping, hand-tuned *48/*100 multipliers. Coordinates with controls-bias-modrange-audit (map fixes interact with gainMap)."
+
+[[item]]
+id = "controls-bias-modrange-audit"
+title = "Bias + mod-input range audit across all packages (CV can't reach full param range at 10x gainMap)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "catalog per Pattern-A/B + GainBias control: bias range, useful sub-range, current gainMap, likely CV sources; produce a canonical-policy table. Confirm a 1.0 CV can sweep the full useful range of frequency/time-domain params (Rauschen cutoff, Helicase sync threshold, drum sweep/decay, Filterbank per-band freq, Pecto feedback tone)" }
+note = "planning/todo-archive.md '## Controls Audit'. Two unifications: (a) normalize bias to 0..1/-1..1 with internal quadratic/log mapping (broader reach, changes feel); or (b) expand per-control gainMap defaults to match bias range. Ngoma Sweep/SweepTime/Decay/Hold/Attack gains already set proportionally (commit eab4e98); repo-wide still pending."
+
+[[item]]
+id = "controls-discrete-encoder-rollout"
+title = "Roll out discrete-encoder ModeSelector mode to other discrete selectors (acceleration-independent)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "on each target selector confirm one detent = one step regardless of turn speed, threshold ≈ 4×(detents/option) scaled to option count (full sweep ~30-40 detents, ≥2 detents/option)" }
+note = "planning/todo-archive.md '## Controls Audit'. Shipped on Parfait shaper-type (2.8.1.11 / v2.6.2). spreadsheet targets (share patched ModeSelector): Pecto patternFader(16)/resonator/slope(4), Rauschen algo(11), Filterbank scale, MultitapDelay vol/pan macros + grid/stack. Other packages (copy block into their ModeSelector.lua): Clouds mode(mi), Chime scale(porcelain), Sfera config + Lambda seed(catchall), stolmine duplicates. One build per package."
+
+[[item]]
+id = "controls-subdisplay-and-viz"
+title = "Sub-display readout audit for expansion-only controls + bias indicator line on visualizer plies"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "confirm every expansion-only control has a matching readout on the parent's shift sub-display; confirm viz plies (Ngoma cube, Helicase orbital, SOM sphere, Larets/Colmatage overview, Rauschen phase space) overlay a dotted bias line while the encoder is actively adjusting" }
+note = "planning/todo-archive.md '## Controls Audit' (feedback_expansion_subdisplay). Bias-indicator reference: Impasto CompressorSpectrumGraphic / Parfait SpectrumGraphic band-level line; needs a show-indicator flag set on encoder-handler, cleared on timeout/cursor-leave."
+
+[[item]]
+id = "tooling-keyword-metadata-audit"
+title = "Normalize per-unit picker `keywords` metadata across all packages"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "tooling"
+verify = { kind = "manual", ref = "walk every unit's keywords across scope/biome/spreadsheet/catchall/mi/peaks/kryos/porcelain; confirm lowercase casing, own short-name included, synonyms/aliases, functional family, and intended picker category — cross-checked against the picker's actual search algorithm" }
+note = "planning/todo-archive.md '## Keyword / Picker Metadata Audit'. The unit picker consumes this field for search/sort; confirm case-sensitive-substring vs token-match before committing normalization."
+
+[[item]]
+id = "audit-passthrough-remaining"
+title = "Review remaining units for clean passthrough vs non-passthrough delineation"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "tooling"
+verify = { kind = "manual", ref = "sweep units not yet audited; confirm each either passes the chain input through cleanly or explicitly sinks it (Comparator on gate/clock inputs, no raw chain-to-Level bleed)" }
+note = "planning/todo-archive.md '## Passthrough Audit'. Marbles/Grids/NR/Gesture/Plaits already done."
+
+[[item]]
+id = "dsp-neon-audit"
+title = "Repo-wide NEON audit — identify hot DSP paths without SIMD and assess vectorization"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "tooling"
+verify = { kind = "manual", ref = "profile the DSP hot paths across packages on am335x; produce a candidate list of unvectorized hot loops with vectorization opportunity + risk, respecting the -fno-tree-vectorize / NEON-hint constraints" }
+note = "planning/todo-archive.md '## NEON Optimization Audit', neon-opportunities.md. Includes Rings sympathetic/FM modes (only modal vectorized) and Clouds ShyFFT/SRC (see mi-clouds-warps-improvements)."
+
+[[item]]
+id = "infra-cross-package-dep-audit"
+title = "Cross-package dependency audit — no require/%import/#include reaching into another package's tree"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "grep all `require \"<pkg>.` strings and %import/#include paths under mods/<pkg>/ for refs naming a different <pkg>; for each hit vendor the dep in (clean) or consolidate; confirm each package tarball-ships solo with no ghost deps" }
+note = "planning/todo-archive.md '## Pre-release scoping'. Stratos→clouds-reverb and Rings→plaits.EngineSelector cross-deps triggered the mi consolidation. catchall pffft duplication is deliberate (lives inside both packages) and allowed."
+
+# --- controls / mi / peaks follow-ups ---
+
+[[item]]
+id = "mi-clouds-warps-improvements"
+title = "MI: Clouds gain-comp + further NEON (Clouds ShyFFT/SRC, Rings sympathetic/FM); Warps vocoder + drive"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "Clouds: gain-compensation toggle auto-scales output to input level; NEON on ShyFFT butterflies + SRC polyphase FIR + Rings sympathetic/FM modes. Warps: 2x up/downsample for correct 96k vocoder filter bank, verify freq-shifter easter egg, expose carrier/mod drive as separate controls" }
+note = "planning/todo-archive.md '## Clouds Improvements', '## Warps Improvements', '## Rings Improvements'."
+
+[[item]]
+id = "mi-commotio-marbles"
+title = "MI: Commotio split-units + sample loading + UI + NEON; Marbles T model picker (7 models, 3 visible)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "Commotio: standalone bow/blow/strike units, custom strike-buffer sample loading, timbre/meta sub-displays, NEON pass. Marbles T: surface all 7 models via a fader or paged UI (OptionControl max-3 currently hides 4)" }
+note = "planning/todo-archive.md '## Commotio Improvements', '## OptionControl Indexing Audit'."
+
+[[item]]
+id = "peaks-refinements"
+title = "Peaks: Tap LFO clock frequency-counter display, PLO continuous phase-increment, step-position viz"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "Tap LFO shows a frequency counter on the clock input; PLO recalculates phase_increment continuously between pulses for smoother pitch; Mini/Mod/101 sequencers show a step-position bar or polygon indicator" }
+note = "planning/todo-archive.md '## Peaks / DMC Ports / Refinements'. Research ER-301 SDK for the frequency-counter display."
+
+# --- new / speculative unit backlog (one item per unit or family) ---
+
+[[item]]
+id = "seq-101-sequencer"
+title = "101 Sequencer — 64-step SH-101-style CV sequencer with address fader + math transforms"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "insert; confirm gate-advance + reset, address fader scrubbing steps, sequence-length + loop-length faders, per-step pitch/CV, dynamic viewport, global math transforms (add/sub/mul/div/mod/randomize) with integer factor, and snap-to-scale" }
+note = "planning/todo-archive.md '## Sequencer Suite'."
+
+[[item]]
+id = "seq-drum-kit"
+title = "Drum Kit Sequencer ('Kit') — drum-role-tagged monophonic CV sequencer for a mono drum voice"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "insert; stamp per-step drum-role tags (kick/snare/hat/tom/rest/custom) driving user-editable recallable per-role CV presets, gate/trig output alongside CV, xform for role-set swaps, drum-grid visual step list" }
+note = "planning/todo-archive.md '## Sequencer Suite'. Distinct from Excel (generic CV) and Control-Forge (time-interpolated). Open Qs: role count (~6), preset-CV vs envelope-segment roles, per-patch vs global preset bank."
+
+[[item]]
+id = "seq-ratchet-strum"
+title = "Ratchet / Strum — gate-burst generator from a single trigger (count/spacing/accel/velocity/gate-length)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "insert; confirm clock in/gate in/clock out, count 1-16, tempo-or-ms spacing, acceleration across burst, velocity curve (flat/decay/crescendo), per-pulse gate length; when gated multiply clock by fader value, when ungated pass clock through unchanged" }
+note = "planning/todo-archive.md '## Ratchet / Strum'."
+
+[[item]]
+id = "seq-automata-chess"
+title = "Automata Sequencer (Chess) — grid sequencer driven by board-game piece movement rules"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "insert; place chess-style pieces (rook/bishop/knight movement) on an 8x8 grid, confirm highlighted cells become active steps, 3-6 voices triggered by intersections, limited piece count, CV feedback influencing placement" }
+note = "planning/todo-archive.md '## Automata Sequencer'. Inspiration: Folktek Matter, Plumbutter. Framework spans generator/processor/sequencer roles."
+
+[[item]]
+id = "seq-compass-port"
+title = "Compass — port of the Norns generative sequencer (feasibility research first)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "assess feasibility within ER-301 UI constraints; if viable, port Compass with its generative sequencing + visual display" }
+note = "planning/todo-archive.md '## Compass'."
+
+[[item]]
+id = "seq-excel-ballot-improvements"
+title = "Excel/Ballot improvements: xform context view, viz polish, output-scope visibility, variants, snap-scale, gate-seq"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "seq"
+verify = { kind = "manual", ref = "confirm: xform-gate enter-menu context view with GainBias faders + CV; animated fire-circle + function icons + gate-activity polish; output visible on a scope (GraphCompiler may skip objects with no chain inlets — see GraphCompiler.cpp, Commotio too); addressable (CV address) + expanded (CV seq/loop length) + probability variants; snap-to-scale offsets; playhead/cursor auto-scroll coupling; a 64-step Excel Gate Seq with chaselight grid + ratchet + euclidean/NR/grids/necklace transforms" }
+note = "planning/todo-archive.md '## Excel/Ballot Improvements' + '### Sequencer UI Research'. Merges 7 checkboxes — several are independently shippable; split when picked up."
+
+[[item]]
+id = "units-2d-wavetable-osc"
+title = "2D/3D Wavetable Oscillator — X/Y-addressable wavetable with stacked pseudo-3D frame viz"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert; confirm 2D table lookup (columns=tables, rows=frames) with bilinear frame interp + anti-alias, X/Y/Pitch(V-Oct)/FM/Sync/Level params, bundled wavetable set (+later user-loadable), StackedFrameGraphic overview (8-16 frames, Z-fade, current-frame highlight), Excel-pattern serialization" }
+note = "planning/todo-archive.md '## 2D/3D Wavetable Oscillator'. Open: 2D-first vs both-axes; bilinear vs nearest+xfade cost on am335x."
+
+[[item]]
+id = "units-spectral-processing"
+title = "Spectral Mask + Spectral Gate — sidechain-keyed / crossover per-band spectral processors"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "Spectral Mask: FFT main + monobranch sidechain (256/512pt, 50% Hann), per-bin mask from sidechain magnitude via attack/release + threshold/ratio, multiply + IFFT overlap-add, plies threshold/attack/release/mix/invert(+tilt). Spectral Gate: shared Parfait crossover, per-band threshold/attack/release/level + global crossover/gain/mix" }
+note = "planning/todo-archive.md '## Spectral Mask', '### Spectral Gate'. Reuse pffft (mods/spreadsheet/pffft.h) + MultibandCompressor analysis; sidechain via monobranch like Impasto. Spectral Gate blocked-adjacent to Kryos work."
+
+[[item]]
+id = "units-ffb-scale-family"
+title = "FFB-scale-distribution family: Tone Cluster / Drone, Comb Bank, Harmonic Series Manipulator, Waveguide"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "each reuses Filterbank scale-aware distribution: Tone Cluster (8-16 detuned oscillators on scale degrees), Comb Bank (8-16 parallel combs, bipolar feedback), Harmonic Series (N BPFs locked to integer harmonic ratios), Waveguide (delay+filter feedback loop, exciter in, V/Oct)" }
+note = "planning/todo-archive.md '## Tone Cluster', '## Comb Bank', '## Harmonic Series Manipulator', '### Waveguide'. All four share FFB's greedy scale-degree distribution; Waveguide pairs with Comb Bank for body modeling."
+
+[[item]]
+id = "units-grain-cloud"
+title = "Grain Cloud — N-grain (8-16) sample-buffer granular unit"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert; confirm per-grain position/pitch(-2..+2 oct)/level + global sample-select/spray-jitter/grain-size/master-pitch(V-Oct)/pan-spread. Extends the builtin manual-grains x N" }
+note = "planning/todo-archive.md '## Grain Cloud'."
+
+[[item]]
+id = "units-phaser-flanger"
+title = "Phaser / Flanger Designer — N allpass stages with per-stage depth/rate/feedback"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert; confirm per-stage depth/rate(0.01-20Hz)/feedback(-100..+100%) in series + global master rate/depth/wet-dry" }
+note = "planning/todo-archive.md '## Phaser / Flanger Designer'."
+
+[[item]]
+id = "units-som"
+title = "SOM — 64-node Kohonen self-organizing map with localized learning + icosphere scan viz"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "screenshot", ref = "insert; confirm 6-dim 64-node map learns timbral prototypes from audio/CV features, Scan icosphere ply (Fibonacci sphere, 64 Voronoi cells, BMU glow, CV-modulatable scan) + Plasticity ply (localized learning around scan position), reconstructed output interpolated from neighbors; usable structure in 1-3s, converged ~15s" }
+note = "planning/todo-archive.md '### SOM'. NOTE: mods/catchall/Som.{cpp} + Som.lua + SomScanControl/SomModControl exist (Alembic's trained-map lineage) — verify whether the standalone utility unit already realizes part of this spec before building. ~3-4% NEON at 64 nodes/6 dims."
+
+[[item]]
+id = "units-device-randomizer-control-forge"
+title = "Device Randomizer + Control Forge-alike — chain-neighbor randomizer and multistage envelope"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "Device Randomizer: on gate, randomize all params of the unit to its right (depth 0-1 scales range) — requires SDK chain-traversal to reach a neighbor's params. Control Forge-alike: spreadsheet multistage envelope, per-stage mode(rise/fall/sustain/random/discontinuous)/time/level/curve, loop points + per-stage submenu" }
+note = "planning/todo-archive.md '### Device Randomizer', '### Control Forge-alike'. Research: can a unit access its chain-neighbor's parameters via the SDK?"
+
+[[item]]
+id = "units-buffer-shuffler"
+title = "Buffer Shuffler / Groovebox — BBCut-style beat-slicing buffer manipulation"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert; confirm buffer record/assign, transient-or-grid slicing, per-slice reverse/repeat/pitch/level, algorithmic BBCut-style shuffle modes, clock-synced playback with gate-triggered stutter/glitch" }
+note = "planning/todo-archive.md '## Buffer Shuffler / Groovebox', bbcut.md. Could evolve into a groovebox framework (seq + slices + effects)."
+
+[[item]]
+id = "units-poly-sample-player"
+title = "Polyphonic sample player — N-voice manual-grain-based sample playback with voice management"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert; confirm N-voice allocation (Polygon-style) with per-voice sample assignment/pitch/envelope/filter and manual grain triggering" }
+note = "planning/todo-archive.md '## Polyphonic Sample Playback', '### Other / Polyphonic sample playback'. Spreadsheet paradigm."
+
+[[item]]
+id = "units-4ms-smr"
+title = "4ms Spectral Multiband Resonator port — 6 resonant bandpass filters with rotation/spread"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "insert; confirm 6 resonant BPFs with rotation + spread controls per the SMR design" }
+note = "planning/todo-archive.md '## 4ms SMR'."
+
+[[item]]
+id = "porcelain-microsound-family"
+title = "Porcelain microsound/electroacoustic family — DSP kernel set (Raster-Noton + Plumbutter)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "build the prototype kernels lowest-cost-first: (1) pulse-excited resonator bank (Gongs), (2) charge-bucket rhythm generator (Rollz), (3) lattice oscillator (Kuramoto coupling), (4) sine-pulse + DC-click (Ikeda), (5) generation-loss processor (Xerrox), (6) trigger-locked grain burst (Bretschneider), (7 optional) Schroeder allpass smear (Butter)" }
+note = "docs/microsound-research.md + planning/todo-archive.md '## Microsound'. Family ON HOLD since 2026-04-14 (Chime v0 shipped, marinating). Aesthetic: clicks-and-cuts / Raster-Noton / Plumbutter."
+
+[[item]]
+id = "stolmine-original-units"
+title = "stolmine originals backlog: X-op FM voice + additional monokit filter models"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "X-op FM voice (4-op+, Akemie's Castle / TX81Z style, building on the Accents XOXO voice); additional filter models from monokit (MoogFF, DFM1, BMoog)" }
+note = "planning/todo-archive.md '## stolmine (original units)'."
+
+[[item]]
+id = "biome-utility-dsp-units"
+title = "biome DSP utility units: simple allpass, dome filter, frequency shifter, bitcrush/downsample"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "Simple allpass (one coef g + delay-time, CV both, cheap to multi-instance). Dome filter (flat-top plateau band, cutoff/width/Q/slope). Frequency shifter (Hilbert-FIR SSB, shift Hz bipolar/mix/upper-lower, CV shift). Bitcrush/Downsample (surface Larets' crush + SR-reduction as a standalone: crush/downsample/both + depth/rate/mix)" }
+note = "planning/todo-archive.md '## Biome', '## Effects'. Frequency shifter core = 90° Hilbert FIR pair + quadrature osc (pick FIR length for skirt flatness vs ARM cost)."
+
+[[item]]
+id = "fx-delay-units"
+title = "Combined Petrichor+Pecto (CPU-efficient) + character-forward Lofi delay"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "Petrichor+Pecto combo: a single DSP object sharing buffer/grain/filter infra (fewer taps/patterns, one resonator model) costing closer to one unit than both summed. Lofi delay: wow/flutter + repeat-count-steepening filter + accumulating bitcrush/noise + tape saturation + modulation bus (Reflex/Thyme+/Generation-Loss references)" }
+note = "planning/todo-archive.md '## Effects'. Design sketch first for both. Lofi-delay package fit TBD (biome vs new fx pkg)."
+
+[[item]]
+id = "units-external-comm"
+title = "External communication units: I2C output to Crow + clock-sync derived from audio"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "I2C output to Crow (complement existing TXo support in the separate er-301-stolmine repo); clock derived from audio transients/zero-crossings" }
+note = "planning/todo-archive.md '## I2C / External Communication'. Input from Crow already exists via sc.cv etc."
+
+[[item]]
+id = "scope-goniometer"
+title = "Goniometer / Lissajous — XY stereo-field scope with correlation readout"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "insert; confirm goniometer (L+R vs L-R) or arbitrary-XY Lissajous display with a +1..-1 correlation readout; negligible DSP" }
+note = "planning/todo-archive.md '### Goniometer / Lissajous'."
+
+[[item]]
+id = "scope-channel-focus"
+title = "Scope: channel focus display switching (show L or R by channel-button selection)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "on a stereo scope, press the channel buttons; confirm the display switches between L and R via runtime watchOutlet()" }
+note = "planning/todo-archive.md '## Scope'. Blocker to solve: SDK has no channel-focus callback for custom ViewControls — find where channel-button events dispatch in the Lua UI layer."
+
+[[item]]
+id = "scope-headerless-research"
+title = "Scope: research headerless unit display"
+status = "blocked"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "determine whether a unit can render without the SDK-hardcoded header; currently not possible" }
+note = "planning/todo-archive.md '## Scope'. Blocked: SDK hardcodes the header — needs upstream firmware change or a new mechanism."
+
+[[item]]
+id = "units-artsy-visualizers"
+title = "Artsy visualizers / generative sound+visual units (Norns/Paratek-inspired eye candy)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "build generative visual + audio units: glitchy audio/CV-driven visuals and a pseudo-3D serial-wavetable-frame view" }
+note = "planning/todo-archive.md '## Artsy Visualizers / Sound Generators', video.md."
+
+# --- multi-output framework + chaos + research ---
+
+[[item]]
+id = "multiout-framework-quadlfo"
+title = "Multi-output framework + Quadrature LFO proof-of-concept driver + candidate audit refresh"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "Quadrature LFO: single phase accumulator, 4 samplers at 0/90/180/270°, macro rate(V-Oct)/shape/amp/sync, primary=0° + author-ordered 90/180/270 sub-outs with meaningful labels, driving the first multi-out picker + sub-view nav. Plus a refreshed multi-out candidate table across core + all habitat packages (derivability-at-destination gate)" }
+note = "planning/redesign/07-multi-output-units.md, project_multi_output_framework.md. QuadLFO forces the framework into existence. Audit gate: internal-only-derivable outputs = candidate (SVF LP/BP/HP, resonator excitation+ring, env gate+CV). feedback_addoutput_required_for_multiout, feedback_unit_output_names_table."
+
+[[item]]
+id = "multiout-generative-units"
+title = "Multi-output generative units: poly clocked burst, coupled CV+gate env, multichannel seq, + candidates"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "Poly clocked burst (JF Geode: N=6 voices, busy-state allocation, summed primary + per-voice sub-outs — capture Technical Map voice-stealing verbatim first). Coupled CV+gate env (CV primary + peak/busy/decay gate sub-outs). Multichannel seq (shared step pointer, N=4 channels, channel-1 primary + 2..N sub-outs). Plus: shift-register seq, polyrhythmic divider, multi-segment env, coupled-osc pair, dual-stream random sampler" }
+note = "planning/todo-archive.md '## Multi-Output Units'. All pass the derivability test (semantic coupling can't be reconstructed downstream). Evaluate the additional candidates once the framework (multiout-framework-quadlfo) is live."
+
+[[item]]
+id = "multiout-nlc-chaos"
+title = "NLC chaotic modulation sources (clean-room): Sloth, Chua, Hyperchaos, Squid Axon, + lower-pri"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "build (start with Sloth): 3rd-order jerk oscillator, 2-3 node-voltage sub-outs, wide log speed macro; then Chua double-scroll (PWL nonlinearity), Hyperchaos (4D, touchy stability), Squid Axon (clocked chaotic map). Sub-stepped integration + isfinite divergence guard + soft clamp; generic ship names (drift/crawl/writhe)" }
+note = "planning/nlc-chaos-modulation.md (resolve scoping first) + planning/todo-archive.md '## NLC Chaotic Modulation Sources'. Ride the multi-out framework (node voltages = siblings). Rauschen already proves am335x integration. Open scoping: one-unit-per-circuit vs model-picker (lean: one continuous-chaos multi-out + one clocked-chaos); control-rate first, audio-rate door open. feedback_no_third_party_branding."
+
+[[item]]
+id = "research-audiorate-param-mod"
+title = "Research: how firmware native units accept clean audio-rate parameter modulation"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "read the er-301 framework source (od::Parameter/GainBias/ParameterAdapter/Inlet-buffer sum) and confirm each hypothesis; deliver planning/audio-rate-parameter-modulation.md with a 'how habitat units should do it' checklist" }
+note = "planning/todo-archive.md '## Audio-Rate Parameter Modulation'. Confirm: (1) modulatable param = per-sample buffer sum not smoothed scalar; (2) scalar→signal smoothing primitive (LinearRamp/SlewLimiter/one-pole) + default length; (3) per-sample vs block coefficient recompute for clean filter FM; (4) ParameterAdapter smooth-vs-jump contract; (5) our Pecto zipper fixes = negative space (which native mechanism we should have used); (6) how native LFO/Env fill output buffers. Transport knowledge for multiout-nlc-chaos. feedback_no_assertions_without_code_evidence."
+
+# --- ports + house package ---
+
+[[item]]
+id = "port-mit-direct"
+title = "MIT-compatible direct ports backlog: Stages LFO, Loom, Open303, Faust reverb, ProCo Rat, AW-remaining"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "port each as MIT-licensed direct ports: Stages LFO (MI), Loom sequencer (RigatoniModular), Open303 acid voice (confirmed MIT, spreadsheet flagship alongside Ngoma), a Faust reverb example (fverb/jot_rev/zita_rev1 → faust-compile→integrate), ProCo Rat distortion, and further Airwindows timbral/lo-fi effects" }
+note = "planning/todo-archive.md '## Port Candidates / MIT-compatible', '### Other', open303-port-scoping.md. Faust route revisits the abandoned Network cascade-FDN (network-cascade-postmortem.md). NOTE: CloudSeedCore abandoned (commits 2190131/6ed6308, branch cloudseed-archive) — ReverbController::Process first-frame hangs Cortex-A8; do not retry without root-causing."
+
+[[item]]
+id = "port-gplv3-cleanroom"
+title = "GPLv3 algorithm-reference clean-room reimplementations (reference only, not code ports)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "units"
+verify = { kind = "manual", ref = "clean-room reimplement the math (not the code) from: Noise Plethora (CC-BY-NC-SA), FrozenWasteland, Plateau/Amalgam, Geodesics, CellaVCV, NOI-VCVRACK, Reformation/Venom" }
+note = "planning/todo-archive.md '### Algorithm reference only (GPLv3)'. Same clean-room approach as the NLC ports — reference the algorithm, write original code."
+
+[[item]]
+id = "house-atom-library"
+title = "House: AW tone-shaping atom library (first-15) + RotCoat/composition component atoms"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "port as individual od::Object (or C++-component) atoms in mods/house/atoms/, each Smoketest-gated on hardware: Density/Spiral/Drive/Mojo/Slew/Acceleration/Creature/Capacitor2/Baxandall/Console0/DeRez2/ChromeOxide/Point/Swell/Fracture, plus component atoms (Spiral saturator, ChromeOxide tape-rot, optional BandSplit2 / BezierUndersampleShell / PurestConsole3 pair). Compose chains as units once ~15 land" }
+note = "planning/airwindows-primitives-inventory.md, house-atom-architecture.md, feedback_atoms_as_components. Component-only by default (no Lua unit/toc) until standalone value exists. Tone-shapers are FLOP-bound (cheap on float+NEON). Some RotCoat prereqs now partly moot (RotCoat shipped diverged; ChromeOxide reserved/unused)."
+
+[[item]]
+id = "house-harness-patterns"
+title = "House: harness patterns — Channel-Buss containment, envelope-driver, reduced-rate domain, kWoodRoom atom refactor"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "Channel-Buss containment (Console0 encode→decode anti-runaway, Lua-first). Envelope-driver (Swell/Point/Capacitor2 Out→param inlets). Reduced-rate domain (host→reduced→host + Bezier reconstruction, C++ harness). kWoodRoom Phase-1: promote KWoodRoomDSP to od::Object at mods/house/atoms/KWoodRoom.h with a thin Lua wrapper" }
+note = "planning/reverb-design-philosophy.md (mechanic #1), house-atom-architecture.md, airwindows-primitives-inventory.md §5. Lua-first for containment/envelope; C++ harness for reduced-rate (needs internal scheduling)."
+
+[[item]]
+id = "house-hybrid-float-retrofits"
+title = "House: hybrid-float retrofits for kWoodRoom (29%→~12-15%) and WoodenBox (14%→~6-8%)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "convert state arrays + per-sample intermediates + feedback taps to float (bezier accumulator + block-rate scalars stay double); bump PKGVERSION 4th digit; hardware-validate CPU drop with no audible change" }
+note = "planning/todo-archive.md '### Retrofits'. Mechanical, same pattern as CreamCoat. After WoodenBox: lightest house atom by 2x, stacks comfortably."
+
+[[item]]
+id = "house-xyz-engine"
+title = "XYZ engine — cryptic 3-param original reverb (X morph, Y saturate+undersample, Z meta-routing)"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "insert; confirm X size/texture morph, Y coupled saturate+undersample, Z three regimes (Nested predictable / Folded signature per-pass aliasing / Coupled chaotic); Coupled mode MUST inherit RotCoat's reduced-rate trick to stay in am335x budget" }
+note = "planning/xyz-engine-design.md. Package house; lands after RotCoat. Signature sound = per-pass aliasing of generated harmonics in Folded mode."
+
+[[item]]
+id = "docs-intro-video"
+title = "Intro video for Habitat packages"
+status = "todo"
+stamped = "2026-07-09T20:59:09-05:00"
+area = "docs"
+verify = { kind = "manual", ref = "produce the intro video per the script in video.md" }
+note = "planning/todo-archive.md '## Video', video.md."
