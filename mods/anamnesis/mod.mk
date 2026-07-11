@@ -48,7 +48,16 @@ LFLAGS = -nostdlib -nodefaultlibs -r
 endif
 
 ifeq ($(ARCH),linux)
-CFLAGS.linux = -Wno-deprecated-declarations -msse4 -fPIC
+# -msse4 is x86-only; gate it so the package also builds natively on
+# aarch64 hosts (CM4 / uConsole dev rig). NEON/ASIMD is baseline on
+# armv8 so no substitute flag is needed there.
+LINUX_HOST_ARCH := $(shell uname -m)
+ifeq ($(LINUX_HOST_ARCH),x86_64)
+  LINUX_SIMD_FLAGS = -msse4
+else
+  LINUX_SIMD_FLAGS =
+endif
+CFLAGS.linux = -Wno-deprecated-declarations $(LINUX_SIMD_FLAGS) -fPIC
 LFLAGS = -shared
 endif
 
