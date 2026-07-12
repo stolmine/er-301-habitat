@@ -175,10 +175,103 @@ Remaining candidates, most-likely first:
 diagnostics armed. If it still traps -> apply fix #1 (class-member the viz arrays)
 and re-verify. If it does not -> the original was a bad build.
 
+## Update 2026-07-12 (fw 9.5.2.58, per-task STACK instrumentation): NOT a stack overflow. A wild WRITE clobbers a Task_Object.
+
+The stolmine harness gained per-task + ISR stack high-water + canary reporting and
+was re-benched against the frozen `0.2.0.83` insert. It caught + rebooted + flushed
+a data-abort (same `Event_post` / `Event.c:285`, `Thread: hwi`, `dfar=0x000000b5`,
+flight recorder `insert Anamnesis`). The new `--- Stacks ---` section:
+
+```
+ log   used=360   (8%)   canary=ok
+ app   used=13852 (42%)  canary=ok      <- the main/display task, HEALTHY
+ usb   used=388   (9%)   canary=ok
+ adc   used=748   (36%)  canary=ok
+       base=0000001c size=167 canary=BLOWN   <- a CORRUPTED Task_Object (blank name)
+ isr   used=1024  (25%)  canary=ok
+```
+
+**This DISPROVES the stack-overflow hypothesis (#1 above).** Every real task stack
+is comfortably in bounds with an intact canary; the `app` (main/display) task, the
+one that runs the viz `draw()`, is at 42 percent. The ~2.4 KB viz stack arrays are
+NOT overflowing. (So promoting them to class members is not the fix for THIS crash,
+though it may still be worth doing on general principle.)
+
+**What it actually is: a stray / wild WRITE.** The `--- Stacks ---` section surfaced
+a real Task_Object whose fields were overwritten with garbage: `stack` pointer ->
+`0x0000001c`, `stackSize` -> `167`, and its env/name pointer clobbered (blank name).
+The enumeration then STOPPED right after it (only 5 of ~9 tasks listed) because that
+Task_Object's list-link `next` pointer was clobbered too. The fault's `r4/r5` =
+`0x80538150/54`, sitting just above the `adc` task stack top (`0x80538128`). So a
+stray write lands in the runtime task-object / heap region around **`0x80538xxx`**
+and clobbers BOTH a Task_Object AND the audio `Event`'s pend queue; the next audio
+EDMA interrupt walks the wrecked queue and traps in `Event_post`.
+
+**Why ASan did not catch it:** this is a wild-pointer / bad-address store, not an
+index overrun of a known allocation. ASan flags out-of-bounds access relative to a
+tracked object; a write through an **uninitialized, dangling, or wrongly-computed
+pointer** whose target address happens to be valid (unshadowed) on x86 but collides
+with the task/Event region only on the am335x memory map will pass ASan clean. That
+matches the evidence (ASan clean, but hardware corrupts a specific low-DDR region).
+
+**Where to look now (in `mods/anamnesis`):** a WRITE through a pointer that is not
+an in-object array index but a raw/derived pointer. Prime suspects:
+- an **uninitialized or default-constructed pointer member** written in the ctor or
+  first `process()` (the crash fires ~0.2s after insert);
+- a pointer produced by **cast / arithmetic / reinterpret** (SWIG-boundary object,
+  a `void*`, an `od::` handle) that is wrong on the target;
+- a **use-after-free / dangling** handle to an object whose address only aliases the
+  task/Event region on am335x;
+- a write to a **near-absolute or offset-from-tiny-base** address (the clobbered
+  Task_Object now holds `stack=0x1c`, `size=167` and the fault has `r0=0x9d`,
+  i.e. small integers 28 / 167 / 157 were written -- grep Anamnesis for a small
+  struct/array of counts or indices being stored through a pointer, and check that
+  pointer's provenance).
+
+The stolmine side is building an object-guard (`crashdiag-object-guard-event`) to
+trap the write AT the store and record the writing `pc`, which would hand you the
+exact instruction. In the meantime, the target region (`~0x80538xxx`) and the
+written values (small ints `0x1c`/`0xa7`/`0x9d`) are the fingerprints to hunt.
+
+## Update 2026-07-12 (habitat static hunt for the wild write): eliminations, no source-level culprit found
+
+Following the wild-write / clobbered-Task_Object finding, audited `mods/anamnesis`
+for a source-level bad-address store. Eliminated:
+
+- **No pointer members** in `Anamnesis` (op) or `AnamFieldGraphic` (only `mpOp`,
+  which is `= 0`-initialized and always `if (mpOp)`-guarded). So no uninitialized/
+  default-constructed pointer member to write through.
+- **No raw-pointer / `memcpy` / `reinterpret_cast` / cast-to-pointer writes** anywhere
+  in the op.
+- **No computed-index array writes** (`arr[a+b] = ...`): every buffer write uses a
+  single index VARIABLE that is wrap/clamp-bounded - `mLoopBuf[mLoopWr]` (Lint
+  clamped), `mTapBuf[mTapWr]`, `mAp[k][idx]` (idx<kApLen<=kApMax), `mLine[i][mWr]`,
+  `mApWr[k]`, `mBandZ[i]`, spawn `slot`/`g`/`parent`, and the field cache
+  `mFcGrid[L*kFieldGW*kFieldGH + j*kFieldGW+i]` (float `+=`, max 6071 < 6072).
+- The written values 167/157 are **not** anamnesis delay/size constants (`kTapBase`
+  = {960,1597,...}, `kApLen`={113,211,337,449}, `kFdnBase`={1669,...}); 28 == kNumPoints
+  but kNumPoints is only ever an array SIZE / loop bound, never stored through a pointer.
+- `mBubRng`/`mDropRng` are used in the ctor Fisher-Yates before being seeded
+  (indeterminate), but they are `uint32_t` RNG state, not pointers -> a value bug at
+  most, not a wild store.
+
+**So the corruptor is not an obvious source-level pointer deref or index overrun.**
+Combined with the prior eliminations (ASan-clean, stack canaries intact, `dfsr=0x5`
+not the NEON trap, single-TU so no sizeof mismatch), the remaining space is a store
+that is invisible at the C++ source level: a compiler codegen artifact, a framework
+(`od::Object` registration / SWIG-wrapper marshalling) interaction with this unusually
+large (~850 KB) object, or a genuinely non-obvious derived pointer. The **decisive
+tool is the stolmine object-guard** (`crashdiag-object-guard-event`): trapping the
+write AT the store and reporting the writing `pc` maps straight to the instruction.
+The habitat static hunt has narrowed WHERE that pc is likely to land (not the plain
+DSP index writes) - hand the captured `pc` back here to symbolize against the am335x
+`.o` (`arm-none-eabi-addr2line` on `testing/am335x/mods/anamnesis/*.o`).
+
 ## Provenance
 
-Captured by the er-301-stolmine crash-diagnostics facility (fw 9.5.2.56, normal
-build, `enableCrashDiagnostics` armed). The exception hook snapshotted the fault
+Captured by the er-301-stolmine crash-diagnostics facility (fw 9.5.2.56 for the
+first capture, fw 9.5.2.58 for the stacks capture, normal build,
+`enableCrashDiagnostics` armed). The exception hook snapshotted the fault
 context + module map + flight recorder into the warm-reboot-surviving panic buffer;
 next boot flushed it to `front/crash.log`; symbolized offline via
 `tools/symbolize_crash.py` against the matching `app.elf`. The `sp==pc` and bogus
