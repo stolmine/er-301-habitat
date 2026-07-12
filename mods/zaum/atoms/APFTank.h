@@ -1446,8 +1446,8 @@ namespace zaum
           if (walk_AP1_L < -apExcursion) walk_AP1_L = -apExcursion;
 
           // Fractional read at kTA1 + walk behind write head.
-          float apReadPos1L = (mWrTA1_L - kTA1) + walk_AP1_L;
-          int    apOff1L     = (int)floor(apReadPos1L);
+          float apReadPos1L = (float)(mWrTA1_L - kTA1) + walk_AP1_L + (float)kTA1_size;
+          int    apOff1L     = (int)apReadPos1L;   // biased >=0: truncation == floor
           float apFrac1L    = apReadPos1L - (float)apOff1L;
           int    apI0_1L     = (apOff1L & (kTA1_size - 1));
           int    apI1_1L     = ((apI0_1L + 1) & (kTA1_size - 1));
@@ -1486,8 +1486,11 @@ namespace zaum
           // per-sample-smoothed (smD1_L glides toward targetD1_L) so Size changes
           // Doppler-glide instead of stepping (zipper fix); walk offsets it.
           smD1_L += kBaseSlew * (targetD1_L - smD1_L);
-          float readPos = ((float)mWrD1_L - smD1_L) + walk_D1_L;
-          int    offset  = (int)floor(readPos);
+          // + kD1_L_size biases readPos >= 0 so the (int) cast truncates == floor
+          // WITHOUT a libm floor() call; the bias is an exact buffer length, so the
+          // &-mask below yields a bit-identical index + frac. (drops 8 floor/sample)
+          float readPos = ((float)mWrD1_L - smD1_L) + walk_D1_L + (float)kD1_L_size;
+          int    offset  = (int)readPos;
           float frac    = readPos - (float)offset;
 
           // Map offset to valid buffer indices [0, kD1_L_size).
@@ -1532,8 +1535,8 @@ namespace zaum
           if (walk_AP2_L >  apExcursion) walk_AP2_L =  apExcursion;
           if (walk_AP2_L < -apExcursion) walk_AP2_L = -apExcursion;
 
-          float apReadPos2L = (mWrTA2_L - kTA2) + walk_AP2_L;
-          int    apOff2L     = (int)floor(apReadPos2L);
+          float apReadPos2L = (float)(mWrTA2_L - kTA2) + walk_AP2_L + (float)kTA2_size;
+          int    apOff2L     = (int)apReadPos2L;   // biased >=0: truncation == floor
           float apFrac2L    = apReadPos2L - (float)apOff2L;
           int    apI0_2L     = (apOff2L & (kTA2_size - 1));
           int    apI1_2L     = ((apI0_2L + 1) & (kTA2_size - 1));
@@ -1567,8 +1570,8 @@ namespace zaum
           if (walk_D2_L < -excursion) walk_D2_L = -excursion;
 
           smD2_L += kBaseSlew * (targetD2_L - smD2_L);
-          float readPos = ((float)mWrD2_L - smD2_L) + walk_D2_L;
-          int    offset  = (int)floor(readPos);
+          float readPos = ((float)mWrD2_L - smD2_L) + walk_D2_L + (float)kD2_L_size;
+          int    offset  = (int)readPos;   // biased >=0: truncation == floor, no libm
           float frac    = readPos - (float)offset;
 
           int i0 = (offset & (kD2_L_size - 1));
@@ -1615,8 +1618,8 @@ namespace zaum
           if (walk_AP1_R >  apExcursion) walk_AP1_R =  apExcursion;
           if (walk_AP1_R < -apExcursion) walk_AP1_R = -apExcursion;
 
-          float apReadPos1R = (mWrTA1_R - kTA1) + walk_AP1_R;
-          int    apOff1R     = (int)floor(apReadPos1R);
+          float apReadPos1R = (float)(mWrTA1_R - kTA1) + walk_AP1_R + (float)kTA1_size;
+          int    apOff1R     = (int)apReadPos1R;   // biased >=0: truncation == floor
           float apFrac1R    = apReadPos1R - (float)apOff1R;
           int    apI0_1R     = (apOff1R & (kTA1_size - 1));
           int    apI1_1R     = ((apI0_1R + 1) & (kTA1_size - 1));
@@ -1649,8 +1652,8 @@ namespace zaum
           if (walk_D1_R < -excursion) walk_D1_R = -excursion;
 
           smD1_R += kBaseSlew * (targetD1_R - smD1_R);
-          float readPos = ((float)mWrD1_R - smD1_R) + walk_D1_R;
-          int    offset  = (int)floor(readPos);
+          float readPos = ((float)mWrD1_R - smD1_R) + walk_D1_R + (float)kD1_R_size;
+          int    offset  = (int)readPos;   // biased >=0: truncation == floor, no libm
           float frac    = readPos - (float)offset;
 
           int i0 = (offset & (kD1_R_size - 1));
@@ -1689,8 +1692,8 @@ namespace zaum
           if (walk_AP2_R >  apExcursion) walk_AP2_R =  apExcursion;
           if (walk_AP2_R < -apExcursion) walk_AP2_R = -apExcursion;
 
-          float apReadPos2R = (mWrTA2_R - kTA2) + walk_AP2_R;
-          int    apOff2R     = (int)floor(apReadPos2R);
+          float apReadPos2R = (float)(mWrTA2_R - kTA2) + walk_AP2_R + (float)kTA2_size;
+          int    apOff2R     = (int)apReadPos2R;   // biased >=0: truncation == floor
           float apFrac2R    = apReadPos2R - (float)apOff2R;
           int    apI0_2R     = (apOff2R & (kTA2_size - 1));
           int    apI1_2R     = ((apI0_2R + 1) & (kTA2_size - 1));
@@ -1723,8 +1726,8 @@ namespace zaum
           if (walk_D2_R < -excursion) walk_D2_R = -excursion;
 
           smD2_R += kBaseSlew * (targetD2_R - smD2_R);
-          float readPos = ((float)mWrD2_R - smD2_R) + walk_D2_R;
-          int    offset  = (int)floor(readPos);
+          float readPos = ((float)mWrD2_R - smD2_R) + walk_D2_R + (float)kD2_R_size;
+          int    offset  = (int)readPos;   // biased >=0: truncation == floor, no libm
           float frac    = readPos - (float)offset;
 
           int i0 = (offset & (kD2_R_size - 1));
