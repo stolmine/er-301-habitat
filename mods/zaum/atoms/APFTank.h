@@ -362,8 +362,8 @@ namespace zaum
   // kTA2_size = kTA2 + 2*kAPHeadroom = 1471 + 32 = 1503
   // ---------------------------------------------------------------------------
   static const int kAPHeadroom = 16;
-  static const int kTA1_size   = kTA1 + 2 * kAPHeadroom;   // 1119
-  static const int kTA2_size   = kTA2 + 2 * kAPHeadroom;   // 1503
+  static const int kTA1_size   = 2048;   // pow2 (>= kTA1+2*kAPHeadroom=1119) for & mask
+  static const int kTA2_size   = 2048;   // pow2 (>= 1503) for & mask
 
   // ---------------------------------------------------------------------------
   // Outer AP modulation excursion constants (0.1.0.11).
@@ -416,16 +416,16 @@ namespace zaum
   static const int kD1_headroom    = 128;   // modulation headroom each side
 
   static const int kD1_L_maxBase  = 10781;  // 7187*1.5 rounded to odd
-  static const int kD1_L_size     = kD1_L_maxBase + 2 * kD1_headroom + 1; // 11038
+  static const int kD1_L_size     = 16384;  // pow2 (>= 11038) for & mask
 
   static const int kD2_L_maxBase  = 7651;   // 5101*1.5 rounded to odd
-  static const int kD2_L_size     = kD2_L_maxBase + 2 * kD1_headroom + 1; // 7908
+  static const int kD2_L_size     = 8192;   // pow2 (>= 7908) for & mask
 
   static const int kD1_R_maxBase  = 10205;  // 6803*1.5 rounded to odd
-  static const int kD1_R_size     = kD1_R_maxBase + 2 * kD1_headroom + 1; // 10462
+  static const int kD1_R_size     = 16384;  // pow2 (>= 10462) for & mask
 
   static const int kD2_R_maxBase  = 9515;   // 6343*1.5 rounded to odd
-  static const int kD2_R_size     = kD2_R_maxBase + 2 * kD1_headroom + 1; // 9772
+  static const int kD2_R_size     = 16384;  // pow2 (>= 9772) for & mask
 
   // ---------------------------------------------------------------------------
   // Modulation tuning constants — adjust these by ear at the 0.1.0.4 gate.
@@ -1412,8 +1412,8 @@ namespace zaum
           float apReadPos1L = (mWrTA1_L - kTA1) + walk_AP1_L;
           int    apOff1L     = (int)floor(apReadPos1L);
           float apFrac1L    = apReadPos1L - (float)apOff1L;
-          int    apI0_1L     = ((apOff1L % kTA1_size) + kTA1_size) % kTA1_size;
-          int    apI1_1L     = (apI0_1L + 1) % kTA1_size;
+          int    apI0_1L     = (apOff1L & (kTA1_size - 1));
+          int    apI1_1L     = ((apI0_1L + 1) & (kTA1_size - 1));
           float vO1d = (1.0f - apFrac1L) * (float)mTA1_L[apI0_1L]
                       +        apFrac1L  * (float)mTA1_L[apI1_1L];
 
@@ -1452,8 +1452,8 @@ namespace zaum
           float frac    = readPos - (float)offset;
 
           // Map offset to valid buffer indices [0, kD1_L_size).
-          int i0 = ((offset % kD1_L_size) + kD1_L_size) % kD1_L_size;
-          int i1 = (i0 + 1) % kD1_L_size;
+          int i0 = (offset & (kD1_L_size - 1));
+          int i1 = ((i0 + 1) & (kD1_L_size - 1));
 
           d1Read_L = (1.0f - frac) * (float)mD1_L[i0] + frac * (float)mD1_L[i1];
 
@@ -1466,9 +1466,9 @@ namespace zaum
         // Modular wrap matches the end-read pattern; all offsets < scaledD1_L < bufSize.
         float d1tap_a_L, d1tap_b_L, d1tap_c_L;
         {
-          int ia = ((mWrD1_L - offD1a_L) % kD1_L_size + kD1_L_size) % kD1_L_size;
-          int ib = ((mWrD1_L - offD1b_L) % kD1_L_size + kD1_L_size) % kD1_L_size;
-          int ic = ((mWrD1_L - offD1c_L) % kD1_L_size + kD1_L_size) % kD1_L_size;
+          int ia = ((mWrD1_L - offD1a_L) & (kD1_L_size - 1));
+          int ib = ((mWrD1_L - offD1b_L) & (kD1_L_size - 1));
+          int ic = ((mWrD1_L - offD1c_L) & (kD1_L_size - 1));
           d1tap_a_L = mD1_L[ia];
           d1tap_b_L = mD1_L[ib];
           d1tap_c_L = mD1_L[ic];
@@ -1496,8 +1496,8 @@ namespace zaum
           float apReadPos2L = (mWrTA2_L - kTA2) + walk_AP2_L;
           int    apOff2L     = (int)floor(apReadPos2L);
           float apFrac2L    = apReadPos2L - (float)apOff2L;
-          int    apI0_2L     = ((apOff2L % kTA2_size) + kTA2_size) % kTA2_size;
-          int    apI1_2L     = (apI0_2L + 1) % kTA2_size;
+          int    apI0_2L     = (apOff2L & (kTA2_size - 1));
+          int    apI1_2L     = ((apI0_2L + 1) & (kTA2_size - 1));
           float vO2d = (1.0f - apFrac2L) * (float)mTA2_L[apI0_2L]
                       +        apFrac2L  * (float)mTA2_L[apI1_2L];
 
@@ -1531,8 +1531,8 @@ namespace zaum
           int    offset  = (int)floor(readPos);
           float frac    = readPos - (float)offset;
 
-          int i0 = ((offset % kD2_L_size) + kD2_L_size) % kD2_L_size;
-          int i1 = (i0 + 1) % kD2_L_size;
+          int i0 = (offset & (kD2_L_size - 1));
+          int i1 = ((i0 + 1) & (kD2_L_size - 1));
 
           d2Read_L = (1.0f - frac) * (float)mD2_L[i0] + frac * (float)mD2_L[i1];
 
@@ -1543,8 +1543,8 @@ namespace zaum
         // D2_L intermediate taps — STATIC (unmodulated).
         float d2tap_a_L, d2tap_b_L;
         {
-          int ia = ((mWrD2_L - offD2a_L) % kD2_L_size + kD2_L_size) % kD2_L_size;
-          int ib = ((mWrD2_L - offD2b_L) % kD2_L_size + kD2_L_size) % kD2_L_size;
+          int ia = ((mWrD2_L - offD2a_L) & (kD2_L_size - 1));
+          int ib = ((mWrD2_L - offD2b_L) & (kD2_L_size - 1));
           d2tap_a_L = mD2_L[ia];
           d2tap_b_L = mD2_L[ib];
         }
@@ -1578,8 +1578,8 @@ namespace zaum
           float apReadPos1R = (mWrTA1_R - kTA1) + walk_AP1_R;
           int    apOff1R     = (int)floor(apReadPos1R);
           float apFrac1R    = apReadPos1R - (float)apOff1R;
-          int    apI0_1R     = ((apOff1R % kTA1_size) + kTA1_size) % kTA1_size;
-          int    apI1_1R     = (apI0_1R + 1) % kTA1_size;
+          int    apI0_1R     = (apOff1R & (kTA1_size - 1));
+          int    apI1_1R     = ((apI0_1R + 1) & (kTA1_size - 1));
           float vO1d = (1.0f - apFrac1R) * (float)mTA1_R[apI0_1R]
                       +        apFrac1R  * (float)mTA1_R[apI1_1R];
 
@@ -1612,8 +1612,8 @@ namespace zaum
           int    offset  = (int)floor(readPos);
           float frac    = readPos - (float)offset;
 
-          int i0 = ((offset % kD1_R_size) + kD1_R_size) % kD1_R_size;
-          int i1 = (i0 + 1) % kD1_R_size;
+          int i0 = (offset & (kD1_R_size - 1));
+          int i1 = ((i0 + 1) & (kD1_R_size - 1));
 
           d1Read_R = (1.0f - frac) * (float)mD1_R[i0] + frac * (float)mD1_R[i1];
 
@@ -1624,9 +1624,9 @@ namespace zaum
         // D1_R intermediate taps — STATIC (unmodulated).
         float d1tap_a_R, d1tap_b_R, d1tap_c_R;
         {
-          int ia = ((mWrD1_R - offD1a_R) % kD1_R_size + kD1_R_size) % kD1_R_size;
-          int ib = ((mWrD1_R - offD1b_R) % kD1_R_size + kD1_R_size) % kD1_R_size;
-          int ic = ((mWrD1_R - offD1c_R) % kD1_R_size + kD1_R_size) % kD1_R_size;
+          int ia = ((mWrD1_R - offD1a_R) & (kD1_R_size - 1));
+          int ib = ((mWrD1_R - offD1b_R) & (kD1_R_size - 1));
+          int ic = ((mWrD1_R - offD1c_R) & (kD1_R_size - 1));
           d1tap_a_R = mD1_R[ia];
           d1tap_b_R = mD1_R[ib];
           d1tap_c_R = mD1_R[ic];
@@ -1651,8 +1651,8 @@ namespace zaum
           float apReadPos2R = (mWrTA2_R - kTA2) + walk_AP2_R;
           int    apOff2R     = (int)floor(apReadPos2R);
           float apFrac2R    = apReadPos2R - (float)apOff2R;
-          int    apI0_2R     = ((apOff2R % kTA2_size) + kTA2_size) % kTA2_size;
-          int    apI1_2R     = (apI0_2R + 1) % kTA2_size;
+          int    apI0_2R     = (apOff2R & (kTA2_size - 1));
+          int    apI1_2R     = ((apI0_2R + 1) & (kTA2_size - 1));
           float vO2d = (1.0f - apFrac2R) * (float)mTA2_R[apI0_2R]
                       +        apFrac2R  * (float)mTA2_R[apI1_2R];
 
@@ -1685,8 +1685,8 @@ namespace zaum
           int    offset  = (int)floor(readPos);
           float frac    = readPos - (float)offset;
 
-          int i0 = ((offset % kD2_R_size) + kD2_R_size) % kD2_R_size;
-          int i1 = (i0 + 1) % kD2_R_size;
+          int i0 = (offset & (kD2_R_size - 1));
+          int i1 = ((i0 + 1) & (kD2_R_size - 1));
 
           d2Read_R = (1.0f - frac) * (float)mD2_R[i0] + frac * (float)mD2_R[i1];
 
@@ -1697,8 +1697,8 @@ namespace zaum
         // D2_R intermediate taps — STATIC (unmodulated).
         float d2tap_a_R, d2tap_b_R;
         {
-          int ia = ((mWrD2_R - offD2a_R) % kD2_R_size + kD2_R_size) % kD2_R_size;
-          int ib = ((mWrD2_R - offD2b_R) % kD2_R_size + kD2_R_size) % kD2_R_size;
+          int ia = ((mWrD2_R - offD2a_R) & (kD2_R_size - 1));
+          int ib = ((mWrD2_R - offD2b_R) & (kD2_R_size - 1));
           d2tap_a_R = mD2_R[ia];
           d2tap_b_R = mD2_R[ib];
         }
