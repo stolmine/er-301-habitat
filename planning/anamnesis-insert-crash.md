@@ -267,6 +267,43 @@ The habitat static hunt has narrowed WHERE that pc is likely to land (not the pl
 DSP index writes) - hand the captured `pc` back here to symbolize against the am335x
 `.o` (`arm-none-eabi-addr2line` on `testing/am335x/mods/anamnesis/*.o`).
 
+## Update 2026-07-12 (LEADING ROOT CAUSE): 843 KB object collides with the am335x kernel heap; it is CM4-only
+
+The written-value fingerprint cracks it. The stray writes were small ints
+**28 / 167 / 157**. Those are exactly plausible values of **`mApWr`** - the 4
+allpass write-positions - each valid against its ring length `kApLen={113,211,337,449}`
+(28<113, 167<211, 157<337). `mApWr[k]=idx` runs **every process block** (`atoms/Anamnesis.h:813`).
+
+Converging facts:
+- **`sizeof(Anamnesis) ~= 843 KB`** per instance (`mLoopBuf` 375 KB + `mLine` 281 KB +
+  `mTapBuf` 152 KB + `mFcGrid` 23 KB + `mAp`/`mHannLut`/... ). Enormous for one unit.
+- am335x allocates unit objects from the **SYS/BIOS `HeapMem` kernel heap**
+  (`arch/am335x/sysbios/sbl.cfg`: `__kernel_heap_start__..__kernel_heap_end__`) - the
+  **same region** that holds task stacks and the audio `Event`.
+- The reported corruption is a handful of words at `~0x80538xxx` (one Task_Object +
+  the Event), NOT a broad range - consistent with a specific member (`mApWr`, near the
+  object tail) landing on top of a live kernel object, not a runaway memset.
+
+**Model: this is a memory-budget collision, not a logic bug.** The 843 KB object does
+not fit the am335x kernel-heap model the way it does on CM4; its placement overlaps
+live task/Event memory, so Anamnesis's own bounded, ASan-clean member writes
+(`mApWr` = 28/167/157, and the per-block `mLine`/`mTapBuf` stores) corrupt the kernel
+objects. ASan on x86 is blind because there the object is properly, non-overlappingly
+allocated in a huge address space. **This is exactly why Anamnesis is flagged CM4-ONLY**
+(`project_spatial_glitch_cm4_unit`): it was never sized for am335x.
+
+**Practical conclusion:** the fix is NOT to hunt a bug in correct DSP code. It is to
+**stop Anamnesis from being inserted on am335x** (enforce CM4-only: gate the build /
+toc so it does not load on am335x), OR - if am335x support is wanted - cut the
+footprint ~10x with an am335x profile (the `mLoopBuf`/`mLine`/`mTapBuf` ~808 KB of
+buffers are the bulk; they would need to shrink drastically).
+
+**Confirm with:** (a) the object-guard `pc` (`crashdiag-object-guard-event`) - it
+should land on a member store such as `mApWr[k]=` in `atoms/Anamnesis.h`; and (b) a
+heap check at insert (free bytes in the kernel `HeapMem` vs the 843 KB request, and
+whether the returned block's extent overlaps the task/Event region). Either confirms
+the budget-collision model directly.
+
 ## Provenance
 
 Captured by the er-301-stolmine crash-diagnostics facility (fw 9.5.2.56 for the
