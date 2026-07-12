@@ -130,6 +130,51 @@ inside Anamnesis, not corrupt a neighbor).
    (ASan-clean if available) AND repeatedly on am335x hardware with crash
    diagnostics armed produces no corruption / no Event_post data-abort."
 
+## Update 2026-07-12: ASan disproves the index-OOB model (current code is clean)
+
+Built `libanamnesis.so` with `-fsanitize=address`, ran the headless emu under
+`LD_PRELOAD=libasan`, and drove a full insert (unit landed in the chain -
+`Chain.getChain(1):length()==1`; `process()` ran - bubbles spawned and rendered
+as metaballs; 300+ frames post-insert). **ASan reported nothing.** Plus a manual
+audit of every member-array WRITE in the ctor and `process()`:
+
+- `mLoopBuf[mLoopWr]` - `Lint` clamped to `kLoopBufLen` (L661). in-bounds.
+- `mTapBuf[mTapWr]` - `mTapWr` wraps at `kTapBufLen`. in-bounds.
+- `mAp[k][idx]` - `idx` wraps at `kApLen[k]`; `kApLen={113,211,337,449}` all
+  `<= kApMax=449`. in-bounds.
+- `mLine[i][mWr]` - `mWr` wraps at `kFdnBufLen`. in-bounds.
+- bubble/drop/grain spawns - every `slot`/`g`/`parent` is found in range or
+  `% kVizMax*`. in-bounds. ctor init loops all bounded.
+- `buildFieldFrame` `mFcGrid[L*kFieldGW*kFieldGH + j*kFieldGW+i]` - max index
+  6071 vs size 6072. in-bounds.
+
+**Conclusion: no logic OOB in the current code (0.2.0.83).** The "index overrun
+corrupts the Event" model above is disproven for the current build. Also:
+anamnesis is **single-TU** (only the SWIG wrapper `.o`), so a stale wrapper is
+self-consistent (no sizeof MISMATCH) - that mechanism can't produce an OOB here
+either.
+
+So the hardware data-abort is **not** a plain logic OOB that reproduces on x86.
+Remaining candidates, most-likely first:
+
+1. **am335x task-stack overflow (invisible to x86 ASan).** The viz draw path runs
+   ~2.4 KB of stack-local arrays on the display task - `buildFieldFrame`:
+   `sbX/sbY/sbR/sbAmp/sbLvl[96]` (1.9 KB) + `ptX/ptY[28]` + `bX/bY/bR/bSeed/bLvl[12]`.
+   On a small SYS/BIOS task stack this can overflow into adjacent memory;
+   `dfsr=0x5` (near-null deref of a *corrupted pointer*) fits a corrupted-neighbour
+   scenario better than an index overrun (which ASan would have caught). **Fix:**
+   promote those arrays to `Anamnesis` class members (heap), per the codebase's
+   am335x class-member-storage rule. NOTE: this stack usage **predates Item 1** -
+   the per-ply `draw()` held the same arrays inline - so it is a latent am335x bug,
+   not an Item-1 regression. `dfsr=0x5` is NOT the NEON `:64` alignment trap
+   (`dfsr=0x1`), so this is plain stack pressure, not a vld1 hint.
+2. **The 9.5.2.56 capture was a stale/older build** (its anamnesis version is
+   unrecorded). The clean `0.2.0.83` (force-cleaned wrapper) may not reproduce it.
+
+**NEXT:** re-capture on am335x hardware with the CLEAN `0.2.0.83` + crash
+diagnostics armed. If it still traps -> apply fix #1 (class-member the viz arrays)
+and re-verify. If it does not -> the original was a bad build.
+
 ## Provenance
 
 Captured by the er-301-stolmine crash-diagnostics facility (fw 9.5.2.56, normal
