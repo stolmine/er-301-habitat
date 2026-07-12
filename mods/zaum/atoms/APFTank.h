@@ -749,6 +749,12 @@ namespace zaum
   static const double kMacroDampAmt    = 0.5;   // fraction of macro applied to Damp
   static const double kSizeFactorSmooth = 0.05; // per-block smoothing toward sizeFactorEff target
   static const double kSizeFactorMin    = 0.12; // hard floor on sizeFactorEff (bounds safety)
+  // Per-sample one-pole slew for the delay bases + predelay + ER level, so Size/
+  // Pre/Early changes glide (Doppler-style) instead of stepping at block rate ->
+  // no zipper. ~25 ms: alpha = 1 - exp(-1/(0.025*48000)). Per feedback_doppler_
+  // basedelay_smoother (Pecto's combSize fix). The read is fractional (already is,
+  // for the Brownian walk), so a fractional base just glides continuously.
+  static const float kBaseSlew = 0.000833f;
 
   // ---------------------------------------------------------------------------
   // xorshift64 PRNG — fast, period 2^64-1, audio-thread safe (no libc).
@@ -899,6 +905,8 @@ namespace zaum
       mScaledD2_L = 3903;
       mScaledD1_R = 5205;
       mScaledD2_R = 4853;
+      mSmD1_L = 5499.0f; mSmD2_L = 3903.0f; mSmD1_R = 5205.0f; mSmD2_R = 4853.0f;
+      mSmPD = 0.0f; mSmEarly = 0.4f;
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
       mSizeFactor       = 0.850;    // raw sizeFactor (Size only), for reference
@@ -952,8 +960,8 @@ namespace zaum
       // Early: 0..1, scales ER contribution. At 0 → no ER (exact 0.1.0.8 output).
       const float earlyParam     = mEarly.value();      // 0..1
 
-      // Max tap = kPD - 1 (keep at least 1-sample separation from write head)
-      const int predelayTap = (int)(predelayParam * (float)(kPD - 1));
+      // Predelay tap is now a per-sample-smoothed FLOAT (targetPD below); the old
+      // integer predelayTap is gone (zipper fix on Pre).
 
       // Decay → g_d via power-curve: g_d = kGdMin + (kGdMax - kGdMin) * decay^kDecayShape
       // Hard cap at kGdCap prevents g_d >= 1 unconditionally.
@@ -1029,6 +1037,16 @@ namespace zaum
       // One-pole smooth toward the target to soften delay-length jumps on Early/Size sweeps.
       mSizeFactorSmoothed += kSizeFactorSmooth * (sizeFactorEffClamped - mSizeFactorSmoothed);
       const double sizeFactorEff = mSizeFactorSmoothed;
+      // Float glide targets for the per-sample base smoother (zipper fix). No
+      // toOdd/int quantization here -> a continuous target the loop glides toward.
+      // Clamp to the same buffer-safe max base as the int taps below.
+      const float sfEff       = (float)sizeFactorEff;
+      const float targetD1_L  = fminf((float)kD1_L_maxBase, (float)kD1_L_base * sfEff);
+      const float targetD2_L  = fminf((float)kD2_L_maxBase, (float)kD2_L_base * sfEff);
+      const float targetD1_R  = fminf((float)kD1_R_maxBase, (float)kD1_R_base * sfEff);
+      const float targetD2_R  = fminf((float)kD2_R_maxBase, (float)kD2_R_base * sfEff);
+      const float targetPD    = (float)predelayParam * (float)(kPD - 1);
+      const float targetEarly = (float)earlyParam;
 
       // Effective g_d: shorter tail as Early rises.
       // g_d_eff = g_d - macro*kMacroDecayAmt*(g_d - kGdMin)
@@ -1164,6 +1182,13 @@ namespace zaum
       float dcx1_L = mDCx1_L;  float dcy1_L = mDCy1_L;
       float dcx1_R = mDCx1_R;  float dcy1_R = mDCy1_R;
 
+      // Per-sample-smoothed delay bases / predelay tap / ER level (zipper fix):
+      // pulled local, glided one-pole toward the block targets each sample, then
+      // written back below. Fractional throughout -> no stepping on Size/Pre/ER.
+      float smD1_L = mSmD1_L, smD2_L = mSmD2_L, smD1_R = mSmD1_R, smD2_R = mSmD2_R;
+      float smPD    = mSmPD;
+      float smEarly = mSmEarly;
+
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
       {
@@ -1180,10 +1205,22 @@ namespace zaum
         //    Buffer size kPD is power-of-two: wrap with & mask.
         // ----------------------------------------------------------------
         mPD[mWrPD] = monoIn;
-        int rdPD = mWrPD - predelayTap;
-        if (rdPD < 0) rdPD += kPD;
-        float diffIn = mPD[rdPD];
+        // Glide the fractional predelay tap toward its target (zipper fix), then
+        // read with linear interpolation. rd0 is the nearer (smaller-delay) sample,
+        // rd1 one step older; pdF crossfades toward the older sample as the
+        // fractional distance grows.
+        smPD += kBaseSlew * (targetPD - smPD);
+        int   pdI = (int)smPD;
+        float pdF = smPD - (float)pdI;
+        int   rd0 = (mWrPD - pdI) & (kPD - 1);
+        int   rd1 = (rd0 - 1) & (kPD - 1);
+        float diffIn = mPD[rd0] + pdF * (mPD[rd1] - mPD[rd0]);
         mWrPD = (mWrPD + 1) & (kPD - 1);
+
+        // Glide the ER level toward its target (zipper fix on the Early knob).
+        // The tap-read guards + final scale below both key off smEarly so the ER
+        // network fades in/out instead of switching.
+        smEarly += kBaseSlew * (targetEarly - smEarly);
 
         // ----------------------------------------------------------------
         // 2b. Early-reflection (ER) network — Tier 3 (0.1.0.9).
@@ -1205,7 +1242,7 @@ namespace zaum
         mER[mWrER] = diffIn;
         float erSumL = 0.0f;
         float erSumR = 0.0f;
-        if (earlyParam > 0.0f)
+        if (smEarly > 1e-4f)
         {
           for (int t = 0; t < kER_tapCount; t++)
           {
@@ -1237,7 +1274,7 @@ namespace zaum
         // runs on zero input → output is zero → no contribution to wetL/wetR.
         // The Early=0 output is BIT-IDENTICAL to 0.1.0.11.
         // ----------------------------------------------------------------
-        if (earlyParam > 0.0f)
+        if (smEarly > 1e-4f)
         {
           // L channel diffuser — stage 1 (N=kERD_L1=211)
           {
@@ -1445,9 +1482,11 @@ namespace zaum
           if (walk_D1_L >  excursion) walk_D1_L =  excursion;
           if (walk_D1_L < -excursion) walk_D1_L = -excursion;
 
-          // Fractional read position relative to write head.
-          // (mWrD1_L - scaledD1_L) is the integer center; walk offsets it.
-          float readPos = (mWrD1_L - scaledD1_L) + walk_D1_L;
+          // Fractional read position relative to write head. The Size base is
+          // per-sample-smoothed (smD1_L glides toward targetD1_L) so Size changes
+          // Doppler-glide instead of stepping (zipper fix); walk offsets it.
+          smD1_L += kBaseSlew * (targetD1_L - smD1_L);
+          float readPos = ((float)mWrD1_L - smD1_L) + walk_D1_L;
           int    offset  = (int)floor(readPos);
           float frac    = readPos - (float)offset;
 
@@ -1527,7 +1566,8 @@ namespace zaum
           if (walk_D2_L >  excursion) walk_D2_L =  excursion;
           if (walk_D2_L < -excursion) walk_D2_L = -excursion;
 
-          float readPos = (mWrD2_L - scaledD2_L) + walk_D2_L;
+          smD2_L += kBaseSlew * (targetD2_L - smD2_L);
+          float readPos = ((float)mWrD2_L - smD2_L) + walk_D2_L;
           int    offset  = (int)floor(readPos);
           float frac    = readPos - (float)offset;
 
@@ -1608,7 +1648,8 @@ namespace zaum
           if (walk_D1_R >  excursion) walk_D1_R =  excursion;
           if (walk_D1_R < -excursion) walk_D1_R = -excursion;
 
-          float readPos = (mWrD1_R - scaledD1_R) + walk_D1_R;
+          smD1_R += kBaseSlew * (targetD1_R - smD1_R);
+          float readPos = ((float)mWrD1_R - smD1_R) + walk_D1_R;
           int    offset  = (int)floor(readPos);
           float frac    = readPos - (float)offset;
 
@@ -1681,7 +1722,8 @@ namespace zaum
           if (walk_D2_R >  excursion) walk_D2_R =  excursion;
           if (walk_D2_R < -excursion) walk_D2_R = -excursion;
 
-          float readPos = (mWrD2_R - scaledD2_R) + walk_D2_R;
+          smD2_R += kBaseSlew * (targetD2_R - smD2_R);
+          float readPos = ((float)mWrD2_R - smD2_R) + walk_D2_R;
           int    offset  = (int)floor(readPos);
           float frac    = readPos - (float)offset;
 
@@ -1742,7 +1784,7 @@ namespace zaum
         // Add ER contribution (parallel, AFTER tank multi-tap).
         // Scales to zero when earlyParam=0 → exact 0.1.0.8 output.
         // ER is purely feedforward (FIR): no feedback, no stability concern.
-        float erScale = (kERLevel * earlyParam);
+        float erScale = (kERLevel * smEarly);
         wetL += erScale * erSumL;
         wetR += erScale * erSumR;
 
@@ -1762,6 +1804,10 @@ namespace zaum
         *out2 = outR;
         in1++; in2++; out1++; out2++;
       }
+
+      // Propagate the per-sample-smoothed bases / predelay / ER level (zipper fix).
+      mSmD1_L = smD1_L; mSmD2_L = smD2_L; mSmD1_R = smD1_R; mSmD2_R = smD2_R;
+      mSmPD = smPD; mSmEarly = smEarly;
 
       // Propagate local walk + seed state back to members.
       mWalk_D1_L = walk_D1_L;
@@ -1873,6 +1919,12 @@ namespace zaum
     int    mScaledD2_L;
     int    mScaledD1_R;
     int    mScaledD2_R;
+    // Per-sample-smoothed FLOAT delay bases (zipper fix): the main feedback
+    // end-reads glide off these instead of the int mScaled* (which still feed the
+    // secondary intermediate taps). Plus smoothed predelay tap + ER level.
+    float  mSmD1_L, mSmD2_L, mSmD1_R, mSmD2_R;
+    float  mSmPD;
+    float  mSmEarly;
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
