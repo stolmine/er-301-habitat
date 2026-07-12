@@ -755,6 +755,14 @@ namespace zaum
   // basedelay_smoother (Pecto's combSize fix). The read is fractional (already is,
   // for the Brownian walk), so a fractional base just glides continuously.
   static const float kBaseSlew = 0.000833f;
+  // Brownian-walk decimation: the 8 per-line walks are sub-Hz drift, so their
+  // xorshift64 + integrate + clamp runs only once per kWalkDecim samples; between
+  // updates each walk ramps linearly toward the new target (no zipper). The
+  // boundary step is scaled by sqrt(kWalkDecim) to preserve the random-walk
+  // variance (std of a K-sample displacement), so the drift rate is unchanged.
+  static const int   kWalkDecim     = 16;
+  static const float kWalkStepScale = 4.0f;    // sqrt(kWalkDecim)
+  static const float kWalkIncScale  = 0.0625f; // 1 / kWalkDecim
 
   // ---------------------------------------------------------------------------
   // xorshift64 PRNG — fast, period 2^64-1, audio-thread safe (no libc).
@@ -907,6 +915,9 @@ namespace zaum
       mScaledD2_R = 4853;
       mSmD1_L = 5499.0f; mSmD2_L = 3903.0f; mSmD1_R = 5205.0f; mSmD2_R = 4853.0f;
       mSmPD = 0.0f; mSmEarly = 0.4f;
+      mWalkPhase = 0;
+      mWalkInc_D1_L = mWalkInc_D2_L = mWalkInc_D1_R = mWalkInc_D2_R = 0.0f;
+      mWalkInc_AP1_L = mWalkInc_AP2_L = mWalkInc_AP1_R = mWalkInc_AP2_R = 0.0f;
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
       mSizeFactor       = 0.850;    // raw sizeFactor (Size only), for reference
@@ -1189,9 +1200,52 @@ namespace zaum
       float smPD    = mSmPD;
       float smEarly = mSmEarly;
 
+      // Decimated Brownian-walk locals (phase + per-line ramp increments).
+      int   walkPhase = mWalkPhase;
+      float walkInc_D1_L = mWalkInc_D1_L, walkInc_D2_L = mWalkInc_D2_L;
+      float walkInc_D1_R = mWalkInc_D1_R, walkInc_D2_R = mWalkInc_D2_R;
+      float walkInc_AP1_L = mWalkInc_AP1_L, walkInc_AP2_L = mWalkInc_AP2_L;
+      float walkInc_AP1_R = mWalkInc_AP1_R, walkInc_AP2_R = mWalkInc_AP2_R;
+
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
       {
+        // ----------------------------------------------------------------
+        // 0. Brownian-walk update (decimated 1/kWalkDecim, linearly ramped).
+        //    All 8 per-line walks (4 tank D + 4 outer AP) advance their PRNG and
+        //    re-target only once per kWalkDecim samples; each sample every walk
+        //    ramps by its stored increment. The boundary step is x sqrt(kWalkDecim)
+        //    so the random-walk variance (drift rate) matches the old per-sample
+        //    integrator. Both target endpoints are clamped, so the linear ramp
+        //    stays in bounds -> no per-sample clamp needed. ~16x fewer xorshift64.
+        // ----------------------------------------------------------------
+        if (walkPhase == 0)
+        {
+          #define ZAUM_WALK_RETARGET(seedv, walkv, incv, exc)                 \
+            do {                                                              \
+              seedv = xorshift64(seedv);                                      \
+              float _n = (seedv & 0xFFFF) * (1.0f / 65535.0f) - 0.5f;         \
+              float _t = walkv + _n * step_size * kWalkStepScale;             \
+              if (_t >  (exc)) _t =  (exc);                                   \
+              if (_t < -(exc)) _t = -(exc);                                   \
+              incv = (_t - walkv) * kWalkIncScale;                            \
+            } while (0)
+          ZAUM_WALK_RETARGET(seed_D1_L, walk_D1_L, walkInc_D1_L, excursion);
+          ZAUM_WALK_RETARGET(seed_D2_L, walk_D2_L, walkInc_D2_L, excursion);
+          ZAUM_WALK_RETARGET(seed_D1_R, walk_D1_R, walkInc_D1_R, excursion);
+          ZAUM_WALK_RETARGET(seed_D2_R, walk_D2_R, walkInc_D2_R, excursion);
+          ZAUM_WALK_RETARGET(seed_AP1_L, walk_AP1_L, walkInc_AP1_L, apExcursion);
+          ZAUM_WALK_RETARGET(seed_AP2_L, walk_AP2_L, walkInc_AP2_L, apExcursion);
+          ZAUM_WALK_RETARGET(seed_AP1_R, walk_AP1_R, walkInc_AP1_R, apExcursion);
+          ZAUM_WALK_RETARGET(seed_AP2_R, walk_AP2_R, walkInc_AP2_R, apExcursion);
+          #undef ZAUM_WALK_RETARGET
+        }
+        walk_D1_L += walkInc_D1_L;  walk_D2_L += walkInc_D2_L;
+        walk_D1_R += walkInc_D1_R;  walk_D2_R += walkInc_D2_R;
+        walk_AP1_L += walkInc_AP1_L; walk_AP2_L += walkInc_AP2_L;
+        walk_AP1_R += walkInc_AP1_R; walk_AP2_R += walkInc_AP2_R;
+        if (++walkPhase >= kWalkDecim) walkPhase = 0;
+
         // ----------------------------------------------------------------
         // 1. Mono sum of L + R inputs.
         // ----------------------------------------------------------------
@@ -1438,12 +1492,7 @@ namespace zaum
         float ap1Out_L;
         {
           // Outer AP (kTA1=1087, g=gTA1 from Diffusion) — MODULATED read:
-          // Advance PRNG, integrate walk, clamp to ±apExcursion.
-          seed_AP1_L = xorshift64(seed_AP1_L);
-          float apNoise1L = (seed_AP1_L & 0xFFFF) / 65535.0f - 0.5f;
-          walk_AP1_L += apNoise1L * step_size;
-          if (walk_AP1_L >  apExcursion) walk_AP1_L =  apExcursion;
-          if (walk_AP1_L < -apExcursion) walk_AP1_L = -apExcursion;
+          // walk_AP1_L is updated at the top of the loop (decimated Brownian walk).
 
           // Fractional read at kTA1 + walk behind write head.
           float apReadPos1L = (float)(mWrTA1_L - kTA1) + walk_AP1_L + (float)kTA1_size;
@@ -1475,12 +1524,7 @@ namespace zaum
           // Write current sample to buffer.
           mD1_L[mWrD1_L] = ap1Out_L;
 
-          // Advance PRNG and update walk.
-          seed_D1_L = xorshift64(seed_D1_L);
-          float noise = (seed_D1_L & 0xFFFF) / 65535.0f - 0.5f;
-          walk_D1_L += noise * step_size;
-          if (walk_D1_L >  excursion) walk_D1_L =  excursion;
-          if (walk_D1_L < -excursion) walk_D1_L = -excursion;
+          // walk_D1_L is updated at the top of the loop (decimated Brownian walk).
 
           // Fractional read position relative to write head. The Size base is
           // per-sample-smoothed (smD1_L glides toward targetD1_L) so Size changes
@@ -1529,11 +1573,7 @@ namespace zaum
         float ap2Out_L;
         {
           // Outer AP (kTA2=1471, g=gTA2 from Diffusion) — MODULATED read:
-          seed_AP2_L = xorshift64(seed_AP2_L);
-          float apNoise2L = (seed_AP2_L & 0xFFFF) / 65535.0f - 0.5f;
-          walk_AP2_L += apNoise2L * step_size;
-          if (walk_AP2_L >  apExcursion) walk_AP2_L =  apExcursion;
-          if (walk_AP2_L < -apExcursion) walk_AP2_L = -apExcursion;
+          // walk_AP2_L updated at loop top (decimated Brownian walk).
 
           float apReadPos2L = (float)(mWrTA2_L - kTA2) + walk_AP2_L + (float)kTA2_size;
           int    apOff2L     = (int)apReadPos2L;   // biased >=0: truncation == floor
@@ -1563,11 +1603,7 @@ namespace zaum
         {
           mD2_L[mWrD2_L] = ap2Out_L;
 
-          seed_D2_L = xorshift64(seed_D2_L);
-          float noise = (seed_D2_L & 0xFFFF) / 65535.0f - 0.5f;
-          walk_D2_L += noise * step_size;
-          if (walk_D2_L >  excursion) walk_D2_L =  excursion;
-          if (walk_D2_L < -excursion) walk_D2_L = -excursion;
+          // walk_D2_L updated at loop top (decimated Brownian walk).
 
           smD2_L += kBaseSlew * (targetD2_L - smD2_L);
           float readPos = ((float)mWrD2_L - smD2_L) + walk_D2_L + (float)kD2_L_size;
@@ -1612,11 +1648,7 @@ namespace zaum
         float ap1Out_R;
         {
           // Outer AP (kTA1=1087, g=gTA1 from Diffusion) — MODULATED read:
-          seed_AP1_R = xorshift64(seed_AP1_R);
-          float apNoise1R = (seed_AP1_R & 0xFFFF) / 65535.0f - 0.5f;
-          walk_AP1_R += apNoise1R * step_size;
-          if (walk_AP1_R >  apExcursion) walk_AP1_R =  apExcursion;
-          if (walk_AP1_R < -apExcursion) walk_AP1_R = -apExcursion;
+          // walk_AP1_R updated at loop top (decimated Brownian walk).
 
           float apReadPos1R = (float)(mWrTA1_R - kTA1) + walk_AP1_R + (float)kTA1_size;
           int    apOff1R     = (int)apReadPos1R;   // biased >=0: truncation == floor
@@ -1645,11 +1677,7 @@ namespace zaum
         {
           mD1_R[mWrD1_R] = ap1Out_R;
 
-          seed_D1_R = xorshift64(seed_D1_R);
-          float noise = (seed_D1_R & 0xFFFF) / 65535.0f - 0.5f;
-          walk_D1_R += noise * step_size;
-          if (walk_D1_R >  excursion) walk_D1_R =  excursion;
-          if (walk_D1_R < -excursion) walk_D1_R = -excursion;
+          // walk_D1_R updated at loop top (decimated Brownian walk).
 
           smD1_R += kBaseSlew * (targetD1_R - smD1_R);
           float readPos = ((float)mWrD1_R - smD1_R) + walk_D1_R + (float)kD1_R_size;
@@ -1686,11 +1714,7 @@ namespace zaum
         float ap2Out_R;
         {
           // Outer AP (kTA2=1471, g=gTA2 from Diffusion) — MODULATED read:
-          seed_AP2_R = xorshift64(seed_AP2_R);
-          float apNoise2R = (seed_AP2_R & 0xFFFF) / 65535.0f - 0.5f;
-          walk_AP2_R += apNoise2R * step_size;
-          if (walk_AP2_R >  apExcursion) walk_AP2_R =  apExcursion;
-          if (walk_AP2_R < -apExcursion) walk_AP2_R = -apExcursion;
+          // walk_AP2_R updated at loop top (decimated Brownian walk).
 
           float apReadPos2R = (float)(mWrTA2_R - kTA2) + walk_AP2_R + (float)kTA2_size;
           int    apOff2R     = (int)apReadPos2R;   // biased >=0: truncation == floor
@@ -1719,11 +1743,7 @@ namespace zaum
         {
           mD2_R[mWrD2_R] = ap2Out_R;
 
-          seed_D2_R = xorshift64(seed_D2_R);
-          float noise = (seed_D2_R & 0xFFFF) / 65535.0f - 0.5f;
-          walk_D2_R += noise * step_size;
-          if (walk_D2_R >  excursion) walk_D2_R =  excursion;
-          if (walk_D2_R < -excursion) walk_D2_R = -excursion;
+          // walk_D2_R updated at loop top (decimated Brownian walk).
 
           smD2_R += kBaseSlew * (targetD2_R - smD2_R);
           float readPos = ((float)mWrD2_R - smD2_R) + walk_D2_R + (float)kD2_R_size;
@@ -1811,6 +1831,13 @@ namespace zaum
       // Propagate the per-sample-smoothed bases / predelay / ER level (zipper fix).
       mSmD1_L = smD1_L; mSmD2_L = smD2_L; mSmD1_R = smD1_R; mSmD2_R = smD2_R;
       mSmPD = smPD; mSmEarly = smEarly;
+
+      // Propagate decimated-walk phase + per-line ramp increments.
+      mWalkPhase = walkPhase;
+      mWalkInc_D1_L = walkInc_D1_L; mWalkInc_D2_L = walkInc_D2_L;
+      mWalkInc_D1_R = walkInc_D1_R; mWalkInc_D2_R = walkInc_D2_R;
+      mWalkInc_AP1_L = walkInc_AP1_L; mWalkInc_AP2_L = walkInc_AP2_L;
+      mWalkInc_AP1_R = walkInc_AP1_R; mWalkInc_AP2_R = walkInc_AP2_R;
 
       // Propagate local walk + seed state back to members.
       mWalk_D1_L = walk_D1_L;
@@ -1928,6 +1955,11 @@ namespace zaum
     float  mSmD1_L, mSmD2_L, mSmD1_R, mSmD2_R;
     float  mSmPD;
     float  mSmEarly;
+    // Decimated Brownian-walk state: phase counter + per-line ramp increments
+    // (the walk RNG updates once per kWalkDecim samples; walk += inc each sample).
+    int    mWalkPhase;
+    float  mWalkInc_D1_L, mWalkInc_D2_L, mWalkInc_D1_R, mWalkInc_D2_R;
+    float  mWalkInc_AP1_L, mWalkInc_AP2_L, mWalkInc_AP1_R, mWalkInc_AP2_R;
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
