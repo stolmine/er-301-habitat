@@ -1,5 +1,5 @@
 PKGNAME ?= anamnesis
-PKGVERSION ?= 0.2.0.82
+PKGVERSION ?= 0.2.0.83
 
 include scripts/env.mk
 
@@ -22,11 +22,16 @@ SWIG_WRAPPER = $(OUT_DIR)/$(MOD_DIR)/$(PKGNAME)_swig.cpp
 SWIG_OBJECT = $(SWIG_WRAPPER:%.cpp=%.o)
 OBJECTS += $(SWIG_OBJECT)
 
-# Track all package headers as SWIG dependencies (per
-# feedback_swig_header_dep). Recursive glob so atoms/*.h is tracked.
-# NOTE: eurorack/ or shared-header edits still require a `-clean` to
-# rebuild source .o files that transitively include them.
+# Track all package headers as SWIG dependencies (per feedback_swig_header_dep).
+# Recursive glob so atoms/*.h is tracked. A header edit that changes a class
+# layout / sizeof while a stale wrapper .o survives is the documented insert-
+# crash trap, so we go BEYOND mtime deps: SWIG_STAMP force-DELETES the generated
+# wrapper + its .o whenever ANY header changes, guaranteeing a from-scratch SWIG
+# re-parse (bulletproof vs interrupted builds, clock skew, byte-identical regen).
+# NOTE: eurorack/ or shared-header edits still require a `-clean` to rebuild
+# source .o files that transitively include them.
 SWIG_HEADER_DEPS := $(call rwildcard, $(MOD_DIR), *.h)
+SWIG_STAMP := $(OUT_DIR)/$(MOD_DIR)/.swig_headers.stamp
 
 ASSETS := $(call rwildcard, $(ASSET_DIR), *)
 
@@ -108,7 +113,14 @@ $(OUT_DIR)/%.o: %.c
 	@mkdir -p $(@D)
 	@$(CC) $(CFLAGS) -std=gnu11 -c $< -o $@
 
-$(SWIG_WRAPPER): $(SWIG_SOURCE) $(SWIG_HEADER_DEPS)
+# Force-clean: any header change wipes the generated wrapper + its .o BEFORE the
+# regen below runs, so a stale sizeof/layout can never survive an incremental build.
+$(SWIG_STAMP): $(SWIG_HEADER_DEPS)
+	@mkdir -p $(@D)
+	@rm -f $(SWIG_WRAPPER) $(SWIG_OBJECT)
+	@touch $@
+
+$(SWIG_WRAPPER): $(SWIG_SOURCE) $(SWIG_HEADER_DEPS) $(SWIG_STAMP)
 	@echo [SWIG $<]
 	@mkdir -p $(@D)
 	@$(SWIG) -c++ $(SWIGFLAGS) -o $@ $<
