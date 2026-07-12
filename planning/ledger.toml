@@ -1194,3 +1194,15 @@ stamped = "2026-07-09T20:59:09-05:00"
 area = "docs"
 verify = { kind = "manual", ref = "produce the intro video per the script in video.md" }
 note = "planning/todo-archive.md '## Video', video.md."
+
+# Fragment: port the Open303 acid-bassline emulation as an ER-301 voice.
+# Append via: scripts/dev ledger-append <this file>
+
+[[item]]
+id = "open303-port"
+title = "Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit"
+status = "todo"
+stamped = "2026-07-11T22:08:06-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "emu audition A/B vs an Open303 reference render; bench-verify on am335x for CPU load + NEON/AAPCS stability" }
+note = "Open303 = Robin Schmidt's open-source TB-303 emulation (rosic DSP: mip-mapped BLIT saw/square oscillator, TeeBee Moog-ladder filter, analog decay envelope with accent + slide). MIT licensed (confirm License.txt on import and keep attribution). Habitat-specific porting concerns: (1) rosic is double-heavy and am335x has no DP NEON, so hot loops need float retargeting per the Cortex-A8 no-double rule; (2) user-facing unit name/description stays generic per the no-third-party-branding convention (no Roland/303 wording); (3) target package TBD (candidate: catchall, or a dedicated voice package). Reference engine: github RobinSchmidt/Open303 (rosic_Open303.*)."
