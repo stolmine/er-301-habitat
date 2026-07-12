@@ -283,6 +283,25 @@
 namespace zaum
 {
 
+  // Float (single-precision) variants of the house helpers, for the am335x
+  // per-sample hot loop (Cortex-A8 has no double-precision NEON, so double math
+  // falls to slow scalar VFPv3). Kept local so this does not touch shared house.
+  // Same math as house::allpassNestedStep / house::spiralFastSaturate.
+  static inline void allpassNestedStepF(float xNow, float vDelayed, float g,
+                                        float &vNew, float &yOut)
+  {
+    vNew = xNow + g * vDelayed;
+    yOut = -g * vNew + vDelayed;
+  }
+  static inline float spiralFastSaturateF(float x, float densityA)
+  {
+    float absX = fabsf(x) * densityA;
+    if (absX > 1.5707963f) absX = 1.5707963f;
+    float x2 = absX * absX;
+    float s = absX * (1.0f + x2 * (-0.16666667f + x2 * 0.008333333f));
+    return (x > 0.0f) ? (s / densityA) : -(s / densityA);
+  }
+
   // ---------------------------------------------------------------------------
   // Buffer size constants
   // ---------------------------------------------------------------------------
@@ -316,7 +335,7 @@ namespace zaum
   // ER diffuser allpass coefficient — shared across all 4 stages.
   // g=0.6: unity-gain (|g|<1), enough diffusion to smear 7–70 ms FIR taps
   // into a smooth wash within a few ms of smear. Primary tuning knob.
-  static const double kERDiffG = 0.6;
+  static const float kERDiffG = 0.6;
 
   // Tank allpass buffers (series-cascade Schroeder APF, BOTH L and R loops).
   // Each tank AP is a SERIES CASCADE: outer (kTA1=1087, g=gTA1_out) feeds
@@ -569,7 +588,7 @@ namespace zaum
   // Form: y[n] = x[n] - x[n-1] + kDCBlockR * y[n-1]
   // fc ≈ (1-R)*sr/(2π) ≈ 3.8 Hz at 48 kHz — inaudible in reverb tail.
   // ---------------------------------------------------------------------------
-  static const double kDCBlockR = 0.9995;
+  static const float kDCBlockR = 0.9995;
 
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
@@ -615,15 +634,15 @@ namespace zaum
   static const double kFD2a = 0.2838;    // D2 intermediate tap fraction a
   static const double kFD2b = 0.6113;    // D2 intermediate tap fraction b
 
-  static const double kWap1  = 0.167;    // weight: ap1Out (early cascade tap)
-  static const double kWd1a  = 0.111;    // weight: D1 tap a (+)
-  static const double kWd1b  = 0.111;    // weight: D1 tap b (-)
-  static const double kWd1c  = 0.111;    // weight: D1 tap c (+)
-  static const double kWd1e  = 0.139;    // weight: D1 end read (+)
-  static const double kWd2a  = 0.111;    // weight: D2 tap a (-)
-  static const double kWd2b  = 0.111;    // weight: D2 tap b (+)
-  static const double kWd2e  = 0.139;    // weight: D2 end read (+)
-  static const double kWetLevel = 2.2;   // level match for signed-sum cancellation
+  static const float kWap1  = 0.167;    // weight: ap1Out (early cascade tap)
+  static const float kWd1a  = 0.111;    // weight: D1 tap a (+)
+  static const float kWd1b  = 0.111;    // weight: D1 tap b (-)
+  static const float kWd1c  = 0.111;    // weight: D1 tap c (+)
+  static const float kWd1e  = 0.139;    // weight: D1 end read (+)
+  static const float kWd2a  = 0.111;    // weight: D2 tap a (-)
+  static const float kWd2b  = 0.111;    // weight: D2 tap b (+)
+  static const float kWd2e  = 0.139;    // weight: D2 end read (+)
+  static const float kWetLevel = 2.2;   // level match for signed-sum cancellation
 
   // ---------------------------------------------------------------------------
   // Early-reflection (ER) FIR network — Tier 3 (0.1.0.9).
@@ -685,14 +704,14 @@ namespace zaum
   // Energy model: -6 dB per octave of delay time (Moorer measured).
   // Signs alternate to emulate surface-reflection phase inversions.
   // Absolute magnitudes: 0.68, 0.56, 0.45, 0.36, 0.28, 0.22, 0.17, 0.13, 0.10
-  static const double kER_gain[9] = {
+  static const float kER_gain[9] = {
     +0.68, -0.56, +0.45, -0.36, +0.28,
     -0.22, +0.17, -0.13, +0.10
   };
   //
   // Output level scaler. PRIMARY TUNING KNOB for ER-vs-tail balance.
   // At Early=0.4, mean |erSum| ~0.4 → contribution = 1.5 * 0.4 * 0.4 = 0.24.
-  static const double kERLevel = 1.5;
+  static const float kERLevel = 1.5;
 
   // ---------------------------------------------------------------------------
   // Early room-macro coupling tuning constants (0.1.0.12).
@@ -972,10 +991,10 @@ namespace zaum
       // Inline expansion — no function call overhead in the hot path.
       #define DIFFCLAMP(v) ((v) < kDiffLo ? kDiffLo : ((v) > kDiffHi ? kDiffHi : (v)))
 
-      const double gID12 = DIFFCLAMP(kDiffBaseID12 + diffDelta);
-      const double gID34 = DIFFCLAMP(kDiffBaseID34 + diffDelta);
-      const double gTA1  = DIFFCLAMP(kDiffBaseTA1  + diffDelta);
-      const double gTA2  = DIFFCLAMP(kDiffBaseTA2  + diffDelta);
+      const float gID12 = DIFFCLAMP(kDiffBaseID12 + diffDelta);
+      const float gID34 = DIFFCLAMP(kDiffBaseID34 + diffDelta);
+      const float gTA1  = DIFFCLAMP(kDiffBaseTA1  + diffDelta);
+      const float gTA2  = DIFFCLAMP(kDiffBaseTA2  + diffDelta);
 
       #undef DIFFCLAMP
 
@@ -1013,7 +1032,7 @@ namespace zaum
 
       // Effective g_d: shorter tail as Early rises.
       // g_d_eff = g_d - macro*kMacroDecayAmt*(g_d - kGdMin)
-      double g_d_eff = g_d - macro * kMacroDecayAmt * (g_d - kGdMin);
+      float g_d_eff = g_d - macro * kMacroDecayAmt * (g_d - kGdMin);
       if (g_d_eff < kGdMin)  g_d_eff = kGdMin;   // floor: never below kGdMin
       if (g_d_eff > kGdCap)  g_d_eff = kGdCap;   // ceiling: same hard cap as raw
 
@@ -1022,7 +1041,7 @@ namespace zaum
       // dampEff ∈ [dampD, 1.0]; the coeff mapping then gives a lower (darker) value.
       double dampEffD = dampD + macro * kMacroDampAmt;
       if (dampEffD > 1.0) dampEffD = 1.0;
-      const double dampCoeffEff = 1.0 - dampEffD * (1.0 - kMinDampCoeff);
+      const float dampCoeffEff = 1.0 - dampEffD * (1.0 - kMinDampCoeff);
       // (dampCoeffEff replaces dampCoeff everywhere damping is applied in the tank.)
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
@@ -1077,8 +1096,8 @@ namespace zaum
       const int offD2b_R = toOdd((int)(kFD2b * scaledD2_R + 0.5));
 
       // Inner AP coefficients — fixed this sub-phase; hard cap < 0.95.
-      const double gTA1_in = (kGTA1_in > 0.95) ? 0.95 : kGTA1_in;
-      const double gTA2_in = (kGTA2_in > 0.95) ? 0.95 : kGTA2_in;
+      const float gTA1_in = (kGTA1_in > 0.95) ? 0.95 : kGTA1_in;
+      const float gTA2_in = (kGTA2_in > 0.95) ? 0.95 : kGTA2_in;
 
       // Modulation parameters — computed once per block.
       // excursion: how far the walk can stray from center, in samples.
@@ -1101,9 +1120,9 @@ namespace zaum
       //   at Size=1.0, scale=1.5/0.85≈1.76; without cap, scaled excursion could reach
       //   72*1.76=127 smp → walk+interp=128 = headroom limit with zero margin. Cap
       //   holds it at 72 smp max — safe with the 128-sample headroom as before.
-      double excursion = rawExcursion * (sizeFactorEff / kSizeRef);
+      float excursion = rawExcursion * (sizeFactorEff / kSizeRef);
       if (excursion > kMaxExcursion) excursion = kMaxExcursion;
-      const double step_size = kMinStep + (double)modRateParam * (kMaxStep - kMinStep);
+      const float step_size = kMinStep + (double)modRateParam * (kMaxStep - kMinStep);
 
       // Outer AP modulation excursion (0.1.0.11).
       // Driven by same Mod param (unified depth control) but mapped to a smaller
@@ -1112,14 +1131,14 @@ namespace zaum
       //   Mod=0.40 → 2.7 smp (gentle, default)
       //   Mod=1.00 → 6.0 smp (subtle, below audible chorus on 1087/1471 smp delays)
       // Bounds: apExcursion=6 + interp neighbor=1 → 7 < kAPHeadroom=16 — safe.
-      const double apExcursion = kAPModMin + (double)modParam * (kAPModMax - kAPModMin);
+      const float apExcursion = kAPModMin + (double)modParam * (kAPModMax - kAPModMin);
 
       // Copy walk accumulators and seeds into local variables for the inner
       // loop. Propagate back to members at end of block.
-      double walk_D1_L = mWalk_D1_L;
-      double walk_D2_L = mWalk_D2_L;
-      double walk_D1_R = mWalk_D1_R;
-      double walk_D2_R = mWalk_D2_R;
+      float walk_D1_L = mWalk_D1_L;
+      float walk_D2_L = mWalk_D2_L;
+      float walk_D1_R = mWalk_D1_R;
+      float walk_D2_R = mWalk_D2_R;
 
       uint64_t seed_D1_L = mSeed_D1_L;
       uint64_t seed_D2_L = mSeed_D2_L;
@@ -1127,10 +1146,10 @@ namespace zaum
       uint64_t seed_D2_R = mSeed_D2_R;
 
       // Outer AP Brownian walk locals (0.1.0.11) — propagated back after the block.
-      double walk_AP1_L = mWalk_AP1_L;
-      double walk_AP2_L = mWalk_AP2_L;
-      double walk_AP1_R = mWalk_AP1_R;
-      double walk_AP2_R = mWalk_AP2_R;
+      float walk_AP1_L = mWalk_AP1_L;
+      float walk_AP2_L = mWalk_AP2_L;
+      float walk_AP1_R = mWalk_AP1_R;
+      float walk_AP2_R = mWalk_AP2_R;
 
       uint64_t seed_AP1_L = mSeed_AP1_L;
       uint64_t seed_AP2_L = mSeed_AP2_L;
@@ -1138,12 +1157,12 @@ namespace zaum
       uint64_t seed_AP2_R = mSeed_AP2_R;
 
       // Copy HF damp filter state local for the sample loop.
-      double dampL = mDampL;
-      double dampR = mDampR;
+      float dampL = mDampL;
+      float dampR = mDampR;
 
       // Copy DC blocker state local for the sample loop.
-      double dcx1_L = mDCx1_L;  double dcy1_L = mDCy1_L;
-      double dcx1_R = mDCx1_R;  double dcy1_R = mDCy1_R;
+      float dcx1_L = mDCx1_L;  float dcy1_L = mDCy1_L;
+      float dcx1_R = mDCx1_R;  float dcy1_R = mDCy1_R;
 
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
@@ -1151,19 +1170,19 @@ namespace zaum
         // ----------------------------------------------------------------
         // 1. Mono sum of L + R inputs.
         // ----------------------------------------------------------------
-        double drySampleL = (double)*in1;
-        double drySampleR = (double)*in2;
-        double monoIn = (drySampleL + drySampleR) * 0.5;
+        float drySampleL = *in1;
+        float drySampleR = *in2;
+        float monoIn = (drySampleL + drySampleR) * 0.5f;
 
         // ----------------------------------------------------------------
         // 2. Predelay ring buffer.
         //    Write, then read at tap distance behind write head.
         //    Buffer size kPD is power-of-two: wrap with & mask.
         // ----------------------------------------------------------------
-        mPD[mWrPD] = (float)monoIn;
+        mPD[mWrPD] = monoIn;
         int rdPD = mWrPD - predelayTap;
         if (rdPD < 0) rdPD += kPD;
-        double diffIn = (double)mPD[rdPD];
+        float diffIn = mPD[rdPD];
         mWrPD = (mWrPD + 1) & (kPD - 1);
 
         // ----------------------------------------------------------------
@@ -1183,17 +1202,17 @@ namespace zaum
         // 0.1.0.8 signal path is reproduced exactly (no floating-point
         // residual beyond the invariant 0 * anything = 0).
         // ----------------------------------------------------------------
-        mER[mWrER] = (float)diffIn;
-        double erSumL = 0.0;
-        double erSumR = 0.0;
+        mER[mWrER] = diffIn;
+        float erSumL = 0.0f;
+        float erSumR = 0.0f;
         if (earlyParam > 0.0f)
         {
           for (int t = 0; t < kER_tapCount; t++)
           {
             int idxL = (mWrER - kER_delayL[t]) & (kER - 1);
             int idxR = (mWrER - kER_delayR[t]) & (kER - 1);
-            erSumL += kER_gain[t] * (double)mER[idxL];
-            erSumR += kER_gain[t] * (double)mER[idxR];
+            erSumL += kER_gain[t] * (float)mER[idxL];
+            erSumR += kER_gain[t] * (float)mER[idxR];
           }
         }
         mWrER = (mWrER + 1) & (kER - 1);
@@ -1222,40 +1241,40 @@ namespace zaum
         {
           // L channel diffuser — stage 1 (N=kERD_L1=211)
           {
-            double vD = (double)mERD_L1[mWrERD_L1];
-            double vNew, yOut;
-            house::allpassNestedStep(erSumL, vD, kERDiffG, vNew, yOut);
-            mERD_L1[mWrERD_L1] = (float)vNew;
+            float vD = mERD_L1[mWrERD_L1];
+            float vNew, yOut;
+            allpassNestedStepF(erSumL, vD, kERDiffG, vNew, yOut);
+            mERD_L1[mWrERD_L1] = vNew;
             mWrERD_L1++;
             if (mWrERD_L1 >= kERD_L1) mWrERD_L1 = 0;
             erSumL = yOut;
           }
           // L channel diffuser — stage 2 (N=kERD_L2=317)
           {
-            double vD = (double)mERD_L2[mWrERD_L2];
-            double vNew, yOut;
-            house::allpassNestedStep(erSumL, vD, kERDiffG, vNew, yOut);
-            mERD_L2[mWrERD_L2] = (float)vNew;
+            float vD = mERD_L2[mWrERD_L2];
+            float vNew, yOut;
+            allpassNestedStepF(erSumL, vD, kERDiffG, vNew, yOut);
+            mERD_L2[mWrERD_L2] = vNew;
             mWrERD_L2++;
             if (mWrERD_L2 >= kERD_L2) mWrERD_L2 = 0;
             erSumL = yOut;
           }
           // R channel diffuser — stage 1 (N=kERD_R1=241)
           {
-            double vD = (double)mERD_R1[mWrERD_R1];
-            double vNew, yOut;
-            house::allpassNestedStep(erSumR, vD, kERDiffG, vNew, yOut);
-            mERD_R1[mWrERD_R1] = (float)vNew;
+            float vD = mERD_R1[mWrERD_R1];
+            float vNew, yOut;
+            allpassNestedStepF(erSumR, vD, kERDiffG, vNew, yOut);
+            mERD_R1[mWrERD_R1] = vNew;
             mWrERD_R1++;
             if (mWrERD_R1 >= kERD_R1) mWrERD_R1 = 0;
             erSumR = yOut;
           }
           // R channel diffuser — stage 2 (N=kERD_R2=359)
           {
-            double vD = (double)mERD_R2[mWrERD_R2];
-            double vNew, yOut;
-            house::allpassNestedStep(erSumR, vD, kERDiffG, vNew, yOut);
-            mERD_R2[mWrERD_R2] = (float)vNew;
+            float vD = mERD_R2[mWrERD_R2];
+            float vNew, yOut;
+            allpassNestedStepF(erSumR, vD, kERDiffG, vNew, yOut);
+            mERD_R2[mWrERD_R2] = vNew;
             mWrERD_R2++;
             if (mWrERD_R2 >= kERD_R2) mWrERD_R2 = 0;
             erSumR = yOut;
@@ -1272,10 +1291,10 @@ namespace zaum
 
         // ID1 (delay 229, g=0.75)
         {
-          double vD = (double)mID1[mWrID1];   // read BEFORE write (v[n-N])
-          double vNew, yOut;
-          house::allpassNestedStep(diffIn, vD, gID12, vNew, yOut);
-          mID1[mWrID1] = (float)vNew;
+          float vD = mID1[mWrID1];   // read BEFORE write (v[n-N])
+          float vNew, yOut;
+          allpassNestedStepF(diffIn, vD, gID12, vNew, yOut);
+          mID1[mWrID1] = vNew;
           mWrID1++;
           if (mWrID1 >= kID1) mWrID1 = 0;
           diffIn = yOut;
@@ -1283,10 +1302,10 @@ namespace zaum
 
         // ID2 (delay 173, g=0.75)
         {
-          double vD = (double)mID2[mWrID2];
-          double vNew, yOut;
-          house::allpassNestedStep(diffIn, vD, gID12, vNew, yOut);
-          mID2[mWrID2] = (float)vNew;
+          float vD = mID2[mWrID2];
+          float vNew, yOut;
+          allpassNestedStepF(diffIn, vD, gID12, vNew, yOut);
+          mID2[mWrID2] = vNew;
           mWrID2++;
           if (mWrID2 >= kID2) mWrID2 = 0;
           diffIn = yOut;
@@ -1294,10 +1313,10 @@ namespace zaum
 
         // ID3 (delay 613, g=0.625)
         {
-          double vD = (double)mID3[mWrID3];
-          double vNew, yOut;
-          house::allpassNestedStep(diffIn, vD, gID34, vNew, yOut);
-          mID3[mWrID3] = (float)vNew;
+          float vD = mID3[mWrID3];
+          float vNew, yOut;
+          allpassNestedStepF(diffIn, vD, gID34, vNew, yOut);
+          mID3[mWrID3] = vNew;
           mWrID3++;
           if (mWrID3 >= kID3) mWrID3 = 0;
           diffIn = yOut;
@@ -1305,10 +1324,10 @@ namespace zaum
 
         // ID4 (delay 449, g=0.625)
         {
-          double vD = (double)mID4[mWrID4];
-          double vNew, yOut;
-          house::allpassNestedStep(diffIn, vD, gID34, vNew, yOut);
-          mID4[mWrID4] = (float)vNew;
+          float vD = mID4[mWrID4];
+          float vNew, yOut;
+          allpassNestedStepF(diffIn, vD, gID34, vNew, yOut);
+          mID4[mWrID4] = vNew;
           mWrID4++;
           if (mWrID4 >= kID4) mWrID4 = 0;
           diffIn = yOut;
@@ -1329,9 +1348,9 @@ namespace zaum
         //   3. Integrate:  walk += n * step_size
         //   4. Clamp:      walk = clamp(walk, -excursion, +excursion)
         //   5. Compute fractional read position:
-        //        readPos = wrHead - scaledBase + walk   (double)
+        //        readPos = wrHead - scaledBase + walk   (float)
         //        offset  = (int)floor(readPos)
-        //        frac    = readPos - (double)offset
+        //        frac    = readPos - (float)offset
         //   6. Wrap to valid buffer indices (add size, mod size):
         //        i0 = ((offset % bufSize) + bufSize) % bufSize
         //        i1 = (i0 + 1) % bufSize
@@ -1349,8 +1368,8 @@ namespace zaum
         // with higher Damp = progressively darker tail.
         //
         // CROSS-COUPLE WIRING (Dattorro, coupling coefficient = 1.0):
-        //   mFeedback_L = spiralFastSaturate(d2Read_R * g_d_eff, 1.0)
-        //   mFeedback_R = spiralFastSaturate(d2Read_L * g_d_eff, 1.0)
+        //   mFeedback_L = spiralFastSaturate(d2Read_R * g_d_eff, 1.0f)
+        //   mFeedback_R = spiralFastSaturate(d2Read_L * g_d_eff, 1.0f)
         //   (0.1.0.12: uses g_d_eff — macro-biased decay — not raw g_d)
         //
         // ORDERING: Both loops fully computed for THIS sample before
@@ -1360,12 +1379,12 @@ namespace zaum
         // -- L LOOP --
 
         // Accumulate: diffusion output + previous-sample cross-feed from R.
-        double tankIn_L = diffIn + mFeedback_L;
+        float tankIn_L = diffIn + mFeedback_L;
 
         // DC blocker on tank input (L loop).
         // y[n] = x[n] - x[n-1] + R*y[n-1]
         {
-          double dcOut = tankIn_L - dcx1_L + kDCBlockR * dcy1_L;
+          float dcOut = tankIn_L - dcx1_L + kDCBlockR * dcy1_L;
           dcx1_L = tankIn_L;
           dcy1_L = dcOut;
           tankIn_L = dcOut;
@@ -1379,64 +1398,64 @@ namespace zaum
         // read at (kTA1 ± walk) behind the write head, using the headroom'd buffer
         // (kTA1_size=1119). Write still advances by 1 each sample at the write head.
         // Inner AP (kTA1i=367) remains UNMODULATED — exact read at write head.
-        double ap1Out_L;
+        float ap1Out_L;
         {
           // Outer AP (kTA1=1087, g=gTA1 from Diffusion) — MODULATED read:
           // Advance PRNG, integrate walk, clamp to ±apExcursion.
           seed_AP1_L = xorshift64(seed_AP1_L);
-          double apNoise1L = (double)(seed_AP1_L & 0xFFFF) / 65535.0 - 0.5;
+          float apNoise1L = (seed_AP1_L & 0xFFFF) / 65535.0f - 0.5f;
           walk_AP1_L += apNoise1L * step_size;
           if (walk_AP1_L >  apExcursion) walk_AP1_L =  apExcursion;
           if (walk_AP1_L < -apExcursion) walk_AP1_L = -apExcursion;
 
           // Fractional read at kTA1 + walk behind write head.
-          double apReadPos1L = (double)(mWrTA1_L - kTA1) + walk_AP1_L;
+          float apReadPos1L = (mWrTA1_L - kTA1) + walk_AP1_L;
           int    apOff1L     = (int)floor(apReadPos1L);
-          double apFrac1L    = apReadPos1L - (double)apOff1L;
+          float apFrac1L    = apReadPos1L - (float)apOff1L;
           int    apI0_1L     = ((apOff1L % kTA1_size) + kTA1_size) % kTA1_size;
           int    apI1_1L     = (apI0_1L + 1) % kTA1_size;
-          double vO1d = (1.0 - apFrac1L) * (double)mTA1_L[apI0_1L]
-                      +        apFrac1L  * (double)mTA1_L[apI1_1L];
+          float vO1d = (1.0f - apFrac1L) * (float)mTA1_L[apI0_1L]
+                      +        apFrac1L  * (float)mTA1_L[apI1_1L];
 
-          double vO1n = tankIn_L + gTA1 * vO1d;
-          double in1  = -gTA1 * vO1n + vO1d;               // outer AP output → inner input
-          mTA1_L[mWrTA1_L] = (float)vO1n;
+          float vO1n = tankIn_L + gTA1 * vO1d;
+          float in1  = -gTA1 * vO1n + vO1d;               // outer AP output → inner input
+          mTA1_L[mWrTA1_L] = vO1n;
           mWrTA1_L++;
           if (mWrTA1_L >= kTA1_size) mWrTA1_L = 0;
           // Inner AP (kTA1i=367, g=gTA1_in=0.50) — UNMODULATED, exact read:
-          double vI1d = (double)mTA1i_L[mWrTA1i_L];        // inner read v[n-367]
-          double vI1n = in1 + gTA1_in * vI1d;
+          float vI1d = mTA1i_L[mWrTA1i_L];        // inner read v[n-367]
+          float vI1n = in1 + gTA1_in * vI1d;
           ap1Out_L    = -gTA1_in * vI1n + vI1d;            // cascade output
-          mTA1i_L[mWrTA1i_L] = (float)vI1n;
+          mTA1i_L[mWrTA1i_L] = vI1n;
           mWrTA1i_L++;
           if (mWrTA1i_L >= kTA1i) mWrTA1i_L = 0;
         }
 
         // D1_L: Brownian-modulated read with linear interpolation.
         // Uses Size-scaled base length (scaledD1_L).
-        double d1Read_L;
+        float d1Read_L;
         {
           // Write current sample to buffer.
-          mD1_L[mWrD1_L] = (float)ap1Out_L;
+          mD1_L[mWrD1_L] = ap1Out_L;
 
           // Advance PRNG and update walk.
           seed_D1_L = xorshift64(seed_D1_L);
-          double noise = (double)(seed_D1_L & 0xFFFF) / 65535.0 - 0.5;
+          float noise = (seed_D1_L & 0xFFFF) / 65535.0f - 0.5f;
           walk_D1_L += noise * step_size;
           if (walk_D1_L >  excursion) walk_D1_L =  excursion;
           if (walk_D1_L < -excursion) walk_D1_L = -excursion;
 
           // Fractional read position relative to write head.
           // (mWrD1_L - scaledD1_L) is the integer center; walk offsets it.
-          double readPos = (double)(mWrD1_L - scaledD1_L) + walk_D1_L;
+          float readPos = (mWrD1_L - scaledD1_L) + walk_D1_L;
           int    offset  = (int)floor(readPos);
-          double frac    = readPos - (double)offset;
+          float frac    = readPos - (float)offset;
 
           // Map offset to valid buffer indices [0, kD1_L_size).
           int i0 = ((offset % kD1_L_size) + kD1_L_size) % kD1_L_size;
           int i1 = (i0 + 1) % kD1_L_size;
 
-          d1Read_L = (1.0 - frac) * (double)mD1_L[i0] + frac * (double)mD1_L[i1];
+          d1Read_L = (1.0f - frac) * (float)mD1_L[i0] + frac * (float)mD1_L[i1];
 
           mWrD1_L++;
           if (mWrD1_L >= kD1_L_size) mWrD1_L = 0;
@@ -1445,14 +1464,14 @@ namespace zaum
         // D1_L intermediate taps — STATIC (unmodulated), read from the same buffer.
         // Offsets computed at block rate as fraction of scaledD1_L, rounded to odd.
         // Modular wrap matches the end-read pattern; all offsets < scaledD1_L < bufSize.
-        double d1tap_a_L, d1tap_b_L, d1tap_c_L;
+        float d1tap_a_L, d1tap_b_L, d1tap_c_L;
         {
           int ia = ((mWrD1_L - offD1a_L) % kD1_L_size + kD1_L_size) % kD1_L_size;
           int ib = ((mWrD1_L - offD1b_L) % kD1_L_size + kD1_L_size) % kD1_L_size;
           int ic = ((mWrD1_L - offD1c_L) % kD1_L_size + kD1_L_size) % kD1_L_size;
-          d1tap_a_L = (double)mD1_L[ia];
-          d1tap_b_L = (double)mD1_L[ib];
-          d1tap_c_L = (double)mD1_L[ic];
+          d1tap_a_L = mD1_L[ia];
+          d1tap_b_L = mD1_L[ib];
+          d1tap_c_L = mD1_L[ic];
         }
 
         // HF damp: one-pole LP on D1 output (Schroeder/Jot feedback form).
@@ -1460,84 +1479,84 @@ namespace zaum
         // Uses dampCoeffEff (macro-biased: more absorption as Early rises).
         // Damp=0,Early=0 → dampCoeffEff=1.0 → dampL tracks x exactly (passthrough).
         dampL += dampCoeffEff * (d1Read_L - dampL);
-        double dampedD1_L = dampL;
+        float dampedD1_L = dampL;
 
         // AP2_L: series cascade — outer (kTA2=1471, g=gTA2) → inner (kTA2i=491, g=gTA2_in).
         // 0.1.0.11: outer AP2_L also uses Brownian-modulated fractional read (kTA2_size=1503).
         // Inner AP2i_L (491) remains UNMODULATED.
-        double ap2Out_L;
+        float ap2Out_L;
         {
           // Outer AP (kTA2=1471, g=gTA2 from Diffusion) — MODULATED read:
           seed_AP2_L = xorshift64(seed_AP2_L);
-          double apNoise2L = (double)(seed_AP2_L & 0xFFFF) / 65535.0 - 0.5;
+          float apNoise2L = (seed_AP2_L & 0xFFFF) / 65535.0f - 0.5f;
           walk_AP2_L += apNoise2L * step_size;
           if (walk_AP2_L >  apExcursion) walk_AP2_L =  apExcursion;
           if (walk_AP2_L < -apExcursion) walk_AP2_L = -apExcursion;
 
-          double apReadPos2L = (double)(mWrTA2_L - kTA2) + walk_AP2_L;
+          float apReadPos2L = (mWrTA2_L - kTA2) + walk_AP2_L;
           int    apOff2L     = (int)floor(apReadPos2L);
-          double apFrac2L    = apReadPos2L - (double)apOff2L;
+          float apFrac2L    = apReadPos2L - (float)apOff2L;
           int    apI0_2L     = ((apOff2L % kTA2_size) + kTA2_size) % kTA2_size;
           int    apI1_2L     = (apI0_2L + 1) % kTA2_size;
-          double vO2d = (1.0 - apFrac2L) * (double)mTA2_L[apI0_2L]
-                      +        apFrac2L  * (double)mTA2_L[apI1_2L];
+          float vO2d = (1.0f - apFrac2L) * (float)mTA2_L[apI0_2L]
+                      +        apFrac2L  * (float)mTA2_L[apI1_2L];
 
-          double vO2n = dampedD1_L + gTA2 * vO2d;
-          double in2  = -gTA2 * vO2n + vO2d;
-          mTA2_L[mWrTA2_L] = (float)vO2n;
+          float vO2n = dampedD1_L + gTA2 * vO2d;
+          float in2  = -gTA2 * vO2n + vO2d;
+          mTA2_L[mWrTA2_L] = vO2n;
           mWrTA2_L++;
           if (mWrTA2_L >= kTA2_size) mWrTA2_L = 0;
           // Inner AP (kTA2i=491, g=gTA2_in=0.50) — UNMODULATED, exact read:
-          double vI2d = (double)mTA2i_L[mWrTA2i_L];
-          double vI2n = in2 + gTA2_in * vI2d;
+          float vI2d = mTA2i_L[mWrTA2i_L];
+          float vI2n = in2 + gTA2_in * vI2d;
           ap2Out_L    = -gTA2_in * vI2n + vI2d;
-          mTA2i_L[mWrTA2i_L] = (float)vI2n;
+          mTA2i_L[mWrTA2i_L] = vI2n;
           mWrTA2i_L++;
           if (mWrTA2i_L >= kTA2i) mWrTA2i_L = 0;
         }
 
         // D2_L: Brownian-modulated read with linear interpolation.
         // Uses Size-scaled base length (scaledD2_L).
-        double d2Read_L;
+        float d2Read_L;
         {
-          mD2_L[mWrD2_L] = (float)ap2Out_L;
+          mD2_L[mWrD2_L] = ap2Out_L;
 
           seed_D2_L = xorshift64(seed_D2_L);
-          double noise = (double)(seed_D2_L & 0xFFFF) / 65535.0 - 0.5;
+          float noise = (seed_D2_L & 0xFFFF) / 65535.0f - 0.5f;
           walk_D2_L += noise * step_size;
           if (walk_D2_L >  excursion) walk_D2_L =  excursion;
           if (walk_D2_L < -excursion) walk_D2_L = -excursion;
 
-          double readPos = (double)(mWrD2_L - scaledD2_L) + walk_D2_L;
+          float readPos = (mWrD2_L - scaledD2_L) + walk_D2_L;
           int    offset  = (int)floor(readPos);
-          double frac    = readPos - (double)offset;
+          float frac    = readPos - (float)offset;
 
           int i0 = ((offset % kD2_L_size) + kD2_L_size) % kD2_L_size;
           int i1 = (i0 + 1) % kD2_L_size;
 
-          d2Read_L = (1.0 - frac) * (double)mD2_L[i0] + frac * (double)mD2_L[i1];
+          d2Read_L = (1.0f - frac) * (float)mD2_L[i0] + frac * (float)mD2_L[i1];
 
           mWrD2_L++;
           if (mWrD2_L >= kD2_L_size) mWrD2_L = 0;
         }
 
         // D2_L intermediate taps — STATIC (unmodulated).
-        double d2tap_a_L, d2tap_b_L;
+        float d2tap_a_L, d2tap_b_L;
         {
           int ia = ((mWrD2_L - offD2a_L) % kD2_L_size + kD2_L_size) % kD2_L_size;
           int ib = ((mWrD2_L - offD2b_L) % kD2_L_size + kD2_L_size) % kD2_L_size;
-          d2tap_a_L = (double)mD2_L[ia];
-          d2tap_b_L = (double)mD2_L[ib];
+          d2tap_a_L = mD2_L[ia];
+          d2tap_b_L = mD2_L[ib];
         }
 
         // -- R LOOP --
 
         // Accumulate: diffusion output + previous-sample cross-feed from L.
-        double tankIn_R = diffIn + mFeedback_R;
+        float tankIn_R = diffIn + mFeedback_R;
 
         // DC blocker on tank input (R loop).
         {
-          double dcOut = tankIn_R - dcx1_R + kDCBlockR * dcy1_R;
+          float dcOut = tankIn_R - dcx1_R + kDCBlockR * dcy1_R;
           dcx1_R = tankIn_R;
           dcy1_R = dcOut;
           tankIn_R = dcOut;
@@ -1547,141 +1566,141 @@ namespace zaum
         // Same coefficients as L; separate buffers (mTA1_R, mTA1i_R) for independent state.
         // 0.1.0.11: outer AP1_R uses independent Brownian walk (seed_AP1_R / walk_AP1_R).
         // Inner AP1i_R (367) remains UNMODULATED.
-        double ap1Out_R;
+        float ap1Out_R;
         {
           // Outer AP (kTA1=1087, g=gTA1 from Diffusion) — MODULATED read:
           seed_AP1_R = xorshift64(seed_AP1_R);
-          double apNoise1R = (double)(seed_AP1_R & 0xFFFF) / 65535.0 - 0.5;
+          float apNoise1R = (seed_AP1_R & 0xFFFF) / 65535.0f - 0.5f;
           walk_AP1_R += apNoise1R * step_size;
           if (walk_AP1_R >  apExcursion) walk_AP1_R =  apExcursion;
           if (walk_AP1_R < -apExcursion) walk_AP1_R = -apExcursion;
 
-          double apReadPos1R = (double)(mWrTA1_R - kTA1) + walk_AP1_R;
+          float apReadPos1R = (mWrTA1_R - kTA1) + walk_AP1_R;
           int    apOff1R     = (int)floor(apReadPos1R);
-          double apFrac1R    = apReadPos1R - (double)apOff1R;
+          float apFrac1R    = apReadPos1R - (float)apOff1R;
           int    apI0_1R     = ((apOff1R % kTA1_size) + kTA1_size) % kTA1_size;
           int    apI1_1R     = (apI0_1R + 1) % kTA1_size;
-          double vO1d = (1.0 - apFrac1R) * (double)mTA1_R[apI0_1R]
-                      +        apFrac1R  * (double)mTA1_R[apI1_1R];
+          float vO1d = (1.0f - apFrac1R) * (float)mTA1_R[apI0_1R]
+                      +        apFrac1R  * (float)mTA1_R[apI1_1R];
 
-          double vO1n = tankIn_R + gTA1 * vO1d;
-          double in1  = -gTA1 * vO1n + vO1d;
-          mTA1_R[mWrTA1_R] = (float)vO1n;
+          float vO1n = tankIn_R + gTA1 * vO1d;
+          float in1  = -gTA1 * vO1n + vO1d;
+          mTA1_R[mWrTA1_R] = vO1n;
           mWrTA1_R++;
           if (mWrTA1_R >= kTA1_size) mWrTA1_R = 0;
           // Inner AP (kTA1i=367, g=gTA1_in=0.50) — UNMODULATED, exact read:
-          double vI1d = (double)mTA1i_R[mWrTA1i_R];
-          double vI1n = in1 + gTA1_in * vI1d;
+          float vI1d = mTA1i_R[mWrTA1i_R];
+          float vI1n = in1 + gTA1_in * vI1d;
           ap1Out_R    = -gTA1_in * vI1n + vI1d;
-          mTA1i_R[mWrTA1i_R] = (float)vI1n;
+          mTA1i_R[mWrTA1i_R] = vI1n;
           mWrTA1i_R++;
           if (mWrTA1i_R >= kTA1i) mWrTA1i_R = 0;
         }
 
         // D1_R: Brownian-modulated read, ASYMMETRIC base (scaledD1_R), R-specific seed.
-        double d1Read_R;
+        float d1Read_R;
         {
-          mD1_R[mWrD1_R] = (float)ap1Out_R;
+          mD1_R[mWrD1_R] = ap1Out_R;
 
           seed_D1_R = xorshift64(seed_D1_R);
-          double noise = (double)(seed_D1_R & 0xFFFF) / 65535.0 - 0.5;
+          float noise = (seed_D1_R & 0xFFFF) / 65535.0f - 0.5f;
           walk_D1_R += noise * step_size;
           if (walk_D1_R >  excursion) walk_D1_R =  excursion;
           if (walk_D1_R < -excursion) walk_D1_R = -excursion;
 
-          double readPos = (double)(mWrD1_R - scaledD1_R) + walk_D1_R;
+          float readPos = (mWrD1_R - scaledD1_R) + walk_D1_R;
           int    offset  = (int)floor(readPos);
-          double frac    = readPos - (double)offset;
+          float frac    = readPos - (float)offset;
 
           int i0 = ((offset % kD1_R_size) + kD1_R_size) % kD1_R_size;
           int i1 = (i0 + 1) % kD1_R_size;
 
-          d1Read_R = (1.0 - frac) * (double)mD1_R[i0] + frac * (double)mD1_R[i1];
+          d1Read_R = (1.0f - frac) * (float)mD1_R[i0] + frac * (float)mD1_R[i1];
 
           mWrD1_R++;
           if (mWrD1_R >= kD1_R_size) mWrD1_R = 0;
         }
 
         // D1_R intermediate taps — STATIC (unmodulated).
-        double d1tap_a_R, d1tap_b_R, d1tap_c_R;
+        float d1tap_a_R, d1tap_b_R, d1tap_c_R;
         {
           int ia = ((mWrD1_R - offD1a_R) % kD1_R_size + kD1_R_size) % kD1_R_size;
           int ib = ((mWrD1_R - offD1b_R) % kD1_R_size + kD1_R_size) % kD1_R_size;
           int ic = ((mWrD1_R - offD1c_R) % kD1_R_size + kD1_R_size) % kD1_R_size;
-          d1tap_a_R = (double)mD1_R[ia];
-          d1tap_b_R = (double)mD1_R[ib];
-          d1tap_c_R = (double)mD1_R[ic];
+          d1tap_a_R = mD1_R[ia];
+          d1tap_b_R = mD1_R[ib];
+          d1tap_c_R = mD1_R[ic];
         }
 
         // HF damp: one-pole LP on D1_R output. Uses dampCoeffEff (macro-biased).
         dampR += dampCoeffEff * (d1Read_R - dampR);
-        double dampedD1_R = dampR;
+        float dampedD1_R = dampR;
 
         // AP2_R: series cascade — outer (kTA2=1471, g=gTA2) → inner (kTA2i=491, g=gTA2_in).
         // 0.1.0.11: outer AP2_R uses independent Brownian walk (seed_AP2_R / walk_AP2_R).
         // Inner AP2i_R (491) remains UNMODULATED.
-        double ap2Out_R;
+        float ap2Out_R;
         {
           // Outer AP (kTA2=1471, g=gTA2 from Diffusion) — MODULATED read:
           seed_AP2_R = xorshift64(seed_AP2_R);
-          double apNoise2R = (double)(seed_AP2_R & 0xFFFF) / 65535.0 - 0.5;
+          float apNoise2R = (seed_AP2_R & 0xFFFF) / 65535.0f - 0.5f;
           walk_AP2_R += apNoise2R * step_size;
           if (walk_AP2_R >  apExcursion) walk_AP2_R =  apExcursion;
           if (walk_AP2_R < -apExcursion) walk_AP2_R = -apExcursion;
 
-          double apReadPos2R = (double)(mWrTA2_R - kTA2) + walk_AP2_R;
+          float apReadPos2R = (mWrTA2_R - kTA2) + walk_AP2_R;
           int    apOff2R     = (int)floor(apReadPos2R);
-          double apFrac2R    = apReadPos2R - (double)apOff2R;
+          float apFrac2R    = apReadPos2R - (float)apOff2R;
           int    apI0_2R     = ((apOff2R % kTA2_size) + kTA2_size) % kTA2_size;
           int    apI1_2R     = (apI0_2R + 1) % kTA2_size;
-          double vO2d = (1.0 - apFrac2R) * (double)mTA2_R[apI0_2R]
-                      +        apFrac2R  * (double)mTA2_R[apI1_2R];
+          float vO2d = (1.0f - apFrac2R) * (float)mTA2_R[apI0_2R]
+                      +        apFrac2R  * (float)mTA2_R[apI1_2R];
 
-          double vO2n = dampedD1_R + gTA2 * vO2d;
-          double in2  = -gTA2 * vO2n + vO2d;
-          mTA2_R[mWrTA2_R] = (float)vO2n;
+          float vO2n = dampedD1_R + gTA2 * vO2d;
+          float in2  = -gTA2 * vO2n + vO2d;
+          mTA2_R[mWrTA2_R] = vO2n;
           mWrTA2_R++;
           if (mWrTA2_R >= kTA2_size) mWrTA2_R = 0;
           // Inner AP (kTA2i=491, g=gTA2_in=0.50) — UNMODULATED, exact read:
-          double vI2d = (double)mTA2i_R[mWrTA2i_R];
-          double vI2n = in2 + gTA2_in * vI2d;
+          float vI2d = mTA2i_R[mWrTA2i_R];
+          float vI2n = in2 + gTA2_in * vI2d;
           ap2Out_R    = -gTA2_in * vI2n + vI2d;
-          mTA2i_R[mWrTA2i_R] = (float)vI2n;
+          mTA2i_R[mWrTA2i_R] = vI2n;
           mWrTA2i_R++;
           if (mWrTA2i_R >= kTA2i) mWrTA2i_R = 0;
         }
 
         // D2_R: Brownian-modulated read, ASYMMETRIC base (scaledD2_R), R-specific seed.
-        double d2Read_R;
+        float d2Read_R;
         {
-          mD2_R[mWrD2_R] = (float)ap2Out_R;
+          mD2_R[mWrD2_R] = ap2Out_R;
 
           seed_D2_R = xorshift64(seed_D2_R);
-          double noise = (double)(seed_D2_R & 0xFFFF) / 65535.0 - 0.5;
+          float noise = (seed_D2_R & 0xFFFF) / 65535.0f - 0.5f;
           walk_D2_R += noise * step_size;
           if (walk_D2_R >  excursion) walk_D2_R =  excursion;
           if (walk_D2_R < -excursion) walk_D2_R = -excursion;
 
-          double readPos = (double)(mWrD2_R - scaledD2_R) + walk_D2_R;
+          float readPos = (mWrD2_R - scaledD2_R) + walk_D2_R;
           int    offset  = (int)floor(readPos);
-          double frac    = readPos - (double)offset;
+          float frac    = readPos - (float)offset;
 
           int i0 = ((offset % kD2_R_size) + kD2_R_size) % kD2_R_size;
           int i1 = (i0 + 1) % kD2_R_size;
 
-          d2Read_R = (1.0 - frac) * (double)mD2_R[i0] + frac * (double)mD2_R[i1];
+          d2Read_R = (1.0f - frac) * (float)mD2_R[i0] + frac * (float)mD2_R[i1];
 
           mWrD2_R++;
           if (mWrD2_R >= kD2_R_size) mWrD2_R = 0;
         }
 
         // D2_R intermediate taps — STATIC (unmodulated).
-        double d2tap_a_R, d2tap_b_R;
+        float d2tap_a_R, d2tap_b_R;
         {
           int ia = ((mWrD2_R - offD2a_R) % kD2_R_size + kD2_R_size) % kD2_R_size;
           int ib = ((mWrD2_R - offD2b_R) % kD2_R_size + kD2_R_size) % kD2_R_size;
-          d2tap_a_R = (double)mD2_R[ia];
-          d2tap_b_R = (double)mD2_R[ib];
+          d2tap_a_R = mD2_R[ia];
+          d2tap_b_R = mD2_R[ib];
         }
 
         // -- CROSS-FEED UPDATE (for next sample) --
@@ -1690,8 +1709,8 @@ namespace zaum
         // Both d2Read_L and d2Read_R are fully computed above before
         // either feedback value is updated — no same-sample causality leak.
         // Cross-feed uses g_d_eff (macro-biased decay) — shorter tail as Early rises.
-        mFeedback_L = house::spiralFastSaturate(d2Read_R * g_d_eff, 1.0);
-        mFeedback_R = house::spiralFastSaturate(d2Read_L * g_d_eff, 1.0);
+        mFeedback_L = spiralFastSaturateF(d2Read_R * g_d_eff, 1.0f);
+        mFeedback_R = spiralFastSaturateF(d2Read_L * g_d_eff, 1.0f);
 
         // ----------------------------------------------------------------
         // 5. Stereo wet taps — Dattorro-style multi-tap signed sum (0.1.0.7).
@@ -1705,14 +1724,14 @@ namespace zaum
         // Loop stability unaffected — output-tap change only. Governors,
         // DC blocker, and cross-feed are all unchanged.
         // ----------------------------------------------------------------
-        double wetL = kWetLevel * (
+        float wetL = kWetLevel * (
             + kWap1 * ap1Out_L
             + kWd1a * d1tap_a_L - kWd1b * d1tap_b_L + kWd1c * d1tap_c_L
             + kWd1e * d1Read_L
             - kWd2a * d2tap_a_L + kWd2b * d2tap_b_L
             + kWd2e * d2Read_L
         );
-        double wetR = kWetLevel * (
+        float wetR = kWetLevel * (
             + kWap1 * ap1Out_R
             + kWd1a * d1tap_a_R - kWd1b * d1tap_b_R + kWd1c * d1tap_c_R
             + kWd1e * d1Read_R
@@ -1723,7 +1742,7 @@ namespace zaum
         // Add ER contribution (parallel, AFTER tank multi-tap).
         // Scales to zero when earlyParam=0 → exact 0.1.0.8 output.
         // ER is purely feedforward (FIR): no feedback, no stability concern.
-        double erScale = (double)(kERLevel * earlyParam);
+        float erScale = (kERLevel * earlyParam);
         wetL += erScale * erSumL;
         wetR += erScale * erSumR;
 
@@ -1734,13 +1753,13 @@ namespace zaum
         //    mixed information between the loops via the figure-8 feedback,
         //    so wetL and wetR are decorrelated even from a mono source.
         // ----------------------------------------------------------------
-        double dryMix  = (double)(1.0f - mix);
-        double wetMix  = (double)mix;
-        double outL = drySampleL * dryMix + wetL * wetMix;
-        double outR = drySampleR * dryMix + wetR * wetMix;
+        float dryMix  = (1.0f - mix);
+        float wetMix  = mix;
+        float outL = drySampleL * dryMix + wetL * wetMix;
+        float outR = drySampleR * dryMix + wetR * wetMix;
 
-        *out1 = (float)outL;
-        *out2 = (float)outR;
+        *out1 = outL;
+        *out2 = outR;
         in1++; in2++; out1++; out2++;
       }
 
@@ -1835,8 +1854,8 @@ namespace zaum
     // for long-decay tails where accumulated rounding would drift pitch).
     // Cross-coupled: mFeedback_L is written from d2Read_R×g_d (R feeds L),
     //                mFeedback_R is written from d2Read_L×g_d (L feeds R).
-    double mFeedback_L;
-    double mFeedback_R;
+    float mFeedback_L;
+    float mFeedback_R;
 
     // HF damp filter state — one per loop (one-pole LP on D1 output).
     // Initialized to 0 in constructor; converges quickly on first use.
