@@ -1,4 +1,4 @@
-PROJECTS = mi kryos peaks scope spreadsheet biome catchall porcelain house anamnesis
+PROJECTS = mi kryos peaks scope spreadsheet biome catchall porcelain house anamnesis zaum
 
 all: $(PROJECTS)
 

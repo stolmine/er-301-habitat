@@ -1,0 +1,933 @@
+// zaum::STFTSpectral
+//
+// BUILD SUB-PHASE 0.2.0.15 — Diffuseness-by-prominence: per-bin Space decorrelation
+//   weighted by bin prominence — partials frontal, noise diffuse; intrinsic to Space,
+//   no new param. After bloomState[k] is finalized each hop, compute a wide boxcar
+//   moving-average localRef[k] (half-width ~8 bins) as the "neighborhood floor." Each
+//   complex bin's Space offset is scaled by diffuse = lerp(1, promW, kPromBlend) where
+//   promW = clamp(1 - (ratio-1)*kPromSlope, 0, 1), ratio = bloomState[k]/(localRef[k]+eps).
+//   Strong tonal partials (ratio>>1) → promW→0 → diffuse→0 → Space offset ~0 → stays
+//   centered/frontal. Weak/noise bins (ratio~1) → promW→1 → diffuse→1 → full Space
+//   offset → spreads wide/diffuse. Space=0 → mSpaceAmt=0 → offset=0 → bit-identical to
+//   0.2.0.14 regardless of prominence. kPromBlend=0 → uniform Space (identical to
+//   0.2.0.14 behavior). Also carries forward 0.2.0.14 Distance-max tuning:
+//   kITDGMax 4800 / kWetDelayLen 6144, kDistanceWetExp 0.5, kAirAbsMax 0.90.
+//
+// BUILD SUB-PHASE 0.2.0.14 — Distance macro (repurposing inert Predelay slot):
+//   ITDG wet-predelay + HF air-absorption + DRR wet-bias; one knob 0..1.
+//   Distance=0 → bit-identical to 0.2.0.13.
+//
+// BUILD SUB-PHASE 0.2.0.13 — Space axis: frequency-weighted static anti-symmetric
+//   inter-channel phase decorrelation, decoupled from Diffuse; mono fan-out.
+//   Two static per-bin tables computed once in the constructor:
+//     mDecorrPhase[k]: structured per-bin phase offset, smoothed across frequency
+//       (6-pass boxcar), scaled to [-π, +π]. Adjacent bins share similar offsets →
+//       no metallic coloration from white per-bin random phase (per Kendall 1995
+//       refutation of naive approach).
+//     mFreqWeight[k]: perceptual frequency weighting — ramps to peak at
+//       kSpacePeakHz (~600 Hz), stays high to kSpaceTaperHz (~3 kHz), tapers to
+//       kSpaceFloor beyond. Implements the Okano/Beranek/Hidaka BQI band emphasis.
+//   In the synth pass: phi = phaseScratch[k] + V*xi + spaceSign*mSpaceAmt*mFreqWeight[k]*mDecorrPhase[k]
+//   L call spaceSign=+1, R call spaceSign=-1 → anti-symmetric between channels.
+//   Same offset every hop (temporally coherent → no line-broadening noise) but
+//   opposite between channels → inter-channel correlation toward 0 → width/LEV.
+//   Magnitude (bloomState[k]) identical L/R — only phase differs.
+//   Space=0 → offset=0 → phi unchanged → bit-identical to 0.2.0.12.
+//   Diffuse (V) is UNTOUCHED; PRNG draw order for xi unchanged.
+//   Below: 0.2.0.12 — Spray (fiction op 1/3): per-bin magnitude noise
+//   injection at the synth stage (Loris/SMS bandwidth-enhanced model).
+//   m = bloomState[k] * (1 + Spray*kSprayMax * rand01), applied to the OUTPUT
+//   magnitude only — bloomState untouched → no accumulator feedback →
+//   unconditionally safe. Separate per-channel Spray PRNG keeps Diffuse's phase
+//   noise independent. Spray=0 → m = bloomState[k] (bit-identical to 0.2.0.11).
+//   Distinct from Diffuse: Diffuse randomizes PHASE, Spray adds noise ENERGY.
+//   Below: 0.2.0.11 — consolidate Blur+Bloom onto one bipolar "Smear"
+//   param: <0.5 → Bloom (swell), >0.5 → Blur (cloud), 0.5 = off. Frees a
+//   parameter slot for the fictional ops (Warp/Scramble/Spray). The Blur and
+//   Bloom DSP are unchanged; only their amounts are derived from one knob.
+//   Below: 0.2.0.10 — Bloom: per-bin asymmetric IIR slow-rise/fast-fall
+//   + frequency stagger; chains after Blur (magAcc → blurState → bloomState → synth).
+//
+//   0.2.0.9 Blur (cross-time symmetric IIR) unchanged. This adds a second per-bin
+//   IIR stage with ASYMMETRIC coefficients: slow rise (controlled by Bloom param,
+//   freq-staggered so HF builds in later), instant fall (kBloomAlphaFall = 0).
+//
+//   Per-bin rise-alpha table (recomputed only when Bloom param changes):
+//     mBloomStagger[k] = 1 + kBloomStagger * k/(N/2)    // 1.0 at DC, 4.0 at Nyquist
+//     mBloomAlphaRise[k] = 1 - exp(-6 * Bloom * mBloomStagger[k])
+//   → HF bins have larger alpha_rise → slower rise → bloom in later → brightening swell.
+//
+//   Per-hop update (feed from blurState[k]; fall = snap; rise = freq-staggered slow):
+//     if blurState[k] >= bloomState[k]: rise path (slow)
+//       bloomState[k] = mBloomAlphaRise[k]*bloomState[k] + (1-mBloomAlphaRise[k])*blurState[k]
+//     else: fall path (fast)
+//       bloomState[k] = kBloomAlphaFall*bloomState[k]   + (1-kBloomAlphaFall)*blurState[k]
+//   Synth reads bloomState[k]. magAcc and blurState are UNTOUCHED by Bloom.
+//
+//   Bloom=0 → mBloomAlphaRise[k]=0, kBloomAlphaFall=0 → bloomState[k]=blurState[k]
+//   every hop → bit-identical to 0.2.0.9.
+//
+//   Three-pass smdProcess structure (0.2.0.10):
+//   1. Accumulate pass (k=0..N/2): SMD+Freeze+Damp into magAcc[k]; update
+//      blurState[k] via symmetric IIR; store base phase in phaseScratch[k].
+//   2. Bloom pass (k=0..N/2): asymmetric IIR from blurState[k] into bloomState[k].
+//   3. Synth pass (k=0..N/2): synthesize from bloomState[k] + stored phase + PRNG xi.
+//
+//   Below: 0.2.0.7 spiral wet-output governor (clip/runaway safety).
+//   0.2.0.6 Freeze fix (decay extension + floored input).
+//   0.2.0.4 made freeze extend the decay (gEff→1) → gorgeous long tails, BUT
+//   zeroed the input at freeze=1 → starved to near-silence ("dry"). 0.2.0.5's
+//   snapshot/hold rewrite fixed the dry but REMOVED the decay extension → lost
+//   the tail (short metallic ring). This restores the decay extension and only
+//   FLOORS the input (kFreezeInFloor) so freeze=1 keeps filling + holds forever:
+//     gkEff  = gk + freeze*(1-gk)                  // decay → infinite at 1
+//     inGain = max(1-freeze, kFreezeInFloor)       // never starve the input
+//     M[k]   = inGain*mag + M[k]*gkEff             // (magnitude-clamped)
+//   freeze=0 = plain reverb; rising = ever-longer tail; 1 = infinite sustain.
+// ShyFFT N=1024, hop R=256, sine window. Inherent latency 1280 smp ≈ 26.7 ms.
+//
+// What changed from 0.2.0.3:
+//   FREEZE: continuous 0..1 parameter that simultaneously blends g toward 1
+//   and fades the incoming input toward 0, so the captured spectrum holds
+//   indefinitely without growing without bound.
+//
+//   SMD accumulate step (per complex bin, replacing 0.2.0.3 line):
+//     gEff      = g_k + freeze * (1.0f - g_k)   // lerp g_k → 1 as freeze rises
+//     inputGain = 1.0f - freeze                  // fade fresh input toward 0
+//     M_out[k]  = inputGain * mag + M_out[k] * gEff
+//     (clamp M_out[k] ≤ kMagClamp as before)
+//
+//   freeze=0: gEff=g_k, inputGain=1 → bit-identical to 0.2.0.3. No change.
+//   freeze=1: gEff=1,   inputGain=0 → M_out[k] = M_out[k]. Infinite hold.
+//   mid-freeze: partial input + near-infinite decay → smooth lengthening tail.
+//
+//   Damp interaction: gEff uses the per-bin Damp-tilted g_k. At freeze=1 all
+//   bins reach gEff=1 regardless of Damp — freeze wins unconditionally. Correct.
+//
+//   Diffuse interaction: the phase path (phi = phase + V*xi) is UNCHANGED and
+//   still runs every hop during freeze. Frozen + Diffuse>0 → the magnitude is
+//   held but the phase re-randomizes each hop → shimmering, evolving drone.
+//   Frozen + Diffuse=0 → static tonal hold. Both are expected and correct.
+//
+//   DC and Nyquist also get the Freeze lerp (same formula, no phase path).
+//   The same kMagClamp backstop applies.
+//
+// SMD pipeline per hop (full, with Decay, Damp, Diffuse, Freeze, Blur, Bloom):
+//   analysis ring → window → ShyFFT::Direct
+//   → pass 1: per bin: mag = |X[k]|, phase = atan2(-nim, re)
+//              gEff = g_k + freeze*(1-g_k);  inputGain = max(1-freeze, floor)
+//              M_out[k] = inputGain*mag + M_out[k]*gEff  (clamped)
+//              blurState[k] = alpha*blurState[k] + (1-alpha)*M_out[k]   // symmetric IIR
+//              phaseScratch[k] = phase (or sign for DC/Nyquist)
+//   → pass 2: per bin: asymmetric IIR bloomState[k] from blurState[k]
+//              rise (blurState>=bloomState): bloomState[k] = alphaRise[k]*bloomState[k] + (1-alphaRise[k])*blurState[k]
+//              fall (blurState<bloomState):  bloomState[k] = kBloomAlphaFall*bloomState[k] + (1-kBloomAlphaFall)*blurState[k]
+//   → pass 3: per bin: phi = phaseScratch[k] + V * xi_k (complex); or sign*bloomState (DC/Nyq)
+//              out = bloomState[k] * e^{j*phi}
+//   → ShyFFT::Inverse → window × 1/(2N) → overlap-add
+//
+// ShyFFT packing, normalization, PRNG, OLA — all unchanged from 0.2.0.3.
+// Wired params: Decay, Damp, Diffuse, Freeze, Blur, Bloom, Mix, Distance (was Predelay).
+
+#pragma once
+
+#include <od/config.h>
+#include <od/objects/Object.h>
+#include <math.h>
+#include <stdint.h>
+#include <string.h>
+
+#ifndef SWIGLUA
+#include "stmlib/fft/shy_fft.h"
+#include <Spiral.h>   // house::spiralFastSaturate — wet output governor
+#endif
+
+namespace zaum
+{
+
+  // ---------------------------------------------------------------------------
+  // STFT framework constants
+  // ---------------------------------------------------------------------------
+  static const int   kStftN    = 1024;
+  static const int   kStftR    = 256;
+  static const int   kStftBuf  = kStftN + kStftR;
+  static const int   kStftLat  = kStftBuf;
+  static const float kStftNorm = 1.0f / (2.0f * (float)kStftN);
+  static const int   kStftBins = kStftN / 2 + 1;   // 513
+
+  // ---------------------------------------------------------------------------
+  // SMD + Damp tuning constants
+  // ---------------------------------------------------------------------------
+  static const double kRT60Min  = 0.3;
+  static const double kRT60Max  = 120.0;
+  static const double kGMax     = 0.9999;
+  static const float  kMagClamp = 32.0f;
+  // Wet output governor: Spiral soft-saturator on the wet signal, bounding it
+  // to [-1/kGovDensity, 1/kGovDensity]. Near-linear below ~0.8/kGovDensity,
+  // so transparent at normal levels; only catches the magnitude-accumulator
+  // build-up at high Freeze/Decay (prevents output clipping / runaway). Hoisted.
+  static const double kGovDensity = 1.0;
+  // Freeze input floor: at freeze=1 the input gain is held at this value (not 0)
+  // so the spectrum keeps filling and HOLDS (infinite sustain) instead of
+  // starving to silence. Hoisted for ear-tuning.
+  static const float  kFreezeInFloor = 0.15f;
+  // Spray noise-skirt injection ceiling: epsilon = Spray * kSprayMax. At Spray=1
+  // the injected noise magnitude ≈ kSprayMax × the bin magnitude. Hoisted.
+  static const float  kSprayMax = 0.3f;
+
+  // Space: inter-channel phase decorrelation frequency weighting.
+  // Bin width at 48 kHz: sampleRate/kStftN = 46.875 Hz/bin (bin k ≈ k*46.875 Hz).
+  // Peak weighting region: DC up to kSpacePeakHz → ramp to 1.0; plateau to kSpaceTaperHz;
+  // taper to kSpaceFloor above. kSpacePeakHz/kSpaceTaperHz are hoisted for ear-tuning.
+  static const float kSpacePeakHz    = 600.0f;    // peak weight reaches 1.0 at this freq
+  static const float kSpaceTaperHz   = 3000.0f;   // taper begins here; above → kSpaceFloor
+  static const float kSpaceFloor     = 0.15f;     // minimum weight at HF (>kSpaceTaperHz)
+  // kSpaceDecorrSmooth: number of boxcar passes over mDecorrPhase to smooth across bins.
+  // More passes → smoother (less metallic), fewer → more random. 6 gives well-correlated
+  // adjacent bins while preserving reasonable per-bin structure.
+  static const int   kSpaceDecorrSmooth = 6;
+
+  // Diffuseness-by-prominence: per-bin Space decorrelation weighted by spectral prominence.
+  // localRef[k] = boxcar moving-average of bloomState (half-width kPromBoxHalf bins).
+  // ratio   = bloomState[k] / (localRef[k] + eps)   — partials >> 1, noise floor ≈ 1.
+  // promW   = clamp(1 - (ratio-1)*kPromSlope, 0, 1) — partial→0, flat/noise→1.
+  // diffuse = 1 + kPromBlend*(promW - 1)            — lerp(1, promW, kPromBlend).
+  // kPromBlend=0 → diffuse=1 everywhere → uniform Space (== 0.2.0.14 behavior).
+  // kPromBlend=1 → full prominence weighting (partials frontal, noise diffuse).
+  // kPromSlope controls how fast a tonal peak suppresses its decorrelation:
+  //   slope=1: ratio=2 (partial 6dB above floor) → promW=0 (fully frontal).
+  //   slope=0.5: ratio=3 (partial ~10dB above floor) → promW=0.
+  // Ear-tuning knobs: kPromSlope, kPromBlend, kPromBoxHalf.
+  static const int   kPromBoxHalf = 8;      // localRef boxcar half-width (bins)
+  static const float kPromSlope   = 1.0f;   // sensitivity: ratio-1=1 → promW=0
+  static const float kPromBlend   = 1.0f;   // 0=uniform (old), 1=full prominence weighting
+
+  // Distance macro: three correlated cues from one 0..1 knob.
+  //
+  // 1. ITDG (initial time-delay gap): wet delay line inserted AFTER the governor,
+  //    before mixing. Quadratic mapping: mITDGSamples = (int)(d*d * kITDGMax).
+  //    At Distance=1 → ~75 ms gap between dry arrival and reverb onset.
+  //    kITDGMax = 3600 samples ≈ 75 ms at 48 kHz.  Ear-tune: raise for a longer
+  //    gap at Distance=1, lower for a shorter gap.
+  static const int   kWetDelayLen = 6144;   // ≈ 128 ms at 48 kHz; must be > kITDGMax
+  static const int   kITDGMax     = 4800;   // ≈ 100 ms at 48 kHz
+
+  // 2. HF air-absorption tilt on the wet (applied to synth magnitude, not accum).
+  //    mAirAbsCurve[k] ∈ [0,1]: ~0 below kAirAbsHz, ramps smoothly to kAirAbsMax
+  //    at Nyquist. Multiplication: m *= (1 - distance * mAirAbsCurve[k]).
+  //    At Distance=1, Nyquist bin is attenuated by kAirAbsMax.
+  //    kAirAbsHz: frequency below which absorption is ~0.  Ear-tune: lower
+  //    (e.g. 2000) for darker absorb; raise (e.g. 6000) for brighter-sounding air.
+  static const float kAirAbsHz  = 4000.0f;  // absorption corner frequency
+  static const float kAirAbsMax = 0.90f;    // max attenuation fraction at Distance=1, Nyquist
+
+  // 3. DRR wet-bias: boost the wet relative to the unchanged dry.
+  //    mWetBias = 10^(distance * kDistanceWetExp).
+  //    Applied BEFORE the Spiral governor so the governor still bounds runaway.
+  //    At Distance=0.5 → 10^(0.5*0.4) = 10^0.2 ≈ +4 dB.
+  //    At Distance=1.0 → 10^0.4 ≈ +8 dB.
+  //    Keep modest: raising too high over-saturates the governor.  Ear-tune.
+  static const float kDistanceWetExp = 0.5f;  // dB-exponent: ~+10 dB max at Distance=1
+
+  // Default Distance (0.25 = gently present; default sound shifts from 0.2.0.13
+  // by design.  Distance=0 remains bit-identical to 0.2.0.13 at any time).
+  static const float kDistanceDefault = 0.25f;
+
+  // Damp: per-bin g multiplier per bin index.
+  //   g_k = g_base * damp_factor^k
+  //   damp_factor = pow(kDampFloor, Damp)
+  //   Damp=0  → damp_factor=1.0  → flat decay across all bins (no tilt)
+  //   Damp=1  → damp_factor=kDampFloor → HF bins decay much faster than LF
+  //
+  // kDampFloor: the damp_factor at Damp=1.
+  // Must satisfy: damp_factor^(N/2) gives a reasonable HF rolloff at Damp=1.
+  // At N/2=512 bins (Nyquist), damp_factor^512 = kDampFloor^512.
+  // We want g_Nyquist / g_DC ≈ a large ratio (e.g. HF decays ~10× faster).
+  // kDampFloor = 0.99: damp_factor^512 = 0.99^512 ≈ 0.006 → ~44 dB faster decay at Nyq.
+  // This is a strong tilt; at Damp=0.5: factor=0.99^0.5≈0.995, ^512≈0.075 → ~22 dB.
+  // PRIMARY TUNING KNOB: adjust kDampFloor for darker/brighter maximum tilt.
+  static const double kDampFloor = 0.99;
+
+  // Bloom: per-bin asymmetric IIR — slow rise (freq-staggered), fast fall.
+  //   mBloomStagger[k] = 1 + kBloomStagger * k/(N/2)
+  //   → DC rise multiplier = 1.0×, Nyquist = (1 + kBloomStagger)×
+  //   HF bins get a larger alpha_rise → slower rise → bloom in later → brightening swell.
+  static const float  kBloomStagger  = 3.0f;    // HF rise time up to 4× LF
+  static const float  kBloomAlphaFall = 0.0f;   // snap release: fall tracks magAcc/blurState immediately
+
+  class STFTSpectral : public od::Object
+  {
+  public:
+    STFTSpectral()
+    {
+      addInput(mInL);
+      addInput(mInR);
+      addOutput(mOutL);
+      addOutput(mOutR);
+      addParameter(mDecay);
+      addParameter(mDamp);
+      addParameter(mDiffuse);
+      addParameter(mFreeze);
+      addParameter(mSmear);
+      addParameter(mSpray);
+      addParameter(mSpace);
+      addParameter(mDistance);
+      addParameter(mMix);
+
+      memset(mAnalysisL,    0, sizeof(mAnalysisL));
+      memset(mAnalysisR,    0, sizeof(mAnalysisR));
+      memset(mSynthesisL,   0, sizeof(mSynthesisL));
+      memset(mSynthesisR,   0, sizeof(mSynthesisR));
+      memset(mDryL,         0, sizeof(mDryL));
+      memset(mDryR,         0, sizeof(mDryR));
+      memset(mWetDelayL,    0, sizeof(mWetDelayL));
+      memset(mWetDelayR,    0, sizeof(mWetDelayR));
+      mWetDelayWr = 0;
+
+#ifndef SWIGLUA
+      for (int n = 0; n < kStftN; ++n) {
+        mWindow[n] = sinf((float)M_PI * ((float)n + 0.5f) / (float)kStftN);
+      }
+
+      mFFT.Init();
+
+      memset(mMagAccL,      0, sizeof(mMagAccL));
+      memset(mMagAccR,      0, sizeof(mMagAccR));
+      memset(mPhaseScratch, 0, sizeof(mPhaseScratch));
+      memset(mBlurStateL,   0, sizeof(mBlurStateL));
+      memset(mBlurStateR,   0, sizeof(mBlurStateR));
+      memset(mBloomStateL,  0, sizeof(mBloomStateL));
+      memset(mBloomStateR,  0, sizeof(mBloomStateR));
+
+      // Pre-compute the per-bin stagger multiplier (static, never changes).
+      // mBloomStagger[k] = 1.0 + kBloomStagger * k/(N/2)
+      // → DC=1.0, Nyquist=1+kBloomStagger=4.0. HF rises up to 4× slower than DC.
+      for (int k = 0; k <= kStftN / 2; ++k) {
+        mBloomStagger[k] = 1.0f + kBloomStagger * (float)k / (float)(kStftN / 2);
+      }
+
+      // Bloom alpha-rise table initialised to 0 (Bloom=0 passthrough).
+      // Recomputed lazily in process() when Bloom param changes.
+      memset(mBloomAlphaRise, 0, sizeof(mBloomAlphaRise));
+
+      // -----------------------------------------------------------------------
+      // Space: build static per-bin tables (computed once; deterministic).
+      // -----------------------------------------------------------------------
+
+      // mDecorrPhase[k]: structured per-bin decorrelation phase offset.
+      // Strategy: generate a white-phase sequence via a local xorshift seeded
+      // with a fixed constant, then smooth it with kSpaceDecorrSmooth passes of
+      // a length-3 boxcar (running-average across adjacent bins). Result: adjacent
+      // bins have correlated offsets → no metallic coloration; global distribution
+      // stays approximately [-π, +π] after rescaling.
+      {
+        // Local xorshift seeded with a fixed deterministic constant.
+        uint64_t rng = UINT64_C(0x853C49E6748FEA9B);
+        for (int k = 0; k <= kStftN / 2; ++k) {
+          rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+          // Map upper 24 bits → [-π, +π)
+          mDecorrPhase[k] = ((float)(rng >> 40) * (1.0f / 8388608.0f) - 1.0f) * (float)M_PI;
+        }
+        // Smooth across bin index: kSpaceDecorrSmooth passes of 3-tap boxcar.
+        for (int pass = 0; pass < kSpaceDecorrSmooth; ++pass) {
+          float prev = mDecorrPhase[0];
+          for (int k = 1; k < kStftN / 2; ++k) {
+            const float cur  = mDecorrPhase[k];
+            const float next = mDecorrPhase[k + 1 <= kStftN / 2 ? k + 1 : kStftN / 2];
+            mDecorrPhase[k] = (prev + cur + next) * (1.0f / 3.0f);
+            prev = cur;
+          }
+        }
+      }
+
+      // mFreqWeight[k]: perceptual frequency weighting for Space decorrelation.
+      // Bin k corresponds to frequency f = k * sampleRate / kStftN.
+      // We use a fixed nominal 48 kHz bin width (46.875 Hz/bin) for the static
+      // table; the curve is smooth enough that small SR deviations are inaudible.
+      // Curve:
+      //   f < kSpacePeakHz  → linear ramp from 0.3 at DC up to 1.0 at peak
+      //   f in [peak, taper] → 1.0 plateau
+      //   f > kSpaceTaperHz  → linear ramp from 1.0 down to kSpaceFloor
+      {
+        const float binHz = 46.875f;   // 48000 / 1024, nominal
+        for (int k = 0; k <= kStftN / 2; ++k) {
+          const float f = (float)k * binHz;
+          float w;
+          if (f < kSpacePeakHz) {
+            // Ramp from 0.3 at DC to 1.0 at kSpacePeakHz
+            const float t = f / kSpacePeakHz;
+            w = 0.3f + 0.7f * t;
+          } else if (f <= kSpaceTaperHz) {
+            w = 1.0f;
+          } else {
+            // Linear taper from 1.0 at kSpaceTaperHz to kSpaceFloor at ~12 kHz
+            const float fTop = 12000.0f;
+            const float t = (f - kSpaceTaperHz) / (fTop - kSpaceTaperHz);
+            const float tc = (t < 1.0f) ? t : 1.0f;
+            w = 1.0f + (kSpaceFloor - 1.0f) * tc;
+          }
+          mFreqWeight[k] = w;
+        }
+      }
+
+      // -----------------------------------------------------------------------
+      // Distance: static air-absorption curve.
+      // mAirAbsCurve[k] ∈ [0, kAirAbsMax]: 0 below kAirAbsHz, linear ramp to
+      // kAirAbsMax at Nyquist.  Applied in synth pass: m *= (1 - d * curve[k]).
+      // At Distance=0: factor = 1.0 everywhere → no effect (bit-identical path).
+      // -----------------------------------------------------------------------
+      {
+        const float binHz = 46.875f;   // 48000 / 1024, nominal
+        const float nyqHz = 24000.0f;  // nominal Nyquist
+        for (int k = 0; k <= kStftN / 2; ++k) {
+          const float f = (float)k * binHz;
+          if (f <= kAirAbsHz) {
+            mAirAbsCurve[k] = 0.0f;
+          } else {
+            const float t = (f - kAirAbsHz) / (nyqHz - kAirAbsHz);
+            const float tc = (t < 1.0f) ? t : 1.0f;
+            mAirAbsCurve[k] = kAirAbsMax * tc;
+          }
+        }
+      }
+#endif
+
+      mBufPtr    = 0;
+      mProcPtr   = (2 * kStftR) % kStftBuf;
+      mBlockSize = 0;
+      mReady     = 0;
+      mDone      = 0;
+      mDryPtr    = 0;
+      mG         = 0.0f;
+      mV         = 0.4f;
+      mDampFactor = 1.0f;
+      mFreezeAmt = 0.0f;
+      mBlurAmt   = 0.0f;
+      mBlurAlpha = 0.0f;
+      mBloomAmt  = 0.0f;
+      mLastBloom = -1.0f;   // force table recompute on first block
+      mSpaceAmt    = 0.4f;
+      mDistanceAmt = kDistanceDefault;
+      mITDGSamples = (int)(kDistanceDefault * kDistanceDefault * (float)kITDGMax);
+      mWetBias     = powf(10.0f, kDistanceDefault * kDistanceWetExp);
+
+      // PRNG seeds: L and R use distinct non-zero constants so the two channels
+      // generate independent xi sequences from sample 0 → stereo decorrelation.
+      // Seed neighborhoods chosen to be far apart in 64-bit state space.
+      mPrngL = UINT64_C(0x9E3779B97F4A7C15);   // golden-ratio constant
+      mPrngR = UINT64_C(0xBF58476D1CE4E5B9);   // splitmix64 constant
+      mSprayPrngL = UINT64_C(0xD1B54A32D192ED03);   // separate Spray PRNG (Diffuse stays independent)
+      mSprayPrngR = UINT64_C(0xA0761D6478BD642F);
+      mSprayEps   = 0.0f;
+    }
+
+    virtual ~STFTSpectral() {}
+
+#ifndef SWIGLUA
+    od::Inlet     mInL{"In L"};
+    od::Inlet     mInR{"In R"};
+    od::Outlet    mOutL{"Out L"};
+    od::Outlet    mOutR{"Out R"};
+    od::Parameter mDecay{"Decay",     0.5f};
+    od::Parameter mDamp{"Damp",       0.3f};
+    od::Parameter mDiffuse{"Diffuse", 0.4f};
+    od::Parameter mFreeze{"Freeze",   0.0f};
+    // Smear: bipolar consolidation of Bloom (lower half) and Blur (upper half).
+    // 0.5 = center/off; <0.5 → Bloom swell; >0.5 → Blur cloud.
+    od::Parameter mSmear{"Smear",     0.5f};
+    // Spray: noise-skirt — per-bin magnitude noise injection at the synth stage
+    // (Loris/SMS bandwidth-enhanced model). Distinct from Diffuse (phase): Spray
+    // adds noise ENERGY. Applied to the output magnitude only, never to the
+    // accumulator → no feedback → unconditionally safe.
+    od::Parameter mSpray{"Spray",     0.0f};
+    // Space: inter-channel phase decorrelation for width/envelopment.
+    // Applies a static, frequency-weighted, anti-symmetric per-bin phase offset:
+    // +δ[k] to L, -δ[k] to R → drives inter-channel correlation toward 0.
+    // Decoupled from Diffuse (which controls intra-channel phase noise).
+    // Space=0 → offset=0 → bit-identical to 0.2.0.12.
+    od::Parameter mSpace{"Space",     0.4f};
+    // Distance: one knob driving ITDG + HF air-absorption + DRR wet-bias.
+    // Default 0.25 = gently present depth (changes default sound vs 0.2.0.13;
+    // Distance=0 is bit-identical to 0.2.0.13).
+    od::Parameter mDistance{"Distance", kDistanceDefault};
+    od::Parameter mMix{"Mix",         0.4f};
+
+    virtual void process()
+    {
+      float* in1  = mInL.buffer();
+      float* in2  = mInR.buffer();
+      float* out1 = mOutL.buffer();
+      float* out2 = mOutR.buffer();
+
+      const float mix   = mMix.value();
+      const float dry   = 1.0f - mix;
+      const float decay = mDecay.value();
+      const float damp  = mDamp.value();
+      mV         = mDiffuse.value();   // cached for processHop
+      mFreezeAmt = mFreeze.value();    // 0..1, cached for processHop
+      mSprayEps  = mSpray.value() * kSprayMax;   // synth-stage noise injection coeff
+      mSpaceAmt    = mSpace.value();     // inter-channel decorrelation amount 0..1
+      // Distance macro: derive three cues at block rate.
+      mDistanceAmt = mDistance.value();
+      {
+        const float d = mDistanceAmt;
+        mITDGSamples = (int)(d * d * (float)kITDGMax);
+        if (mITDGSamples >= kWetDelayLen) mITDGSamples = kWetDelayLen - 1;
+        mWetBias = powf(10.0f, d * kDistanceWetExp);
+      }
+      // Smear (bipolar): >0.5 → Blur (upper half), <0.5 → Bloom (lower half),
+      // 0.5 = off. One knob, both behaviors retained (mutually exclusive).
+      const float smear = mSmear.value();
+      mBlurAmt   = (smear > 0.5f) ? (smear - 0.5f) * 2.0f : 0.0f;
+      mBloomAmt  = (smear < 0.5f) ? (0.5f - smear) * 2.0f : 0.0f;
+      // Cross-time IIR alpha: 0→0 (passthrough), 0.5→0.950 (~100ms), 1→0.998
+      mBlurAlpha = 1.0f - expf(-6.0f * mBlurAmt);
+
+      // Bloom: per-bin asymmetric IIR rise-alpha table, lazily recomputed.
+      // 513 expf calls only when Bloom amount actually changes.
+      if (mBloomAmt != mLastBloom) {
+        for (int k = 0; k <= kStftN / 2; ++k) {
+          mBloomAlphaRise[k] = 1.0f - expf(-6.0f * mBloomAmt * mBloomStagger[k]);
+        }
+        mLastBloom = mBloomAmt;
+      }
+
+      // Decay → RT60 → g_base (uniform base decay, same as 0.2.0.2).
+      {
+        const double fs   = (double)globalConfig.sampleRate;
+        const double rt60 = kRT60Min * pow(kRT60Max / kRT60Min, (double)decay);
+        double g = pow(10.0, -3.0 * (double)kStftR / (rt60 * fs));
+        if (g > kGMax) g = kGMax;
+        mG = (float)g;
+      }
+
+      // Damp → per-bin tilt factor.
+      // damp_factor = pow(kDampFloor, Damp):  Damp=0→1.0 (flat), Damp=1→kDampFloor.
+      // g_k = g_base * damp_factor^k, computed by running multiplication in the bin loop.
+      // pow() called once per block (block rate), not per bin.
+      {
+        mDampFactor = (float)pow(kDampFloor, (double)damp);
+      }
+
+      // Sample loop: ring I/O + dry delay + mix.
+      for (int i = 0; i < FRAMELENGTH; ++i) {
+        const float inL = in1[i];
+        const float inR = in2[i];
+
+        mAnalysisL[mBufPtr] = inL;
+        mAnalysisR[mBufPtr] = inR;
+
+        const float wetL = mSynthesisL[mBufPtr];
+        const float wetR = mSynthesisR[mBufPtr];
+
+        mDryL[mDryPtr] = inL;
+        mDryR[mDryPtr] = inR;
+        const int   dryRead = (mDryPtr + 1) % kStftLat;
+        const float dryL    = mDryL[dryRead];
+        const float dryR    = mDryR[dryRead];
+        ++mDryPtr;
+        if (mDryPtr >= kStftLat) mDryPtr = 0;
+
+        // Distance: DRR wet-bias applied before the governor (governor still bounds).
+        // ITDG: write governed wet into the delay line; read back mITDGSamples later.
+        // mITDGSamples=0 → readback == current sample → no delay (Distance=0 path).
+        //
+        // Apply wet-bias to the STFT output wet BEFORE the governor.
+        const float biasedWetL = wetL * mWetBias;
+        const float biasedWetR = wetR * mWetBias;
+
+        // Spiral governor on the biased wet (dry stays clean).
+        const float govL = (float)house::spiralFastSaturate((double)biasedWetL, kGovDensity);
+        const float govR = (float)house::spiralFastSaturate((double)biasedWetR, kGovDensity);
+
+        // ITDG wet delay: write governed wet, read mITDGSamples behind.
+        mWetDelayL[mWetDelayWr] = govL;
+        mWetDelayR[mWetDelayWr] = govR;
+        const int wetRead = (mWetDelayWr - mITDGSamples + kWetDelayLen) % kWetDelayLen;
+        const float wetSatL = mWetDelayL[wetRead];
+        const float wetSatR = mWetDelayR[wetRead];
+        ++mWetDelayWr;
+        if (mWetDelayWr >= kWetDelayLen) mWetDelayWr = 0;
+
+        out1[i] = dry * dryL + mix * wetSatL;
+        out2[i] = dry * dryR + mix * wetSatR;
+
+        ++mBufPtr;
+        if (mBufPtr >= kStftBuf) mBufPtr = 0;
+
+        ++mBlockSize;
+        if (mBlockSize >= kStftR) {
+          mBlockSize = 0;
+          ++mReady;
+        }
+      }
+
+      while (mReady != mDone) {
+        processHop();
+        ++mDone;
+        mProcPtr += kStftR;
+        if (mProcPtr >= kStftBuf) mProcPtr -= kStftBuf;
+      }
+    }
+
+  private:
+    void processHop()
+    {
+      // 1. Windowed analysis frame.
+      {
+        int src = mProcPtr;
+        for (int i = 0; i < kStftN; ++i) {
+          mFftBufL[i] = mWindow[i] * mAnalysisL[src];
+          mFftBufR[i] = mWindow[i] * mAnalysisR[src];
+          ++src;
+          if (src >= kStftBuf) src -= kStftBuf;
+        }
+      }
+
+      // 2. Forward FFT.
+      mFFT.Direct(mFftBufL, mFftOutL);
+      mFFT.Direct(mFftBufR, mFftOutR);
+
+      // 3. SMD + Diffuse + Damp + Blur — L and R channels.
+      //    Independent PRNG state per channel → decorrelated stereo phase noise.
+      smdProcess(mFftOutL, mFftBufL, mMagAccL, mBlurStateL, mBloomStateL, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngL, mSprayEps, mSprayPrngL, +1.0f, mDistanceAmt);
+      smdProcess(mFftOutR, mFftBufR, mMagAccR, mBlurStateR, mBloomStateR, mG, mV, mDampFactor, mFreezeAmt, mBlurAlpha, mBloomAlphaRise, mPrngR, mSprayEps, mSprayPrngR, -1.0f, mDistanceAmt);
+
+      // 4. Inverse FFT.
+      mFFT.Inverse(mFftBufL, mIfftOutL);
+      mFFT.Inverse(mFftBufR, mIfftOutR);
+
+      // 5. Synthesis window + 1/(2N) + overlap-add.
+      {
+        int dst = mProcPtr;
+        for (int i = 0; i < kStftN; ++i) {
+          const float sL = mIfftOutL[i] * mWindow[i] * kStftNorm;
+          const float sR = mIfftOutR[i] * mWindow[i] * kStftNorm;
+          if (i < kStftN - kStftR) {
+            mSynthesisL[dst] += sL;
+            mSynthesisR[dst] += sR;
+          } else {
+            mSynthesisL[dst]  = sL;
+            mSynthesisR[dst]  = sR;
+          }
+          ++dst;
+          if (dst >= kStftBuf) dst -= kStftBuf;
+        }
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // smdProcess(): three-pass SMD accumulate + Blur + Bloom + Synth.
+    //
+    // Pass 1 — Accumulate+Blur: compute mag, SMD+Freeze+Damp into magAcc[k],
+    //           update blurState[k] via symmetric IIR, store base phase.
+    // Pass 2 — Bloom: asymmetric IIR from blurState[k] into bloomState[k].
+    //           Rise path: slow, freq-staggered (alphaRise[k] larger at HF → HF later).
+    //           Fall path: kBloomAlphaFall=0 → instant (snap to blurState).
+    // Pass 3 — Synth: synthesize ifft_in from bloomState[k] + stored phase + PRNG xi.
+    //
+    // spectrum[]:    ShyFFT Direct output (N floats).
+    // ifft_in[]:     repacked spectrum for Inverse.
+    // magAcc[]:      per-bin magnitude accumulator (kStftBins floats, persistent).
+    // blurState[]:   per-bin symmetric IIR state (kStftBins floats, persistent).
+    // bloomState[]:  per-bin asymmetric IIR state (kStftBins floats, persistent).
+    // g:             base decay factor (uniform pre-tilt).
+    // V:             phase randomization depth 0..1.
+    // dampFactor:    per-bin g tilt multiplier (1.0=flat, <1.0=HF darker).
+    // freeze:        freeze amount 0..1.
+    // blurAlpha:     symmetric IIR coefficient (Blur); 0→passthrough.
+    // bloomAlphaRise[]: per-bin asymmetric rise coefficients (shared L/R, block-rate).
+    // prng:          per-channel xorshift64 state (updated in place → decorrelated L/R).
+    //
+    // Bloom=0 → bloomAlphaRise[k]=0 + kBloomAlphaFall=0 → bloomState[k]=blurState[k]
+    // every hop → bit-identical to 0.2.0.9.
+    // magAcc and blurState are NEVER modified by the Bloom path.
+    // PRNG draw order (one xi per complex bin k=1..N/2-1) unchanged.
+    // -------------------------------------------------------------------------
+    void smdProcess(const float* spectrum, float* ifft_in,
+                    float* magAcc, float* blurState, float* bloomState,
+                    float g, float V, float dampFactor, float freeze,
+                    float blurAlpha, const float* bloomAlphaRise, uint64_t& prng,
+                    float sprayEps, uint64_t& sprayPrng, float spaceSign,
+                    float distance)
+    {
+      const int kNyq = kStftN / 2;
+      const float blurAlphaComp = 1.0f - blurAlpha;   // (1-blurAlpha) pre-computed
+
+      // -----------------------------------------------------------------------
+      // PASS 1 — Accumulate + Blur IIR: SMD+Freeze+Damp into magAcc, then
+      //          update blurState[k] via symmetric per-bin IIR, store base phase.
+      // phaseScratch[k] for complex bins: atan2(-nim, re) (standard DFT phase).
+      // phaseScratch[k] for DC/Nyquist:  +1.0 or -1.0 (sign of input real).
+      // -----------------------------------------------------------------------
+
+      // DC (k=0): real-only.
+      {
+        const float re  = spectrum[0];
+        const float mag = (re >= 0.0f) ? re : -re;
+        const float gEff   = g + freeze * (1.0f - g);
+        const float inGain = (1.0f - freeze > kFreezeInFloor) ? (1.0f - freeze) : kFreezeInFloor;
+        float m = inGain * mag + magAcc[0] * gEff;
+        if (m > kMagClamp) m = kMagClamp;
+        magAcc[0]    = m;
+        blurState[0] = blurAlpha * blurState[0] + blurAlphaComp * m;
+        mPhaseScratch[0] = (re >= 0.0f) ? 1.0f : -1.0f;   // sign-encoding
+      }
+
+      // Complex bins k=1..N/2-1: SMD + Damp tilt + Blur IIR + store phase.
+      float g_k = g * dampFactor;   // g for k=1; multiplied by dampFactor each step
+      for (int k = 1; k < kNyq; ++k) {
+        const float gk = (g_k < (float)kGMax) ? g_k : (float)kGMax;
+
+        const float re  = spectrum[k];
+        const float nim = spectrum[kNyq + k];   // nim = -imag_DFT[k]
+        const float mag   = sqrtf(re * re + nim * nim);
+        const float phase = atan2f(-nim, re);
+
+        const float gkEff  = gk + freeze * (1.0f - gk);
+        const float inGain = (1.0f - freeze > kFreezeInFloor) ? (1.0f - freeze) : kFreezeInFloor;
+        float m = inGain * mag + magAcc[k] * gkEff;
+        if (m > kMagClamp) m = kMagClamp;
+        magAcc[k]    = m;
+        blurState[k] = blurAlpha * blurState[k] + blurAlphaComp * m;
+        mPhaseScratch[k] = phase;
+
+        g_k *= dampFactor;
+      }
+
+      // Nyquist (k=N/2): real-only.
+      {
+        const float re   = spectrum[kNyq];
+        const float mag  = (re >= 0.0f) ? re : -re;
+        const float gEff   = g + freeze * (1.0f - g);
+        const float inGain = (1.0f - freeze > kFreezeInFloor) ? (1.0f - freeze) : kFreezeInFloor;
+        float m = inGain * mag + magAcc[kNyq] * gEff;
+        if (m > kMagClamp) m = kMagClamp;
+        magAcc[kNyq]    = m;
+        blurState[kNyq] = blurAlpha * blurState[kNyq] + blurAlphaComp * m;
+        mPhaseScratch[kNyq] = (re >= 0.0f) ? 1.0f : -1.0f;   // sign-encoding
+      }
+
+      // -----------------------------------------------------------------------
+      // PASS 2 — Bloom: asymmetric IIR from blurState[k] into bloomState[k].
+      //
+      // Rise (blurState >= bloomState): slow, freq-staggered.
+      //   bloomState[k] = ar[k]*bloomState[k] + (1-ar[k])*blurState[k]
+      //   ar[k] = bloomAlphaRise[k] (larger at HF → HF rises more slowly → later bloom)
+      // Fall (blurState < bloomState):  snap release.
+      //   bloomState[k] = kBloomAlphaFall*bloomState[k] + (1-kBloomAlphaFall)*blurState[k]
+      //   kBloomAlphaFall=0 → bloomState[k] = blurState[k] instantly.
+      //
+      // Bloom=0 → bloomAlphaRise[k]=0 → both paths collapse to bloomState[k]=blurState[k].
+      // magAcc and blurState are UNTOUCHED here.
+      // -----------------------------------------------------------------------
+      for (int k = 0; k <= kNyq; ++k) {
+        const float src = blurState[k];
+        const float bs  = bloomState[k];
+        if (src >= bs) {
+          const float ar = bloomAlphaRise[k];
+          bloomState[k] = ar * bs + (1.0f - ar) * src;
+        } else {
+          // kBloomAlphaFall = 0.0f: snap to src
+          bloomState[k] = src;
+        }
+      }
+
+      // -----------------------------------------------------------------------
+      // PASS 2b — LocalRef boxcar: wide moving-average of bloomState for prominence.
+      //
+      // O(N) running-sum boxcar, half-width kPromBoxHalf bins. Edge bins clamped
+      // (window shrinks at the edges — no OOB access). Shared L/R scratch mLocalRef[].
+      // bloomState[] is READ ONLY here — no modification.
+      // -----------------------------------------------------------------------
+      {
+        const int H = kPromBoxHalf;
+        // Build initial running sum for k=0 window: bins [0 .. min(H, kNyq)]
+        float rsum = 0.0f;
+        int   rcnt = 0;
+        const int initEnd = (H < kNyq) ? H : kNyq;
+        for (int j = 0; j <= initEnd; ++j) { rsum += bloomState[j]; ++rcnt; }
+        mLocalRef[0] = (rcnt > 0) ? rsum / (float)rcnt : 0.0f;
+        // Slide window across bins 1..kNyq
+        for (int k = 1; k <= kNyq; ++k) {
+          // Remove departing left edge: j = k - H - 1
+          const int jOld = k - H - 1;
+          if (jOld >= 0) { rsum -= bloomState[jOld]; --rcnt; }
+          // Add arriving right edge: j = k + H
+          const int jNew = k + H;
+          if (jNew <= kNyq) { rsum += bloomState[jNew]; ++rcnt; }
+          mLocalRef[k] = (rcnt > 0) ? rsum / (float)rcnt : 0.0f;
+        }
+      }
+
+      // -----------------------------------------------------------------------
+      // PASS 3 — Synth: synthesize ifft_in from bloomState + stored phase + PRNG xi.
+      //
+      // DC and Nyquist: real-only, sign from phaseScratch (no PRNG).
+      // Complex bins: phi = phaseScratch[k] + V*xi; xi drawn from PRNG in same
+      // k order (k=1..N/2-1) as 0.2.0.7 → PRNG draw count/order unchanged.
+      // -----------------------------------------------------------------------
+
+      // DC (k=0) — Spray adds magnitude noise (separate PRNG; Diffuse independent).
+      sprayPrng ^= sprayPrng << 13; sprayPrng ^= sprayPrng >> 7; sprayPrng ^= sprayPrng << 17;
+      ifft_in[0] = mPhaseScratch[0] * (bloomState[0] * (1.0f + sprayEps * ((float)(sprayPrng >> 40) * (1.0f / 16777216.0f))));
+
+      // Complex bins k=1..N/2-1
+      // spaceOffset: frequency-weighted, anti-symmetric between L (+spaceSign=+1)
+      // and R (+spaceSign=-1). Static per-bin table → same every hop (temporally
+      // coherent → no line broadening); opposite sign between channels → drives
+      // inter-channel correlation toward 0 → width/envelopment. Space=0 → 0.
+      //
+      // Diffuseness-by-prominence: the Space offset is further scaled by `diffuse`,
+      // derived from each bin's prominence relative to its spectral neighborhood.
+      //   ratio   = bloomState[k] / (mLocalRef[k] + eps)
+      //   promW   = clamp(1 - (ratio-1)*kPromSlope, 0, 1)  — partial→0, noise→1
+      //   diffuse = 1 + kPromBlend*(promW - 1)              — lerp(1→promW)
+      // kPromBlend=0 → diffuse=1 → uniform Space (0.2.0.14 behavior).
+      // Space=0 → mSpaceAmt=0 → offset=0 → bit-identical to 0.2.0.14.
+      const float kEps = 1e-9f;
+      const float spaceAmtSigned = mSpaceAmt * spaceSign;
+      for (int k = 1; k < kNyq; ++k) {
+        // xorshift64 inline (Marsaglia 2003) — avoids ODR collision with APFTank.h
+        prng ^= prng << 13; prng ^= prng >> 7; prng ^= prng << 17;
+        // Map upper 24 bits → float [-pi, pi)
+        const float xi  = ((float)(prng >> 40) * (1.0f / 8388608.0f) - 1.0f) * (float)M_PI;
+
+        // Prominence weighting: suppress Space offset for tonal (prominent) bins.
+        const float ratio  = bloomState[k] / (mLocalRef[k] + kEps);
+        const float promW_ = 1.0f - (ratio - 1.0f) * kPromSlope;
+        const float promW  = (promW_ < 0.0f) ? 0.0f : (promW_ > 1.0f) ? 1.0f : promW_;
+        const float diffuse = 1.0f + kPromBlend * (promW - 1.0f);
+
+        const float phi = mPhaseScratch[k] + V * xi
+                        + spaceAmtSigned * mFreqWeight[k] * diffuse * mDecorrPhase[k];
+
+        // Spray: per-bin magnitude noise injection (synth-stage only — bloomState
+        // is untouched, so no accumulator feedback). sprayEps=0 → m = bloomState[k].
+        sprayPrng ^= sprayPrng << 13; sprayPrng ^= sprayPrng >> 7; sprayPrng ^= sprayPrng << 17;
+        const float n01 = (float)(sprayPrng >> 40) * (1.0f / 16777216.0f);
+        // Air-absorption (Distance cue 2): attenuate HF bins in proportion to Distance.
+        // mAirAbsCurve[k]=0 for k below kAirAbsHz → no effect at LF.
+        // bloomState/accumulator are UNTOUCHED — synth magnitude only.
+        // distance=0 → factor = 1.0 → no change (bit-identical path).
+        const float airFactor = 1.0f - distance * mAirAbsCurve[k];
+        const float m   = bloomState[k] * (1.0f + sprayEps * n01) * airFactor;
+        ifft_in[k]          = m * cosf(phi);
+        ifft_in[kNyq + k]   = m * sinf(phi);
+      }
+
+      // Nyquist (k=N/2) — Spray
+      sprayPrng ^= sprayPrng << 13; sprayPrng ^= sprayPrng >> 7; sprayPrng ^= sprayPrng << 17;
+      ifft_in[kNyq] = mPhaseScratch[kNyq] * (bloomState[kNyq] * (1.0f + sprayEps * ((float)(sprayPrng >> 40) * (1.0f / 16777216.0f))));
+    }
+
+    // -------------------------------------------------------------------------
+    // Members
+    // -------------------------------------------------------------------------
+
+    stmlib::ShyFFT<float, kStftN, stmlib::RotationPhasor> mFFT;
+
+    float mWindow[kStftN];
+
+    float mAnalysisL[kStftBuf];
+    float mAnalysisR[kStftBuf];
+    float mSynthesisL[kStftBuf];
+    float mSynthesisR[kStftBuf];
+
+    float mDryL[kStftLat];
+    float mDryR[kStftLat];
+
+    float mFftBufL[kStftN];
+    float mFftBufR[kStftN];
+    float mFftOutL[kStftN];
+    float mFftOutR[kStftN];
+    float mIfftOutL[kStftN];
+    float mIfftOutR[kStftN];
+
+    // SMD magnitude accumulators — persistent reverb tail state.
+    float mMagAccL[kStftBins];
+    float mMagAccR[kStftBins];
+
+    // Phase scratch — shared between L and R calls (fully overwritten each smdProcess).
+    // phaseScratch[k]: base phase for complex bins (atan2); sign (+1/-1) for DC/Nyquist.
+    float mPhaseScratch[kStftBins];
+
+    // Cross-time IIR blur state — persistent per-channel per-bin smoother.
+    // blurState[k] = alpha*blurState[k] + (1-alpha)*magAcc[k], updated every hop.
+    // alpha=0 (Blur=0) → blurState[k] == magAcc[k] each hop → bit-identical to 0.2.0.7.
+    float mBlurStateL[kStftBins];
+    float mBlurStateR[kStftBins];
+
+    // Asymmetric Bloom IIR state — persistent per-channel per-bin.
+    // Updated from blurState[k] each hop: slow freq-staggered rise, instant fall.
+    // Bloom=0 → bloomState[k] == blurState[k] each hop → bit-identical to 0.2.0.9.
+    float mBloomStateL[kStftBins];
+    float mBloomStateR[kStftBins];
+
+    // Bloom stagger table (static, computed once in ctor):
+    //   mBloomStagger[k] = 1.0 + kBloomStagger * k/(N/2)  — DC=1.0, Nyquist=4.0
+    float mBloomStagger[kStftBins];
+
+    // Per-bin rise-alpha table (shared L/R, recomputed lazily when Bloom changes):
+    //   mBloomAlphaRise[k] = 1 - exp(-6 * Bloom * mBloomStagger[k])
+    float mBloomAlphaRise[kStftBins];
+
+    // Space: static per-bin tables (computed once in ctor, never change).
+    // mDecorrPhase[k]: structured (frequency-smoothed) decorrelation phase in [-π,+π].
+    // mFreqWeight[k]:  perceptual weighting — peak ~600 Hz, taper above ~3 kHz.
+    float mDecorrPhase[kStftBins];
+    float mFreqWeight[kStftBins];
+
+    // Distance: static air-absorption curve (computed once in ctor).
+    // mAirAbsCurve[k] ∈ [0, kAirAbsMax]: 0 below kAirAbsHz, linear ramp to
+    // kAirAbsMax at Nyquist.  Synth-stage only; bloomState/accum untouched.
+    float mAirAbsCurve[kStftBins];
+
+    // Prominence localRef scratch (shared L/R, overwritten each hop after Bloom pass).
+    // mLocalRef[k] = wide boxcar moving-average of bloomState[k] (half-width kPromBoxHalf).
+    // Used in the Synth pass to weight Space decorrelation by per-bin prominence.
+    float mLocalRef[kStftBins];
+
+    // Distance: wet delay line for ITDG (initial time-delay gap).
+    // Filled sample-by-sample with the governor output; read back mITDGSamples later.
+    // kWetDelayLen = 4096 ≈ 85 ms at 48 kHz; mITDGSamples clamped < kWetDelayLen.
+    float mWetDelayL[kWetDelayLen];
+    float mWetDelayR[kWetDelayLen];
+    int   mWetDelayWr;   // write pointer (wraps at kWetDelayLen)
+
+    // xorshift64 PRNG state — one per channel for independent stereo phase noise.
+    uint64_t mPrngL;
+    uint64_t mPrngR;
+    // Separate Spray PRNG per channel (keeps Diffuse's phase noise independent).
+    uint64_t mSprayPrngL;
+    uint64_t mSprayPrngR;
+    float    mSprayEps;   // Spray noise injection coeff (Spray * kSprayMax), block-rate
+
+    // Ring/hop state.
+    int   mBufPtr;
+    int   mProcPtr;
+    int   mBlockSize;
+    int   mReady;
+    int   mDone;
+    int   mDryPtr;
+
+    // Block-rate cached parameters.
+    float mG;           // base decay factor from Decay param
+    float mV;           // phase randomization depth from Diffuse param
+    float mDampFactor;  // per-bin g tilt multiplier from Damp param
+    float mFreezeAmt;   // freeze amount 0..1 from Freeze param
+    float mBlurAmt;     // raw Blur param 0..1
+    float mBlurAlpha;   // IIR smoothing coefficient: 1 - exp(-6*mBlurAmt)
+    float mBloomAmt;    // raw Bloom param 0..1
+    float mLastBloom;   // cached previous Bloom value for lazy table recompute
+    float mSpaceAmt;    // inter-channel decorrelation amount 0..1 (block-rate)
+
+    // Distance macro block-rate state.
+    float mDistanceAmt;  // raw Distance param 0..1
+    int   mITDGSamples;  // wet delay read-back offset: (int)(d*d * kITDGMax), clamped
+    float mWetBias;      // DRR wet-bias scalar: 10^(d * kDistanceWetExp) ≥ 1.0
+
+#endif  // SWIGLUA
+  };
+
+}  // namespace zaum

@@ -75,7 +75,7 @@ release_slot() { [ -n "$_slot_fd" ] && { exec {_slot_fd}>&-; _slot_fd=; }; retur
 # The package list the top-level Makefile fans out over (PROJECTS). `dev build
 # <pkg>` validates against this before invoking make so a typo fails fast with a
 # helpful message rather than an opaque "no rule to make target".
-PROJECTS="mi kryos peaks scope spreadsheet biome catchall porcelain house"
+PROJECTS="mi kryos peaks scope spreadsheet biome catchall porcelain house anamnesis zaum"
 
 do_build() {
   local pkg="${1:-}"
