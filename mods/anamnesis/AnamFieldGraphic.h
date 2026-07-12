@@ -72,6 +72,11 @@ namespace anamnesis
       const float rtau = field::rippleTauOf(mpOp ? mpOp->vizDecay() : 0.0f); // Decay -> ripple persistence
       const int n = field::kStreamN;
 
+      // Build the shared strip-wide metaball field ONCE per frame: the first ply
+      // that draws this frame does the work (keyed on vizPhase), the rest reuse.
+      // Item 1 of planning/anamnesis-viz-optimization.md.
+      if (mpOp) mpOp->ensureFieldFrame();
+
       // Cache the active rain droplets once (epicenters in content-x / column-y).
       int nd = 0;
       float dX[kVizMaxDrops], dY[kVizMaxDrops], dAge[kVizMaxDrops];
@@ -156,91 +161,16 @@ namespace anamnesis
         }
       };
 
-      // Bubbles = 2D METABALLS per z-LEVEL (lava-lamp): a thresholded field (FBM
-      // noise + Gaussian bumps at the level's bubbles) traced by marching squares
-      // -> smooth iso-contours that morph + split/join. 2 levels brighter than the
-      // lines; fill (occlude lower-z) then bright contour. Clipped to the ply.
+      // Bubbles = 2D METABALLS per z-LEVEL (lava-lamp). The pond-wide field (point
+      // drift + sub-bump expansion + per-level grid build + slew) is now built ONCE
+      // per frame, strip-wide, on the shared op (ensureFieldFrame above) -- each ply
+      // just SAMPLES its window of the global grid. Item 1.
       int bubB = (int)(baseB + 2.5f);
       if (bubB > 15) bubB = 15;
       const int bXlo = left, bXhi = left + w + wext, bYlo = bot, bYhi = bot + h;
-      const float bMorph = phase * field::kMetaMorph; // noise scroll (freezes w/ flow)
 
-      // Cache active bubbles (content-x / column-y / radius / level).
-      int nb = 0;
-      float bX[kVizMaxBubbles], bY[kVizMaxBubbles], bR[kVizMaxBubbles], bSeed[kVizMaxBubbles];
-      int bLvl[kVizMaxBubbles];
-      bool levelUsed[field::kBubLevels];
-      for (int L = 0; L < field::kBubLevels; L++) levelUsed[L] = false;
-      if (mpOp)
-      {
-        for (int i = 0; i < kVizMaxBubbles; i++)
-        {
-          const float br = mpOp->vizBubR(i);
-          if (br <= 0.0f) continue;
-          bX[nb] = mpOp->vizBubX(i);
-          bY[nb] = mpOp->vizBubY(i);
-          bR[nb] = br;
-          bSeed[nb] = mpOp->vizBubSeed(i);
-          int L = (int)(mpOp->vizBubZ(i) + 0.5f);
-          if (L < 0) L = 0; else if (L >= field::kBubLevels) L = field::kBubLevels - 1;
-          bLvl[nb] = L;
-          levelUsed[L] = true;
-          nb++;
-        }
-      }
-
-      // Expand each bubble into a CLUSTER of sub-bumps whose offsets are read from
-      // the noise topography at the bubble -> they walk the LUT as it moves, so the
-      // compound contour pinches and SPLITS. (The "invisible compounded blobs".)
-      // Drifting point layer (content-space, shared by all plies/levels).
-      const int NP = field::kNumPoints;
-      float ptX[field::kNumPoints], ptY[field::kNumPoints];
-      const float ptt = phase * field::kPointDriftRate;
-      const float reacht = phase * field::kReachRate;
-      for (int p = 0; p < NP; p++)
-      {
-        ptX[p] = field::hash01(p, 1) * field::kVizStripW + field::kPointDrift * anamnesis::noise::sample((float)p * 0.37f, ptt);
-        ptY[p] = 6.0f + field::hash01(p, 2) * 52.0f + field::kPointDrift * anamnesis::noise::sample((float)p * 0.37f + 40.0f, ptt + 7.0f);
-      }
-
-      // Each bubble = a CORE bump + momentary lobes latched onto nearby points,
-      // each weighted by distance (smooth fade) -> lobes grow & shed -> splits.
-      const int kSBcap = kVizMaxBubbles * (1 + field::kMaxLobes);
-      int nsb = 0;
-      float sbX[kSBcap], sbY[kSBcap], sbR[kSBcap], sbAmp[kSBcap];
-      int sbLvl[kSBcap];
-      for (int b = 0; b < nb; b++)
-      {
-        if (nsb < kSBcap)
-        {
-          sbX[nsb] = bX[b]; sbY[nsb] = bY[b]; sbR[nsb] = bR[b] * field::kCoreK;
-          sbAmp[nsb] = 1.0f; sbLvl[nsb] = bLvl[b]; nsb++;
-        }
-        const float rnz = anamnesis::noise::sample(bX[b] * field::kReachFreq, bY[b] * field::kReachFreq + reacht);
-        float reach = (bR[b] * field::kLatchK + field::kLatchBase) * (1.0f + field::kReachVar * rnz);
-        if (reach < field::kLatchBase) reach = field::kLatchBase; // breathes -> sometimes grabs far points
-        const float reach2 = reach * reach;
-        int lobes = 0;
-        for (int p = 0; p < NP && lobes < field::kMaxLobes && nsb < kSBcap; p++)
-        {
-          const float dx = ptX[p] - bX[b], dy = ptY[p] - bY[b];
-          const float d2 = dx * dx + dy * dy;
-          if (d2 >= reach2) continue;
-          const float w0 = 1.0f - field::smooth01(reach * field::kLatchFull, reach, sqrtf(d2)); // full, fade at edge
-          // Per-bubble AFFINITY: this bubble's attraction to point p (stable from
-          // its seed). Below kAffBias -> not latched, so each bubble ignores some
-          // nearby points (distinct personalities; sets up flow/droplet throws).
-          float aff = 0.5f + 0.5f * anamnesis::noise::sample(bSeed[b] * 0.7f + (float)p * 0.13f, (float)p * 0.31f + 5.0f);
-          aff = (aff - field::kAffBias) / (1.0f - field::kAffBias);
-          if (aff <= 0.0f) continue;
-          const float w = w0 * aff;
-          if (w < 0.05f) continue;
-          // Per-point STRENGTH -> lobe size (some points spawn bigger lobes).
-          const float str = field::kPointStrMin + (1.0f - field::kPointStrMin) * field::hash01(p, 5);
-          sbX[nsb] = ptX[p]; sbY[nsb] = ptY[p]; sbR[nsb] = field::kLobeR * (0.6f + 0.9f * str);
-          sbAmp[nsb] = w; sbLvl[nsb] = bLvl[b]; nsb++; lobes++;
-        }
-      }
+      // (Point-drift + sub-bump expansion + the per-level field build moved to
+      // Anamnesis::buildFieldFrame -- computed once per frame, not once per ply.)
 
       // Marching-squares segment table for OUR convention (config bit1=TL, 2=TR,
       // 4=BL, 8=BR; edges 0=top,1=right,2=bottom,3=left). Each pair = one segment
@@ -264,9 +194,7 @@ namespace anamnesis
           {0, 3, -1, -1},   // 14 TR+BL+BR
           {-1, -1, -1, -1}};// 15
       const int C = field::kMetaCell;
-      const int gx0n = x0 / C - 1;        // first grid node (content-x = gx0n*C); global -> seams align
-      int gw = w / C + 4; if (gw > kMetaGW) gw = kMetaGW;
-      int gh = h / C + 2; if (gh > kMetaGH) gh = kMetaGH;
+      const int GW = field::kFieldGW, GH = field::kFieldGH; // shared global grid dims
       const float T = field::kMetaThresh;
       // Diffusion bloom: the field band [bloomLo, T) outside each shape is drawn
       // as a graded, dithered aura (max-blended over already-drawn lower/equal-z
@@ -280,44 +208,21 @@ namespace anamnesis
 
       auto renderBubbleLevel = [&](int L)
       {
-        float *G = &mSlewGrid[L * kMetaGW * kMetaGH];
-        for (int j = 0; j < gh; j++) // build the target field, SLEW G toward it
-        {
-          const float cy = (float)(j * C);
-          for (int i = 0; i < gw; i++)
-          {
-            const float cx = (float)((gx0n + i) * C);
-            float bumps = 0.0f;
-            for (int b = 0; b < nsb; b++)
-            {
-              if (sbLvl[b] != L) continue;
-              const float dx = cx - sbX[b], dy = cy - sbY[b];
-              float s = sbR[b] * field::kMetaSigmaK; if (s < 1.0f) s = 1.0f;
-              bumps += sbAmp[b] * field::kMetaBumpAmp * expf(-(dx * dx + dy * dy) / (2.0f * s * s));
-            }
-            // Each bump SHAPED by the local noise topography (multiplicative): the
-            // edge follows peaks/valleys -> irregular/compound blobs that pinch &
-            // split. Far from bumps (bumps~0) the field stays 0 (no spurious blobs).
-            const float nz = anamnesis::noise::fbm(cx * field::kMetaNoiseFreq + (float)L * 3.1f,
-                                                   cy * field::kMetaNoiseFreq - bMorph);
-            const float f = bumps * (1.0f + field::kMetaNoiseGain * nz);
-            const int idx = j * kMetaGW + i;
-            G[idx] += field::kMetaSlew * (f - G[idx]); // temporal slew -> gentle morph
-          }
-        }
+        const float *G = mpOp ? mpOp->vizFieldGrid(L) : (const float *)0; // shared strip-wide grid
+        if (!G) return;
         for (int lx = 0; lx < w + wext; lx++) // FILL where field > T (occlude lower-z)
         {
-          const float gxf = (float)(x0 + lx) / (float)C - (float)gx0n;
-          const int gi = (int)gxf; if (gi < 0 || gi >= gw - 1) continue;
+          const float gxf = (float)(x0 + lx) / (float)C; // global cell coord (grid origin = content-x 0)
+          const int gi = (int)gxf; if (gi < 0 || gi >= GW - 1) continue;
           const float fx = gxf - (float)gi;
           const int px = left + lx;
           for (int py = bYlo; py < bYhi; py++)
           {
             const float gyf = (float)(py - bot) / (float)C;
-            const int gj = (int)gyf; if (gj < 0 || gj >= gh - 1) continue;
+            const int gj = (int)gyf; if (gj < 0 || gj >= GH - 1) continue;
             const float fy = gyf - (float)gj;
-            const float v00 = G[gj * kMetaGW + gi], v10 = G[gj * kMetaGW + gi + 1];
-            const float v01 = G[(gj + 1) * kMetaGW + gi], v11 = G[(gj + 1) * kMetaGW + gi + 1];
+            const float v00 = G[gj * GW + gi], v10 = G[gj * GW + gi + 1];
+            const float v01 = G[(gj + 1) * GW + gi], v11 = G[(gj + 1) * GW + gi + 1];
             const float v = (v00 * (1.0f - fx) + v10 * fx) * (1.0f - fy) + (v01 * (1.0f - fx) + v11 * fx) * fy;
             if (v > T) // INTERIOR: feathered (AA) black occlusion -- no hard spill past the contour
             {
@@ -335,11 +240,14 @@ namespace anamnesis
             }
           }
         }
-        for (int j = 0; j < gh - 1; j++) // marching-squares contour (smooth edges)
-          for (int i = 0; i < gw - 1; i++)
+        // Marching-squares contour over the global cells overlapping this ply's window.
+        int ci0 = x0 / C - 1; if (ci0 < 0) ci0 = 0;
+        int ci1 = (x0 + w + wext) / C + 1; if (ci1 > GW - 1) ci1 = GW - 1;
+        for (int j = 0; j < GH - 1; j++) // marching-squares contour (smooth edges)
+          for (int i = ci0; i < ci1; i++)
           {
-            const float v00 = G[j * kMetaGW + i], v10 = G[j * kMetaGW + i + 1];
-            const float v01 = G[(j + 1) * kMetaGW + i], v11 = G[(j + 1) * kMetaGW + i + 1];
+            const float v00 = G[j * GW + i], v10 = G[j * GW + i + 1];
+            const float v01 = G[(j + 1) * GW + i], v11 = G[(j + 1) * GW + i + 1];
             int cfg = 0;
             if (v00 > T) cfg |= 1;
             if (v10 > T) cfg |= 2;
@@ -355,9 +263,9 @@ namespace anamnesis
             for (int e = 0; e < 4; e += 2)
             {
               if (sg[e] < 0 || sg[e + 1] < 0) continue;
-              const float ax = (float)left + ((float)gx0n + ex[sg[e]]) * (float)C - (float)x0;
+              const float ax = (float)left + ex[sg[e]] * (float)C - (float)x0;
               const float ay = (float)bot + ey[sg[e]] * (float)C;
-              const float bx2 = (float)left + ((float)gx0n + ex[sg[e + 1]]) * (float)C - (float)x0;
+              const float bx2 = (float)left + ex[sg[e + 1]] * (float)C - (float)x0;
               const float by2 = (float)bot + ey[sg[e + 1]] * (float)C;
               drawAALineClip(fb, ax, ay, bx2, by2, bubB, bXlo, bXhi, bYlo, bYhi);
             }
@@ -372,7 +280,7 @@ namespace anamnesis
       int ni = 0;
       for (int b = 0; b < nBands; b++) { items[ni].z = mpOp ? (float)mpOp->vizBandZ(b) : (float)b; items[ni].type = 0; items[ni].idx = b; ni++; }
       for (int L = 0; L < field::kBubLevels; L++)
-        if (levelUsed[L]) { items[ni].z = ((float)L + 0.5f) * (float)nBands / (float)field::kBubLevels; items[ni].type = 1; items[ni].idx = L; ni++; }
+        if (mpOp && mpOp->vizLevelUsed(L)) { items[ni].z = ((float)L + 0.5f) * (float)nBands / (float)field::kBubLevels; items[ni].type = 1; items[ni].idx = L; ni++; }
       for (int a = 1; a < ni; a++) { ZItem key = items[a]; int j = a - 1; while (j >= 0 && items[j].z > key.z) { items[j + 1] = items[j]; j--; } items[j + 1] = key; }
       for (int it = 0; it < ni; it++)
       {
@@ -530,10 +438,8 @@ namespace anamnesis
     int mIndex = 0;
     int mCount = 1;
     int mFeature = 0;
-    static const int kMetaGW = 24, kMetaGH = 24; // metaball field grid capacity
-    // Per-level SLEWED field, persisted across frames -> gentle morph (the
-    // screensaver smooths its field too). Zero-init: blobs fade in on insert.
-    float mSlewGrid[field::kBubLevels * kMetaGW * kMetaGH] = {};
+    // (Metaball field grid moved to Anamnesis::mFcGrid -- one shared strip-wide
+    // grid built once per frame on the op, not a per-ply slew grid. Item 1.)
   };
 
 } // namespace anamnesis

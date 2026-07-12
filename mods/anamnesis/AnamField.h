@@ -286,6 +286,14 @@ namespace anamnesis
     static const float kMetaMorph     = 0.12f; // noise scroll (slow; movement walks the topography)
     static const float kMetaSlew      = 0.09f; // field temporal slew (gentle morph, no wild jumps)
 
+    // Strip-wide metaball grid dims for the shared per-frame field cache (Item 1
+    // of planning/anamnesis-viz-optimization.md). ONE global grid over the whole
+    // strip in CONTENT space (cell i,j -> content-x i*kMetaCell, content-y
+    // j*kMetaCell), built once per frame on the op, sampled per-ply. +2 margin so
+    // bilinear/marching-squares reads at the last column stay in-bounds.
+    static const int kFieldGW = (kVizPlies * kStride) / kMetaCell + 2; // ~88 (258/3+2)
+    static const int kFieldGH = 64 / kMetaCell + 2;                    // ~23 (kVizColH=64)
+
     // Baseline y (px) of streamline s within a height-h column.
     inline float baseline(int s, int n, int h)
     {

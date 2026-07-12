@@ -294,6 +294,16 @@ namespace anamnesis
     float vizBubR(int i)      { return mBubR[i]; }   // <= 0 = inactive
     float vizBubSeed(int i)   { return mBubSeed[i]; }
 
+    // ---- Item 1: shared per-frame all-over-field cache -----------------------
+    // The metaball field is content-space + pond-wide, but was rebuilt per-ply
+    // (~6x redundant). Build it ONCE per draw frame here (keyed on mVizPhase --
+    // all plies in a frame see the same phase, so the first ply builds and the
+    // rest reuse) into a strip-wide grid; each AnamFieldGraphic samples its
+    // window. planning/anamnesis-viz-optimization.md
+    void ensureFieldFrame() { if (mVizPhase != mFcLastPhase) { mFcLastPhase = mVizPhase; buildFieldFrame(); } }
+    const float *vizFieldGrid(int L) { return &mFcGrid[L * field::kFieldGW * field::kFieldGH]; }
+    bool vizLevelUsed(int L) { return mFcLevelUsed[L]; }
+
     inline void ensureFlushToZero()
     {
 #if defined(__aarch64__)
@@ -926,6 +936,98 @@ namespace anamnesis
     float mBubX[kVizMaxBubbles], mBubY[kVizMaxBubbles], mBubZ[kVizMaxBubbles];
     float mBubR[kVizMaxBubbles], mBubVx[kVizMaxBubbles], mBubVy[kVizMaxBubbles]; // mBubR <= 0 = inactive
     float mBubSeed[kVizMaxBubbles];                        // stable per-bubble blob shape seed
+
+    // ---- shared per-frame all-over-field cache (built by ensureFieldFrame) ----
+    static const int kFcSBcap = kVizMaxBubbles * (1 + field::kMaxLobes); // 96
+    float mFcLastPhase = -1e30f;                                         // frame guard
+    bool  mFcLevelUsed[field::kBubLevels] = {};
+    float mFcGrid[field::kBubLevels * field::kFieldGW * field::kFieldGH] = {}; // strip-wide, slewed
+    // Build the strip-wide per-level metaball field once per frame: drift points
+    // + sub-bump cluster expansion + Gaussian/FBM grid with temporal slew. Moved
+    // verbatim off the per-ply draw() (was recomputed ~6x/frame).
+    void buildFieldFrame()
+    {
+      const float phase = mVizPhase;
+      // Active bubbles (content-x / column-y / radius / seed / level).
+      int nb = 0;
+      float bX[kVizMaxBubbles], bY[kVizMaxBubbles], bR[kVizMaxBubbles], bSeed[kVizMaxBubbles];
+      int bLvl[kVizMaxBubbles];
+      for (int L = 0; L < field::kBubLevels; L++) mFcLevelUsed[L] = false;
+      for (int i = 0; i < kVizMaxBubbles; i++)
+      {
+        const float br = mBubR[i];
+        if (br <= 0.0f) continue;
+        bX[nb] = mBubX[i]; bY[nb] = mBubY[i]; bR[nb] = br; bSeed[nb] = mBubSeed[i];
+        int L = (int)(mBubZ[i] + 0.5f);
+        if (L < 0) L = 0; else if (L >= field::kBubLevels) L = field::kBubLevels - 1;
+        bLvl[nb] = L; mFcLevelUsed[L] = true; nb++;
+      }
+      // Drifting point layer (content-space, shared).
+      const int NP = field::kNumPoints;
+      float ptX[field::kNumPoints], ptY[field::kNumPoints];
+      const float ptt = phase * field::kPointDriftRate;
+      const float reacht = phase * field::kReachRate;
+      for (int p = 0; p < NP; p++)
+      {
+        ptX[p] = field::hash01(p, 1) * field::kVizStripW + field::kPointDrift * anamnesis::noise::sample((float)p * 0.37f, ptt);
+        ptY[p] = 6.0f + field::hash01(p, 2) * 52.0f + field::kPointDrift * anamnesis::noise::sample((float)p * 0.37f + 40.0f, ptt + 7.0f);
+      }
+      // Expand each bubble into a core bump + latched lobe sub-bumps.
+      float sbX[kFcSBcap], sbY[kFcSBcap], sbR[kFcSBcap], sbAmp[kFcSBcap];
+      int sbLvl[kFcSBcap];
+      int nsb = 0;
+      for (int b = 0; b < nb; b++)
+      {
+        if (nsb < kFcSBcap) { sbX[nsb] = bX[b]; sbY[nsb] = bY[b]; sbR[nsb] = bR[b] * field::kCoreK; sbAmp[nsb] = 1.0f; sbLvl[nsb] = bLvl[b]; nsb++; }
+        const float rnz = anamnesis::noise::sample(bX[b] * field::kReachFreq, bY[b] * field::kReachFreq + reacht);
+        float reach = (bR[b] * field::kLatchK + field::kLatchBase) * (1.0f + field::kReachVar * rnz);
+        if (reach < field::kLatchBase) reach = field::kLatchBase;
+        const float reach2 = reach * reach;
+        int lobes = 0;
+        for (int p = 0; p < NP && lobes < field::kMaxLobes && nsb < kFcSBcap; p++)
+        {
+          const float dx = ptX[p] - bX[b], dy = ptY[p] - bY[b];
+          const float d2 = dx * dx + dy * dy;
+          if (d2 >= reach2) continue;
+          const float w0 = 1.0f - field::smooth01(reach * field::kLatchFull, reach, sqrtf(d2));
+          float aff = 0.5f + 0.5f * anamnesis::noise::sample(bSeed[b] * 0.7f + (float)p * 0.13f, (float)p * 0.31f + 5.0f);
+          aff = (aff - field::kAffBias) / (1.0f - field::kAffBias);
+          if (aff <= 0.0f) continue;
+          const float w = w0 * aff;
+          if (w < 0.05f) continue;
+          const float str = field::kPointStrMin + (1.0f - field::kPointStrMin) * field::hash01(p, 5);
+          sbX[nsb] = ptX[p]; sbY[nsb] = ptY[p]; sbR[nsb] = field::kLobeR * (0.6f + 0.9f * str);
+          sbAmp[nsb] = w; sbLvl[nsb] = bLvl[b]; nsb++; lobes++;
+        }
+      }
+      // Strip-wide per-level metaball grid (content-space) with temporal slew.
+      const int C = field::kMetaCell;
+      const float bMorph = phase * field::kMetaMorph;
+      for (int L = 0; L < field::kBubLevels; L++)
+      {
+        float *G = &mFcGrid[L * field::kFieldGW * field::kFieldGH];
+        for (int j = 0; j < field::kFieldGH; j++)
+        {
+          const float cy = (float)(j * C);
+          for (int i = 0; i < field::kFieldGW; i++)
+          {
+            const float cx = (float)(i * C);
+            float bumps = 0.0f;
+            for (int b = 0; b < nsb; b++)
+            {
+              if (sbLvl[b] != L) continue;
+              const float dx = cx - sbX[b], dy = cy - sbY[b];
+              float s = sbR[b] * field::kMetaSigmaK; if (s < 1.0f) s = 1.0f;
+              bumps += sbAmp[b] * field::kMetaBumpAmp * expf(-(dx * dx + dy * dy) / (2.0f * s * s));
+            }
+            const float nz = anamnesis::noise::fbm(cx * field::kMetaNoiseFreq + (float)L * 3.1f, cy * field::kMetaNoiseFreq - bMorph);
+            const float f = bumps * (1.0f + field::kMetaNoiseGain * nz);
+            const int idx = j * field::kFieldGW + i;
+            G[idx] += field::kMetaSlew * (f - G[idx]);
+          }
+        }
+      }
+    }
     uint32_t mBubRng = 0x9e3779b9u;
     float mBubSpawnT = 0.0f;
     float mWetFb, mFbDcX1, mFbDcY1;   // cross-feedback signal + DC-blocker state
