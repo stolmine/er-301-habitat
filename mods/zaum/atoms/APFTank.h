@@ -646,7 +646,10 @@ namespace zaum
   static const float kCombGdComp   = 0.3f;        // tank-gd trim at full comb resonance
   static const float kCombFreezeAtten = 0.6f;     // trim comb resonance/voice under Freeze
                                                   // (tame standing waves in the frozen cloud)
-  static const float kCombVoice    = 0.8f;        // direct comb->wet injection (presence:
+  static const float kCombInGain   = 0.65f;       // drive trim INTO the comb: keeps the
+                                                  // internal signals in the guards' linear
+                                                  // region -> more headroom, gentler sat
+  static const float kCombVoice    = 0.7f;        // direct comb->wet injection (presence:
                                                   // the tank diffusers smear the comb, so
                                                   // tap it straight to the output too)
 
@@ -1967,15 +1970,19 @@ namespace zaum
           int   i0B = (int)rpB;  float frB = rpB - (float)i0B;
           int   a0B = i0B & (kCombBufSize - 1), a1B = (i0B + 1) & (kCombBufSize - 1);
           float dB  = mCombBufR[a0B] + frB * (mCombBufR[a1B] - mCombBufR[a0B]);
+          // Excitation trimmed by kCombInGain -> the internal comb signals stay in
+          // the spiral guards' linear region (more headroom, gentler saturation).
+          float exA = kCombInGain * d2Read_R;
+          float exB = kCombInGain * d2Read_L;
           // Buffer = the resonant feedback loop (Regen only), spiral-guarded, excited
-          // by the tank's D2 read. Bipolar combFb: + peaks / - inverted.
-          mCombBufL[mCombWr] = spiralFastSaturateF(d2Read_R + combFb * dA, 1.0f);
-          mCombBufR[mCombWr] = spiralFastSaturateF(d2Read_L + combFb * dB, 1.0f);
+          // by the (trimmed) tank D2 read. Bipolar combFb: + peaks / - inverted.
+          mCombBufL[mCombWr] = spiralFastSaturateF(exA + combFb * dA, 1.0f);
+          mCombBufR[mCombWr] = spiralFastSaturateF(exB + combFb * dB, 1.0f);
           // Voice = self-contained feedforward comb of the excitation (notch colour
           // at Regen=0, resonant peaks as Regen rises). Spiral-GOVERNED + freeze-
           // attenuated, then tapped straight to the wet (undiffused = present).
-          float combOutA = d2Read_R + kCombFF * dA;
-          float combOutB = d2Read_L + kCombFF * dB;
+          float combOutA = exA + kCombFF * dA;
+          float combOutB = exB + kCombFF * dB;
           combVoiceL = combMix * spiralFastSaturateF(combOutA, 1.0f) * combFreezeAtten;
           combVoiceR = combMix * spiralFastSaturateF(combOutB, 1.0f) * combFreezeAtten;
           mCombWr = (mCombWr + 1) & (kCombBufSize - 1);
