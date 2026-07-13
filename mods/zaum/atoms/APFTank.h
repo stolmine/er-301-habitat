@@ -628,6 +628,21 @@ namespace zaum
   // unaffected (it still reads the live input), so this only lifts the tank part.
   static const float kFreezeMakeup     = 0.8f;    // +20*log10(1.8) ~= +5.1 dB at fz=1
 
+  // Comb macro on the wet output (post-tank, so its feedback is self-contained and
+  // stable - NOT nested in the tank loop). Feedforward tap = notch coloration;
+  // added feedback (Regen) = resonant ring; a quadrature LFO (Move) modulates the
+  // delay for flanger smear and gives L/R a 90-degree offset = stereo movement.
+  // Spans static formant -> resonant comb -> flange on one control set.
+  static const int   kCombBufSize  = 2048;        // pow2 ring (~42 ms @48k), per ch
+  static const float kCombFF       = 0.9f;        // fixed feedforward comb depth
+  static const float kCombFbMax    = 0.85f;       // max feedback (Regen), < 1 = stable
+  static const float kCombMinD     = 8.0f;        // shortest delay (~0.17 ms, high pitch)
+  static const float kCombMaxTuneD = 1000.0f;     // longest delay (~21 ms, low pitch)
+  static const float kCombModMax   = 150.0f;      // max LFO delay swing (samples)
+  static const float kCombLfoMinHz = 0.05f;       // Move=0 -> slow drift
+  static const float kCombLfoMaxHz = 6.0f;        // Move=1 -> audible flange
+  static const float kCombSlew     = 0.02f;       // block-rate param smoother
+
 
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
@@ -848,6 +863,10 @@ namespace zaum
       addParameter(mMix);
       addParameter(mEarly);
       addParameter(mFreeze);
+      addParameter(mComb);
+      addParameter(mCombTune);
+      addParameter(mCombRegen);
+      addParameter(mCombMove);
 
       memset(mPD,     0, sizeof(mPD));
       memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
@@ -966,6 +985,13 @@ namespace zaum
       mTankWetR_prev = mTankWetR_curr = 0.0f;
       mWetHpLp1_L = mWetHpLp2_L = mWetHpLp1_R = mWetHpLp2_R = 0.0f;
       mFreezeSmoothed = 0.0f;
+      memset(mCombBufL, 0, sizeof(mCombBufL));
+      memset(mCombBufR, 0, sizeof(mCombBufR));
+      mCombWr = 0;
+      mCombLfoS = 0.0f; mCombLfoC = 1.0f;   // sine=0, cosine=1 (unit amplitude)
+      mCombMixSm = 0.0f;
+      mCombDSm = 0.5f * (kCombMinD + kCombMaxTuneD);
+      mCombFbSm = 0.0f;
 
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
@@ -990,6 +1016,10 @@ namespace zaum
     od::Parameter mMix{"Mix", 0.40f};
     od::Parameter mEarly{"Early", 0.4f};
     od::Parameter mFreeze{"Freeze", 0.0f};
+    od::Parameter mComb{"Comb", 0.0f};
+    od::Parameter mCombTune{"Tune", 0.5f};
+    od::Parameter mCombRegen{"Regen", 0.0f};
+    od::Parameter mCombMove{"Move", 0.0f};
 
     virtual void process()
     {
@@ -1149,6 +1179,31 @@ namespace zaum
       const float tankInGain = 1.0f - fz;
       // Makeup on the tank wet to counter the perceived drop when the input mutes.
       const float freezeMakeup = 1.0f + fz * kFreezeMakeup;
+
+      // --- Comb macro (block-rate) ---
+      const float combParam = mComb.value();       // 0..1 mix (0 = bypass)
+      const float combTune  = mCombTune.value();   // 0..1 (higher = shorter delay/higher pitch)
+      const float combRegen = mCombRegen.value(); // 0..1 resonance
+      const float combMove  = mCombMove.value();   // 0..1 modulation
+      // Delay base: quadratic map (more resolution at short delays), Tune=1 -> shortest.
+      const float ctq = 1.0f - combTune;
+      const float combDTarget = kCombMinD + (kCombMaxTuneD - kCombMinD) * ctq * ctq;
+      mCombMixSm += kCombSlew * (combParam - mCombMixSm);
+      mCombDSm   += kCombSlew * (combDTarget - mCombDSm);
+      mCombFbSm  += kCombSlew * (combRegen * kCombFbMax - mCombFbSm);
+      const float combMix   = mCombMixSm;
+      const float combDBase = mCombDSm;
+      const float combFb    = mCombFbSm;
+      // LFO: small-angle increment (magic-circle osc) + delay-swing depth.
+      const float combLfoHz  = kCombLfoMinHz + combMove * (kCombLfoMaxHz - kCombLfoMinHz);
+      const float combW      = 6.2831853f * combLfoHz / 48000.0f;
+      const float combModDepth = combMove * kCombModMax;
+      // Gentle renorm of the LFO magnitude (keeps the magic-circle osc unit-amplitude).
+      {
+        float mag = mCombLfoS * mCombLfoS + mCombLfoC * mCombLfoC;
+        float g = 1.5f - 0.5f * mag;
+        mCombLfoS *= g; mCombLfoC *= g;
+      }
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
       // since the smoothed value moves continuously when converging.
@@ -1920,6 +1975,35 @@ namespace zaum
         wetL += erScale * erSumL;
         wetR += erScale * erSumR;
 
+        // --- Comb macro: feedforward notch + resonant feedback on the wet. The
+        //     quadrature LFO gives L (sine) / R (cosine) a 90-deg flange offset =
+        //     stereo movement. Self-contained (downstream of the tank) so the
+        //     bounded feedback is stable; spiral guard caps the resonance.
+        float dLenL = combDBase + combModDepth * mCombLfoS;
+        float dLenR = combDBase + combModDepth * mCombLfoC;
+        if (dLenL < 1.0f) dLenL = 1.0f;
+        if (dLenR < 1.0f) dLenR = 1.0f;
+        float rpL = (float)mCombWr - dLenL + (float)kCombBufSize;
+        int   i0L = (int)rpL;  float frL = rpL - (float)i0L;
+        int   a0L = i0L & (kCombBufSize - 1), a1L = (i0L + 1) & (kCombBufSize - 1);
+        float dSampL = mCombBufL[a0L] + frL * (mCombBufL[a1L] - mCombBufL[a0L]);
+        float rpR = (float)mCombWr - dLenR + (float)kCombBufSize;
+        int   i0R = (int)rpR;  float frR = rpR - (float)i0R;
+        int   a0R = i0R & (kCombBufSize - 1), a1R = (i0R + 1) & (kCombBufSize - 1);
+        float dSampR = mCombBufR[a0R] + frR * (mCombBufR[a1R] - mCombBufR[a0R]);
+        mCombBufL[mCombWr] = spiralFastSaturateF(wetL + combFb * dSampL, 1.0f);
+        mCombBufR[mCombWr] = spiralFastSaturateF(wetR + combFb * dSampR, 1.0f);
+        float combedL = wetL + kCombFF * dSampL;
+        float combedR = wetR + kCombFF * dSampR;
+        wetL += combMix * (combedL - wetL);
+        wetR += combMix * (combedR - wetR);
+        mCombWr = (mCombWr + 1) & (kCombBufSize - 1);
+        {
+          float sN = mCombLfoS + combW * mCombLfoC;
+          float cN = mCombLfoC - combW * mCombLfoS;
+          mCombLfoS = sN; mCombLfoC = cN;
+        }
+
         // Static 200 Hz wet highpass (12 dB/oct = two cascaded one-poles/ch).
         // Applied to the full wet (tank + ER) before the mix, at host rate.
         mWetHpLp1_L += kWetHpA * (wetL - mWetHpLp1_L);
@@ -2091,6 +2175,13 @@ namespace zaum
     // Wet-output 200 Hz highpass: LP states of the two cascaded one-poles/ch.
     float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
     float  mFreezeSmoothed;       // block-rate smoothed Freeze amount (0..1)
+    // Comb macro: per-channel delay rings, shared write head + quadrature LFO,
+    // smoothed mix/delay/feedback.
+    float  mCombBufL[kCombBufSize];
+    float  mCombBufR[kCombBufSize];
+    int    mCombWr;
+    float  mCombLfoS, mCombLfoC;  // quadrature sine LFO state (magic-circle osc)
+    float  mCombMixSm, mCombDSm, mCombFbSm;
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
