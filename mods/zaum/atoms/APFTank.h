@@ -643,6 +643,9 @@ namespace zaum
   static const float kCombLfoMaxHz = 6.0f;        // Move=1 -> audible flange
   static const float kCombSlew     = 0.02f;       // block-rate param smoother
   static const float kCombGdComp   = 0.3f;        // tank-gd trim at full comb resonance
+  static const float kCombVoice    = 1.2f;        // direct comb->wet injection (presence:
+                                                  // the tank diffusers smear the comb, so
+                                                  // tap it straight to the output too)
 
 
   // ---------------------------------------------------------------------------
@@ -1940,6 +1943,10 @@ namespace zaum
         //     sources, detuned by the quadrature LFO -> stereo. Feedforward tap =
         //     notch color (combMix); bipolar Regen feedback = resonance (+ peaks /
         //     - inverted), spiral-guarded and gd-compensated for stability.
+        // combVoiceL/R also carry the comb's resonant read STRAIGHT to the wet
+        // output (below), undiffused, so the comb keeps presence (the diffusers
+        // otherwise smear it away when it only lives in the recirculation).
+        float combVoiceL = 0.0f, combVoiceR = 0.0f;
         {
           float dLenA = combDBase + combModDepth * mCombLfoS;
           float dLenB = combDBase + combModDepth * mCombLfoC;
@@ -1957,6 +1964,8 @@ namespace zaum
           mCombBufR[mCombWr] = spiralFastSaturateF(d2Read_L + combFb * dB, 1.0f);
           float sigA = d2Read_R + combMix * kCombFF * dA;
           float sigB = d2Read_L + combMix * kCombFF * dB;
+          combVoiceL = combMix * dA;   // undiffused comb voice for the direct output tap
+          combVoiceR = combMix * dB;
           mCombWr = (mCombWr + 1) & (kCombBufSize - 1);
           float sN = mCombLfoS + combW * mCombLfoC;
           float cN = mCombLfoC - combW * mCombLfoS;
@@ -1985,6 +1994,7 @@ namespace zaum
             + kWd1e * d1Read_L
             - kWd2a * d2tap_a_L + kWd2b * d2tap_b_L
             + kWd2e * d2Read_L
+            + kCombVoice * combVoiceL
         );
         mTankWetR_prev = mTankWetR_curr;
         mTankWetR_curr = kWetLevel * (
@@ -1993,6 +2003,7 @@ namespace zaum
             + kWd1e * d1Read_R
             - kWd2a * d2tap_a_R + kWd2b * d2tap_b_R
             + kWd2e * d2Read_R
+            + kCombVoice * combVoiceR
         );
         }  // end if (tankTick) — tank core ran at 24k
 
