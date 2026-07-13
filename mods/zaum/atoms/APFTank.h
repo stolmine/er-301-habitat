@@ -633,10 +633,12 @@ namespace zaum
   // click-free). Reverse crossfades the wet toward its reversed self: the tail
   // rises INTO the hits. Runs at the 48 kHz host rate, per channel.
   static const int   kRevBufSize   = 32768;       // pow2 ring (>= 2.5*grainMax)
-  // Grain (reverse window) length is dynamic: tied to Size + Decay so bigger/
-  // longer settings give longer reverse swells. Bounded so 2.5*max < kRevBufSize.
-  static const int   kRevGrainMin  = 5000;        // ~104 ms @48k
-  static const int   kRevGrainMax  = 12800;       // ~267 ms @48k (2.5*max=32000<32768)
+  // Grain (reverse window) length is driven by the INTER-ONSET INTERVAL (samples
+  // since the last trigger), clamped to this range -> each reverse grain spans the
+  // actual gap between events, coherent with the input rhythm rather than the
+  // arbitrary Size/Decay of the space. Bounded so 2*max < kRevBufSize.
+  static const int   kRevGrainMin  = 3000;        // ~62 ms  (fastest reverse grain)
+  static const int   kRevGrainMax  = 14000;       // ~292 ms (2*max=28000 < 32768)
   static const int   kHannSize     = 1024;        // window LUT resolution
   static const float kRevSlew      = 0.02f;       // block-rate amount smoother
   // Transient-synced reverse: an envelope follower on the dry mono input detects
@@ -655,8 +657,8 @@ namespace zaum
   static const float kOnsetFloor    = 0.004f;     // abs floor (ignore near-silence)
   static const float kThrFloorK     = 1.5f;       // threshold floor = this * slow env
   static const float kThrOver       = 1.05f;      // set bar 5% above the triggering peak
-  static const float kThrDecayTau   = 4.0f;       // threshold decays ~4 taus over a grain
-  static const float kRefracFrac    = 0.6f;       // refractory = this * grain length
+  static const float kRevThrDecay   = 0.9998f;    // adaptive-bar decay (~20 dB over ~230 ms)
+  static const int   kRevRefrac     = 1400;       // ~29 ms trigger debounce (min IOI)
   static const float kRevFallbackJit = 0.4f;      // +-40% jitter on idle-fallback interval
 
   // ---------------------------------------------------------------------------
@@ -1221,15 +1223,8 @@ namespace zaum
       const float reverseParam = mReverse.value();               // 0..1
       mReverseSmoothed += kRevSlew * (reverseParam - mReverseSmoothed);
       const float revAmt = mReverseSmoothed;
-      // Reverse grain (window) length tied to Size + Decay (bigger room / longer
-      // tail -> longer reverse swells). Set per grain at trigger time.
-      const float revGrainNorm = 0.5f * sizeParam + 0.5f * decayParam;   // 0..1
-      const int   revGrainLen  = kRevGrainMin +
-                                 (int)(revGrainNorm * (kRevGrainMax - kRevGrainMin));
-      // Adaptive-threshold decay + refractory both scale with grain length, so
-      // longer reverbs trigger more sparsely (fewer, more distinct reverses).
-      const float revThrDecay  = 1.0f - kThrDecayTau / (float)revGrainLen;
-      const int   revRefrac    = (int)(revGrainLen * kRefracFrac);
+      // Reverse grain length is now derived per-trigger from the inter-onset
+      // interval (below), so it needs no block-rate Size/Decay derivation.
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
       // since the smoothed value moves continuously when converging.
@@ -2028,7 +2023,7 @@ namespace zaum
         // Adaptive threshold: decay toward the relative floor, clamp up to it.
         float thrFloor = mEnvSlow * kThrFloorK;
         if (thrFloor < kOnsetFloor) thrFloor = kOnsetFloor;
-        mRevThr *= revThrDecay;
+        mRevThr *= kRevThrDecay;
         if (mRevThr < thrFloor) mRevThr = thrFloor;
         if (mRevRefractoryCtr > 0) mRevRefractoryCtr--;
         // Fire on the armed rising edge above the (self-calibrated) bar; then raise
@@ -2041,11 +2036,18 @@ namespace zaum
         bool fire = onset || (mRevIdle >= mRevFallbackTarget);
         if (fire)
         {
-          mRevRefractoryCtr = revRefrac;
+          // Grain length = inter-onset interval (samples since the last trigger),
+          // clamped -> the reverse grain spans the actual gap between events.
+          int grainLen = mRevIdle;
+          if (grainLen < kRevGrainMin) grainLen = kRevGrainMin;
+          if (grainLen > kRevGrainMax) grainLen = kRevGrainMax;
+          mRevRefractoryCtr = kRevRefrac;
           mRevIdle = 0;
+          // Fallback interval: jittered around the max IOI so sustained input gets
+          // long, aperiodic grains (no re-introduced periodicity).
           mRevSeed = xorshift64(mRevSeed);
           float jr = ((mRevSeed & 0xFFFF) * (1.0f / 65535.0f) - 0.5f) * (2.0f * kRevFallbackJit);
-          mRevFallbackTarget = revGrainLen + (int)(revGrainLen * jr);
+          mRevFallbackTarget = kRevGrainMax + (int)(kRevGrainMax * jr);
           if (mRevFallbackTarget < kRevGrainMin) mRevFallbackTarget = kRevGrainMin;
           // Steal the most-idle voice (largest phase) and launch a backward grain.
           int vsel = 0, maxph = mRevVoicePhase[0];
@@ -2053,8 +2055,8 @@ namespace zaum
             if (mRevVoicePhase[v] > maxph) { maxph = mRevVoicePhase[v]; vsel = v; }
           mRevVoicePhase[vsel]  = 0;
           mRevVoiceAnchor[vsel] = mRevWr;
-          mRevVoiceLen[vsel]    = revGrainLen;
-          mRevVoiceRatio[vsel]  = (float)kHannSize / (float)revGrainLen;
+          mRevVoiceLen[vsel]    = grainLen;
+          mRevVoiceRatio[vsel]  = (float)kHannSize / (float)grainLen;
         }
 
         // --- Sum active reverse voices (backward Hann grains) ---
