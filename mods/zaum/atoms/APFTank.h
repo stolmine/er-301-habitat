@@ -312,23 +312,6 @@ namespace zaum
     float s = absX * (1.0f + x2 * (-0.16666667f + x2 * 0.008333333f));
     return (x > 0.0f) ? (s / densityA) : -(s / densityA);
   }
-  // Character morph for the in-loop feedback nonlinearity: clean -> saturated ->
-  // folded. densityA drives the spiral saturator harder (saturates peaks, unity
-  // through-gain at low level so the decay time is preserved). foldAmt then blends
-  // in a cubic single-fold f(u)=u-u^3/3 (slope 1 at 0 -> also unity through-gain,
-  // decay preserved), driven by foldDrive and clamped to the fold region. Both
-  // stages are unity at small signal, so Character colours the tail's harmonics
-  // without changing loop gain / stability. Applied in the cross-feed path.
-  static ZAUM_ALWAYS_INLINE float characterShapeF(float x, float densityA,
-                                                  float foldAmt, float foldDrive)
-  {
-    float sat = spiralFastSaturateF(x, densityA);
-    float fx  = sat * foldDrive;
-    if (fx >  1.5f) fx =  1.5f;               // clamp to the fold region
-    if (fx < -1.5f) fx = -1.5f;
-    float folded = (fx - fx * fx * fx * 0.33333333f) / foldDrive;
-    return sat + foldAmt * (folded - sat);
-  }
 
   // ---------------------------------------------------------------------------
   // Buffer size constants
@@ -633,26 +616,29 @@ namespace zaum
   // by fz=0.85, R by fz=1.0) so the tail "sets" progressively rather than snapping.
   // The Brownian mod keeps running -> a LIVING frozen cloud, not a static loop.
   static const float kFreezeSlew       = 0.02f;   // block-rate one-pole (~30 ms glide)
-  static const float kFreezeGd         = 1.0f;    // unity feedback at full freeze
+  static const float kFreezeGd         = 1.001f;  // a hair over unity at full freeze:
+                                                  // counters loop losses so the frozen
+                                                  // cloud holds instead of slowly dying
+                                                  // (spiral governor caps any creep).
   static const float kFreezeStaggerL   = 0.85f;   // L reaches unity by fz=0.85
   static const float kFreezeStaggerOff = 0.15f;   // R begins locking at fz=0.15
+  // Freeze makeup: muting the tank input removes its input-driven early taps, so
+  // the frozen wet reads quieter. Ramp a makeup gain on the tank wet with freeze
+  // to restore perceived level (~+5 dB at full freeze). The live ER network is
+  // unaffected (it still reads the live input), so this only lifts the tank part.
+  static const float kFreezeMakeup     = 0.8f;    // +20*log10(1.8) ~= +5.1 dB at fz=1
 
   // Reverse (0..1): a granular reverse buffer on the wet. Two Hann-windowed grains
   // read the recent wet BACKWARD, offset by half a grain (50% overlap-add -> flat,
   // click-free). Reverse crossfades the wet toward its reversed self: the tail
   // rises INTO the hits. Runs at the 48 kHz host rate, per channel.
-  static const int   kRevBufSize   = 16384;       // pow2 ring (>= 2.5*grain)
-  static const int   kRevGrain     = 5760;        // grain length (~120 ms @48k)
-  static const int   kRevGrainHalf = 2880;        // grain B phase offset
+  static const int   kRevBufSize   = 32768;       // pow2 ring (>= 2.5*grainMax)
+  // Grain (reverse window) length is dynamic: tied to Size + Decay so bigger/
+  // longer settings give longer reverse swells. Bounded so 2.5*max < kRevBufSize.
+  static const int   kRevGrainMin  = 5000;        // ~104 ms @48k
+  static const int   kRevGrainMax  = 12800;       // ~267 ms @48k (2.5*max=32000<32768)
   static const int   kHannSize     = 1024;        // window LUT resolution
-  static const float kRevHannRatio = 1024.0f / 5760.0f; // phase -> LUT index
   static const float kRevSlew      = 0.02f;       // block-rate amount smoother
-
-  // Character (0..1): morphs the in-loop nonlinearity clean -> saturated -> folded.
-  // First half raises the saturator density; second half morphs in the wavefold.
-  static const float kCharSlew     = 0.02f;       // block-rate amount smoother
-  static const float kCharSatMax   = 3.0f;        // densityA 1..(1+max)
-  static const float kCharFoldMax  = 2.0f;        // foldDrive 1..(1+max)
 
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
@@ -874,7 +860,6 @@ namespace zaum
       addParameter(mEarly);
       addParameter(mFreeze);
       addParameter(mReverse);
-      addParameter(mCharacter);
 
       memset(mPD,     0, sizeof(mPD));
       memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
@@ -1001,10 +986,8 @@ namespace zaum
       memset(mRevBufL, 0, sizeof(mRevBufL));
       memset(mRevBufR, 0, sizeof(mRevBufR));
       mRevWr = 0;
-      mRevPhaseA = 0;            mRevAnchorA = 0;
-      mRevPhaseB = kRevGrainHalf; mRevAnchorB = 0;
+      mRevPhaseA = 0; mRevAnchorA = 0; mRevAnchorB = 0;
       mReverseSmoothed = 0.0f;
-      mCharacterSmoothed = 0.0f;
       {
         const double ct = 0.99998117528260111;  // cos(2*pi/1024)
         double cm1 = 1.0;   // cos(0)
@@ -1042,7 +1025,6 @@ namespace zaum
     od::Parameter mEarly{"Early", 0.4f};
     od::Parameter mFreeze{"Freeze", 0.0f};
     od::Parameter mReverse{"Reverse", 0.0f};
-    od::Parameter mCharacter{"Character", 0.0f};
 
     virtual void process()
     {
@@ -1200,20 +1182,20 @@ namespace zaum
       const float dampCoeffFreeze = dampCoeffEff + fzMean * (1.0f - dampCoeffEff);
       // Mute new input into the tank as it freezes (preserve the frozen content).
       const float tankInGain = 1.0f - fz;
+      // Makeup on the tank wet to counter the perceived drop when the input mutes.
+      const float freezeMakeup = 1.0f + fz * kFreezeMakeup;
 
       // --- Reverse amount (block-rate smoothed) ---
       const float reverseParam = mReverse.value();               // 0..1
       mReverseSmoothed += kRevSlew * (reverseParam - mReverseSmoothed);
       const float revAmt = mReverseSmoothed;
-
-      // --- Character: clean -> saturated -> folded (block-rate smoothed) ---
-      const float characterParam = mCharacter.value();           // 0..1
-      mCharacterSmoothed += kCharSlew * (characterParam - mCharacterSmoothed);
-      const float ch = mCharacterSmoothed;
-      const float charDensity = 1.0f + ch * kCharSatMax;         // saturator drive
-      float charFoldAmt = (ch - 0.5f) * 2.0f;                    // fold in over top half
-      if (charFoldAmt < 0.0f) charFoldAmt = 0.0f;
-      const float charFoldDrive = 1.0f + charFoldAmt * kCharFoldMax;
+      // Reverse window length tied to Size + Decay (bigger room / longer tail ->
+      // longer reverse swells). Blend the two params 50/50 across the grain range.
+      const float revGrainNorm = 0.5f * sizeParam + 0.5f * decayParam;   // 0..1
+      const int   revGrainLen  = kRevGrainMin +
+                                 (int)(revGrainNorm * (kRevGrainMax - kRevGrainMin));
+      const int   revGrainHalf = revGrainLen >> 1;
+      const float revHannRatio = (float)kHannSize / (float)revGrainLen;  // phase->LUT
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
       // since the smoothed value moves continuously when converging.
@@ -1933,12 +1915,10 @@ namespace zaum
         // Both d2Read_L and d2Read_R are fully computed above before
         // either feedback value is updated — no same-sample causality leak.
         // Cross-feed uses g_d_eff (macro-biased decay) — shorter tail as Early rises.
-        // gdFreezeA/B ramp to unity as Freeze rises (staggered L/R); the Character
-        // shaper (clean/saturated/folded) is the in-loop governor and bounds the
-        // loop, so unity feedback sustains without runaway. Unity through-gain at
-        // low level keeps decay/stability independent of Character.
-        mFeedback_L = characterShapeF(d2Read_R * gdFreezeA, charDensity, charFoldAmt, charFoldDrive);
-        mFeedback_R = characterShapeF(d2Read_L * gdFreezeB, charDensity, charFoldAmt, charFoldDrive);
+        // gdFreezeA/B ramp to unity as Freeze rises (staggered L/R); the spiral
+        // governor bounds the loop so unity feedback sustains without runaway.
+        mFeedback_L = spiralFastSaturateF(d2Read_R * gdFreezeA, 1.0f);
+        mFeedback_R = spiralFastSaturateF(d2Read_L * gdFreezeB, 1.0f);
 
         // ----------------------------------------------------------------
         // 5. Stereo wet taps — Dattorro-style multi-tap signed sum (0.1.0.7).
@@ -1976,8 +1956,8 @@ namespace zaum
         // between sample (the fresh curr). One-host-sample group delay. Upgrade
         // path if imaging is heard: a half-band upsampler.
         float interpF = tankTick ? 0.5f : 1.0f;
-        float wetL = mTankWetL_prev + (mTankWetL_curr - mTankWetL_prev) * interpF;
-        float wetR = mTankWetR_prev + (mTankWetR_curr - mTankWetR_prev) * interpF;
+        float wetL = (mTankWetL_prev + (mTankWetL_curr - mTankWetL_prev) * interpF) * freezeMakeup;
+        float wetR = (mTankWetR_prev + (mTankWetR_curr - mTankWetR_prev) * interpF) * freezeMakeup;
         mTankPhase ^= 1;
 
         // Add ER contribution (parallel, AFTER tank multi-tap).
@@ -2005,17 +1985,32 @@ namespace zaum
         mRevBufL[mRevWr] = wetL;
         mRevBufR[mRevWr] = wetR;
         float revL = 0.0f, revR = 0.0f;
+        // Grain A: primary phase; grain B: derived exactly half a grain ahead so
+        // the two Hann windows always overlap 50% (flat) even as the grain length
+        // tracks Size/Decay. Each grain reads BACKWARD from its own anchor.
         {
-          int   ri  = (mRevAnchorA - mRevPhaseA) & (kRevBufSize - 1);
-          float win = mHannLut[(int)(mRevPhaseA * kRevHannRatio)];
-          revL += win * mRevBufL[ri];  revR += win * mRevBufR[ri];
-          if (++mRevPhaseA >= kRevGrain) { mRevPhaseA = 0; mRevAnchorA = mRevWr; }
+          int   hiA = (int)(mRevPhaseA * revHannRatio);
+          if (hiA >= kHannSize) hiA = kHannSize - 1;
+          int   riA = (mRevAnchorA - mRevPhaseA) & (kRevBufSize - 1);
+          float wA  = mHannLut[hiA];
+          revL += wA * mRevBufL[riA];  revR += wA * mRevBufR[riA];
+
+          int   pB = mRevPhaseA + revGrainHalf;
+          if (pB >= revGrainLen) pB -= revGrainLen;
+          int   hiB = (int)(pB * revHannRatio);
+          if (hiB >= kHannSize) hiB = kHannSize - 1;
+          int   riB = (mRevAnchorB - pB) & (kRevBufSize - 1);
+          float wB  = mHannLut[hiB];
+          revL += wB * mRevBufL[riB];  revR += wB * mRevBufR[riB];
         }
+        // Advance A; set A's anchor when A wraps, B's anchor when B's phase wraps
+        // (i.e. when A crosses revGrainLen - revGrainHalf) -> each grain re-anchors
+        // to the current write head at its own start.
         {
-          int   ri  = (mRevAnchorB - mRevPhaseB) & (kRevBufSize - 1);
-          float win = mHannLut[(int)(mRevPhaseB * kRevHannRatio)];
-          revL += win * mRevBufL[ri];  revR += win * mRevBufR[ri];
-          if (++mRevPhaseB >= kRevGrain) { mRevPhaseB = 0; mRevAnchorB = mRevWr; }
+          const int bWrap = revGrainLen - revGrainHalf;
+          const int prevA = mRevPhaseA;
+          if (++mRevPhaseA >= revGrainLen) { mRevPhaseA = 0; mRevAnchorA = mRevWr; }
+          if (prevA < bWrap && mRevPhaseA >= bWrap) mRevAnchorB = mRevWr;
         }
         mRevWr = (mRevWr + 1) & (kRevBufSize - 1);
         wetL += revAmt * (revL - wetL);
@@ -2184,9 +2179,8 @@ namespace zaum
     float  mRevBufL[kRevBufSize];
     float  mRevBufR[kRevBufSize];
     float  mHannLut[kHannSize];
-    int    mRevWr, mRevPhaseA, mRevPhaseB, mRevAnchorA, mRevAnchorB;
+    int    mRevWr, mRevPhaseA, mRevAnchorA, mRevAnchorB;
     float  mReverseSmoothed;      // block-rate smoothed Reverse amount (0..1)
-    float  mCharacterSmoothed;    // block-rate smoothed Character amount (0..1)
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)

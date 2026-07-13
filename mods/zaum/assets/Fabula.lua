@@ -95,10 +95,6 @@ function Fabula:onLoadGraph(channelCount)
   tie(op, "Reverse", reverse, "Out")
   self:addMonoBranch("reverse", reverse, "In", reverse, "Out")
 
-  local character = self:addObject("character", app.ParameterAdapter())
-  character:hardSet("Bias", 0.0)
-  tie(op, "Character", character, "Out")
-  self:addMonoBranch("character", character, "In", character, "Out")
 end
 
 function Fabula:onLoadViews()
@@ -202,20 +198,9 @@ function Fabula:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
-    },
-    character = GainBias {
-      button = "char",
-      description = "Character (clean/sat/fold)",
-      branch = self.branches.character,
-      gainbias = self.objects.character,
-      range = self.objects.character,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.0
     }
   }, {
-    expanded = { "size", "decay", "damp", "diffusion", "predelay", "mix", "early", "freeze", "reverse", "character" },
+    expanded = { "size", "decay", "damp", "diffusion", "predelay", "mix", "early", "freeze", "reverse" },
     collapsed = {}
   }
 end
