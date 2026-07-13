@@ -312,6 +312,23 @@ namespace zaum
     float s = absX * (1.0f + x2 * (-0.16666667f + x2 * 0.008333333f));
     return (x > 0.0f) ? (s / densityA) : -(s / densityA);
   }
+  // Character morph for the in-loop feedback nonlinearity: clean -> saturated ->
+  // folded. densityA drives the spiral saturator harder (saturates peaks, unity
+  // through-gain at low level so the decay time is preserved). foldAmt then blends
+  // in a cubic single-fold f(u)=u-u^3/3 (slope 1 at 0 -> also unity through-gain,
+  // decay preserved), driven by foldDrive and clamped to the fold region. Both
+  // stages are unity at small signal, so Character colours the tail's harmonics
+  // without changing loop gain / stability. Applied in the cross-feed path.
+  static ZAUM_ALWAYS_INLINE float characterShapeF(float x, float densityA,
+                                                  float foldAmt, float foldDrive)
+  {
+    float sat = spiralFastSaturateF(x, densityA);
+    float fx  = sat * foldDrive;
+    if (fx >  1.5f) fx =  1.5f;               // clamp to the fold region
+    if (fx < -1.5f) fx = -1.5f;
+    float folded = (fx - fx * fx * fx * 0.33333333f) / foldDrive;
+    return sat + foldAmt * (folded - sat);
+  }
 
   // ---------------------------------------------------------------------------
   // Buffer size constants
@@ -631,6 +648,12 @@ namespace zaum
   static const float kRevHannRatio = 1024.0f / 5760.0f; // phase -> LUT index
   static const float kRevSlew      = 0.02f;       // block-rate amount smoother
 
+  // Character (0..1): morphs the in-loop nonlinearity clean -> saturated -> folded.
+  // First half raises the saturator density; second half morphs in the wavefold.
+  static const float kCharSlew     = 0.02f;       // block-rate amount smoother
+  static const float kCharSatMax   = 3.0f;        // densityA 1..(1+max)
+  static const float kCharFoldMax  = 2.0f;        // foldDrive 1..(1+max)
+
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
   // Both inner stages fixed at 0.50 this sub-phase (Dattorro value).
@@ -851,6 +874,7 @@ namespace zaum
       addParameter(mEarly);
       addParameter(mFreeze);
       addParameter(mReverse);
+      addParameter(mCharacter);
 
       memset(mPD,     0, sizeof(mPD));
       memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
@@ -980,6 +1004,7 @@ namespace zaum
       mRevPhaseA = 0;            mRevAnchorA = 0;
       mRevPhaseB = kRevGrainHalf; mRevAnchorB = 0;
       mReverseSmoothed = 0.0f;
+      mCharacterSmoothed = 0.0f;
       {
         const double ct = 0.99998117528260111;  // cos(2*pi/1024)
         double cm1 = 1.0;   // cos(0)
@@ -1017,6 +1042,7 @@ namespace zaum
     od::Parameter mEarly{"Early", 0.4f};
     od::Parameter mFreeze{"Freeze", 0.0f};
     od::Parameter mReverse{"Reverse", 0.0f};
+    od::Parameter mCharacter{"Character", 0.0f};
 
     virtual void process()
     {
@@ -1179,6 +1205,15 @@ namespace zaum
       const float reverseParam = mReverse.value();               // 0..1
       mReverseSmoothed += kRevSlew * (reverseParam - mReverseSmoothed);
       const float revAmt = mReverseSmoothed;
+
+      // --- Character: clean -> saturated -> folded (block-rate smoothed) ---
+      const float characterParam = mCharacter.value();           // 0..1
+      mCharacterSmoothed += kCharSlew * (characterParam - mCharacterSmoothed);
+      const float ch = mCharacterSmoothed;
+      const float charDensity = 1.0f + ch * kCharSatMax;         // saturator drive
+      float charFoldAmt = (ch - 0.5f) * 2.0f;                    // fold in over top half
+      if (charFoldAmt < 0.0f) charFoldAmt = 0.0f;
+      const float charFoldDrive = 1.0f + charFoldAmt * kCharFoldMax;
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
       // since the smoothed value moves continuously when converging.
@@ -1898,10 +1933,12 @@ namespace zaum
         // Both d2Read_L and d2Read_R are fully computed above before
         // either feedback value is updated — no same-sample causality leak.
         // Cross-feed uses g_d_eff (macro-biased decay) — shorter tail as Early rises.
-        // gdFreezeA/B ramp to unity as Freeze rises (staggered L/R); the spiral
-        // governor bounds the loop so unity feedback sustains without runaway.
-        mFeedback_L = spiralFastSaturateF(d2Read_R * gdFreezeA, 1.0f);
-        mFeedback_R = spiralFastSaturateF(d2Read_L * gdFreezeB, 1.0f);
+        // gdFreezeA/B ramp to unity as Freeze rises (staggered L/R); the Character
+        // shaper (clean/saturated/folded) is the in-loop governor and bounds the
+        // loop, so unity feedback sustains without runaway. Unity through-gain at
+        // low level keeps decay/stability independent of Character.
+        mFeedback_L = characterShapeF(d2Read_R * gdFreezeA, charDensity, charFoldAmt, charFoldDrive);
+        mFeedback_R = characterShapeF(d2Read_L * gdFreezeB, charDensity, charFoldAmt, charFoldDrive);
 
         // ----------------------------------------------------------------
         // 5. Stereo wet taps — Dattorro-style multi-tap signed sum (0.1.0.7).
@@ -2149,6 +2186,7 @@ namespace zaum
     float  mHannLut[kHannSize];
     int    mRevWr, mRevPhaseA, mRevPhaseB, mRevAnchorA, mRevAnchorB;
     float  mReverseSmoothed;      // block-rate smoothed Reverse amount (0..1)
+    float  mCharacterSmoothed;    // block-rate smoothed Character amount (0..1)
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
