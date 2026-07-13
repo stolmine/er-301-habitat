@@ -639,6 +639,18 @@ namespace zaum
   static const int   kRevGrainMax  = 12800;       // ~267 ms @48k (2.5*max=32000<32768)
   static const int   kHannSize     = 1024;        // window LUT resolution
   static const float kRevSlew      = 0.02f;       // block-rate amount smoother
+  // Transient-synced reverse: an envelope follower on the dry mono input detects
+  // onsets; each onset triggers a backward Hann grain from a small voice pool, so
+  // grain boundaries land ON transients (masked) instead of at a fixed period ->
+  // no rhythmic chop. A jittered idle-fallback keeps sustained passages alive
+  // without re-introducing periodicity. Each grain swells out of the pre-hit audio.
+  static const int   kRevVoices     = 6;          // reverse grain voice pool
+  static const float kEnvFastRel    = 0.002f;     // ~10 ms fast-env release
+  static const float kEnvSlowA      = 0.00014f;   // ~150 ms slow-env tracker
+  static const float kOnsetRatio    = 1.6f;       // fast must exceed slow x this
+  static const float kOnsetFloor    = 0.004f;     // abs floor (ignore near-silence)
+  static const int   kRevRefractory = 1920;       // 40 ms min between onsets @48k
+  static const float kRevFallbackJit = 0.4f;      // +-40% jitter on idle-fallback interval
 
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
@@ -986,8 +998,19 @@ namespace zaum
       memset(mRevBufL, 0, sizeof(mRevBufL));
       memset(mRevBufR, 0, sizeof(mRevBufR));
       mRevWr = 0;
-      mRevPhaseA = 0; mRevAnchorA = 0; mRevAnchorB = 0;
       mReverseSmoothed = 0.0f;
+      mEnvFast = mEnvSlow = 0.0f;
+      mRevRefractoryCtr = 0;
+      mRevIdle = 0;
+      mRevFallbackTarget = kRevGrainMin;
+      mRevSeed = 0x9E3779B97F4A7C15ULL;   // nonzero xorshift seed
+      for (int v = 0; v < kRevVoices; v++)
+      {
+        mRevVoicePhase[v]  = 1 << 30;      // parked past end -> window ~0 (idle)
+        mRevVoiceAnchor[v] = 0;
+        mRevVoiceLen[v]    = 1;
+        mRevVoiceRatio[v]  = 0.0f;
+      }
       {
         const double ct = 0.99998117528260111;  // cos(2*pi/1024)
         double cm1 = 1.0;   // cos(0)
@@ -1189,13 +1212,11 @@ namespace zaum
       const float reverseParam = mReverse.value();               // 0..1
       mReverseSmoothed += kRevSlew * (reverseParam - mReverseSmoothed);
       const float revAmt = mReverseSmoothed;
-      // Reverse window length tied to Size + Decay (bigger room / longer tail ->
-      // longer reverse swells). Blend the two params 50/50 across the grain range.
+      // Reverse grain (window) length tied to Size + Decay (bigger room / longer
+      // tail -> longer reverse swells). Set per grain at trigger time.
       const float revGrainNorm = 0.5f * sizeParam + 0.5f * decayParam;   // 0..1
       const int   revGrainLen  = kRevGrainMin +
                                  (int)(revGrainNorm * (kRevGrainMax - kRevGrainMin));
-      const int   revGrainHalf = revGrainLen >> 1;
-      const float revHannRatio = (float)kHannSize / (float)revGrainLen;  // phase->LUT
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
       // since the smoothed value moves continuously when converging.
@@ -1984,34 +2005,51 @@ namespace zaum
         //     buffer + phase always advance so history/grains stay live at rev=0.
         mRevBufL[mRevWr] = wetL;
         mRevBufR[mRevWr] = wetR;
-        float revL = 0.0f, revR = 0.0f;
-        // Grain A: primary phase; grain B: derived exactly half a grain ahead so
-        // the two Hann windows always overlap 50% (flat) even as the grain length
-        // tracks Size/Decay. Each grain reads BACKWARD from its own anchor.
-        {
-          int   hiA = (int)(mRevPhaseA * revHannRatio);
-          if (hiA >= kHannSize) hiA = kHannSize - 1;
-          int   riA = (mRevAnchorA - mRevPhaseA) & (kRevBufSize - 1);
-          float wA  = mHannLut[hiA];
-          revL += wA * mRevBufL[riA];  revR += wA * mRevBufR[riA];
 
-          int   pB = mRevPhaseA + revGrainHalf;
-          if (pB >= revGrainLen) pB -= revGrainLen;
-          int   hiB = (int)(pB * revHannRatio);
-          if (hiB >= kHannSize) hiB = kHannSize - 1;
-          int   riB = (mRevAnchorB - pB) & (kRevBufSize - 1);
-          float wB  = mHannLut[hiB];
-          revL += wB * mRevBufL[riB];  revR += wB * mRevBufR[riB];
-        }
-        // Advance A; set A's anchor when A wraps, B's anchor when B's phase wraps
-        // (i.e. when A crosses revGrainLen - revGrainHalf) -> each grain re-anchors
-        // to the current write head at its own start.
+        // --- Onset detection: envelope follower on the dry mono input ---
+        // Fast peak env vs slow tracker; an onset is a sudden rise above the slow
+        // level (past a floor, outside the refractory window).
+        float ax = fabsf(monoIn);
+        mEnvFast = (ax > mEnvFast) ? ax : mEnvFast + kEnvFastRel * (ax - mEnvFast);
+        mEnvSlow += kEnvSlowA * (ax - mEnvSlow);
+        if (mRevRefractoryCtr > 0) mRevRefractoryCtr--;
+        bool onset = (mEnvFast > mEnvSlow * kOnsetRatio) &&
+                     (mEnvFast > kOnsetFloor) && (mRevRefractoryCtr == 0);
+        // Jittered idle-fallback so sustained passages still get (aperiodic) grains.
+        mRevIdle++;
+        bool fire = onset || (mRevIdle >= mRevFallbackTarget);
+        if (fire)
         {
-          const int bWrap = revGrainLen - revGrainHalf;
-          const int prevA = mRevPhaseA;
-          if (++mRevPhaseA >= revGrainLen) { mRevPhaseA = 0; mRevAnchorA = mRevWr; }
-          if (prevA < bWrap && mRevPhaseA >= bWrap) mRevAnchorB = mRevWr;
+          mRevRefractoryCtr = kRevRefractory;
+          mRevIdle = 0;
+          mRevSeed = xorshift64(mRevSeed);
+          float jr = ((mRevSeed & 0xFFFF) * (1.0f / 65535.0f) - 0.5f) * (2.0f * kRevFallbackJit);
+          mRevFallbackTarget = revGrainLen + (int)(revGrainLen * jr);
+          if (mRevFallbackTarget < kRevGrainMin) mRevFallbackTarget = kRevGrainMin;
+          // Steal the most-idle voice (largest phase) and launch a backward grain.
+          int vsel = 0, maxph = mRevVoicePhase[0];
+          for (int v = 1; v < kRevVoices; v++)
+            if (mRevVoicePhase[v] > maxph) { maxph = mRevVoicePhase[v]; vsel = v; }
+          mRevVoicePhase[vsel]  = 0;
+          mRevVoiceAnchor[vsel] = mRevWr;
+          mRevVoiceLen[vsel]    = revGrainLen;
+          mRevVoiceRatio[vsel]  = (float)kHannSize / (float)revGrainLen;
         }
+
+        // --- Sum active reverse voices (backward Hann grains) ---
+        float revL = 0.0f, revR = 0.0f;
+        for (int v = 0; v < kRevVoices; v++)
+        {
+          int   ph  = mRevVoicePhase[v];
+          int   hi  = (int)(ph * mRevVoiceRatio[v]);   // ph capped at len -> hi <= kHannSize
+          if (hi >= kHannSize) hi = kHannSize - 1;     // parked/idle -> Hann ~ 0
+          float win = mHannLut[hi];
+          int   ri  = (mRevVoiceAnchor[v] - ph) & (kRevBufSize - 1);
+          revL += win * mRevBufL[ri];
+          revR += win * mRevBufR[ri];
+          if (ph < mRevVoiceLen[v]) mRevVoicePhase[v] = ph + 1;   // cap (no overflow)
+        }
+
         mRevWr = (mRevWr + 1) & (kRevBufSize - 1);
         wetL += revAmt * (revL - wetL);
         wetR += revAmt * (revR - wetR);
@@ -2179,8 +2217,14 @@ namespace zaum
     float  mRevBufL[kRevBufSize];
     float  mRevBufR[kRevBufSize];
     float  mHannLut[kHannSize];
-    int    mRevWr, mRevPhaseA, mRevAnchorA, mRevAnchorB;
+    int    mRevWr;
     float  mReverseSmoothed;      // block-rate smoothed Reverse amount (0..1)
+    // Transient-synced reverse: envelope follower + onset state + voice pool.
+    float  mEnvFast, mEnvSlow;
+    int    mRevRefractoryCtr, mRevIdle, mRevFallbackTarget;
+    uint64_t mRevSeed;
+    int    mRevVoicePhase[kRevVoices], mRevVoiceAnchor[kRevVoices], mRevVoiceLen[kRevVoices];
+    float  mRevVoiceRatio[kRevVoices];
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
