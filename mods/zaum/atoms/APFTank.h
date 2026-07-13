@@ -642,6 +642,7 @@ namespace zaum
   static const float kCombLfoMinHz = 0.05f;       // Move=0 -> slow drift
   static const float kCombLfoMaxHz = 6.0f;        // Move=1 -> audible flange
   static const float kCombSlew     = 0.02f;       // block-rate param smoother
+  static const float kCombGdComp   = 0.3f;        // tank-gd trim at full comb resonance
 
 
   // ---------------------------------------------------------------------------
@@ -1194,10 +1195,18 @@ namespace zaum
       const float combMix   = mCombMixSm;
       const float combDBase = mCombDSm;
       const float combFb    = mCombFbSm;
-      // LFO: small-angle increment (magic-circle osc) + delay-swing depth.
+      // LFO: small-angle increment (magic-circle osc) + delay-swing depth. The comb
+      // now lives in the tank feedback, which ticks at SR/2 = 24 kHz, so the LFO
+      // advances at 24 kHz.
       const float combLfoHz  = kCombLfoMinHz + combMove * (kCombLfoMaxHz - kCombLfoMinHz);
-      const float combW      = 6.2831853f * combLfoHz / 48000.0f;
+      const float combW      = 6.2831853f * combLfoHz / 24000.0f;
       const float combModDepth = combMove * kCombModMax;
+      // gd compensation: the comb's bipolar feedback is now NESTED in the tank loop,
+      // so trim the tank feedback as comb resonance x mix rises to keep total loop
+      // gain in check (the spiral governor is the hard backstop).
+      const float gdCombComp = 1.0f - (fabsf(combFb) / kCombFbMax) * combMix * kCombGdComp;
+      const float gdCombA = gdFreezeA * gdCombComp;
+      const float gdCombB = gdFreezeB * gdCombComp;
       // Gentle renorm of the LFO magnitude (keeps the magic-circle osc unit-amplitude).
       {
         float mag = mCombLfoS * mCombLfoS + mCombLfoC * mCombLfoC;
@@ -1925,8 +1934,36 @@ namespace zaum
         // Cross-feed uses g_d_eff (macro-biased decay) — shorter tail as Early rises.
         // gdFreezeA/B ramp to unity as Freeze rises (staggered L/R); the spiral
         // governor bounds the loop so unity feedback sustains without runaway.
-        mFeedback_L = spiralFastSaturateF(d2Read_R * gdFreezeA, 1.0f);
-        mFeedback_R = spiralFastSaturateF(d2Read_L * gdFreezeB, 1.0f);
+        // --- Comb woven into the tank feedback: each round trip is comb-filtered,
+        //     so the reverb smears the comb and the comb pitches the tail (not a
+        //     serial post-effect). Two instances (buffers L/R) on the cross-feed
+        //     sources, detuned by the quadrature LFO -> stereo. Feedforward tap =
+        //     notch color (combMix); bipolar Regen feedback = resonance (+ peaks /
+        //     - inverted), spiral-guarded and gd-compensated for stability.
+        {
+          float dLenA = combDBase + combModDepth * mCombLfoS;
+          float dLenB = combDBase + combModDepth * mCombLfoC;
+          if (dLenA < 1.0f) dLenA = 1.0f;
+          if (dLenB < 1.0f) dLenB = 1.0f;
+          float rpA = (float)mCombWr - dLenA + (float)kCombBufSize;
+          int   i0A = (int)rpA;  float frA = rpA - (float)i0A;
+          int   a0A = i0A & (kCombBufSize - 1), a1A = (i0A + 1) & (kCombBufSize - 1);
+          float dA  = mCombBufL[a0A] + frA * (mCombBufL[a1A] - mCombBufL[a0A]);
+          float rpB = (float)mCombWr - dLenB + (float)kCombBufSize;
+          int   i0B = (int)rpB;  float frB = rpB - (float)i0B;
+          int   a0B = i0B & (kCombBufSize - 1), a1B = (i0B + 1) & (kCombBufSize - 1);
+          float dB  = mCombBufR[a0B] + frB * (mCombBufR[a1B] - mCombBufR[a0B]);
+          mCombBufL[mCombWr] = spiralFastSaturateF(d2Read_R + combFb * dA, 1.0f);
+          mCombBufR[mCombWr] = spiralFastSaturateF(d2Read_L + combFb * dB, 1.0f);
+          float sigA = d2Read_R + combMix * kCombFF * dA;
+          float sigB = d2Read_L + combMix * kCombFF * dB;
+          mCombWr = (mCombWr + 1) & (kCombBufSize - 1);
+          float sN = mCombLfoS + combW * mCombLfoC;
+          float cN = mCombLfoC - combW * mCombLfoS;
+          mCombLfoS = sN; mCombLfoC = cN;
+          mFeedback_L = spiralFastSaturateF(sigA * gdCombA, 1.0f);
+          mFeedback_R = spiralFastSaturateF(sigB * gdCombB, 1.0f);
+        }
 
         // ----------------------------------------------------------------
         // 5. Stereo wet taps — Dattorro-style multi-tap signed sum (0.1.0.7).
@@ -1974,35 +2011,6 @@ namespace zaum
         float erScale = (kERLevel * smEarly);
         wetL += erScale * erSumL;
         wetR += erScale * erSumR;
-
-        // --- Comb macro: feedforward notch + resonant feedback on the wet. The
-        //     quadrature LFO gives L (sine) / R (cosine) a 90-deg flange offset =
-        //     stereo movement. Self-contained (downstream of the tank) so the
-        //     bounded feedback is stable; spiral guard caps the resonance.
-        float dLenL = combDBase + combModDepth * mCombLfoS;
-        float dLenR = combDBase + combModDepth * mCombLfoC;
-        if (dLenL < 1.0f) dLenL = 1.0f;
-        if (dLenR < 1.0f) dLenR = 1.0f;
-        float rpL = (float)mCombWr - dLenL + (float)kCombBufSize;
-        int   i0L = (int)rpL;  float frL = rpL - (float)i0L;
-        int   a0L = i0L & (kCombBufSize - 1), a1L = (i0L + 1) & (kCombBufSize - 1);
-        float dSampL = mCombBufL[a0L] + frL * (mCombBufL[a1L] - mCombBufL[a0L]);
-        float rpR = (float)mCombWr - dLenR + (float)kCombBufSize;
-        int   i0R = (int)rpR;  float frR = rpR - (float)i0R;
-        int   a0R = i0R & (kCombBufSize - 1), a1R = (i0R + 1) & (kCombBufSize - 1);
-        float dSampR = mCombBufR[a0R] + frR * (mCombBufR[a1R] - mCombBufR[a0R]);
-        mCombBufL[mCombWr] = spiralFastSaturateF(wetL + combFb * dSampL, 1.0f);
-        mCombBufR[mCombWr] = spiralFastSaturateF(wetR + combFb * dSampR, 1.0f);
-        float combedL = wetL + kCombFF * dSampL;
-        float combedR = wetR + kCombFF * dSampR;
-        wetL += combMix * (combedL - wetL);
-        wetR += combMix * (combedR - wetR);
-        mCombWr = (mCombWr + 1) & (kCombBufSize - 1);
-        {
-          float sN = mCombLfoS + combW * mCombLfoC;
-          float cN = mCombLfoC - combW * mCombLfoS;
-          mCombLfoS = sN; mCombLfoC = cN;
-        }
 
         // Static 200 Hz wet highpass (12 dB/oct = two cascaded one-poles/ch).
         // Applied to the full wet (tank + ER) before the mix, at host rate.

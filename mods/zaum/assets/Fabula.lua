@@ -26,6 +26,7 @@ local floatMap = function(min, max, precision)
 end
 
 local zeroOneMap = floatMap(0, 1)
+local bipolarMap = floatMap(-1, 1)   -- Regen: - = feedforward/inverted, + = feedback
 
 local Fabula = Class {}
 Fabula:include(Unit)
@@ -226,11 +227,11 @@ function Fabula:onLoadViews()
     },
     regen = GainBias {
       button = "regen",
-      description = "Comb Regen (resonance)",
+      description = "Comb Regen (-fwd / +fbk)",
       branch = self.branches.regen,
       gainbias = self.objects.combRegen,
       range = self.objects.combRegen,
-      biasMap = zeroOneMap,
+      biasMap = bipolarMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
