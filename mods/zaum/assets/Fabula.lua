@@ -90,11 +90,6 @@ function Fabula:onLoadGraph(channelCount)
   tie(op, "Freeze", freeze, "Out")
   self:addMonoBranch("freeze", freeze, "In", freeze, "Out")
 
-  local reverse = self:addObject("reverse", app.ParameterAdapter())
-  reverse:hardSet("Bias", 0.0)
-  tie(op, "Reverse", reverse, "Out")
-  self:addMonoBranch("reverse", reverse, "In", reverse, "Out")
-
 end
 
 function Fabula:onLoadViews()
@@ -187,20 +182,9 @@ function Fabula:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
-    },
-    reverse = GainBias {
-      button = "rev",
-      description = "Reverse (granular)",
-      branch = self.branches.reverse,
-      gainbias = self.objects.reverse,
-      range = self.objects.reverse,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.0
     }
   }, {
-    expanded = { "size", "decay", "damp", "diffusion", "predelay", "mix", "early", "freeze", "reverse" },
+    expanded = { "size", "decay", "damp", "diffusion", "predelay", "mix", "early", "freeze" },
     collapsed = {}
   }
 end

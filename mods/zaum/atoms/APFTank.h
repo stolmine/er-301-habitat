@@ -628,38 +628,6 @@ namespace zaum
   // unaffected (it still reads the live input), so this only lifts the tank part.
   static const float kFreezeMakeup     = 0.8f;    // +20*log10(1.8) ~= +5.1 dB at fz=1
 
-  // Reverse (0..1): a granular reverse buffer on the wet. Two Hann-windowed grains
-  // read the recent wet BACKWARD, offset by half a grain (50% overlap-add -> flat,
-  // click-free). Reverse crossfades the wet toward its reversed self: the tail
-  // rises INTO the hits. Runs at the 48 kHz host rate, per channel.
-  static const int   kRevBufSize   = 32768;       // pow2 ring (>= 2.5*grainMax)
-  // Grain (reverse window) length is driven by the INTER-ONSET INTERVAL (samples
-  // since the last trigger), clamped to this range -> each reverse grain spans the
-  // actual gap between events, coherent with the input rhythm rather than the
-  // arbitrary Size/Decay of the space. Bounded so 2*max < kRevBufSize.
-  static const int   kRevGrainMin  = 3000;        // ~62 ms  (fastest reverse grain)
-  static const int   kRevGrainMax  = 14000;       // ~292 ms (2*max=28000 < 32768)
-  static const int   kHannSize     = 1024;        // window LUT resolution
-  static const float kRevSlew      = 0.02f;       // block-rate amount smoother
-  // Transient-synced reverse: an envelope follower on the dry mono input detects
-  // onsets; each onset triggers a backward Hann grain from a small voice pool, so
-  // grain boundaries land ON transients (masked) instead of at a fixed period ->
-  // no rhythmic chop. A jittered idle-fallback keeps sustained passages alive
-  // without re-introducing periodicity. Each grain swells out of the pre-hit audio.
-  static const int   kRevVoices     = 6;          // reverse grain voice pool
-  static const float kEnvFastRel    = 0.0008f;    // ~26 ms fast-env release (holds the peak)
-  static const float kEnvSlowA      = 0.00014f;   // ~150 ms slow-env tracker
-  // ADAPTIVE onset threshold (self-calibrating, no a-priori loudness assumption):
-  // the threshold JUMPS to each hit's peak when it fires (kThrOver headroom) and
-  // DECAYS back toward a relative floor (kThrFloorK * slow). So a hit must clear a
-  // bar set by what was just heard -> loud/busy passages self-raise the bar (few,
-  // salient triggers); quiet passages let it fall. Schmitt-armed (one grain/edge).
-  static const float kOnsetFloor    = 0.004f;     // abs floor (ignore near-silence)
-  static const float kThrFloorK     = 1.5f;       // threshold floor = this * slow env
-  static const float kThrOver       = 1.05f;      // set bar 5% above the triggering peak
-  static const float kRevThrDecay   = 0.9998f;    // adaptive-bar decay (~20 dB over ~230 ms)
-  static const int   kRevRefrac     = 1400;       // ~29 ms trigger debounce (min IOI)
-  static const float kRevFallbackJit = 0.4f;      // +-40% jitter on idle-fallback interval
 
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
@@ -880,7 +848,6 @@ namespace zaum
       addParameter(mMix);
       addParameter(mEarly);
       addParameter(mFreeze);
-      addParameter(mReverse);
 
       memset(mPD,     0, sizeof(mPD));
       memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
@@ -1000,41 +967,6 @@ namespace zaum
       mWetHpLp1_L = mWetHpLp2_L = mWetHpLp1_R = mWetHpLp2_R = 0.0f;
       mFreezeSmoothed = 0.0f;
 
-      // Reverse: zero buffers, seed grains (B offset by half a grain), fill the
-      // Hann LUT via a cosine RECURRENCE (no runtime trig — am335x package sinf/
-      // cosf can miscompute; see feedback_package_trig_lut). Recurrence:
-      // cos((n+1)t) = 2 cos(t) cos(nt) - cos((n-1)t), Hann[n] = 0.5*(1 - cos(nt)).
-      memset(mRevBufL, 0, sizeof(mRevBufL));
-      memset(mRevBufR, 0, sizeof(mRevBufR));
-      mRevWr = 0;
-      mReverseSmoothed = 0.0f;
-      mEnvFast = mEnvSlow = 0.0f;
-      mRevThr = kOnsetFloor;
-      mRevArmed = true;
-      mRevRefractoryCtr = 0;
-      mRevIdle = 0;
-      mRevFallbackTarget = kRevGrainMin;
-      mRevSeed = 0x9E3779B97F4A7C15ULL;   // nonzero xorshift seed
-      for (int v = 0; v < kRevVoices; v++)
-      {
-        mRevVoicePhase[v]  = 1 << 30;      // parked past end -> window ~0 (idle)
-        mRevVoiceAnchor[v] = 0;
-        mRevVoiceLen[v]    = 1;
-        mRevVoiceRatio[v]  = 0.0f;
-      }
-      {
-        const double ct = 0.99998117528260111;  // cos(2*pi/1024)
-        double cm1 = 1.0;   // cos(0)
-        double c0  = ct;    // cos(t)
-        mHannLut[0] = 0.0f;
-        mHannLut[1] = (float)(0.5 * (1.0 - c0));
-        for (int n = 2; n < kHannSize; n++)
-        {
-          double cn = 2.0 * ct * c0 - cm1;
-          mHannLut[n] = (float)(0.5 * (1.0 - cn));
-          cm1 = c0; c0 = cn;
-        }
-      }
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
       mSizeFactor       = 0.850;    // raw sizeFactor (Size only), for reference
@@ -1058,7 +990,6 @@ namespace zaum
     od::Parameter mMix{"Mix", 0.40f};
     od::Parameter mEarly{"Early", 0.4f};
     od::Parameter mFreeze{"Freeze", 0.0f};
-    od::Parameter mReverse{"Reverse", 0.0f};
 
     virtual void process()
     {
@@ -1218,13 +1149,6 @@ namespace zaum
       const float tankInGain = 1.0f - fz;
       // Makeup on the tank wet to counter the perceived drop when the input mutes.
       const float freezeMakeup = 1.0f + fz * kFreezeMakeup;
-
-      // --- Reverse amount (block-rate smoothed) ---
-      const float reverseParam = mReverse.value();               // 0..1
-      mReverseSmoothed += kRevSlew * (reverseParam - mReverseSmoothed);
-      const float revAmt = mReverseSmoothed;
-      // Reverse grain length is now derived per-trigger from the inter-onset
-      // interval (below), so it needs no block-rate Size/Decay derivation.
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
       // since the smoothed value moves continuously when converging.
@@ -2007,75 +1931,6 @@ namespace zaum
         mWetHpLp2_R += kWetHpA * (hp1R - mWetHpLp2_R);
         wetR = hp1R - mWetHpLp2_R;
 
-        // --- Reverse: write wet to the ring, sum two backward Hann grains,
-        //     crossfade wet -> reversed by revAmt. Grains are offset by half a
-        //     grain (50% overlap) so the Hann windows sum flat / click-free. The
-        //     buffer + phase always advance so history/grains stay live at rev=0.
-        mRevBufL[mRevWr] = wetL;
-        mRevBufR[mRevWr] = wetR;
-
-        // --- Onset detection: envelope follower on the dry mono input ---
-        // Fast peak env vs slow tracker; an onset is a sudden rise above the slow
-        // level (past a floor, outside the refractory window).
-        float ax = fabsf(monoIn);
-        mEnvFast = (ax > mEnvFast) ? ax : mEnvFast + kEnvFastRel * (ax - mEnvFast);
-        mEnvSlow += kEnvSlowA * (ax - mEnvSlow);
-        // Adaptive threshold: decay toward the relative floor, clamp up to it.
-        float thrFloor = mEnvSlow * kThrFloorK;
-        if (thrFloor < kOnsetFloor) thrFloor = kOnsetFloor;
-        mRevThr *= kRevThrDecay;
-        if (mRevThr < thrFloor) mRevThr = thrFloor;
-        if (mRevRefractoryCtr > 0) mRevRefractoryCtr--;
-        // Fire on the armed rising edge above the (self-calibrated) bar; then raise
-        // the bar to this peak + disarm. Re-arm once the fast env falls back below.
-        bool onset = mRevArmed && (mEnvFast > mRevThr) && (mRevRefractoryCtr == 0);
-        if (onset) { mRevThr = mEnvFast * kThrOver; mRevArmed = false; }
-        else if (mEnvFast < mRevThr) mRevArmed = true;
-        // Jittered idle-fallback so sustained passages still get (aperiodic) grains.
-        mRevIdle++;
-        bool fire = onset || (mRevIdle >= mRevFallbackTarget);
-        if (fire)
-        {
-          // Grain length = inter-onset interval (samples since the last trigger),
-          // clamped -> the reverse grain spans the actual gap between events.
-          int grainLen = mRevIdle;
-          if (grainLen < kRevGrainMin) grainLen = kRevGrainMin;
-          if (grainLen > kRevGrainMax) grainLen = kRevGrainMax;
-          mRevRefractoryCtr = kRevRefrac;
-          mRevIdle = 0;
-          // Fallback interval: jittered around the max IOI so sustained input gets
-          // long, aperiodic grains (no re-introduced periodicity).
-          mRevSeed = xorshift64(mRevSeed);
-          float jr = ((mRevSeed & 0xFFFF) * (1.0f / 65535.0f) - 0.5f) * (2.0f * kRevFallbackJit);
-          mRevFallbackTarget = kRevGrainMax + (int)(kRevGrainMax * jr);
-          if (mRevFallbackTarget < kRevGrainMin) mRevFallbackTarget = kRevGrainMin;
-          // Steal the most-idle voice (largest phase) and launch a backward grain.
-          int vsel = 0, maxph = mRevVoicePhase[0];
-          for (int v = 1; v < kRevVoices; v++)
-            if (mRevVoicePhase[v] > maxph) { maxph = mRevVoicePhase[v]; vsel = v; }
-          mRevVoicePhase[vsel]  = 0;
-          mRevVoiceAnchor[vsel] = mRevWr;
-          mRevVoiceLen[vsel]    = grainLen;
-          mRevVoiceRatio[vsel]  = (float)kHannSize / (float)grainLen;
-        }
-
-        // --- Sum active reverse voices (backward Hann grains) ---
-        float revL = 0.0f, revR = 0.0f;
-        for (int v = 0; v < kRevVoices; v++)
-        {
-          int   ph  = mRevVoicePhase[v];
-          int   hi  = (int)(ph * mRevVoiceRatio[v]);   // ph capped at len -> hi <= kHannSize
-          if (hi >= kHannSize) hi = kHannSize - 1;     // parked/idle -> Hann ~ 0
-          float win = mHannLut[hi];
-          int   ri  = (mRevVoiceAnchor[v] - ph) & (kRevBufSize - 1);
-          revL += win * mRevBufL[ri];
-          revR += win * mRevBufR[ri];
-          if (ph < mRevVoiceLen[v]) mRevVoicePhase[v] = ph + 1;   // cap (no overflow)
-        }
-
-        mRevWr = (mRevWr + 1) & (kRevBufSize - 1);
-        wetL += revAmt * (revL - wetL);
-        wetR += revAmt * (revR - wetR);
 
         // ----------------------------------------------------------------
         // 6. Dry/wet mix — true stereo.
@@ -2236,19 +2091,6 @@ namespace zaum
     // Wet-output 200 Hz highpass: LP states of the two cascaded one-poles/ch.
     float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
     float  mFreezeSmoothed;       // block-rate smoothed Freeze amount (0..1)
-    // Reverse granular buffer (per channel) + shared grain state + Hann LUT.
-    float  mRevBufL[kRevBufSize];
-    float  mRevBufR[kRevBufSize];
-    float  mHannLut[kHannSize];
-    int    mRevWr;
-    float  mReverseSmoothed;      // block-rate smoothed Reverse amount (0..1)
-    // Transient-synced reverse: envelope follower + onset state + voice pool.
-    float  mEnvFast, mEnvSlow, mRevThr;   // fast/slow env + adaptive onset threshold
-    bool   mRevArmed;             // Schmitt-trigger arm state (one grain per transient)
-    int    mRevRefractoryCtr, mRevIdle, mRevFallbackTarget;
-    uint64_t mRevSeed;
-    int    mRevVoicePhase[kRevVoices], mRevVoiceAnchor[kRevVoices], mRevVoiceLen[kRevVoices];
-    float  mRevVoiceRatio[kRevVoices];
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
