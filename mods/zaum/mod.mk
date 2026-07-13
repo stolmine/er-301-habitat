@@ -1,5 +1,5 @@
 PKGNAME ?= zaum
-PKGVERSION ?= 0.2.0.35
+PKGVERSION ?= 0.2.0.36
 
 include scripts/env.mk
 

@@ -1207,11 +1207,9 @@ namespace zaum
       const float combLfoHz  = kCombLfoMinHz + combMove * (kCombLfoMaxHz - kCombLfoMinHz);
       const float combW      = 6.2831853f * combLfoHz / 24000.0f;
       const float combModDepth = combMove * kCombModMax;
-      // gd compensation (from block-rate targets - a gentle stability trim): trim the
-      // tank feedback as comb resonance x mix rises. Spiral governor is the backstop.
-      const float gdCombComp = 1.0f - (fabsf(combFbTarget) / kCombFbMax) * combMixTarget * kCombGdComp;
-      const float gdCombA = gdFreezeA * gdCombComp;
-      const float gdCombB = gdFreezeB * gdCombComp;
+      // The comb is a PARALLEL resonator (excited by the tank's D2 read, output to
+      // the wet) - it is NOT in the tank feedback loop, so no loop-gain trim is
+      // needed and the tank feedback / Freeze is left pristine.
       // Gentle renorm of the LFO magnitude (keeps the magic-circle osc unit-amplitude).
       {
         float mag = mCombLfoS * mCombLfoS + mCombLfoC * mCombLfoC;
@@ -1939,15 +1937,14 @@ namespace zaum
         // Cross-feed uses g_d_eff (macro-biased decay) — shorter tail as Early rises.
         // gdFreezeA/B ramp to unity as Freeze rises (staggered L/R); the spiral
         // governor bounds the loop so unity feedback sustains without runaway.
-        // --- Comb woven into the tank feedback: each round trip is comb-filtered,
-        //     so the reverb smears the comb and the comb pitches the tail (not a
-        //     serial post-effect). Two instances (buffers L/R) on the cross-feed
-        //     sources, detuned by the quadrature LFO -> stereo. Feedforward tap =
-        //     notch color (combMix); bipolar Regen feedback = resonance (+ peaks /
-        //     - inverted), spiral-guarded and gd-compensated for stability.
-        // combVoiceL/R also carry the comb's resonant read STRAIGHT to the wet
-        // output (below), undiffused, so the comb keeps presence (the diffusers
-        // otherwise smear it away when it only lives in the recirculation).
+        // --- Comb as a PARALLEL resonator EXCITED by the tank's D2 recirculating
+        //     read (d2Read), output straight to the wet - NOT inside the feedback
+        //     loop. So the tank loop gain (and Freeze) is left pristine, while the
+        //     comb still rings, excited by the reverb, and decays with it. Two
+        //     instances (L/R), detuned by the quadrature LFO -> stereo. Bipolar
+        //     Regen = self-contained resonance (+ peaks / - inverted), spiral-
+        //     guarded; the resonant read goes direct to the wet (undiffused) so it
+        //     keeps presence. This is the goldilocks: integrated but Freeze-safe.
         float combVoiceL = 0.0f, combVoiceR = 0.0f;
         {
           // Per-sample glide of Mix / Tune(delay) / Regen(fb) toward the block
@@ -1970,21 +1967,25 @@ namespace zaum
           int   i0B = (int)rpB;  float frB = rpB - (float)i0B;
           int   a0B = i0B & (kCombBufSize - 1), a1B = (i0B + 1) & (kCombBufSize - 1);
           float dB  = mCombBufR[a0B] + frB * (mCombBufR[a1B] - mCombBufR[a0B]);
+          // Buffer = the resonant feedback loop (Regen only), spiral-guarded, excited
+          // by the tank's D2 read. Bipolar combFb: + peaks / - inverted.
           mCombBufL[mCombWr] = spiralFastSaturateF(d2Read_R + combFb * dA, 1.0f);
           mCombBufR[mCombWr] = spiralFastSaturateF(d2Read_L + combFb * dB, 1.0f);
-          float sigA = d2Read_R + combMix * kCombFF * dA;
-          float sigB = d2Read_L + combMix * kCombFF * dB;
-          // Undiffused comb voice for the direct output tap: spiral-GOVERNED (bounds
-          // the resonant peaks) and freeze-attenuated (tames frozen standing waves).
-          combVoiceL = combMix * spiralFastSaturateF(dA, 1.0f) * combFreezeAtten;
-          combVoiceR = combMix * spiralFastSaturateF(dB, 1.0f) * combFreezeAtten;
+          // Voice = self-contained feedforward comb of the excitation (notch colour
+          // at Regen=0, resonant peaks as Regen rises). Spiral-GOVERNED + freeze-
+          // attenuated, then tapped straight to the wet (undiffused = present).
+          float combOutA = d2Read_R + kCombFF * dA;
+          float combOutB = d2Read_L + kCombFF * dB;
+          combVoiceL = combMix * spiralFastSaturateF(combOutA, 1.0f) * combFreezeAtten;
+          combVoiceR = combMix * spiralFastSaturateF(combOutB, 1.0f) * combFreezeAtten;
           mCombWr = (mCombWr + 1) & (kCombBufSize - 1);
           float sN = mCombLfoS + combW * mCombLfoC;
           float cN = mCombLfoC - combW * mCombLfoS;
           mCombLfoS = sN; mCombLfoC = cN;
-          mFeedback_L = spiralFastSaturateF(sigA * gdCombA, 1.0f);
-          mFeedback_R = spiralFastSaturateF(sigB * gdCombB, 1.0f);
         }
+        // Tank feedback stays CLEAN (no comb) -> Freeze behaves exactly as before.
+        mFeedback_L = spiralFastSaturateF(d2Read_R * gdFreezeA, 1.0f);
+        mFeedback_R = spiralFastSaturateF(d2Read_L * gdFreezeB, 1.0f);
 
         // ----------------------------------------------------------------
         // 5. Stereo wet taps — Dattorro-style multi-tap signed sum (0.1.0.7).
