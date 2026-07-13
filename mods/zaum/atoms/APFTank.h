@@ -601,6 +601,14 @@ namespace zaum
   // ---------------------------------------------------------------------------
   static const float kDCBlockR = 0.999;
 
+  // Static wet-output highpass (housekeeping): keeps the reverb out of the low
+  // mids so it doesn't mud up the mix or pump the tank on bass. Two cascaded
+  // one-pole highpasses = 12 dB/oct at ~200 Hz, run at the 48 kHz host rate on
+  // the reconstructed wet (per channel). Coeff a = 1 - exp(-2*pi*fc/sr); at
+  // fc=200, sr=48000 -> a ~= 0.02593. hp = x - lp; lp += a*(x - lp).
+  static const float kWetHpF = 200.0f;
+  static const float kWetHpA = 0.025918f;
+
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
   // Both inner stages fixed at 0.50 this sub-phase (Dattorro value).
@@ -812,8 +820,10 @@ namespace zaum
       addParameter(mDecay);
       addParameter(mDamp);
       addParameter(mDiffusion);
-      addParameter(mMod);
-      addParameter(mModRate);
+      // Mod / ModRate are DEMOTED to baked-in character (not exposed): the knobs
+      // did little, and the organic Brownian drift is part of Fabula's identity.
+      // The members are kept (mMod.value()/mModRate.value() return their defaults)
+      // so they can be re-exposed or CV-tied later without a layout change.
       addParameter(mPredelay);
       addParameter(mMix);
       addParameter(mEarly);
@@ -933,6 +943,7 @@ namespace zaum
       mDecimPrev = 0.0f;
       mTankWetL_prev = mTankWetL_curr = 0.0f;
       mTankWetR_prev = mTankWetR_curr = 0.0f;
+      mWetHpLp1_L = mWetHpLp2_L = mWetHpLp1_R = mWetHpLp2_R = 0.0f;
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
       mSizeFactor       = 0.850;    // raw sizeFactor (Size only), for reference
@@ -977,8 +988,8 @@ namespace zaum
       // ------------------------------------------------------------------
       const float predelayParam  = mPredelay.value();   // 0..1
       const float mix            = mMix.value();        // 0..1
-      const float modParam       = mMod.value();        // 0..1
-      const float modRateParam   = mModRate.value();    // 0..1
+      const float modParam       = mMod.value();        // 0..1 (baked-in, see ctor)
+      const float modRateParam   = mModRate.value();    // 0..1 (baked-in, see ctor)
       const float dampParam      = mDamp.value();       // 0..1
       const float decayParam     = mDecay.value();      // 0..1
       const float sizeParam      = mSize.value();       // 0..1
@@ -1861,6 +1872,17 @@ namespace zaum
         wetL += erScale * erSumL;
         wetR += erScale * erSumR;
 
+        // Static 200 Hz wet highpass (12 dB/oct = two cascaded one-poles/ch).
+        // Applied to the full wet (tank + ER) before the mix, at host rate.
+        mWetHpLp1_L += kWetHpA * (wetL - mWetHpLp1_L);
+        float hp1L = wetL - mWetHpLp1_L;
+        mWetHpLp2_L += kWetHpA * (hp1L - mWetHpLp2_L);
+        wetL = hp1L - mWetHpLp2_L;
+        mWetHpLp1_R += kWetHpA * (wetR - mWetHpLp1_R);
+        float hp1R = wetR - mWetHpLp1_R;
+        mWetHpLp2_R += kWetHpA * (hp1R - mWetHpLp2_R);
+        wetR = hp1R - mWetHpLp2_R;
+
         // ----------------------------------------------------------------
         // 6. Dry/wet mix — true stereo.
         //    Each channel's dry is preserved; each channel's wet is drawn
@@ -2017,6 +2039,8 @@ namespace zaum
     float  mDecimPrev;            // previous host-sample diffIn (decimator tap)
     float  mTankWetL_prev, mTankWetL_curr;
     float  mTankWetR_prev, mTankWetR_curr;
+    // Wet-output 200 Hz highpass: LP states of the two cascaded one-poles/ch.
+    float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)

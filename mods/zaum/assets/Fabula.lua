@@ -67,15 +67,8 @@ function Fabula:onLoadGraph(channelCount)
   tie(op, "Diffusion", diffusion, "Out")
   self:addMonoBranch("diffusion", diffusion, "In", diffusion, "Out")
 
-  local mod = self:addObject("mod", app.ParameterAdapter())
-  mod:hardSet("Bias", 0.40)
-  tie(op, "Mod", mod, "Out")
-  self:addMonoBranch("mod", mod, "In", mod, "Out")
-
-  local modRate = self:addObject("modRate", app.ParameterAdapter())
-  modRate:hardSet("Bias", 0.2)
-  tie(op, "ModRate", modRate, "Out")
-  self:addMonoBranch("modRate", modRate, "In", modRate, "Out")
+  -- Mod / ModRate demoted to baked-in character (not exposed); the C++ op no
+  -- longer registers those parameters, so there is nothing to tie here.
 
   local predelay = self:addObject("predelay", app.ParameterAdapter())
   predelay:hardSet("Bias", 0.041)
@@ -139,28 +132,7 @@ function Fabula:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.45
     },
-    mod = GainBias {
-      button = "mod",
-      description = "Modulation Depth",
-      branch = self.branches.mod,
-      gainbias = self.objects.mod,
-      range = self.objects.mod,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.40
-    },
-    modRate = GainBias {
-      button = "rate",
-      description = "Modulation Rate",
-      branch = self.branches.modRate,
-      gainbias = self.objects.modRate,
-      range = self.objects.modRate,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.2
-    },
+    -- mod / modRate controls removed (demoted to baked-in character).
     predelay = GainBias {
       button = "pre",
       description = "Predelay",
@@ -195,7 +167,7 @@ function Fabula:onLoadViews()
       initialBias = 0.4
     }
   }, {
-    expanded = { "size", "decay", "damp", "diffusion", "mod", "modRate", "predelay", "mix", "early" },
+    expanded = { "size", "decay", "damp", "diffusion", "predelay", "mix", "early" },
     collapsed = {}
   }
 end
