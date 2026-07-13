@@ -628,39 +628,6 @@ namespace zaum
   // unaffected (it still reads the live input), so this only lifts the tank part.
   static const float kFreezeMakeup     = 0.8f;    // +20*log10(1.8) ~= +5.1 dB at fz=1
 
-  // Comb macro on the wet output (post-tank, so its feedback is self-contained and
-  // stable - NOT nested in the tank loop). Feedforward tap = notch coloration;
-  // added feedback (Regen) = resonant ring; a quadrature LFO (Move) modulates the
-  // delay for flanger smear and gives L/R a 90-degree offset = stereo movement.
-  // Spans static formant -> resonant comb -> flange on one control set.
-  static const int   kCombBufSize  = 2048;        // pow2 ring (~42 ms @48k), per ch
-  static const float kCombFF       = 0.9f;        // fixed feedforward comb depth
-  static const float kCombFbMax    = 0.85f;       // max feedback (Regen), < 1 = stable
-  static const float kCombMinD     = 3.0f;        // shortest D1 (~0.06 ms) -> ~16 kHz top
-  static const float kCombMaxTuneD = 800.0f;      // longest D1 (~17 ms); D2=D1*phi fits buf
-  static const float kCombModMax   = 150.0f;      // max LFO delay swing (samples)
-  static const float kCombLfoMinHz = 0.01f;       // Move=0 -> very slow drift (~100 s)
-  static const float kCombLfoMaxHz = 6.0f;        // Move=1 -> audible flange
-  static const float kCombSlew     = 0.02f;       // (block-rate; kept for Mix/Move)
-  static const float kCombGlide    = 0.00167f;    // per-sample Tune/Regen glide (~25ms @24k)
-  static const float kCombGdComp   = 0.3f;        // tank-gd trim at full comb resonance
-  static const float kCombFreezeAtten = 0.6f;     // trim comb resonance/voice under Freeze
-                                                  // (tame standing waves in the frozen cloud)
-  static const float kCombInGain   = 0.65f;       // drive trim INTO the comb: keeps the
-                                                  // internal signals in the guards' linear
-                                                  // region -> more headroom, gentler sat
-  // Dual phi-detuned taps: a second tap at D * phi. Two incommensurate combs
-  // interleave so there is no coincident notch series (no stark single-comb
-  // cancellation / hollowness), and the phi offset naturally spreads L/R.
-  static const float kPhi          = 1.6180340f;  // golden ratio (tap 2 delay = D*phi)
-  static const float kCombPan      = 0.2f;        // cross-bleed of the off-side tap: low =
-                                                  // deeper per-channel comb (more bite) +
-                                                  // wider stereo (the two combs separated)
-  static const float kCombFbNorm   = 0.5f;        // per-tap feedback norm: total loop fb =
-                                                  // cFb (not 2*cFb) -> no buildup past +-0.5
-  static const float kCombMakeup   = 1.4f;        // comb output makeup (AFTER the guard, so
-                                                  // it adds level/body without more sat)
-
 
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
@@ -881,10 +848,6 @@ namespace zaum
       addParameter(mMix);
       addParameter(mEarly);
       addParameter(mFreeze);
-      addParameter(mComb);
-      addParameter(mCombTune);
-      addParameter(mCombRegen);
-      addParameter(mCombMove);
 
       memset(mPD,     0, sizeof(mPD));
       memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
@@ -1003,13 +966,6 @@ namespace zaum
       mTankWetR_prev = mTankWetR_curr = 0.0f;
       mWetHpLp1_L = mWetHpLp2_L = mWetHpLp1_R = mWetHpLp2_R = 0.0f;
       mFreezeSmoothed = 0.0f;
-      memset(mCombBufL, 0, sizeof(mCombBufL));
-      memset(mCombBufR, 0, sizeof(mCombBufR));
-      mCombWr = 0;
-      mCombLfoS = 0.0f; mCombLfoC = 1.0f;   // sine=0, cosine=1 (unit amplitude)
-      mCombMixSm = 0.0f;
-      mCombDSm = 0.5f * (kCombMinD + kCombMaxTuneD);
-      mCombFbSm = 0.0f;
 
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
@@ -1034,10 +990,6 @@ namespace zaum
     od::Parameter mMix{"Mix", 0.40f};
     od::Parameter mEarly{"Early", 0.4f};
     od::Parameter mFreeze{"Freeze", 0.0f};
-    od::Parameter mComb{"Comb", 0.0f};
-    od::Parameter mCombTune{"Tune", 0.5f};
-    od::Parameter mCombRegen{"Regen", 0.0f};
-    od::Parameter mCombMove{"Move", 0.0f};
 
     virtual void process()
     {
@@ -1197,33 +1149,6 @@ namespace zaum
       const float tankInGain = 1.0f - fz;
       // Makeup on the tank wet to counter the perceived drop when the input mutes.
       const float freezeMakeup = 1.0f + fz * kFreezeMakeup;
-
-      // --- Comb macro (block-rate) ---
-      const float combParam = mComb.value();       // 0..1 mix (0 = bypass)
-      const float combTune  = mCombTune.value();   // 0..1 (higher = shorter delay/higher pitch)
-      const float combRegen = mCombRegen.value(); // 0..1 resonance
-      const float combMove  = mCombMove.value();   // 0..1 modulation
-      // Freeze attenuation: tame comb resonance + voice as the cloud freezes, so the
-      // standing waves stay a colour instead of taking over.
-      const float combFreezeAtten = 1.0f - fz * kCombFreezeAtten;
-      // Per-sample glide TARGETS (Tune/Regen glide in the loop -> zipper-free, like
-      // the tank's Size zipper-fix). Delay base: quadratic map, Tune=1 -> shortest.
-      const float ctq = 1.0f - combTune;
-      const float combMixTarget = combParam;
-      const float combDTarget   = kCombMinD + (kCombMaxTuneD - kCombMinD) * ctq * ctq;
-      const float combFbTarget  = combRegen * kCombFbMax * combFreezeAtten;
-      // LFO: small-angle increment (magic-circle osc) + delay-swing depth. Cubic
-      // rate curve so most of the Move knob is SLOW (very-gradual drift near 0).
-      const float move3      = combMove * combMove * combMove;
-      const float combLfoHz  = kCombLfoMinHz + move3 * (kCombLfoMaxHz - kCombLfoMinHz);
-      const float combW      = 6.2831853f * combLfoHz / 48000.0f;
-      const float combModDepth = combMove * kCombModMax;
-      // Gentle renorm of the LFO magnitude (keeps the magic-circle osc unit-amplitude).
-      {
-        float mag = mCombLfoS * mCombLfoS + mCombLfoC * mCombLfoC;
-        float g = 1.5f - 0.5f * mag;
-        mCombLfoS *= g; mCombLfoC *= g;
-      }
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
       // since the smoothed value moves continuously when converging.
@@ -1945,7 +1870,6 @@ namespace zaum
         // Cross-feed uses g_d_eff (macro-biased decay) — shorter tail as Early rises.
         // gdFreezeA/B ramp to unity as Freeze rises (staggered L/R); the spiral
         // governor bounds the loop so unity feedback sustains without runaway.
-        // Tank feedback stays CLEAN (comb is a serial post-effect on the wet, below).
         mFeedback_L = spiralFastSaturateF(d2Read_R * gdFreezeA, 1.0f);
         mFeedback_R = spiralFastSaturateF(d2Read_L * gdFreezeB, 1.0f);
 
@@ -1995,51 +1919,6 @@ namespace zaum
         float erScale = (kERLevel * smEarly);
         wetL += erScale * erSumL;
         wetR += erScale * erSumR;
-
-        // --- Dual phi-detuned comb on the wet (serial post-effect at 48 kHz). Two
-        //     taps: D1 (Move-modulated) and D2 = D1*phi. The incommensurate pair
-        //     interleaves -> no coincident notch series (no hollow single-comb
-        //     cancellation). D1 leans L, D2 leans R for a stereo spread. Per-channel
-        //     resonant buffers (Regen, bipolar, spiral-guarded); drive trimmed for
-        //     headroom; per-sample glide on Mix/Tune/Regen. Serial -> Freeze-safe.
-        {
-          mCombMixSm += kCombGlide * (combMixTarget - mCombMixSm);
-          mCombDSm   += kCombGlide * (combDTarget   - mCombDSm);
-          mCombFbSm  += kCombGlide * (combFbTarget  - mCombFbSm);
-          const float cMix = mCombMixSm, cFb = mCombFbSm;
-          float d1 = mCombDSm + combModDepth * mCombLfoS;
-          if (d1 < 1.0f) d1 = 1.0f;
-          float d2 = d1 * kPhi;
-          const float dmax = (float)(kCombBufSize - 2);
-          if (d2 > dmax) d2 = dmax;
-          const int wr = mCombWr;
-          float r1 = (float)wr - d1 + (float)kCombBufSize;
-          int   i1 = (int)r1; float f1 = r1 - (float)i1;
-          int   a1 = i1 & (kCombBufSize - 1), b1 = (i1 + 1) & (kCombBufSize - 1);
-          float tL1 = mCombBufL[a1] + f1 * (mCombBufL[b1] - mCombBufL[a1]);
-          float tR1 = mCombBufR[a1] + f1 * (mCombBufR[b1] - mCombBufR[a1]);
-          float r2 = (float)wr - d2 + (float)kCombBufSize;
-          int   i2 = (int)r2; float f2 = r2 - (float)i2;
-          int   a2 = i2 & (kCombBufSize - 1), b2 = (i2 + 1) & (kCombBufSize - 1);
-          float tL2 = mCombBufL[a2] + f2 * (mCombBufL[b2] - mCombBufL[a2]);
-          float tR2 = mCombBufR[a2] + f2 * (mCombBufR[b2] - mCombBufR[a2]);
-          // Resonant feedback: (trimmed) wet + Regen*avg(both taps), spiral-guarded.
-          // kCombFbNorm=0.5 keeps the TOTAL loop feedback = cFb (not 2*cFb), so it
-          // no longer crosses unity / builds up around Regen +-0.5.
-          const float fbTapL = kCombFbNorm * cFb * (tL1 + tL2);
-          const float fbTapR = kCombFbNorm * cFb * (tR1 + tR2);
-          mCombBufL[wr] = spiralFastSaturateF(kCombInGain * wetL + fbTapL, 1.0f);
-          mCombBufR[wr] = spiralFastSaturateF(kCombInGain * wetR + fbTapR, 1.0f);
-          // Feedforward voice, phi-spread (D1 leans L, D2 leans R), governed, mixed in.
-          float voiceL = kCombFF * (tL1 + kCombPan * tL2);
-          float voiceR = kCombFF * (kCombPan * tR1 + tR2);
-          wetL += cMix * kCombMakeup * spiralFastSaturateF(voiceL, 1.0f);
-          wetR += cMix * kCombMakeup * spiralFastSaturateF(voiceR, 1.0f);
-          mCombWr = (wr + 1) & (kCombBufSize - 1);
-          float sN = mCombLfoS + combW * mCombLfoC;
-          float cN = mCombLfoC - combW * mCombLfoS;
-          mCombLfoS = sN; mCombLfoC = cN;
-        }
 
         // Static 200 Hz wet highpass (12 dB/oct = two cascaded one-poles/ch).
         // Applied to the full wet (tank + ER) before the mix, at host rate.
@@ -2212,13 +2091,6 @@ namespace zaum
     // Wet-output 200 Hz highpass: LP states of the two cascaded one-poles/ch.
     float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
     float  mFreezeSmoothed;       // block-rate smoothed Freeze amount (0..1)
-    // Comb macro: per-channel delay rings, shared write head + quadrature LFO,
-    // smoothed mix/delay/feedback.
-    float  mCombBufL[kCombBufSize];
-    float  mCombBufR[kCombBufSize];
-    int    mCombWr;
-    float  mCombLfoS, mCombLfoC;  // quadrature sine LFO state (magic-circle osc)
-    float  mCombMixSm, mCombDSm, mCombFbSm;
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)

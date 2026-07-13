@@ -26,7 +26,6 @@ local floatMap = function(min, max, precision)
 end
 
 local zeroOneMap = floatMap(0, 1)
-local bipolarMap = floatMap(-1, 1)   -- Regen: - = feedforward/inverted, + = feedback
 
 local Fabula = Class {}
 Fabula:include(Unit)
@@ -90,26 +89,6 @@ function Fabula:onLoadGraph(channelCount)
   freeze:hardSet("Bias", 0.0)
   tie(op, "Freeze", freeze, "Out")
   self:addMonoBranch("freeze", freeze, "In", freeze, "Out")
-
-  local comb = self:addObject("comb", app.ParameterAdapter())
-  comb:hardSet("Bias", 0.0)
-  tie(op, "Comb", comb, "Out")
-  self:addMonoBranch("comb", comb, "In", comb, "Out")
-
-  local combTune = self:addObject("combTune", app.ParameterAdapter())
-  combTune:hardSet("Bias", 0.5)
-  tie(op, "Tune", combTune, "Out")
-  self:addMonoBranch("tune", combTune, "In", combTune, "Out")
-
-  local combRegen = self:addObject("combRegen", app.ParameterAdapter())
-  combRegen:hardSet("Bias", 0.0)
-  tie(op, "Regen", combRegen, "Out")
-  self:addMonoBranch("regen", combRegen, "In", combRegen, "Out")
-
-  local combMove = self:addObject("combMove", app.ParameterAdapter())
-  combMove:hardSet("Bias", 0.0)
-  tie(op, "Move", combMove, "Out")
-  self:addMonoBranch("move", combMove, "In", combMove, "Out")
 end
 
 function Fabula:onLoadViews()
@@ -202,53 +181,9 @@ function Fabula:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
-    },
-    comb = GainBias {
-      button = "comb",
-      description = "Comb (mix)",
-      branch = self.branches.comb,
-      gainbias = self.objects.comb,
-      range = self.objects.comb,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.0
-    },
-    tune = GainBias {
-      button = "tune",
-      description = "Comb Tune (pitch)",
-      branch = self.branches.tune,
-      gainbias = self.objects.combTune,
-      range = self.objects.combTune,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.5
-    },
-    regen = GainBias {
-      button = "regen",
-      description = "Comb Regen (-fwd / +fbk)",
-      branch = self.branches.regen,
-      gainbias = self.objects.combRegen,
-      range = self.objects.combRegen,
-      biasMap = bipolarMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.0
-    },
-    move = GainBias {
-      button = "move",
-      description = "Comb Move (flange)",
-      branch = self.branches.move,
-      gainbias = self.objects.combMove,
-      range = self.objects.combMove,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.0
     }
   }, {
-    expanded = { "size", "decay", "damp", "diffusion", "predelay", "mix", "early", "freeze", "comb", "tune", "regen", "move" },
+    expanded = { "size", "decay", "damp", "diffusion", "predelay", "mix", "early", "freeze" },
     collapsed = {}
   }
 end
