@@ -641,9 +641,12 @@ namespace zaum
   static const float kCombModMax   = 150.0f;      // max LFO delay swing (samples)
   static const float kCombLfoMinHz = 0.05f;       // Move=0 -> slow drift
   static const float kCombLfoMaxHz = 6.0f;        // Move=1 -> audible flange
-  static const float kCombSlew     = 0.02f;       // block-rate param smoother
+  static const float kCombSlew     = 0.02f;       // (block-rate; kept for Mix/Move)
+  static const float kCombGlide    = 0.00167f;    // per-sample Tune/Regen glide (~25ms @24k)
   static const float kCombGdComp   = 0.3f;        // tank-gd trim at full comb resonance
-  static const float kCombVoice    = 1.2f;        // direct comb->wet injection (presence:
+  static const float kCombFreezeAtten = 0.6f;     // trim comb resonance/voice under Freeze
+                                                  // (tame standing waves in the frozen cloud)
+  static const float kCombVoice    = 0.8f;        // direct comb->wet injection (presence:
                                                   // the tank diffusers smear the comb, so
                                                   // tap it straight to the output too)
 
@@ -1189,25 +1192,24 @@ namespace zaum
       const float combTune  = mCombTune.value();   // 0..1 (higher = shorter delay/higher pitch)
       const float combRegen = mCombRegen.value(); // 0..1 resonance
       const float combMove  = mCombMove.value();   // 0..1 modulation
-      // Delay base: quadratic map (more resolution at short delays), Tune=1 -> shortest.
+      // Freeze attenuation: tame comb resonance + voice as the cloud freezes, so the
+      // standing waves stay a colour instead of taking over.
+      const float combFreezeAtten = 1.0f - fz * kCombFreezeAtten;
+      // Per-sample glide TARGETS (Tune/Regen glide in the loop -> zipper-free, like
+      // the tank's Size zipper-fix). Delay base: quadratic map, Tune=1 -> shortest.
       const float ctq = 1.0f - combTune;
-      const float combDTarget = kCombMinD + (kCombMaxTuneD - kCombMinD) * ctq * ctq;
-      mCombMixSm += kCombSlew * (combParam - mCombMixSm);
-      mCombDSm   += kCombSlew * (combDTarget - mCombDSm);
-      mCombFbSm  += kCombSlew * (combRegen * kCombFbMax - mCombFbSm);
-      const float combMix   = mCombMixSm;
-      const float combDBase = mCombDSm;
-      const float combFb    = mCombFbSm;
+      const float combMixTarget = combParam;
+      const float combDTarget   = kCombMinD + (kCombMaxTuneD - kCombMinD) * ctq * ctq;
+      const float combFbTarget  = combRegen * kCombFbMax * combFreezeAtten;
       // LFO: small-angle increment (magic-circle osc) + delay-swing depth. The comb
-      // now lives in the tank feedback, which ticks at SR/2 = 24 kHz, so the LFO
+      // lives in the tank feedback, which ticks at SR/2 = 24 kHz, so the LFO
       // advances at 24 kHz.
       const float combLfoHz  = kCombLfoMinHz + combMove * (kCombLfoMaxHz - kCombLfoMinHz);
       const float combW      = 6.2831853f * combLfoHz / 24000.0f;
       const float combModDepth = combMove * kCombModMax;
-      // gd compensation: the comb's bipolar feedback is now NESTED in the tank loop,
-      // so trim the tank feedback as comb resonance x mix rises to keep total loop
-      // gain in check (the spiral governor is the hard backstop).
-      const float gdCombComp = 1.0f - (fabsf(combFb) / kCombFbMax) * combMix * kCombGdComp;
+      // gd compensation (from block-rate targets - a gentle stability trim): trim the
+      // tank feedback as comb resonance x mix rises. Spiral governor is the backstop.
+      const float gdCombComp = 1.0f - (fabsf(combFbTarget) / kCombFbMax) * combMixTarget * kCombGdComp;
       const float gdCombA = gdFreezeA * gdCombComp;
       const float gdCombB = gdFreezeB * gdCombComp;
       // Gentle renorm of the LFO magnitude (keeps the magic-circle osc unit-amplitude).
@@ -1948,6 +1950,14 @@ namespace zaum
         // otherwise smear it away when it only lives in the recirculation).
         float combVoiceL = 0.0f, combVoiceR = 0.0f;
         {
+          // Per-sample glide of Mix / Tune(delay) / Regen(fb) toward the block
+          // targets -> zipper-free (like the tank Size smoother).
+          mCombMixSm += kCombGlide * (combMixTarget - mCombMixSm);
+          mCombDSm   += kCombGlide * (combDTarget   - mCombDSm);
+          mCombFbSm  += kCombGlide * (combFbTarget  - mCombFbSm);
+          float combMix   = mCombMixSm;
+          float combDBase = mCombDSm;
+          float combFb    = mCombFbSm;
           float dLenA = combDBase + combModDepth * mCombLfoS;
           float dLenB = combDBase + combModDepth * mCombLfoC;
           if (dLenA < 1.0f) dLenA = 1.0f;
@@ -1964,8 +1974,10 @@ namespace zaum
           mCombBufR[mCombWr] = spiralFastSaturateF(d2Read_L + combFb * dB, 1.0f);
           float sigA = d2Read_R + combMix * kCombFF * dA;
           float sigB = d2Read_L + combMix * kCombFF * dB;
-          combVoiceL = combMix * dA;   // undiffused comb voice for the direct output tap
-          combVoiceR = combMix * dB;
+          // Undiffused comb voice for the direct output tap: spiral-GOVERNED (bounds
+          // the resonant peaks) and freeze-attenuated (tames frozen standing waves).
+          combVoiceL = combMix * spiralFastSaturateF(dA, 1.0f) * combFreezeAtten;
+          combVoiceR = combMix * spiralFastSaturateF(dB, 1.0f) * combFreezeAtten;
           mCombWr = (mCombWr + 1) & (kCombBufSize - 1);
           float sN = mCombLfoS + combW * mCombLfoC;
           float cN = mCombLfoC - combW * mCombLfoS;
