@@ -359,10 +359,10 @@ namespace zaum
   //   kAPHeadroom=16: generous for ±6-sample max excursion + 1 interp neighbor = 7 < 16.
   //   kTA1_size = 1087 + 32 = 1119; kTA2_size = 1471 + 32 = 1503.
   // INNER AP buffers (kTA1i=367, kTA2i=491) UNCHANGED — exact size, UNMODULATED.
-  static const int kTA1  = 1087;   // AP1 outer base delay
-  static const int kTA1i = 367;    // AP1 inner delay — series cascade (0.1.0.7), UNMODULATED
-  static const int kTA2  = 1471;   // AP2 outer base delay
-  static const int kTA2i = 491;    // AP2 inner delay — series cascade (0.1.0.7), UNMODULATED
+  static const int kTA1  = 543;   // AP1 outer base delay
+  static const int kTA1i = 183;    // AP1 inner delay — series cascade (0.1.0.7), UNMODULATED
+  static const int kTA2  = 735;   // AP2 outer base delay
+  static const int kTA2i = 245;    // AP2 inner delay — series cascade (0.1.0.7), UNMODULATED
 
   // ---------------------------------------------------------------------------
   // Outer AP modulation headroom and buffer sizes (0.1.0.11).
@@ -373,8 +373,8 @@ namespace zaum
   // kTA2_size = kTA2 + 2*kAPHeadroom = 1471 + 32 = 1503
   // ---------------------------------------------------------------------------
   static const int kAPHeadroom = 16;
-  static const int kTA1_size   = 2048;   // pow2 (>= kTA1+2*kAPHeadroom=1119) for & mask
-  static const int kTA2_size   = 2048;   // pow2 (>= 1503) for & mask
+  static const int kTA1_size   = 1024;   // pow2 (>= kTA1+2*kAPHeadroom=1119) for & mask
+  static const int kTA2_size   = 1024;   // pow2 (>= 1503) for & mask
 
   // ---------------------------------------------------------------------------
   // Outer AP modulation excursion constants (0.1.0.11).
@@ -388,18 +388,18 @@ namespace zaum
   // Rate: reuses the D1/D2 step_size (ModRate-derived) — same gentle Brownian
   // drift, just applied to a smaller excursion window.
   // ---------------------------------------------------------------------------
-  static const double kAPModMin = 0.5;   // min AP excursion (samples) — near-static at Mod=0
-  static const double kAPModMax = 6.0;   // max AP excursion (samples) — subtle, below chorus
+  static const double kAPModMin = 0.25;   // min AP excursion (samples) — near-static at Mod=0
+  static const double kAPModMax = 3.0;   // max AP excursion (samples) — subtle, below chorus
 
   // ---------------------------------------------------------------------------
   // Tank delay line base lengths (Size=0.5 default = current approved sound)
   // ---------------------------------------------------------------------------
   // These four values are the "canonical" lengths from fabula-design.md §2.
   // With Size=0.5 → sizeFactor=1.0, the scaled lengths reproduce these exactly.
-  static const int kD1_L_base = 7187;
-  static const int kD2_L_base = 5101;
-  static const int kD1_R_base = 6803;
-  static const int kD2_R_base = 6343;
+  static const int kD1_L_base = 3593;
+  static const int kD2_L_base = 2551;
+  static const int kD1_R_base = 3401;
+  static const int kD2_R_base = 3171;
 
   // ---------------------------------------------------------------------------
   // Tank delay line buffer sizes: must hold MAX scaled length + headroom.
@@ -426,17 +426,17 @@ namespace zaum
   // ---------------------------------------------------------------------------
   static const int kD1_headroom    = 128;   // modulation headroom each side
 
-  static const int kD1_L_maxBase  = 10781;  // 7187*1.5 rounded to odd
-  static const int kD1_L_size     = 16384;  // pow2 (>= 11038) for & mask
+  static const int kD1_L_maxBase  = 5391;  // 7187*1.5 rounded to odd
+  static const int kD1_L_size     = 8192;  // pow2 (>= 11038) for & mask
 
-  static const int kD2_L_maxBase  = 7651;   // 5101*1.5 rounded to odd
-  static const int kD2_L_size     = 8192;   // pow2 (>= 7908) for & mask
+  static const int kD2_L_maxBase  = 3827;   // 5101*1.5 rounded to odd
+  static const int kD2_L_size     = 4096;   // pow2 (>= 7908) for & mask
 
-  static const int kD1_R_maxBase  = 10205;  // 6803*1.5 rounded to odd
-  static const int kD1_R_size     = 16384;  // pow2 (>= 10462) for & mask
+  static const int kD1_R_maxBase  = 5103;  // 6803*1.5 rounded to odd
+  static const int kD1_R_size     = 8192;  // pow2 (>= 10462) for & mask
 
-  static const int kD2_R_maxBase  = 9515;   // 6343*1.5 rounded to odd
-  static const int kD2_R_size     = 16384;  // pow2 (>= 9772) for & mask
+  static const int kD2_R_maxBase  = 4757;   // 6343*1.5 rounded to odd
+  static const int kD2_R_size     = 8192;  // pow2 (>= 9772) for & mask
 
   // ---------------------------------------------------------------------------
   // Modulation tuning constants — adjust these by ear at the 0.1.0.4 gate.
@@ -445,8 +445,8 @@ namespace zaum
   // Excursion mapping: Mod 0..1 → kMinExcursion..kMaxExcursion samples.
   // At 48 kHz: 9 samples ≈ 0.19 ms, 72 samples ≈ 1.5 ms.
   // Max excursion 72 + 1 interp neighbor = 73 < 128 headroom — safe.
-  static const double kMinExcursion = 9.0;
-  static const double kMaxExcursion = 72.0;
+  static const double kMinExcursion = 4.5;
+  static const double kMaxExcursion = 36.0;
 
   // Step size mapping: ModRate 0..1 → kMinStep..kMaxStep per sample.
   // This is the per-sample walk increment applied to the integrated noise.
@@ -599,7 +599,7 @@ namespace zaum
   // Form: y[n] = x[n] - x[n-1] + kDCBlockR * y[n-1]
   // fc ≈ (1-R)*sr/(2π) ≈ 3.8 Hz at 48 kHz — inaudible in reverb tail.
   // ---------------------------------------------------------------------------
-  static const float kDCBlockR = 0.9995;
+  static const float kDCBlockR = 0.999;
 
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
@@ -920,15 +920,19 @@ namespace zaum
       //
       //   mSizeFactorSmoothed initialized to 0.7650 (matches first-block target exactly
       //   → no first-block step; the smoother starts converged).
-      mScaledD1_L = 5499;
-      mScaledD2_L = 3903;
-      mScaledD1_R = 5205;
-      mScaledD2_R = 4853;
-      mSmD1_L = 5499.0f; mSmD2_L = 3903.0f; mSmD1_R = 5205.0f; mSmD2_R = 4853.0f;
+      mScaledD1_L = 2749;   // SR/2 tank: half the 48k default scaled lengths
+      mScaledD2_L = 1951;   // (block-rate compute overwrites on first block)
+      mScaledD1_R = 2603;
+      mScaledD2_R = 2427;
+      mSmD1_L = 2749.0f; mSmD2_L = 1951.0f; mSmD1_R = 2603.0f; mSmD2_R = 2427.0f;
       mSmPD = 0.0f; mSmEarly = 0.4f;
       mWalkPhase = 0;
       mWalkInc_D1_L = mWalkInc_D2_L = mWalkInc_D1_R = mWalkInc_D2_R = 0.0f;
       mWalkInc_AP1_L = mWalkInc_AP2_L = mWalkInc_AP1_R = mWalkInc_AP2_R = 0.0f;
+      mTankPhase = 0;
+      mDecimPrev = 0.0f;
+      mTankWetL_prev = mTankWetL_curr = 0.0f;
+      mTankWetR_prev = mTankWetR_curr = 0.0f;
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
       mSizeFactor       = 0.850;    // raw sizeFactor (Size only), for reference
@@ -1081,7 +1085,12 @@ namespace zaum
       // dampEff ∈ [dampD, 1.0]; the coeff mapping then gives a lower (darker) value.
       double dampEffD = dampD + macro * kMacroDampAmt;
       if (dampEffD > 1.0) dampEffD = 1.0;
-      const float dampCoeffEff = 1.0 - dampEffD * (1.0 - kMinDampCoeff);
+      const float dampCoeffEff48 = 1.0 - dampEffD * (1.0 - kMinDampCoeff);
+      // SR/2 tank: the HF-damp one-pole runs at 24k, so preserve its cutoff-in-Hz.
+      // For pole p, cutoff ~ (1-p)*SR; same Hz at half SR needs (1-p')=(1-p)^2,
+      // i.e. alpha' = alpha*(2-alpha) (larger alpha = brighter, compensating the
+      // rate drop). TUNING-SENSITIVE: verify tail brightness by ear (approx rule).
+      const float dampCoeffEff = dampCoeffEff48 * (2.0f - dampCoeffEff48);
       // (dampCoeffEff replaces dampCoeff everywhere damping is applied in the tank.)
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
@@ -1221,6 +1230,12 @@ namespace zaum
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
       {
+        // Tank runs at SR/2: this host sample ticks the recirculating tank only
+        // when phase==0 (every 2nd host sample). The Brownian walk, the tank
+        // fractional reads, and the DC/damp/feedback state all advance at tank
+        // rate, so they live inside the tankTick gate below.
+        bool tankTick = (mTankPhase == 0);
+
         // ----------------------------------------------------------------
         // 0. Brownian-walk update (decimated 1/kWalkDecim, linearly ramped).
         //    All 8 per-line walks (4 tank D + 4 outer AP) advance their PRNG and
@@ -1230,6 +1245,7 @@ namespace zaum
         //    integrator. Both target endpoints are clamped, so the linear ramp
         //    stays in bounds -> no per-sample clamp needed. ~16x fewer xorshift64.
         // ----------------------------------------------------------------
+        if (tankTick) {
         if (walkPhase == 0)
         {
           #define ZAUM_WALK_RETARGET(seedv, walkv, incv, exc)                 \
@@ -1256,6 +1272,7 @@ namespace zaum
         walk_AP1_L += walkInc_AP1_L; walk_AP2_L += walkInc_AP2_L;
         walk_AP1_R += walkInc_AP1_R; walk_AP2_R += walkInc_AP2_R;
         if (++walkPhase >= kWalkDecim) walkPhase = 0;
+        }  // end if (tankTick) — the Brownian walk advances at tank rate
 
         // ----------------------------------------------------------------
         // 1. Mono sum of L + R inputs.
@@ -1478,10 +1495,19 @@ namespace zaum
         // either feedback value is updated — no same-sample causality leak.
         // ----------------------------------------------------------------
 
+        // --- SR/2 tank input: 2-tap half-band decimation of diffIn ---
+        // tankInDec = 0.5*(diffIn[n] + diffIn[n-1]): null at 24k Nyquist, -3 dB at
+        // 12k. Anti-aliases before the tank drops to half rate. mDecimPrev tracks
+        // every host sample; tankInDec is only consumed on ticks.
+        float tankInDec = 0.5f * (diffIn + mDecimPrev);
+        mDecimPrev = diffIn;
+
+        if (tankTick)
+        {
         // -- L LOOP --
 
         // Accumulate: diffusion output + previous-sample cross-feed from R.
-        float tankIn_L = diffIn + mFeedback_L;
+        float tankIn_L = tankInDec + mFeedback_L;
 
         // DC blocker on tank input (L loop).
         // y[n] = x[n] - x[n-1] + R*y[n-1]
@@ -1642,7 +1668,7 @@ namespace zaum
         // -- R LOOP --
 
         // Accumulate: diffusion output + previous-sample cross-feed from L.
-        float tankIn_R = diffIn + mFeedback_R;
+        float tankIn_R = tankInDec + mFeedback_R;
 
         // DC blocker on tank input (R loop).
         {
@@ -1800,20 +1826,33 @@ namespace zaum
         // Loop stability unaffected — output-tap change only. Governors,
         // DC blocker, and cross-feed are all unchanged.
         // ----------------------------------------------------------------
-        float wetL = kWetLevel * (
+        // Tank wet multi-tap sum (24k). Shift prev<-curr, store this tick's output.
+        mTankWetL_prev = mTankWetL_curr;
+        mTankWetL_curr = kWetLevel * (
             + kWap1 * ap1Out_L
             + kWd1a * d1tap_a_L - kWd1b * d1tap_b_L + kWd1c * d1tap_c_L
             + kWd1e * d1Read_L
             - kWd2a * d2tap_a_L + kWd2b * d2tap_b_L
             + kWd2e * d2Read_L
         );
-        float wetR = kWetLevel * (
+        mTankWetR_prev = mTankWetR_curr;
+        mTankWetR_curr = kWetLevel * (
             + kWap1 * ap1Out_R
             + kWd1a * d1tap_a_R - kWd1b * d1tap_b_R + kWd1c * d1tap_c_R
             + kWd1e * d1Read_R
             - kWd2a * d2tap_a_R + kWd2b * d2tap_b_R
             + kWd2e * d2Read_R
         );
+        }  // end if (tankTick) — tank core ran at 24k
+
+        // --- Reconstruct 48k wet: 2:1 linear interp of the last two tank outputs ---
+        // interpF = 0.5 on the tick sample (midpoint prev<->curr), 1.0 on the
+        // between sample (the fresh curr). One-host-sample group delay. Upgrade
+        // path if imaging is heard: a half-band upsampler.
+        float interpF = tankTick ? 0.5f : 1.0f;
+        float wetL = mTankWetL_prev + (mTankWetL_curr - mTankWetL_prev) * interpF;
+        float wetR = mTankWetR_prev + (mTankWetR_curr - mTankWetR_prev) * interpF;
+        mTankPhase ^= 1;
 
         // Add ER contribution (parallel, AFTER tank multi-tap).
         // Scales to zero when earlyParam=0 → exact 0.1.0.8 output.
@@ -1971,6 +2010,13 @@ namespace zaum
     int    mWalkPhase;
     float  mWalkInc_D1_L, mWalkInc_D2_L, mWalkInc_D1_R, mWalkInc_D2_R;
     float  mWalkInc_AP1_L, mWalkInc_AP2_L, mWalkInc_AP1_R, mWalkInc_AP2_R;
+    // SR/2 downsampled tank: phase toggle (tank ticks every 2nd host sample),
+    // 2-tap half-band decimation history of diffIn, and the last two tank wet
+    // outputs (24k) for 2:1 linear reconstruction back to the 48k host rate.
+    int    mTankPhase;
+    float  mDecimPrev;            // previous host-sample diffIn (decimator tap)
+    float  mTankWetL_prev, mTankWetL_curr;
+    float  mTankWetR_prev, mTankWetR_curr;
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
