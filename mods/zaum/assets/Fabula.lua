@@ -84,6 +84,11 @@ function Fabula:onLoadGraph(channelCount)
   early:hardSet("Bias", 0.4)
   tie(op, "Early", early, "Out")
   self:addMonoBranch("early", early, "In", early, "Out")
+
+  local freeze = self:addObject("freeze", app.ParameterAdapter())
+  freeze:hardSet("Bias", 0.0)
+  tie(op, "Freeze", freeze, "Out")
+  self:addMonoBranch("freeze", freeze, "In", freeze, "Out")
 end
 
 function Fabula:onLoadViews()
@@ -165,9 +170,20 @@ function Fabula:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.4
+    },
+    freeze = GainBias {
+      button = "frz",
+      description = "Freeze (living hold)",
+      branch = self.branches.freeze,
+      gainbias = self.objects.freeze,
+      range = self.objects.freeze,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
     }
   }, {
-    expanded = { "size", "decay", "damp", "diffusion", "predelay", "mix", "early" },
+    expanded = { "size", "decay", "damp", "diffusion", "predelay", "mix", "early", "freeze" },
     collapsed = {}
   }
 end

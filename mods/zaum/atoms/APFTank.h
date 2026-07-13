@@ -609,6 +609,17 @@ namespace zaum
   static const float kWetHpF = 200.0f;
   static const float kWetHpA = 0.025918f;
 
+  // Living Freeze (continuous 0..1): as Freeze rises, the tank feedback ramps to
+  // unity (the spiral governor keeps it bounded/stable), the tank input mutes so
+  // the frozen content is preserved, and the HF damp lifts toward passthrough so
+  // the cloud stays bright. The two tank halves lock in a stagger (L reaches unity
+  // by fz=0.85, R by fz=1.0) so the tail "sets" progressively rather than snapping.
+  // The Brownian mod keeps running -> a LIVING frozen cloud, not a static loop.
+  static const float kFreezeSlew       = 0.02f;   // block-rate one-pole (~30 ms glide)
+  static const float kFreezeGd         = 1.0f;    // unity feedback at full freeze
+  static const float kFreezeStaggerL   = 0.85f;   // L reaches unity by fz=0.85
+  static const float kFreezeStaggerOff = 0.15f;   // R begins locking at fz=0.15
+
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
   // Both inner stages fixed at 0.50 this sub-phase (Dattorro value).
@@ -827,6 +838,7 @@ namespace zaum
       addParameter(mPredelay);
       addParameter(mMix);
       addParameter(mEarly);
+      addParameter(mFreeze);
 
       memset(mPD,     0, sizeof(mPD));
       memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
@@ -944,6 +956,7 @@ namespace zaum
       mTankWetL_prev = mTankWetL_curr = 0.0f;
       mTankWetR_prev = mTankWetR_curr = 0.0f;
       mWetHpLp1_L = mWetHpLp2_L = mWetHpLp1_R = mWetHpLp2_R = 0.0f;
+      mFreezeSmoothed = 0.0f;
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
       mSizeFactor       = 0.850;    // raw sizeFactor (Size only), for reference
@@ -966,6 +979,7 @@ namespace zaum
     od::Parameter mPredelay{"Predelay", 0.041f};
     od::Parameter mMix{"Mix", 0.40f};
     od::Parameter mEarly{"Early", 0.4f};
+    od::Parameter mFreeze{"Freeze", 0.0f};
 
     virtual void process()
     {
@@ -1103,6 +1117,26 @@ namespace zaum
       // rate drop). TUNING-SENSITIVE: verify tail brightness by ear (approx rule).
       const float dampCoeffEff = dampCoeffEff48 * (2.0f - dampCoeffEff48);
       // (dampCoeffEff replaces dampCoeff everywhere damping is applied in the tank.)
+
+      // --- Living Freeze (continuous) — block-rate macro derivation ---------------
+      const float freezeParam = mFreeze.value();                 // 0..1
+      mFreezeSmoothed += kFreezeSlew * (freezeParam - mFreezeSmoothed);
+      const float fz = mFreezeSmoothed;
+      // Staggered lock: fzA drives L's cross-feed (unity by fz=0.85), fzB drives
+      // R's (begins at fz=0.15, unity by fz=1.0) -> the tail sets in stages.
+      float fzA = fz / kFreezeStaggerL;
+      if (fzA > 1.0f) fzA = 1.0f;
+      float fzB = (fz - kFreezeStaggerOff) / kFreezeStaggerL;
+      if (fzB < 0.0f) fzB = 0.0f;
+      if (fzB > 1.0f) fzB = 1.0f;
+      // Feedback -> unity as freeze rises (spiral governor keeps it bounded).
+      const float gdFreezeA = g_d_eff + fzA * (kFreezeGd - g_d_eff);
+      const float gdFreezeB = g_d_eff + fzB * (kFreezeGd - g_d_eff);
+      // Lift damp toward passthrough so the frozen cloud stays bright.
+      const float fzMean = 0.5f * (fzA + fzB);
+      const float dampCoeffFreeze = dampCoeffEff + fzMean * (1.0f - dampCoeffEff);
+      // Mute new input into the tank as it freezes (preserve the frozen content).
+      const float tankInGain = 1.0f - fz;
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
       // since the smoothed value moves continuously when converging.
@@ -1510,7 +1544,7 @@ namespace zaum
         // tankInDec = 0.5*(diffIn[n] + diffIn[n-1]): null at 24k Nyquist, -3 dB at
         // 12k. Anti-aliases before the tank drops to half rate. mDecimPrev tracks
         // every host sample; tankInDec is only consumed on ticks.
-        float tankInDec = 0.5f * (diffIn + mDecimPrev);
+        float tankInDec = 0.5f * (diffIn + mDecimPrev) * tankInGain;
         mDecimPrev = diffIn;
 
         if (tankTick)
@@ -1612,7 +1646,7 @@ namespace zaum
         // y += coeff * (x - y)  with state dampL.
         // Uses dampCoeffEff (macro-biased: more absorption as Early rises).
         // Damp=0,Early=0 → dampCoeffEff=1.0 → dampL tracks x exactly (passthrough).
-        dampL += dampCoeffEff * (d1Read_L - dampL);
+        dampL += dampCoeffFreeze * (d1Read_L - dampL);
         float dampedD1_L = dampL;
 
         // AP2_L: series cascade — outer (kTA2=1471, g=gTA2) → inner (kTA2i=491, g=gTA2_in).
@@ -1753,7 +1787,7 @@ namespace zaum
         }
 
         // HF damp: one-pole LP on D1_R output. Uses dampCoeffEff (macro-biased).
-        dampR += dampCoeffEff * (d1Read_R - dampR);
+        dampR += dampCoeffFreeze * (d1Read_R - dampR);
         float dampedD1_R = dampR;
 
         // AP2_R: series cascade — outer (kTA2=1471, g=gTA2) → inner (kTA2i=491, g=gTA2_in).
@@ -1822,8 +1856,10 @@ namespace zaum
         // Both d2Read_L and d2Read_R are fully computed above before
         // either feedback value is updated — no same-sample causality leak.
         // Cross-feed uses g_d_eff (macro-biased decay) — shorter tail as Early rises.
-        mFeedback_L = spiralFastSaturateF(d2Read_R * g_d_eff, 1.0f);
-        mFeedback_R = spiralFastSaturateF(d2Read_L * g_d_eff, 1.0f);
+        // gdFreezeA/B ramp to unity as Freeze rises (staggered L/R); the spiral
+        // governor bounds the loop so unity feedback sustains without runaway.
+        mFeedback_L = spiralFastSaturateF(d2Read_R * gdFreezeA, 1.0f);
+        mFeedback_R = spiralFastSaturateF(d2Read_L * gdFreezeB, 1.0f);
 
         // ----------------------------------------------------------------
         // 5. Stereo wet taps — Dattorro-style multi-tap signed sum (0.1.0.7).
@@ -2041,6 +2077,7 @@ namespace zaum
     float  mTankWetR_prev, mTankWetR_curr;
     // Wet-output 200 Hz highpass: LP states of the two cascaded one-poles/ch.
     float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
+    float  mFreezeSmoothed;       // block-rate smoothed Freeze amount (0..1)
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
