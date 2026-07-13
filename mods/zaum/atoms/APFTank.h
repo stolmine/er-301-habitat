@@ -639,7 +639,7 @@ namespace zaum
   static const float kCombMinD     = 8.0f;        // shortest delay (~0.17 ms, high pitch)
   static const float kCombMaxTuneD = 800.0f;      // longest D1 (~17 ms); D2=D1*phi fits buf
   static const float kCombModMax   = 150.0f;      // max LFO delay swing (samples)
-  static const float kCombLfoMinHz = 0.05f;       // Move=0 -> slow drift
+  static const float kCombLfoMinHz = 0.01f;       // Move=0 -> very slow drift (~100 s)
   static const float kCombLfoMaxHz = 6.0f;        // Move=1 -> audible flange
   static const float kCombSlew     = 0.02f;       // (block-rate; kept for Mix/Move)
   static const float kCombGlide    = 0.00167f;    // per-sample Tune/Regen glide (~25ms @24k)
@@ -653,7 +653,11 @@ namespace zaum
   // interleave so there is no coincident notch series (no stark single-comb
   // cancellation / hollowness), and the phi offset naturally spreads L/R.
   static const float kPhi          = 1.6180340f;  // golden ratio (tap 2 delay = D*phi)
-  static const float kCombPan      = 0.4f;        // cross-bleed of the off-side tap (stereo)
+  static const float kCombPan      = 0.2f;        // cross-bleed of the off-side tap: low =
+                                                  // deeper per-channel comb (more bite) +
+                                                  // wider stereo (the two combs separated)
+  static const float kCombFbNorm   = 0.5f;        // per-tap feedback norm: total loop fb =
+                                                  // cFb (not 2*cFb) -> no buildup past +-0.5
 
 
   // ---------------------------------------------------------------------------
@@ -1206,9 +1210,10 @@ namespace zaum
       const float combMixTarget = combParam;
       const float combDTarget   = kCombMinD + (kCombMaxTuneD - kCombMinD) * ctq * ctq;
       const float combFbTarget  = combRegen * kCombFbMax * combFreezeAtten;
-      // LFO: small-angle increment (magic-circle osc) + delay-swing depth. The comb
-      // is a serial post-effect on the wet at the 48 kHz host rate.
-      const float combLfoHz  = kCombLfoMinHz + combMove * (kCombLfoMaxHz - kCombLfoMinHz);
+      // LFO: small-angle increment (magic-circle osc) + delay-swing depth. Cubic
+      // rate curve so most of the Move knob is SLOW (very-gradual drift near 0).
+      const float move3      = combMove * combMove * combMove;
+      const float combLfoHz  = kCombLfoMinHz + move3 * (kCombLfoMaxHz - kCombLfoMinHz);
       const float combW      = 6.2831853f * combLfoHz / 48000.0f;
       const float combModDepth = combMove * kCombModMax;
       // Gentle renorm of the LFO magnitude (keeps the magic-circle osc unit-amplitude).
@@ -2016,9 +2021,13 @@ namespace zaum
           int   a2 = i2 & (kCombBufSize - 1), b2 = (i2 + 1) & (kCombBufSize - 1);
           float tL2 = mCombBufL[a2] + f2 * (mCombBufL[b2] - mCombBufL[a2]);
           float tR2 = mCombBufR[a2] + f2 * (mCombBufR[b2] - mCombBufR[a2]);
-          // Resonant feedback: (trimmed) wet + Regen*(both taps), spiral-guarded.
-          mCombBufL[wr] = spiralFastSaturateF(kCombInGain * wetL + cFb * (tL1 + tL2), 1.0f);
-          mCombBufR[wr] = spiralFastSaturateF(kCombInGain * wetR + cFb * (tR1 + tR2), 1.0f);
+          // Resonant feedback: (trimmed) wet + Regen*avg(both taps), spiral-guarded.
+          // kCombFbNorm=0.5 keeps the TOTAL loop feedback = cFb (not 2*cFb), so it
+          // no longer crosses unity / builds up around Regen +-0.5.
+          const float fbTapL = kCombFbNorm * cFb * (tL1 + tL2);
+          const float fbTapR = kCombFbNorm * cFb * (tR1 + tR2);
+          mCombBufL[wr] = spiralFastSaturateF(kCombInGain * wetL + fbTapL, 1.0f);
+          mCombBufR[wr] = spiralFastSaturateF(kCombInGain * wetR + fbTapR, 1.0f);
           // Feedforward voice, phi-spread (D1 leans L, D2 leans R), governed, mixed in.
           float voiceL = kCombFF * (tL1 + kCombPan * tL2);
           float voiceR = kCombFF * (kCombPan * tR1 + tR2);
