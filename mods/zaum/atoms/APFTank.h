@@ -658,6 +658,8 @@ namespace zaum
                                                   // wider stereo (the two combs separated)
   static const float kCombFbNorm   = 0.5f;        // per-tap feedback norm: total loop fb =
                                                   // cFb (not 2*cFb) -> no buildup past +-0.5
+  static const float kCombMakeup   = 1.4f;        // comb output makeup (AFTER the guard, so
+                                                  // it adds level/body without more sat)
 
 
   // ---------------------------------------------------------------------------
@@ -2031,8 +2033,8 @@ namespace zaum
           // Feedforward voice, phi-spread (D1 leans L, D2 leans R), governed, mixed in.
           float voiceL = kCombFF * (tL1 + kCombPan * tL2);
           float voiceR = kCombFF * (kCombPan * tR1 + tR2);
-          wetL += cMix * spiralFastSaturateF(voiceL, 1.0f);
-          wetR += cMix * spiralFastSaturateF(voiceR, 1.0f);
+          wetL += cMix * kCombMakeup * spiralFastSaturateF(voiceL, 1.0f);
+          wetR += cMix * kCombMakeup * spiralFastSaturateF(voiceR, 1.0f);
           mCombWr = (wr + 1) & (kCombBufSize - 1);
           float sN = mCombLfoS + combW * mCombLfoC;
           float cN = mCombLfoC - combW * mCombLfoS;
