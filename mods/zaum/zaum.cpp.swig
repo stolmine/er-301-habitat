@@ -11,8 +11,12 @@
 // using ShyFFT, N=1024, hop=256, sine window. Sub-phase 0.2.0.1: identity
 // passthrough. Plan: planning/sujet-design.md.
 #include "atoms/STFTSpectral.h"
+// FabricGraphic: Fabula's 2.5D "fabric" overview viz (od::Graphic subclass,
+// header-only, all-inline). Reads APFTank's inline viz getters.
+#include "FabricGraphic.h"
 #define SWIGLUA
 %}
 
 %include "atoms/APFTank.h"
 %include "atoms/STFTSpectral.h"
+%include "FabricGraphic.h"

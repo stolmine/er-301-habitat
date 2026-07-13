@@ -18,6 +18,7 @@ local libzaum = require "zaum.libzaum"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local FabulaOverviewControl = require "zaum.FabulaOverviewControl"
 
 local floatMap = function(min, max, precision)
   local map = app.LinearDialMap(min, max)
@@ -93,51 +94,23 @@ end
 
 function Fabula:onLoadViews()
   return {
-    size = GainBias {
+    -- Overview: Size is the main dial; the fabric waterfall viz replaces the
+    -- fader; tap-shift reveals Decay / Damp / Diffusion.
+    size = FabulaOverviewControl {
       button = "size",
-      description = "Size (delay scale)",
+      description = "Size",
       branch = self.branches.size,
       gainbias = self.objects.size,
       range = self.objects.size,
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.35
+      initialBias = 0.35,
+      tank = self.objects.op,
+      decayParam = self.objects.decay:getParameter("Bias"),
+      dampParam = self.objects.damp:getParameter("Bias"),
+      diffusionParam = self.objects.diffusion:getParameter("Bias")
     },
-    decay = GainBias {
-      button = "dcy",
-      description = "Decay (RT60)",
-      branch = self.branches.decay,
-      gainbias = self.objects.decay,
-      range = self.objects.decay,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.30
-    },
-    damp = GainBias {
-      button = "damp",
-      description = "Damp (HF rolloff)",
-      branch = self.branches.damp,
-      gainbias = self.objects.damp,
-      range = self.objects.damp,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.40
-    },
-    diffusion = GainBias {
-      button = "diff",
-      description = "Diffusion",
-      branch = self.branches.diffusion,
-      gainbias = self.objects.diffusion,
-      range = self.objects.diffusion,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.45
-    },
-    -- mod / modRate controls removed (demoted to baked-in character).
     predelay = GainBias {
       button = "pre",
       description = "Predelay",
@@ -183,7 +156,7 @@ function Fabula:onLoadViews()
       initialBias = 0.0
     }
   }, {
-    expanded = { "size", "decay", "damp", "diffusion", "predelay", "mix", "early", "freeze" },
+    expanded = { "size", "predelay", "early", "freeze", "mix" },
     collapsed = {}
   }
 end

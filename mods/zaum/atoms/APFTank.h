@@ -628,6 +628,12 @@ namespace zaum
   // unaffected (it still reads the live input), so this only lifts the tank part.
   static const float kFreezeMakeup     = 0.8f;    // +20*log10(1.8) ~= +5.1 dB at fz=1
 
+  // Overview viz taps: a decimated mono-wet snapshot ring the graphic reads as the
+  // waterfall's front line, plus the smoothed freeze amount (so the sheet holds
+  // when frozen). kVizCols is pow2 for &-mask indexing; decimation sets the front-
+  // line time window (kVizCols*kVizDecim / SR ~= 32 ms at 48k).
+  static const int kVizCols  = 32;
+  static const int kVizDecim = 48;
 
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
@@ -966,6 +972,10 @@ namespace zaum
       mTankWetR_prev = mTankWetR_curr = 0.0f;
       mWetHpLp1_L = mWetHpLp2_L = mWetHpLp1_R = mWetHpLp2_R = 0.0f;
       mFreezeSmoothed = 0.0f;
+      memset(mVizRow, 0, sizeof(mVizRow));
+      mVizWr = 0;
+      mVizDecimCtr = kVizDecim;
+      mVizFreeze = 0.0f;
 
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
@@ -990,6 +1000,12 @@ namespace zaum
     od::Parameter mMix{"Mix", 0.40f};
     od::Parameter mEarly{"Early", 0.4f};
     od::Parameter mFreeze{"Freeze", 0.0f};
+
+    // --- Overview viz accessors (inline; read by the FabricGraphic). NOT virtual. ---
+    // vizSample(i): the decimated mono-wet ring in chronological order (0 = oldest).
+    int   vizCols() const { return kVizCols; }
+    float vizSample(int i) const { return mVizRow[(mVizWr + i) & (kVizCols - 1)]; }
+    float vizFreeze() const { return mVizFreeze; }
 
     virtual void process()
     {
@@ -1132,6 +1148,7 @@ namespace zaum
       const float freezeParam = mFreeze.value();                 // 0..1
       mFreezeSmoothed += kFreezeSlew * (freezeParam - mFreezeSmoothed);
       const float fz = mFreezeSmoothed;
+      mVizFreeze = fz;   // mirror for the overview graphic
       // Staggered lock: fzA drives L's cross-feed (unity by fz=0.85), fzB drives
       // R's (begins at fz=0.15, unity by fz=1.0) -> the tail sets in stages.
       float fzA = fz / kFreezeStaggerL;
@@ -1931,6 +1948,13 @@ namespace zaum
         mWetHpLp2_R += kWetHpA * (hp1R - mWetHpLp2_R);
         wetR = hp1R - mWetHpLp2_R;
 
+        // Overview viz tap: decimated mono-wet into the ring (front line source).
+        if (--mVizDecimCtr <= 0)
+        {
+          mVizDecimCtr = kVizDecim;
+          mVizRow[mVizWr] = 0.5f * (wetL + wetR);
+          mVizWr = (mVizWr + 1) & (kVizCols - 1);
+        }
 
         // ----------------------------------------------------------------
         // 6. Dry/wet mix — true stereo.
@@ -2091,6 +2115,12 @@ namespace zaum
     // Wet-output 200 Hz highpass: LP states of the two cascaded one-poles/ch.
     float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
     float  mFreezeSmoothed;       // block-rate smoothed Freeze amount (0..1)
+    // Overview viz state: decimated mono-wet ring + freeze mirror (graphic reads
+    // these via the inline getters below).
+    float  mVizRow[kVizCols];
+    int    mVizWr;
+    int    mVizDecimCtr;
+    float  mVizFreeze;
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
