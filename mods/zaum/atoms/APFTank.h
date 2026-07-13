@@ -287,13 +287,24 @@ namespace zaum
   // per-sample hot loop (Cortex-A8 has no double-precision NEON, so double math
   // falls to slow scalar VFPv3). Kept local so this does not touch shared house.
   // Same math as house::allpassNestedStep / house::spiralFastSaturate.
-  static inline void allpassNestedStepF(float xNow, float vDelayed, float g,
-                                        float &vNew, float &yOut)
+// always_inline is load-bearing: without it GCC leaves these as out-of-line
+// calls in the per-sample loop. For spiralFastSaturateF that also blocks the
+// densityA=1.0 constant-fold, so the out-of-line body keeps a real vdiv (s /
+// densityA) - 2 calls + 2 vdiv/sample. Forcing inline removes both the call
+// overhead and (with the literal 1.0f arg) folds the divide away entirely.
+// SWIG's parser does not understand __attribute__, so hide it behind a macro.
+#ifdef SWIG
+#define ZAUM_ALWAYS_INLINE inline
+#else
+#define ZAUM_ALWAYS_INLINE inline __attribute__((always_inline))
+#endif
+  static ZAUM_ALWAYS_INLINE void allpassNestedStepF(
+      float xNow, float vDelayed, float g, float &vNew, float &yOut)
   {
     vNew = xNow + g * vDelayed;
     yOut = -g * vNew + vDelayed;
   }
-  static inline float spiralFastSaturateF(float x, float densityA)
+  static ZAUM_ALWAYS_INLINE float spiralFastSaturateF(float x, float densityA)
   {
     float absX = fabsf(x) * densityA;
     if (absX > 1.5707963f) absX = 1.5707963f;
