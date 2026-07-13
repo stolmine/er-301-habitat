@@ -647,13 +647,16 @@ namespace zaum
   static const int   kRevVoices     = 6;          // reverse grain voice pool
   static const float kEnvFastRel    = 0.0008f;    // ~26 ms fast-env release (holds the peak)
   static const float kEnvSlowA      = 0.00014f;   // ~150 ms slow-env tracker
-  // Schmitt-trigger onset: FIRE when the fast env rises past kOnsetRatio*slow, then
-  // DISARM; only RE-ARM once it falls back below kOnsetRearm*slow. This makes one
-  // transient = one grain (no re-fires during a hit's decay = no micro-swells).
-  static const float kOnsetRatio    = 1.8f;       // rising-edge fire threshold
-  static const float kOnsetRearm    = 1.2f;       // re-arm once fallen back near slow
+  // ADAPTIVE onset threshold (self-calibrating, no a-priori loudness assumption):
+  // the threshold JUMPS to each hit's peak when it fires (kThrOver headroom) and
+  // DECAYS back toward a relative floor (kThrFloorK * slow). So a hit must clear a
+  // bar set by what was just heard -> loud/busy passages self-raise the bar (few,
+  // salient triggers); quiet passages let it fall. Schmitt-armed (one grain/edge).
   static const float kOnsetFloor    = 0.004f;     // abs floor (ignore near-silence)
-  static const int   kRevRefractory = 2880;       // 60 ms min between onsets @48k
+  static const float kThrFloorK     = 1.5f;       // threshold floor = this * slow env
+  static const float kThrOver       = 1.05f;      // set bar 5% above the triggering peak
+  static const float kThrDecayTau   = 4.0f;       // threshold decays ~4 taus over a grain
+  static const float kRefracFrac    = 0.6f;       // refractory = this * grain length
   static const float kRevFallbackJit = 0.4f;      // +-40% jitter on idle-fallback interval
 
   // ---------------------------------------------------------------------------
@@ -1004,6 +1007,7 @@ namespace zaum
       mRevWr = 0;
       mReverseSmoothed = 0.0f;
       mEnvFast = mEnvSlow = 0.0f;
+      mRevThr = kOnsetFloor;
       mRevArmed = true;
       mRevRefractoryCtr = 0;
       mRevIdle = 0;
@@ -1222,6 +1226,10 @@ namespace zaum
       const float revGrainNorm = 0.5f * sizeParam + 0.5f * decayParam;   // 0..1
       const int   revGrainLen  = kRevGrainMin +
                                  (int)(revGrainNorm * (kRevGrainMax - kRevGrainMin));
+      // Adaptive-threshold decay + refractory both scale with grain length, so
+      // longer reverbs trigger more sparsely (fewer, more distinct reverses).
+      const float revThrDecay  = 1.0f - kThrDecayTau / (float)revGrainLen;
+      const int   revRefrac    = (int)(revGrainLen * kRefracFrac);
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
       // since the smoothed value moves continuously when converging.
@@ -2017,19 +2025,23 @@ namespace zaum
         float ax = fabsf(monoIn);
         mEnvFast = (ax > mEnvFast) ? ax : mEnvFast + kEnvFastRel * (ax - mEnvFast);
         mEnvSlow += kEnvSlowA * (ax - mEnvSlow);
+        // Adaptive threshold: decay toward the relative floor, clamp up to it.
+        float thrFloor = mEnvSlow * kThrFloorK;
+        if (thrFloor < kOnsetFloor) thrFloor = kOnsetFloor;
+        mRevThr *= revThrDecay;
+        if (mRevThr < thrFloor) mRevThr = thrFloor;
         if (mRevRefractoryCtr > 0) mRevRefractoryCtr--;
-        // Schmitt trigger: fire on the armed rising edge, then disarm; re-arm only
-        // once the fast env falls back below kOnsetRearm*slow (transient passed).
-        bool onset = mRevArmed && (mEnvFast > mEnvSlow * kOnsetRatio) &&
-                     (mEnvFast > kOnsetFloor) && (mRevRefractoryCtr == 0);
-        if (onset) mRevArmed = false;
-        else if (mEnvFast < mEnvSlow * kOnsetRearm) mRevArmed = true;
+        // Fire on the armed rising edge above the (self-calibrated) bar; then raise
+        // the bar to this peak + disarm. Re-arm once the fast env falls back below.
+        bool onset = mRevArmed && (mEnvFast > mRevThr) && (mRevRefractoryCtr == 0);
+        if (onset) { mRevThr = mEnvFast * kThrOver; mRevArmed = false; }
+        else if (mEnvFast < mRevThr) mRevArmed = true;
         // Jittered idle-fallback so sustained passages still get (aperiodic) grains.
         mRevIdle++;
         bool fire = onset || (mRevIdle >= mRevFallbackTarget);
         if (fire)
         {
-          mRevRefractoryCtr = kRevRefractory;
+          mRevRefractoryCtr = revRefrac;
           mRevIdle = 0;
           mRevSeed = xorshift64(mRevSeed);
           float jr = ((mRevSeed & 0xFFFF) * (1.0f / 65535.0f) - 0.5f) * (2.0f * kRevFallbackJit);
@@ -2229,7 +2241,7 @@ namespace zaum
     int    mRevWr;
     float  mReverseSmoothed;      // block-rate smoothed Reverse amount (0..1)
     // Transient-synced reverse: envelope follower + onset state + voice pool.
-    float  mEnvFast, mEnvSlow;
+    float  mEnvFast, mEnvSlow, mRevThr;   // fast/slow env + adaptive onset threshold
     bool   mRevArmed;             // Schmitt-trigger arm state (one grain per transient)
     int    mRevRefractoryCtr, mRevIdle, mRevFallbackTarget;
     uint64_t mRevSeed;
