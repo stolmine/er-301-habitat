@@ -636,7 +636,7 @@ namespace zaum
   static const int   kCombBufSize  = 2048;        // pow2 ring (~42 ms @48k), per ch
   static const float kCombFF       = 0.9f;        // fixed feedforward comb depth
   static const float kCombFbMax    = 0.85f;       // max feedback (Regen), < 1 = stable
-  static const float kCombMinD     = 8.0f;        // shortest delay (~0.17 ms, high pitch)
+  static const float kCombMinD     = 3.0f;        // shortest D1 (~0.06 ms) -> ~16 kHz top
   static const float kCombMaxTuneD = 800.0f;      // longest D1 (~17 ms); D2=D1*phi fits buf
   static const float kCombModMax   = 150.0f;      // max LFO delay swing (samples)
   static const float kCombLfoMinHz = 0.01f;       // Move=0 -> very slow drift (~100 s)
