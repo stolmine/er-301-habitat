@@ -620,6 +620,17 @@ namespace zaum
   static const float kFreezeStaggerL   = 0.85f;   // L reaches unity by fz=0.85
   static const float kFreezeStaggerOff = 0.15f;   // R begins locking at fz=0.15
 
+  // Reverse (0..1): a granular reverse buffer on the wet. Two Hann-windowed grains
+  // read the recent wet BACKWARD, offset by half a grain (50% overlap-add -> flat,
+  // click-free). Reverse crossfades the wet toward its reversed self: the tail
+  // rises INTO the hits. Runs at the 48 kHz host rate, per channel.
+  static const int   kRevBufSize   = 16384;       // pow2 ring (>= 2.5*grain)
+  static const int   kRevGrain     = 5760;        // grain length (~120 ms @48k)
+  static const int   kRevGrainHalf = 2880;        // grain B phase offset
+  static const int   kHannSize     = 1024;        // window LUT resolution
+  static const float kRevHannRatio = 1024.0f / 5760.0f; // phase -> LUT index
+  static const float kRevSlew      = 0.02f;       // block-rate amount smoother
+
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
   // Both inner stages fixed at 0.50 this sub-phase (Dattorro value).
@@ -839,6 +850,7 @@ namespace zaum
       addParameter(mMix);
       addParameter(mEarly);
       addParameter(mFreeze);
+      addParameter(mReverse);
 
       memset(mPD,     0, sizeof(mPD));
       memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
@@ -957,6 +969,30 @@ namespace zaum
       mTankWetR_prev = mTankWetR_curr = 0.0f;
       mWetHpLp1_L = mWetHpLp2_L = mWetHpLp1_R = mWetHpLp2_R = 0.0f;
       mFreezeSmoothed = 0.0f;
+
+      // Reverse: zero buffers, seed grains (B offset by half a grain), fill the
+      // Hann LUT via a cosine RECURRENCE (no runtime trig — am335x package sinf/
+      // cosf can miscompute; see feedback_package_trig_lut). Recurrence:
+      // cos((n+1)t) = 2 cos(t) cos(nt) - cos((n-1)t), Hann[n] = 0.5*(1 - cos(nt)).
+      memset(mRevBufL, 0, sizeof(mRevBufL));
+      memset(mRevBufR, 0, sizeof(mRevBufR));
+      mRevWr = 0;
+      mRevPhaseA = 0;            mRevAnchorA = 0;
+      mRevPhaseB = kRevGrainHalf; mRevAnchorB = 0;
+      mReverseSmoothed = 0.0f;
+      {
+        const double ct = 0.99998117528260111;  // cos(2*pi/1024)
+        double cm1 = 1.0;   // cos(0)
+        double c0  = ct;    // cos(t)
+        mHannLut[0] = 0.0f;
+        mHannLut[1] = (float)(0.5 * (1.0 - c0));
+        for (int n = 2; n < kHannSize; n++)
+        {
+          double cn = 2.0 * ct * c0 - cm1;
+          mHannLut[n] = (float)(0.5 * (1.0 - cn));
+          cm1 = c0; c0 = cn;
+        }
+      }
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
       mSizeFactor       = 0.850;    // raw sizeFactor (Size only), for reference
@@ -980,6 +1016,7 @@ namespace zaum
     od::Parameter mMix{"Mix", 0.40f};
     od::Parameter mEarly{"Early", 0.4f};
     od::Parameter mFreeze{"Freeze", 0.0f};
+    od::Parameter mReverse{"Reverse", 0.0f};
 
     virtual void process()
     {
@@ -1137,6 +1174,11 @@ namespace zaum
       const float dampCoeffFreeze = dampCoeffEff + fzMean * (1.0f - dampCoeffEff);
       // Mute new input into the tank as it freezes (preserve the frozen content).
       const float tankInGain = 1.0f - fz;
+
+      // --- Reverse amount (block-rate smoothed) ---
+      const float reverseParam = mReverse.value();               // 0..1
+      mReverseSmoothed += kRevSlew * (reverseParam - mReverseSmoothed);
+      const float revAmt = mReverseSmoothed;
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
       // since the smoothed value moves continuously when converging.
@@ -1919,6 +1961,29 @@ namespace zaum
         mWetHpLp2_R += kWetHpA * (hp1R - mWetHpLp2_R);
         wetR = hp1R - mWetHpLp2_R;
 
+        // --- Reverse: write wet to the ring, sum two backward Hann grains,
+        //     crossfade wet -> reversed by revAmt. Grains are offset by half a
+        //     grain (50% overlap) so the Hann windows sum flat / click-free. The
+        //     buffer + phase always advance so history/grains stay live at rev=0.
+        mRevBufL[mRevWr] = wetL;
+        mRevBufR[mRevWr] = wetR;
+        float revL = 0.0f, revR = 0.0f;
+        {
+          int   ri  = (mRevAnchorA - mRevPhaseA) & (kRevBufSize - 1);
+          float win = mHannLut[(int)(mRevPhaseA * kRevHannRatio)];
+          revL += win * mRevBufL[ri];  revR += win * mRevBufR[ri];
+          if (++mRevPhaseA >= kRevGrain) { mRevPhaseA = 0; mRevAnchorA = mRevWr; }
+        }
+        {
+          int   ri  = (mRevAnchorB - mRevPhaseB) & (kRevBufSize - 1);
+          float win = mHannLut[(int)(mRevPhaseB * kRevHannRatio)];
+          revL += win * mRevBufL[ri];  revR += win * mRevBufR[ri];
+          if (++mRevPhaseB >= kRevGrain) { mRevPhaseB = 0; mRevAnchorB = mRevWr; }
+        }
+        mRevWr = (mRevWr + 1) & (kRevBufSize - 1);
+        wetL += revAmt * (revL - wetL);
+        wetR += revAmt * (revR - wetR);
+
         // ----------------------------------------------------------------
         // 6. Dry/wet mix — true stereo.
         //    Each channel's dry is preserved; each channel's wet is drawn
@@ -2078,6 +2143,12 @@ namespace zaum
     // Wet-output 200 Hz highpass: LP states of the two cascaded one-poles/ch.
     float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
     float  mFreezeSmoothed;       // block-rate smoothed Freeze amount (0..1)
+    // Reverse granular buffer (per channel) + shared grain state + Hann LUT.
+    float  mRevBufL[kRevBufSize];
+    float  mRevBufR[kRevBufSize];
+    float  mHannLut[kHannSize];
+    int    mRevWr, mRevPhaseA, mRevPhaseB, mRevAnchorA, mRevAnchorB;
+    float  mReverseSmoothed;      // block-rate smoothed Reverse amount (0..1)
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
