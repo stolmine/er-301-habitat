@@ -93,34 +93,45 @@ function FabulaOverviewControl:init(args)
   self:setParamMode(false)
 end
 
+-- Single source of truth: points BOTH the encoder-routing field
+-- (paramFocusedReadout) and the rendered sub-caret (setSubCursorController) at the
+-- SAME readout. Grabs encoder focus FIRST so setSubCursorController actually pushes
+-- to the renderer (Base/Widget only notifies when the focused widget == self);
+-- setSubCursorController is LAST so it wins over the self.bias cursor that
+-- setFocusedReadout(self.bias) re-installs (feedback_subcursor_inheritance).
+function FabulaOverviewControl:focusParamSub(readout)
+  self:setFocusedReadout(self.bias)   -- keep GainBias's focusedReadout valid+non-nil
+  readout:save()
+  self.paramFocusedReadout = readout
+  if not self:hasFocus("encoder") then self:focus() end
+  self:setSubCursorController(readout) -- LAST: caret follows the encoder
+end
+
 function FabulaOverviewControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
   if enabled then
-    -- Show the Decay/Damp/Diff submenu and focus the default sub so the encoder
-    -- edits the SHOWN parameter (not Size).
+    -- Attach the param sub FIRST so its readouts are live when the cursor installs.
     self.subGraphic = self.paramSubGraphic
-    self.paramFocusedReadout = self.paramModeDefaultSub
-    self:setSubCursorController(self.paramFocusedReadout)
+    self:addSubGraphic(self.subGraphic)
+    self:focusParamSub(self.paramModeDefaultSub)  -- caret + encoder both on S1
   else
-    -- Level sub: Size on the main encoder.
     self.subGraphic = self.levelSubGraphic
     self.paramFocusedReadout = nil
-    self:setSubCursorController(nil)
-    self:setFocusedReadout(self.bias)
+    self:addSubGraphic(self.subGraphic)
+    self:setFocusedReadout(self.bias)             -- Size on encoder, caret on bias
   end
-  self:addSubGraphic(self.subGraphic)
 end
 
 function FabulaOverviewControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
   if self.paramMode then
-    -- Respect the shown submenu: focus its sub-param for the encoder.
     if not self.paramFocusedReadout then
       self.paramFocusedReadout = self.paramModeDefaultSub
     end
-    self:setSubCursorController(self.paramFocusedReadout)
+    -- Re-point caret AND encoder at the same sub, forcing the renderer update.
+    self:focusParamSub(self.paramFocusedReadout)
   end
 end
 
@@ -128,6 +139,7 @@ function FabulaOverviewControl:onCursorLeave(spot)
   if self.paramMode then
     self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
+    self:setFocusedReadout(self.bias)   -- keep GainBias.onFocused safe on return
   end
   self:releaseFocus("shiftPressed", "shiftReleased")
   GainBias.onCursorLeave(self, spot)
@@ -162,10 +174,7 @@ function FabulaOverviewControl:shiftReleased()
 end
 
 function FabulaOverviewControl:focusReadout(readout)
-  readout:save()
-  self.paramFocusedReadout = readout
-  self:setSubCursorController(readout)
-  if not self:hasFocus("encoder") then self:focus() end
+  self:focusParamSub(readout)   -- one path for caret + encoder
 end
 
 function FabulaOverviewControl:subReleased(i, shifted)
