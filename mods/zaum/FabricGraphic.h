@@ -64,13 +64,13 @@ namespace zaum
       //     frame so the incoming contour is smooth, not jittery.
       float mean = 0.0f;
       for (int c = 0; c < cols; c++)
-        mean += mpTank->vizSample(c);
+        mean += mpTank->vizSample(c) * bandTilt(c);
       mean *= (1.0f / (float)cols);
       mDc += (mean - mDc) * 0.1f;
       float pk = 0.0f;
       for (int c = 0; c < cols; c++)
       {
-        float v = mpTank->vizSample(c) - mDc;
+        float v = mpTank->vizSample(c) * bandTilt(c) - mDc;
         mFront[c] += (v - mFront[c]) * kSlew;
         float a = mFront[c] < 0.0f ? -mFront[c] : mFront[c];
         if (a > pk) pk = a;
@@ -197,5 +197,14 @@ namespace zaum
              (-2.0f * t3 + 3.0f * t2) * p2 + (t3 - t2) * m2;
     }
     static const int kSub = 3; // Catmull-Rom sub-segments per column span
+
+    // Per-band display tilt: reverb spectra are bass-heavy, so down-weight the
+    // low bands and up-weight the highs (a rising weight across frequency).
+    static constexpr float kTiltLo = 0.25f; // weight of band 0 (bass)
+    static constexpr float kTiltHi = 1.3f;  // weight of the top band (treble)
+    static inline float bandTilt(int c)
+    {
+      return kTiltLo + (kTiltHi - kTiltLo) * (float)c / (float)(kCols - 1);
+    }
   };
 }
