@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**125 items** — 37 done, 3 wip, 82 todo, 3 blocked. *Rendered 2026-07-14.*
+**128 items** — 37 done, 3 wip, 85 todo, 3 blocked. *Rendered 2026-07-14.*
 
 ## DSP
 
@@ -18,6 +18,9 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `biome-utility-dsp-units` | biome DSP utility units: simple allpass, dome filter, frequency shifter, bitcrush/downsample | manual · 2026-07-09 |
 |   | `canals-audiorate-and-cpu` | Canals: audio-rate Span-sweep aliasing (halfband decimator) + hardware CPU/NEON pass | manual · 2026-07-09 |
 |   | `canals-response-tuning` | Canals: SPAN/volume/low-band/Q/soft-clip response tuning against hardware capture corpus | manual · 2026-07-09 |
+|   | `fabula-diffusion-makeup` | Fabula: AGC / intelligent gain control to make up volume lost to diffusion | manual · 2026-07-14 |
+|   | `fabula-dry-under-hpf` | Fabula: dry passthrough underneath the 200Hz wet HPF | manual · 2026-07-14 |
+|   | `fabula-xform` | Fabula: xform (transform/randomize) control, modeled on Pecto/Petrichor | manual · 2026-07-14 |
 |   | `flakes-shards-fidelity` | Flakes: tune self-modulation engine to Shards, steeper LP on feedback, evaluate manual-loops fidelity | manual · 2026-07-09 |
 |   | `fx-delay-units` | Combined Petrichor+Pecto (CPU-efficient) + character-forward Lofi delay | manual · 2026-07-09 |
 |   | `helicase-sync-polyblep` | Helicase: PolyBLEP at the carrier reset discontinuity on hard sync | manual · 2026-07-09 |

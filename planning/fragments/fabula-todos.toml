@@ -1,0 +1,28 @@
+# Fabula follow-up features (post-viz). Append via scripts/dev ledger-append.
+
+[[item]]
+id = "fabula-diffusion-makeup"
+title = "Fabula: AGC / intelligent gain control to make up volume lost to diffusion"
+status = "todo"
+stamped = "2026-07-14T18:37:47-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "sweep Diffusion (and Size/Decay): perceived wet level should stay roughly constant instead of dropping as diffusion rises; an AGC/envelope-tracked makeup on the wet compensates the diffusion loss without pumping" }
+note = "Diffusion (and the multi-tap signed sum) costs perceived level. Add an AGC / envelope-tracked makeup on the wet that compensates the loss. Watch interaction with the Freeze makeup (kFreezeMakeup) and the SR/2 tank. See [[project_fabula_am335x]]."
+
+[[item]]
+id = "fabula-dry-under-hpf"
+title = "Fabula: dry passthrough underneath the 200Hz wet HPF"
+status = "todo"
+stamped = "2026-07-14T18:37:47-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "confirm the dry signal's low end passes full-range while the wet stays HPF'd at 200Hz - i.e. the HPF shapes only the reverb, and a dry passthrough preserves lows underneath" }
+note = "The 200Hz kWetHpF/kWetHpA highpass currently shapes the wet. Want a dry passthrough that keeps the low end underneath the HPF'd wet (clarify: full-range dry blend vs a shelved dry). See [[project_fabula_am335x]]."
+
+[[item]]
+id = "fabula-xform"
+title = "Fabula: xform (transform/randomize) control, modeled on Pecto/Petrichor"
+status = "todo"
+stamped = "2026-07-14T18:37:47-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "an xform gate randomizes/morphs a curated set of Fabula params (size/decay/damp/diffusion/early + mod character) into musical new spaces; modeled on Pecto's / Petrichor's xform gate" }
+note = "Add an xform control (gate/trig) that randomizes or morphs a curated param set into new rooms. Model on Pecto's xform (planning/combbody.md) or Petrichor's. Curate which params + ranges stay musical. See [[project_fabula_am335x]]."
