@@ -632,8 +632,8 @@ namespace zaum
   // waterfall's front line, plus the smoothed freeze amount (so the sheet holds
   // when frozen). kVizCols is pow2 for &-mask indexing; decimation sets the front-
   // line time window (kVizCols*kVizDecim / SR ~= 32 ms at 48k).
-  static const int kVizCols  = 32;
-  static const int kVizDecim = 48;
+  static const int kVizCols  = 16;
+  static const int kVizDecim = 64;
 
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).

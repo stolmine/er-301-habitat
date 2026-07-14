@@ -85,9 +85,9 @@ namespace zaum
 
       // Orthographic projection (linear, no trig): rows step up-and-right as they
       // recede -> a parallelogram; front bright, back dim.
-      const int marginX = 3, marginY = 4;
-      const float rowSkewX = 2.0f;
-      const float rowSkewY = 2.2f;
+      const int marginX = 2, marginY = 4;
+      const float rowSkewX = 1.6f;
+      const float rowSkewY = 3.0f;
       float usableW = (float)(w - 2 * marginX) - rowSkewX * (float)(kRows - 1);
       if (usableW < 1.0f)
         usableW = 1.0f;
@@ -121,8 +121,8 @@ namespace zaum
 
   private:
     APFTank *mpTank;
-    static const int kRows = 12;
-    static const int kCols = 32; // matches APFTank::kVizCols
+    static const int kRows = 10;
+    static const int kCols = 16; // matches APFTank::kVizCols
     static constexpr float kScrollRate = 1.0f;  // rows advanced per frame at freeze=0
     static constexpr float kMembrane = 0.65f;    // 0 = crisp lines, 1 = smooth membrane
     float mHist[kRows][kCols];
