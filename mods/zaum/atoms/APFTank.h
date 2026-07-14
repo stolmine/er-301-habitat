@@ -632,15 +632,17 @@ namespace zaum
   // envelope per band), read by the graphic as the waterfall's front contour, plus
   // the smoothed freeze amount. Spectral (not raw waveform) so contours are smooth
   // and meaningful - the tail's frequency content decaying, Damp darkening highs.
-  static const int kVizCols  = 16;
-  static const float kVizEnvAtt = 0.004f;   // ~5 ms band-envelope attack
-  static const float kVizEnvRel = 0.00015f; // ~140 ms release
-  // One-pole LP coefficients, log-spaced fc 200 Hz..16 kHz @48k (band k = LP[k]-LP[k-1]).
+  static const int kVizCols   = 16;
+  static const int kVizAnDecim = 4;         // analyzer runs 1/4 host rate (12 kHz) - CPU
+  static const float kVizEnvRel = 0.0006f;  // ~140 ms release @12k (attack is instant/max)
+  // One-pole LP coefficients, log-spaced fc 200 Hz..5 kHz @12k (band k = LP[k]-LP[k-1]).
+  // (The SR/2 tank is band-limited, and the analyzer input is 4-sample box-averaged
+  //  -> decimating to 12 kHz costs 1/4 with negligible spectral loss for a viz.)
   static constexpr float kVizBandA[kVizCols] = {
-    0.025840f, 0.034455f, 0.045873f, 0.060954f,
-    0.080779f, 0.106676f, 0.140220f, 0.183181f,
-    0.237374f, 0.304365f, 0.384959f, 0.478466f,
-    0.581822f, 0.688903f, 0.790665f, 0.876855f,
+    0.099423f, 0.121716f, 0.148580f, 0.180737f,
+    0.218911f, 0.263762f, 0.315792f, 0.375203f,
+    0.441725f, 0.514427f, 0.591532f, 0.670324f,
+    0.747223f, 0.818122f, 0.879051f, 0.927051f,
   };
 
   // ---------------------------------------------------------------------------
@@ -982,6 +984,8 @@ namespace zaum
       mFreezeSmoothed = 0.0f;
       memset(mVizLp, 0, sizeof(mVizLp));
       memset(mVizEnv, 0, sizeof(mVizEnv));
+      mVizAcc = 0.0f;
+      mVizDecimCtr = kVizAnDecim;
       mVizFreeze = 0.0f;
 
       mLastSize         = 0.35f;
@@ -1955,11 +1959,16 @@ namespace zaum
         mWetHpLp2_R += kWetHpA * (hp1R - mWetHpLp2_R);
         wetR = hp1R - mWetHpLp2_R;
 
-        // Overview viz tap: 16-band spectrum of the mono wet. Each band = the
-        // difference of successive log-spaced one-pole LPs (a cheap bandpass),
-        // fed to a fast-attack / slow-release envelope -> smooth per-band energy.
+        // Overview viz tap: 16-band spectrum of the mono wet, run at 1/4 host rate
+        // (12 kHz) on the box-averaged wet for CPU. Each band = the difference of
+        // successive log-spaced one-pole LPs (cheap bandpass) -> peak envelope
+        // (instant attack via max, slow release; branchless).
+        mVizAcc += 0.5f * (wetL + wetR);
+        if (--mVizDecimCtr <= 0)
         {
-          float xm = 0.5f * (wetL + wetR);
+          mVizDecimCtr = kVizAnDecim;
+          float xm = mVizAcc * (1.0f / (float)kVizAnDecim);
+          mVizAcc = 0.0f;
           float prevLp = 0.0f;
           for (int k = 0; k < kVizCols; k++)
           {
@@ -1967,8 +1976,8 @@ namespace zaum
             float band = mVizLp[k] - prevLp;
             prevLp = mVizLp[k];
             float a = band < 0.0f ? -band : band;
-            float coef = (a > mVizEnv[k]) ? kVizEnvAtt : kVizEnvRel;
-            mVizEnv[k] += coef * (a - mVizEnv[k]);
+            float e = mVizEnv[k] + kVizEnvRel * (a - mVizEnv[k]);
+            mVizEnv[k] = e > a ? e : a;   // instant attack, slow release
           }
         }
 
@@ -2135,6 +2144,8 @@ namespace zaum
     // these via the inline getters below).
     float  mVizLp[kVizCols];   // per-band one-pole LP states
     float  mVizEnv[kVizCols];  // per-band envelope (the spectrum the graphic reads)
+    float  mVizAcc;            // box-average accumulator for the decimated analyzer
+    int    mVizDecimCtr;
     float  mVizFreeze;
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)

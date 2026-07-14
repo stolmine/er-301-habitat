@@ -3,6 +3,7 @@
 #include <od/graphics/Graphic.h>
 #include "atoms/APFTank.h"
 #include <string.h>
+#include <math.h>
 
 namespace zaum
 {
@@ -62,15 +63,17 @@ namespace zaum
       // --- Front line: read the box-averaged wet, DC-remove, and heavily SLEW
       //     each column across frames (Helicase's actual smoothing). Runs every
       //     frame so the incoming contour is smooth, not jittery.
+      // sqrtf = log-ish amplitude compression so loud low bands don't dominate;
+      // bandTilt additionally down-weights the low frequencies.
       float mean = 0.0f;
       for (int c = 0; c < cols; c++)
-        mean += mpTank->vizSample(c) * bandTilt(c);
+        mean += sqrtf(mpTank->vizSample(c)) * bandTilt(c);
       mean *= (1.0f / (float)cols);
       mDc += (mean - mDc) * 0.1f;
       float pk = 0.0f;
       for (int c = 0; c < cols; c++)
       {
-        float v = mpTank->vizSample(c) * bandTilt(c) - mDc;
+        float v = sqrtf(mpTank->vizSample(c)) * bandTilt(c) - mDc;
         mFront[c] += (v - mFront[c]) * kSlew;
         float a = mFront[c] < 0.0f ? -mFront[c] : mFront[c];
         if (a > pk) pk = a;
@@ -108,8 +111,8 @@ namespace zaum
       // Orthographic projection (linear, no trig): rows step up-and-right as they
       // recede -> a parallelogram. Its extent is measured and the whole mesh is
       // CENTERED in the ply.
-      const float rowSkewX = 1.6f;
-      const float rowSkewY = 3.0f;
+      const float rowSkewX = 1.0f;   // less horizontal shift = more head-on
+      const float rowSkewY = 3.2f;
       float availW = (float)w * 0.9f;
       float colStep = (availW - rowSkewX * (float)(kRows - 1)) / (float)(cols - 1);
       if (colStep < 1.0f)
