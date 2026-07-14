@@ -52,28 +52,48 @@ namespace zaum
       if (!mInit)
       {
         memset(mHist, 0, sizeof(mHist));
+        memset(mFront, 0, sizeof(mFront));
         mInit = true;
       }
 
       const int cols = kCols; // must match APFTank::kVizCols
       float fz = mpTank->vizFreeze();
 
-      // Scroll gate: advance ~ (1 - freeze), so Freeze holds the sheet.
-      mScrollAcc += (1.0f - fz) * kScrollRate + 0.0001f; // tiny floor keeps it alive
+      // --- Front line: read the box-averaged wet, DC-remove, and heavily SLEW
+      //     each column across frames (Helicase's actual smoothing). Runs every
+      //     frame so the incoming contour is smooth, not jittery.
+      float mean = 0.0f;
+      for (int c = 0; c < cols; c++)
+        mean += mpTank->vizSample(c);
+      mean *= (1.0f / (float)cols);
+      mDc += (mean - mDc) * 0.1f;
+      float pk = 0.0f;
+      for (int c = 0; c < cols; c++)
+      {
+        float v = mpTank->vizSample(c) - mDc;
+        mFront[c] += (v - mFront[c]) * kSlew;
+        float a = mFront[c] < 0.0f ? -mFront[c] : mFront[c];
+        if (a > pk) pk = a;
+      }
+      // Auto-scale: track the peak (fast attack, slow release) so the fabric fills
+      // the ply regardless of input level; below a floor -> flat (silence).
+      mPeak += (pk - mPeak) * (pk > mPeak ? 0.3f : 0.03f);
+
+      // Scroll gate: advance ~ (1 - freeze) so Freeze holds the sheet. On a tick,
+      // shift the history back and insert the (laterally smoothed) front line.
+      mScrollAcc += (1.0f - fz) * kScrollRate + 0.0001f;
       if (mScrollAcc >= 1.0f)
       {
         mScrollAcc -= 1.0f;
         for (int r = kRows - 1; r > 0; r--)
           for (int c = 0; c < cols; c++)
             mHist[r][c] = mHist[r - 1][c];
-        // New front row: decimated wet, laterally smoothed toward a membrane.
         for (int c = 0; c < cols; c++)
         {
-          float s0 = mpTank->vizSample(c);
-          float sl = mpTank->vizSample(c > 0 ? c - 1 : 0);
-          float sr = mpTank->vizSample(c < cols - 1 ? c + 1 : cols - 1);
-          float sm = 0.25f * (sl + 2.0f * s0 + sr);
-          mHist[0][c] = kMembrane * sm + (1.0f - kMembrane) * s0;
+          float l = mFront[c > 0 ? c - 1 : 0];
+          float rr = mFront[c < cols - 1 ? c + 1 : cols - 1];
+          float sm = 0.25f * (l + 2.0f * mFront[c] + rr);
+          mHist[0][c] = kMembrane * sm + (1.0f - kMembrane) * mFront[c];
         }
       }
 
@@ -81,7 +101,9 @@ namespace zaum
       mBreathe += 0.03f;
       if (mBreathe > 6.28318531f)
         mBreathe -= 6.28318531f;
-      float vscale = (float)h * 0.22f * (1.0f + 0.06f * fz * fastSin(mBreathe));
+      // Displacement scale: peak-normalized so the fabric fills ~0.4*height.
+      float amp = (mPeak > 1e-4f) ? (0.40f * (float)h / mPeak) : 0.0f;
+      float vscale = amp * (1.0f + 0.06f * fz * fastSin(mBreathe));
 
       // Orthographic projection (linear, no trig): rows step up-and-right as they
       // recede -> a parallelogram. Its extent is measured and the whole mesh is
@@ -144,8 +166,12 @@ namespace zaum
     static const int kRows = 10;
     static const int kCols = 16; // matches APFTank::kVizCols
     static constexpr float kScrollRate = 1.0f;  // rows advanced per frame at freeze=0
-    static constexpr float kMembrane = 0.65f;    // 0 = crisp lines, 1 = smooth membrane
+    static constexpr float kMembrane = 0.6f;     // 0 = crisp lines, 1 = smooth membrane
+    static constexpr float kSlew = 0.15f;        // per-column temporal slew (Helicase-style)
     float mHist[kRows][kCols];
+    float mFront[kCols];   // slewed, DC-removed front line (class member, not stack)
+    float mDc = 0.0f;      // slow DC tracker
+    float mPeak = 0.0f;    // running peak for auto-scale (fast attack / slow release)
     bool mInit = false;
     float mScrollAcc = 0.0f;
     float mBreathe = 0.0f;

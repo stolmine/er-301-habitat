@@ -628,12 +628,20 @@ namespace zaum
   // unaffected (it still reads the live input), so this only lifts the tank part.
   static const float kFreezeMakeup     = 0.8f;    // +20*log10(1.8) ~= +5.1 dB at fz=1
 
-  // Overview viz taps: a decimated mono-wet snapshot ring the graphic reads as the
-  // waterfall's front line, plus the smoothed freeze amount (so the sheet holds
-  // when frozen). kVizCols is pow2 for &-mask indexing; decimation sets the front-
-  // line time window (kVizCols*kVizDecim / SR ~= 32 ms at 48k).
+  // Overview viz taps: a cheap 16-band SPECTRUM of the mono wet (one-pole ladder +
+  // envelope per band), read by the graphic as the waterfall's front contour, plus
+  // the smoothed freeze amount. Spectral (not raw waveform) so contours are smooth
+  // and meaningful - the tail's frequency content decaying, Damp darkening highs.
   static const int kVizCols  = 16;
-  static const int kVizDecim = 64;
+  static const float kVizEnvAtt = 0.004f;   // ~5 ms band-envelope attack
+  static const float kVizEnvRel = 0.00015f; // ~140 ms release
+  // One-pole LP coefficients, log-spaced fc 200 Hz..16 kHz @48k (band k = LP[k]-LP[k-1]).
+  static constexpr float kVizBandA[kVizCols] = {
+    0.025840f, 0.034455f, 0.045873f, 0.060954f,
+    0.080779f, 0.106676f, 0.140220f, 0.183181f,
+    0.237374f, 0.304365f, 0.384959f, 0.478466f,
+    0.581822f, 0.688903f, 0.790665f, 0.876855f,
+  };
 
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
@@ -972,9 +980,8 @@ namespace zaum
       mTankWetR_prev = mTankWetR_curr = 0.0f;
       mWetHpLp1_L = mWetHpLp2_L = mWetHpLp1_R = mWetHpLp2_R = 0.0f;
       mFreezeSmoothed = 0.0f;
-      memset(mVizRow, 0, sizeof(mVizRow));
-      mVizWr = 0;
-      mVizDecimCtr = kVizDecim;
+      memset(mVizLp, 0, sizeof(mVizLp));
+      memset(mVizEnv, 0, sizeof(mVizEnv));
       mVizFreeze = 0.0f;
 
       mLastSize         = 0.35f;
@@ -1004,7 +1011,7 @@ namespace zaum
     // --- Overview viz accessors (inline; read by the FabricGraphic). NOT virtual. ---
     // vizSample(i): the decimated mono-wet ring in chronological order (0 = oldest).
     int   vizCols() const { return kVizCols; }
-    float vizSample(int i) const { return mVizRow[(mVizWr + i) & (kVizCols - 1)]; }
+    float vizSample(int i) const { return mVizEnv[i]; }   // band-k energy (spectrum)
     float vizFreeze() const { return mVizFreeze; }
 
     virtual void process()
@@ -1948,12 +1955,21 @@ namespace zaum
         mWetHpLp2_R += kWetHpA * (hp1R - mWetHpLp2_R);
         wetR = hp1R - mWetHpLp2_R;
 
-        // Overview viz tap: decimated mono-wet into the ring (front line source).
-        if (--mVizDecimCtr <= 0)
+        // Overview viz tap: 16-band spectrum of the mono wet. Each band = the
+        // difference of successive log-spaced one-pole LPs (a cheap bandpass),
+        // fed to a fast-attack / slow-release envelope -> smooth per-band energy.
         {
-          mVizDecimCtr = kVizDecim;
-          mVizRow[mVizWr] = 0.5f * (wetL + wetR);
-          mVizWr = (mVizWr + 1) & (kVizCols - 1);
+          float xm = 0.5f * (wetL + wetR);
+          float prevLp = 0.0f;
+          for (int k = 0; k < kVizCols; k++)
+          {
+            mVizLp[k] += kVizBandA[k] * (xm - mVizLp[k]);
+            float band = mVizLp[k] - prevLp;
+            prevLp = mVizLp[k];
+            float a = band < 0.0f ? -band : band;
+            float coef = (a > mVizEnv[k]) ? kVizEnvAtt : kVizEnvRel;
+            mVizEnv[k] += coef * (a - mVizEnv[k]);
+          }
         }
 
         // ----------------------------------------------------------------
@@ -2117,9 +2133,8 @@ namespace zaum
     float  mFreezeSmoothed;       // block-rate smoothed Freeze amount (0..1)
     // Overview viz state: decimated mono-wet ring + freeze mirror (graphic reads
     // these via the inline getters below).
-    float  mVizRow[kVizCols];
-    int    mVizWr;
-    int    mVizDecimCtr;
+    float  mVizLp[kVizCols];   // per-band one-pole LP states
+    float  mVizEnv[kVizCols];  // per-band envelope (the spectrum the graphic reads)
     float  mVizFreeze;
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
