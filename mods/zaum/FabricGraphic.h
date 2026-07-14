@@ -58,7 +58,6 @@ namespace zaum
       }
 
       const int cols = kCols; // must match APFTank::kVizCols
-      float fz = mpTank->vizFreeze();
 
       // --- Front line: read the box-averaged wet, DC-remove, and heavily SLEW
       //     each column across frames (Helicase's actual smoothing). Runs every
@@ -82,9 +81,9 @@ namespace zaum
       // the ply regardless of input level; below a floor -> flat (silence).
       mPeak += (pk - mPeak) * (pk > mPeak ? 0.3f : 0.03f);
 
-      // Scroll gate: advance ~ (1 - freeze) so Freeze holds the sheet. On a tick,
-      // shift the history back and insert the (laterally smoothed) front line.
-      mScrollAcc += (1.0f - fz) * kScrollRate + 0.0001f;
+      // Scroll one row per frame (Freeze no longer affects the viz). Shift history
+      // back, insert the laterally smoothed front line.
+      mScrollAcc += kScrollRate;
       if (mScrollAcc >= 1.0f)
       {
         mScrollAcc -= 1.0f;
@@ -100,27 +99,17 @@ namespace zaum
         }
       }
 
-      // Subtle breathe when frozen so the held sheet stays alive.
-      mBreathe += 0.03f;
-      if (mBreathe > 6.28318531f)
-        mBreathe -= 6.28318531f;
-      // Displacement scale: peak-normalized so the fabric fills ~0.4*height.
-      float amp = (mPeak > 1e-4f) ? (0.40f * (float)h / mPeak) : 0.0f;
-      float vscale = amp * (1.0f + 0.06f * fz * fastSin(mBreathe));
-
-      // Orthographic projection (linear, no trig): rows step up-and-right as they
-      // recede -> a parallelogram. Its extent is measured and the whole mesh is
-      // CENTERED in the ply.
-      const float rowSkewX = 1.0f;   // less horizontal shift = more head-on
-      const float rowSkewY = 3.2f;
-      float availW = (float)w * 0.9f;
-      float colStep = (availW - rowSkewX * (float)(kRows - 1)) / (float)(cols - 1);
-      if (colStep < 1.0f)
-        colStep = 1.0f;
-      float meshW = colStep * (float)(cols - 1) + rowSkewX * (float)(kRows - 1);
-      float meshH = rowSkewY * (float)(kRows - 1);
-      float originX = (float)left + ((float)w - meshW) * 0.5f;
-      float originY = (float)bot + ((float)h - meshH) * 0.5f; // front-row baseline
+      // Full-overhead layout: each contour is a FLAT horizontal line (the spectrum
+      // across the width); contours stack VERTICALLY (newest at the bottom, older
+      // rows scroll up and dim). No perspective skew - fills the whole ply.
+      const int marginX = 1, marginY = 2;
+      float colStep = (float)(w - 2 * marginX) / (float)(cols - 1);
+      float rowSpacing = (float)(h - 2 * marginY) / (float)(kRows - 1);
+      float originX = (float)left + (float)marginX;
+      float originY = (float)bot + (float)marginY;
+      // Ripple: auto-scaled to ~row spacing so lines wiggle and lightly weave
+      // without turning to mush; below a floor -> flat (silence).
+      float vscale = (mPeak > 1e-4f) ? (rowSpacing * 0.9f / mPeak) : 0.0f;
       int top = bot + h - 1;
       int right = left + w - 1;
 
@@ -131,8 +120,8 @@ namespace zaum
         int gray = 14 - (r * 11) / kRows;
         if (gray < 3)
           gray = 3;
-        float rowX = originX + rowSkewX * (float)r;
-        float rowY = originY + rowSkewY * (float)r;
+        float rowX = originX;                          // flat: no horizontal skew
+        float rowY = originY + rowSpacing * (float)r;  // stacked vertically
         int prevSx = -1, prevSy = 0;
         for (int c = 0; c < cols - 1; c++)
         {
@@ -166,7 +155,7 @@ namespace zaum
 
   private:
     APFTank *mpTank;
-    static const int kRows = 10;
+    static const int kRows = 16; // flat contours stacked to fill the ply height
     static const int kCols = 16; // matches APFTank::kVizCols
     static constexpr float kScrollRate = 1.0f;  // rows advanced per frame at freeze=0
     static constexpr float kMembrane = 0.6f;     // 0 = crisp lines, 1 = smooth membrane
@@ -177,16 +166,6 @@ namespace zaum
     float mPeak = 0.0f;    // running peak for auto-scale (fast attack / slow release)
     bool mInit = false;
     float mScrollAcc = 0.0f;
-    float mBreathe = 0.0f;
-
-    // Inline polynomial sine for the breathe (no libm; arg wrapped to [-pi,pi]).
-    static inline float fastSin(float x)
-    {
-      if (x > 3.14159265f)
-        x -= 6.28318531f;
-      float x2 = x * x;
-      return x * (1.0f - x2 * (0.16666667f - x2 * 0.00833333f));
-    }
 
     // Catmull-Rom (Hermite form, tangents = tau*(p2-p0)/(p3-p1)) for smooth row
     // curves between the column samples. (Same helper as HelicaseOrbitalGraphic.)

@@ -37,7 +37,7 @@ function FabulaOverviewControl:init(args)
   self:setMainCursorController(fabric)
   self:setControlGraphic(container)
 
-  self.paramMode = true
+  self.paramMode = false
   self.shiftHeld = false
   self.shiftUsed = false
   self.levelSubGraphic = self.subGraphic
@@ -86,21 +86,27 @@ function FabulaOverviewControl:init(args)
   self.paramSubGraphic:addChild(app.SubButton("damp", 2))
   self.paramSubGraphic:addChild(app.SubButton("diff", 3))
 
-  -- Highlight Decay on paramMode entry (Size stays on the main encoder).
+  -- Default sub focused when the shift submenu is opened.
   self.paramModeDefaultSub = self.decayReadout
 
-  self:setParamMode(true)
+  -- Default: Size on the main encoder (level sub). Tap-shift reveals Decay/Damp/Diff.
+  self:setParamMode(false)
 end
 
 function FabulaOverviewControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
-  self.paramFocusedReadout = nil
-  self:setSubCursorController(nil)
   if enabled then
+    -- Show the Decay/Damp/Diff submenu and focus the default sub so the encoder
+    -- edits the SHOWN parameter (not Size).
     self.subGraphic = self.paramSubGraphic
+    self.paramFocusedReadout = self.paramModeDefaultSub
+    self:setSubCursorController(self.paramFocusedReadout)
   else
+    -- Level sub: Size on the main encoder.
     self.subGraphic = self.levelSubGraphic
+    self.paramFocusedReadout = nil
+    self:setSubCursorController(nil)
     self:setFocusedReadout(self.bias)
   end
   self:addSubGraphic(self.subGraphic)
@@ -110,7 +116,11 @@ function FabulaOverviewControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
   if self.paramMode then
-    self:setSubCursorController(self.paramModeDefaultSub)
+    -- Respect the shown submenu: focus its sub-param for the encoder.
+    if not self.paramFocusedReadout then
+      self.paramFocusedReadout = self.paramModeDefaultSub
+    end
+    self:setSubCursorController(self.paramFocusedReadout)
   end
 end
 
