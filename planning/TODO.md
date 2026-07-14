@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**128 items** — 37 done, 3 wip, 85 todo, 3 blocked. *Rendered 2026-07-14.*
+**129 items** — 37 done, 3 wip, 86 todo, 3 blocked. *Rendered 2026-07-14.*
 
 ## DSP
 
@@ -108,6 +108,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `controls-fader-response-audit` | Repo-wide fader response audit (dial-map shape, coarse/fine steps, encoder velocity, bias range) | manual · 2026-07-09 |
 |   | `controls-shift-audit-impl` | Shift-button behavior audit — implementation phase (spec locked in planning/shift-handling.md) | manual · 2026-07-09 |
 |   | `controls-subdisplay-and-viz` | Sub-display readout audit for expansion-only controls + bias indicator line on visualizer plies | manual · 2026-07-09 |
+|   | `fabula-overview-caret` | Fabula overview: default-focus a sub-readout on re-entry WITHOUT breaking navigation (renderer focus==self gate) | manual · 2026-07-14 |
 |   | `filterbank-defaults-and-randomize-gates` | Filterbank: better default gain/Q for immediate audibility + band-list randomize gate controls | manual · 2026-07-09 |
 |   | `helicase-polish` | Helicase: wider carrier-shape set, more-reactive overview viz, am335x CPU profile | manual · 2026-07-09 |
 |   | `impasto-stereo-option-state` | Impasto: saved stereo option state can disagree with instantiation if toggled without re-insert | manual · 2026-07-09 |

@@ -628,6 +628,17 @@ namespace zaum
   // unaffected (it still reads the live input), so this only lifts the tank part.
   static const float kFreezeMakeup     = 0.8f;    // +20*log10(1.8) ~= +5.1 dB at fz=1
 
+  // Diffusion makeup: more Diffusion spreads the energy (allpass smear + more
+  // decorrelated tap sum) -> lower perceived loudness even though the allpasses
+  // are unity-gain. Compensate with a static wet gain rising with Diffusion (the
+  // loss is a function of the param, not the signal, so no dynamic AGC / no pump).
+  static const float kDiffMakeup       = 0.9f;    // up to +20*log10(1.9) ~= +5.6 dB at Diff=1
+
+  // Dry low passthrough: the 200 Hz wet HPF strips the reverb's (muddy) lows, so
+  // pass CLEAN low end from the dry underneath the HPF'd wet (complementary 200 Hz
+  // lowpass of the dry), scaled by Mix so the low body stays even at 100% wet.
+  static const float kDryUnder         = 1.0f;    // dry-low passthrough level
+
   // Overview viz taps: a cheap 16-band SPECTRUM of the mono wet (one-pole ladder +
   // envelope per band), read by the graphic as the waterfall's front contour, plus
   // the smoothed freeze amount. Spectral (not raw waveform) so contours are smooth
@@ -981,6 +992,7 @@ namespace zaum
       mTankWetL_prev = mTankWetL_curr = 0.0f;
       mTankWetR_prev = mTankWetR_curr = 0.0f;
       mWetHpLp1_L = mWetHpLp2_L = mWetHpLp1_R = mWetHpLp2_R = 0.0f;
+      mDryLp1_L = mDryLp2_L = mDryLp1_R = mDryLp2_R = 0.0f;
       mFreezeSmoothed = 0.0f;
       memset(mVizLp, 0, sizeof(mVizLp));
       memset(mVizEnv, 0, sizeof(mVizEnv));
@@ -1177,6 +1189,11 @@ namespace zaum
       const float tankInGain = 1.0f - fz;
       // Makeup on the tank wet to counter the perceived drop when the input mutes.
       const float freezeMakeup = 1.0f + fz * kFreezeMakeup;
+      // Diffusion makeup: static wet gain compensating the perceived level lost as
+      // Diffusion spreads the energy (see kDiffMakeup).
+      const float diffMakeup = 1.0f + kDiffMakeup * diffusionParam;
+      // Dry low passthrough gain (scaled by Mix -> fills in as the wet takes over).
+      const float dryUnderGain = mMix.value() * kDryUnder;
 
       // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
       // since the smoothed value moves continuously when converging.
@@ -1989,9 +2006,19 @@ namespace zaum
         //    so wetL and wetR are decorrelated even from a mono source.
         // ----------------------------------------------------------------
         float dryMix  = (1.0f - mix);
-        float wetMix  = mix;
+        float wetMix  = mix * diffMakeup;   // diffusion makeup folded into wet gain
         float outL = drySampleL * dryMix + wetL * wetMix;
         float outR = drySampleR * dryMix + wetR * wetMix;
+
+        // Dry low passthrough: complementary 200 Hz LP of the dry (2 cascaded
+        // one-poles, 12 dB/oct) added underneath the HPF'd wet, so clean low body
+        // stays even at high Mix.
+        mDryLp1_L += kWetHpA * (drySampleL - mDryLp1_L);
+        mDryLp2_L += kWetHpA * (mDryLp1_L - mDryLp2_L);
+        mDryLp1_R += kWetHpA * (drySampleR - mDryLp1_R);
+        mDryLp2_R += kWetHpA * (mDryLp1_R - mDryLp2_R);
+        outL += mDryLp2_L * dryUnderGain;
+        outR += mDryLp2_R * dryUnderGain;
 
         *out1 = outL;
         *out2 = outR;
@@ -2139,6 +2166,7 @@ namespace zaum
     float  mTankWetR_prev, mTankWetR_curr;
     // Wet-output 200 Hz highpass: LP states of the two cascaded one-poles/ch.
     float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
+    float  mDryLp1_L, mDryLp2_L, mDryLp1_R, mDryLp2_R;  // dry low passthrough LP states
     float  mFreezeSmoothed;       // block-rate smoothed Freeze amount (0..1)
     // Overview viz state: decimated mono-wet ring + freeze mirror (graphic reads
     // these via the inline getters below).

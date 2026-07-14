@@ -127,11 +127,12 @@ function FabulaOverviewControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
   if self.paramMode then
-    if not self.paramFocusedReadout then
-      self.paramFocusedReadout = self.paramModeDefaultSub
-    end
-    -- Re-point caret AND encoder at the same sub, forcing the renderer update.
-    self:focusParamSub(self.paramFocusedReadout)
+    -- STRICT convention on re-entry: clear the sub cursor and leave the encoder on
+    -- Size (paramFocusedReadout was niled in onCursorLeave). No focus-grab on enter
+    -- (that broke navigation), no phantom caret. Tap a SubButton to edit Decay/Damp/
+    -- Diff. The ideal "auto-focus the shown sub with a caret" needs deeper research
+    -- into the renderer's focus==self gate -> see fabula-overview-caret TODO.
+    self:setSubCursorController(nil)
   end
 end
 

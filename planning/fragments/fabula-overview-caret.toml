@@ -1,0 +1,8 @@
+[[item]]
+id = "fabula-overview-caret"
+title = "Fabula overview: default-focus a sub-readout on re-entry WITHOUT breaking navigation (renderer focus==self gate)"
+status = "todo"
+stamped = "2026-07-14T18:53:54-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "enter the Fabula overview -> tap-shift to the Decay/Damp/Diff submenu -> navigate to another top-level control -> navigate back: the caret should land on a sub-readout AND the encoder should edit that SAME sub, with normal top-level navigation still working (no cursor grabbing nothing / traversing)" }
+note = "The sub caret renders at subCursorController's coords, and setSubCursorController only pushes to the renderer when the widget already holds encoder focus (Base/Widget.lua). Original bug: on re-entry the caret bled onto self.bias (col3/center4, pixel-identical to the S3/diff readout) while the encoder edited S1 (caret/encoder split). The focusParamSub() fix (0.2.0.52) forced encoder focus via self:focus() on cursor-enter to make the caret render, but that BROKE navigation (cursor grabs nothing / traverses top-level). Reverted onCursorEnter to the STRICT convention (setSubCursorController(nil), encoder edits Size until a SubButton is tapped) - consistent + navigation works, but loses the intended default-edit-Decay-with-caret. Deeper research needed: how do the framework's cursor navigation and encoder focus interact so a paramMode control can present a positive default sub-caret on re-entry without self:focus() hijacking navigation. This is the exact unresolved renderer limitation pinned in feedback_subcursor_inheritance / shift-handling.md:399 ('positive default highlight does not render'). See [[project_fabula_am335x]]."
