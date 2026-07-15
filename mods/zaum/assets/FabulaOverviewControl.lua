@@ -1,7 +1,13 @@
 -- Fabula overview control: a GainBias whose main dial is Size and whose fader
 -- graphic is replaced by the FabricGraphic waterfall viz. Tap-shift toggles a
 -- param submenu exposing Decay / Damp / Diffusion (each a Readout bound to the
--- real Bias parameter). Mirrors spreadsheet/HelicaseOverviewControl.lua.
+-- real Bias parameter).
+--
+-- Cursor / paramMode / shift / enter handling is a VERBATIM port of Pecto's
+-- spreadsheet/DensityControl.lua (the only differences are the three readouts
+-- and the fabric viz replacing the fader). Aped exactly so the subdisplay cursor
+-- and enter-to-expand behave identically to Pecto (previous custom focusParamSub
+-- logic caused the caret weirdness - see the retired fabula-overview-caret note).
 
 local app = app
 local libzaum = require "zaum.libzaum"
@@ -40,99 +46,59 @@ function FabulaOverviewControl:init(args)
   self.paramMode = false
   self.shiftHeld = false
   self.shiftUsed = false
-  self.levelSubGraphic = self.subGraphic
+  self.normalSubGraphic = self.subGraphic
 
   self.paramSubGraphic = app.Graphic(0, 0, 128, 64)
 
-  local desc = app.Label("Overview", 10)
+  local function makeReadout(param, x)
+    local g = app.Readout(0, 0, ply, 10)
+    g:setParameter(param)
+    g:setAttributes(app.unitNone, zeroOneMap())
+    g:setPrecision(2)
+    g:setCenter(x, center4)
+    return g
+  end
+
+  self.decayReadout = makeReadout(args.decayParam, col1)
+  self.dampReadout = makeReadout(args.dampParam, col2)
+  self.diffReadout = makeReadout(args.diffusionParam, col3)
+
+  local desc = app.Label("Decay / Damp / Diff", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
   desc:setBorder(1)
   desc:setCornerRadius(3, 0, 0, 3)
   desc:setCenter(col2, center1 + 1)
-  self.paramSubGraphic:addChild(desc)
 
-  self.decayReadout = (function()
-    local g = app.Readout(0, 0, ply, 10)
-    g:setParameter(args.decayParam)
-    g:setAttributes(app.unitNone, zeroOneMap())
-    g:setPrecision(2)
-    g:setCenter(col1, center4)
-    return g
-  end)()
   self.paramSubGraphic:addChild(self.decayReadout)
-
-  self.dampReadout = (function()
-    local g = app.Readout(0, 0, ply, 10)
-    g:setParameter(args.dampParam)
-    g:setAttributes(app.unitNone, zeroOneMap())
-    g:setPrecision(2)
-    g:setCenter(col2, center4)
-    return g
-  end)()
   self.paramSubGraphic:addChild(self.dampReadout)
-
-  self.diffReadout = (function()
-    local g = app.Readout(0, 0, ply, 10)
-    g:setParameter(args.diffusionParam)
-    g:setAttributes(app.unitNone, zeroOneMap())
-    g:setPrecision(2)
-    g:setCenter(col3, center4)
-    return g
-  end)()
   self.paramSubGraphic:addChild(self.diffReadout)
-
+  self.paramSubGraphic:addChild(desc)
   self.paramSubGraphic:addChild(app.SubButton("dcy", 1))
   self.paramSubGraphic:addChild(app.SubButton("damp", 2))
   self.paramSubGraphic:addChild(app.SubButton("diff", 3))
-
-  -- Default sub focused when the shift submenu is opened.
-  self.paramModeDefaultSub = self.decayReadout
-
-  -- Default: Size on the main encoder (level sub). Tap-shift reveals Decay/Damp/Diff.
-  self:setParamMode(false)
-end
-
--- Single source of truth: points BOTH the encoder-routing field
--- (paramFocusedReadout) and the rendered sub-caret (setSubCursorController) at the
--- SAME readout. Grabs encoder focus FIRST so setSubCursorController actually pushes
--- to the renderer (Base/Widget only notifies when the focused widget == self);
--- setSubCursorController is LAST so it wins over the self.bias cursor that
--- setFocusedReadout(self.bias) re-installs (feedback_subcursor_inheritance).
-function FabulaOverviewControl:focusParamSub(readout)
-  self:setFocusedReadout(self.bias)   -- keep GainBias's focusedReadout valid+non-nil
-  readout:save()
-  self.paramFocusedReadout = readout
-  if not self:hasFocus("encoder") then self:focus() end
-  self:setSubCursorController(readout) -- LAST: caret follows the encoder
 end
 
 function FabulaOverviewControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
+  self.paramFocusedReadout = nil
+  self:setSubCursorController(nil)
+
   if enabled then
-    -- Attach the param sub FIRST so its readouts are live when the cursor installs.
     self.subGraphic = self.paramSubGraphic
-    self:addSubGraphic(self.subGraphic)
-    self:focusParamSub(self.paramModeDefaultSub)  -- caret + encoder both on S1
   else
-    self.subGraphic = self.levelSubGraphic
-    self.paramFocusedReadout = nil
-    self:addSubGraphic(self.subGraphic)
-    self:setFocusedReadout(self.bias)             -- Size on encoder, caret on bias
+    self.subGraphic = self.normalSubGraphic
+    self:setFocusedReadout(self.bias)
   end
+  self:addSubGraphic(self.subGraphic)
 end
 
 function FabulaOverviewControl:onCursorEnter(spot)
   GainBias.onCursorEnter(self, spot)
   self:grabFocus("shiftPressed", "shiftReleased")
   if self.paramMode then
-    -- STRICT convention on re-entry: clear the sub cursor and leave the encoder on
-    -- Size (paramFocusedReadout was niled in onCursorLeave). No focus-grab on enter
-    -- (that broke navigation), no phantom caret. Tap a SubButton to edit Decay/Damp/
-    -- Diff. The ideal "auto-focus the shown sub with a caret" needs deeper research
-    -- into the renderer's focus==self gate -> see fabula-overview-caret TODO.
-    self:setSubCursorController(nil)
+    self:setSubCursorController(self.paramModeDefaultSub)
   end
 end
 
@@ -140,7 +106,6 @@ function FabulaOverviewControl:onCursorLeave(spot)
   if self.paramMode then
     self.paramFocusedReadout = nil
     self:setSubCursorController(nil)
-    self:setFocusedReadout(self.bias)   -- keep GainBias.onFocused safe on return
   end
   self:releaseFocus("shiftPressed", "shiftReleased")
   GainBias.onCursorLeave(self, spot)
@@ -174,21 +139,31 @@ function FabulaOverviewControl:shiftReleased()
   return true
 end
 
-function FabulaOverviewControl:focusReadout(readout)
-  self:focusParamSub(readout)   -- one path for caret + encoder
+function FabulaOverviewControl:spotReleased(spot, shifted)
+  if self.paramMode then
+    self.paramFocusedReadout = nil
+    self:setSubCursorController(nil)
+    self:setParamMode(false)
+  end
+  return GainBias.spotReleased(self, spot, shifted)
 end
 
 function FabulaOverviewControl:subReleased(i, shifted)
   if self.paramMode then
-    if i == 1 then
-      if shifted then ShiftHelpers.openKeyboardFor(self.decayReadout, "decay")
-      else self:focusReadout(self.decayReadout) end
-    elseif i == 2 then
-      if shifted then ShiftHelpers.openKeyboardFor(self.dampReadout, "damp")
-      else self:focusReadout(self.dampReadout) end
-    elseif i == 3 then
-      if shifted then ShiftHelpers.openKeyboardFor(self.diffReadout, "diffusion")
-      else self:focusReadout(self.diffReadout) end
+    local readout, label
+    if i == 1 then readout, label = self.decayReadout, "decay"
+    elseif i == 2 then readout, label = self.dampReadout, "damp"
+    elseif i == 3 then readout, label = self.diffReadout, "diffusion"
+    end
+    if readout then
+      if shifted then
+        ShiftHelpers.openKeyboardFor(readout, label)
+      else
+        readout:save()
+        self.paramFocusedReadout = readout
+        self:setSubCursorController(readout)
+        if not self:hasFocus("encoder") then self:focus() end
+      end
     end
     return true
   end
@@ -196,7 +171,9 @@ function FabulaOverviewControl:subReleased(i, shifted)
 end
 
 function FabulaOverviewControl:encoder(change, shifted)
-  if shifted and self.shiftHeld then self.shiftUsed = true end
+  if shifted and self.shiftHeld then
+    self.shiftUsed = true
+  end
   if self.paramMode and self.paramFocusedReadout then
     self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
     return true
