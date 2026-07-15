@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**134 items** — 38 done, 3 wip, 90 todo, 3 blocked. *Rendered 2026-07-14.*
+**134 items** — 39 done, 3 wip, 89 todo, 3 blocked. *Rendered 2026-07-14.*
 
 ## DSP
 
@@ -162,8 +162,8 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 |   | `diffusion-makeup-model-notate` | Notate Fabula's diffusion-makeup gain model as a reusable pattern for tap-based units (main target: Network) | manual · 2026-07-14 |
 |   | `docs-intro-video` | Intro video for Habitat packages | manual · 2026-07-09 |
-|   | `readme-airwindows-attribution` | Add an attribution line in the README for Airwindows' creator Chris Johnson | manual · 2026-07-14 |
 | ✓ | `control-expansion-views-pattern` | Canonical pattern: control expansion views (expand sub-params to full faders on ENTER) | manual *(attested)* · 2026-07-14 |
+| ✓ | `readme-airwindows-attribution` | Add an attribution line in the README for Airwindows' creator Chris Johnson | manual *(attested)* · 2026-07-14 |
 
 ## Infrastructure
 
