@@ -1339,3 +1339,38 @@ stamped = "2026-07-14T22:28:23-05:00"
 area = "docs"
 verify = { kind = "manual", ref = "README has a credit/attribution line naming Chris Johnson (Airwindows), acknowledging his MIT-licensed plugins as the source/derivation basis." }
 note = "Habitat carries Airwindows-derived DSP: the house package AW atom ports ([[feedback_aw_atom_port_template]]) and the spiralFastSaturate / allpassNestedStep math reused across units (e.g. Fabula's tank governor). Add a proper attribution line in the README crediting Chris Johnson (Airwindows), whose plugins are MIT-licensed. Keep it a plain credit (no third-party branding in unit names per [[feedback_no_third_party_branding]]); the README credit is the right place for the acknowledgement."
+
+[[item]]
+id = "larets-effect-breakout"
+title = "Break out Larets effects into individual units where the catalog lacks standalone coverage"
+status = "todo"
+stamped = "2026-07-15T08:09:01-05:00"
+area = "units"
+verify = { kind = "manual", ref = "for each Larets effect without an existing standalone equivalent, a dedicated unit exists (or a reasoned decision not to); effects already covered elsewhere are not duplicated." }
+note = """Larets bundles 10 effects: stutter / reverse / bitcrush / downsample / filter / pitch-shift / distortion / shuffle / delay / comb. Break the ones the catalog does NOT already cover into their own units. Existing coverage to audit against: filter (Tomograph/Filterbank, Canals, DJ Filter, Latch Filter, Tilt EQ), delay (Petrichor), comb (Pecto), distortion/saturation (Parfait, 94 Discont), bitcrush/crush (94 Discont). Likely gaps needing a standalone unit: stutter, reverse, shuffle, pitch-shift, and possibly a dedicated downsample/lofi. Audit the map first ([[project_spreadsheet_effect_positioning]]) and only build where there is a real gap; reuse Larets' clock-locked buffer + true-stereo per-channel buffer patterns as the starting point. Generic functional names ([[feedback_no_third_party_branding]])."""
+
+[[item]]
+id = "larets-feature-additions"
+title = "Larets: add reset input, random step selection, ring-mod + chorus effects, width + panning effects"
+status = "todo"
+stamped = "2026-07-15T08:09:01-05:00"
+area = "units"
+verify = { kind = "manual", ref = "Larets gains: a reset gate/trigger input for the step sequencer; a random-step-selection mode; ring modulation and chorus added to the effect roster; and width + panning stereo-field effects. Each is CV-controllable and serializes." }
+note = """Feature pass on Larets. (1) reset input: a gate/trigger that resets the 16-step sequencer to step 0 (Comparator inlet, >0.5 edge per [[feedback_comparator_gate_threshold]]). (2) random step selection: a mode where the active step is chosen randomly instead of advancing linearly (xorshift, decimated). (3) new effects: ring modulation and chorus added to the stepped effect roster (extend the effect enum + per-effect param wiring; mind Larets' internal-stereo Object pattern [[feedback_stereo_pattern_selection]]). (4) stereo-field effects: width (M/S widen-narrow) and panning. All new params CV-modulatable and round-tripped through the existing Larets serialization."""
+
+[[item]]
+id = "polyphonic-sample-playback"
+title = "Polyphonic sample playback unit(s) - synth-style poly + drum-machine-style per-voice sample loader"
+status = "todo"
+stamped = "2026-07-15T08:09:01-05:00"
+area = "units"
+verify = { kind = "manual", ref = "a polyphonic sample player exists in one or both envisioned forms (identical-voice synth poly; and/or per-voice sample drum-machine with list-traversal overview, separate voice-selection param, multi-load auto-mapping), with a workable gate/voice-allocation story." }
+note = """Two designs seen:
+
+(A) Trad-synth poly: several IDENTICAL voices playing one loaded sample, like tomf's Polygon series. Standard poly voice-allocation.
+
+(B) Drum-machine style: an overview ply that traverses a LIST, letting the user load a SEPARATE sample per voice/pad. A voice-selection parameter is SEPARATE from list navigation, and is mappable to v/oct, index, or nearest - like the VariSpeed player's slice param. Stretch: if the user loads a MULTI (selects several samples at once), they are auto-mapped across the pads up to the voice limit.
+
+Open problem - GATES: with per-voice samples, each voice needs its own gate one way or another. Round-robin distribution from a single gate would mean only one sample plays at a time (defeats poly). Real per-voice gating likely needs a MIDI implementation, so (B) may have to wait for MIDI. Capture both designs; (A) is buildable now, (B)'s gate story is the blocker.
+
+Refs: VariSpeed slice-param mapping (v/oct | index | nearest); tomf Polygon series; a future MIDI unit for per-voice gates."""

@@ -1,0 +1,8 @@
+[[item]]
+id = "larets-effect-breakout"
+title = "Break out Larets effects into individual units where the catalog lacks standalone coverage"
+status = "todo"
+stamped = "2026-07-15T08:07:54-05:00"
+area = "units"
+verify = { kind = "manual", ref = "for each Larets effect without an existing standalone equivalent, a dedicated unit exists (or a reasoned decision not to); effects already covered elsewhere are not duplicated." }
+note = """Larets bundles 10 effects: stutter / reverse / bitcrush / downsample / filter / pitch-shift / distortion / shuffle / delay / comb. Break the ones the catalog does NOT already cover into their own units. Existing coverage to audit against: filter (Tomograph/Filterbank, Canals, DJ Filter, Latch Filter, Tilt EQ), delay (Petrichor), comb (Pecto), distortion/saturation (Parfait, 94 Discont), bitcrush/crush (94 Discont). Likely gaps needing a standalone unit: stutter, reverse, shuffle, pitch-shift, and possibly a dedicated downsample/lofi. Audit the map first ([[project_spreadsheet_effect_positioning]]) and only build where there is a real gap; reuse Larets' clock-locked buffer + true-stereo per-channel buffer patterns as the starting point. Generic functional names ([[feedback_no_third_party_branding]])."""

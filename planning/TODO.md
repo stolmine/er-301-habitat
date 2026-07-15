@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**134 items** — 40 done, 3 wip, 88 todo, 3 blocked. *Rendered 2026-07-14.*
+**137 items** — 40 done, 3 wip, 91 todo, 3 blocked. *Rendered 2026-07-15.*
 
 ## DSP
 
@@ -70,10 +70,13 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `blanda-scan-mixer` | Blanda — 3-input scan mixer (Morph-4-style continuous bell-scan, not a crossover) | manual · 2026-07-09 |
 |   | `etcher-io-range-and-presets` | Etcher: change I/O ranges to ±1V + add sine/triangle/user presets + hardware deviation verify | manual · 2026-07-09 |
 |   | `jf-phase6-ship` | JF Phase 6: polish + ship (trig-LUT audit, CPU profile, test procedures, vanilla-compat, FM consolidation) | manual · 2026-07-09 |
+|   | `larets-effect-breakout` | Break out Larets effects into individual units where the catalog lacks standalone coverage | manual · 2026-07-15 |
+|   | `larets-feature-additions` | Larets: add reset input, random step selection, ring-mod + chorus effects, width + panning effects | manual · 2026-07-15 |
 |   | `mi-commotio-marbles` | MI: Commotio split-units + sample loading + UI + NEON; Marbles T model picker (7 models, 3 visible) | manual · 2026-07-09 |
 |   | `multiout-framework-quadlfo` | Multi-output framework + Quadrature LFO proof-of-concept driver + candidate audit refresh | manual · 2026-07-09 |
 |   | `multiout-generative-units` | Multi-output generative units: poly clocked burst, coupled CV+gate env, multichannel seq, + candidates | manual · 2026-07-09 |
 |   | `ngoma-preset-library` | Ngoma: per-drum preset library (kick/snare/hat/tom) + default tuning | manual · 2026-07-09 |
+|   | `polyphonic-sample-playback` | Polyphonic sample playback unit(s) - synth-style poly + drum-machine-style per-voice sample loader | manual · 2026-07-15 |
 |   | `porcelain-microsound-family` | Porcelain microsound/electroacoustic family — DSP kernel set (Raster-Noton + Plumbutter) | manual · 2026-07-09 |
 |   | `port-gplv3-cleanroom` | GPLv3 algorithm-reference clean-room reimplementations (reference only, not code ports) | manual · 2026-07-09 |
 |   | `port-mit-direct` | MIT-compatible direct ports backlog: Stages LFO, Loom, Open303, Faust reverb, ProCo Rat, AW-remaining | manual · 2026-07-09 |
