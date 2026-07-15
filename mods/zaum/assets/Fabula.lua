@@ -20,6 +20,7 @@ local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local FabulaOverviewControl = require "zaum.FabulaOverviewControl"
 local TransformGateControl = require "zaum.TransformGateControl"
+local MixHpfControl = require "zaum.MixHpfControl"
 
 local floatMap = function(min, max, precision)
   local map = app.LinearDialMap(min, max)
@@ -94,6 +95,13 @@ function Fabula:onLoadGraph(channelCount)
   mix:hardSet("Bias", 0.40)
   tie(op, "Mix", mix, "Out")
   self:addMonoBranch("mix", mix, "In", mix, "Out")
+
+  -- Wet highpass corner (Hz), a sub under Mix. NOT an xform target (never added
+  -- to setTopLevelBias), so a re-roll leaves the body/HPF alone.
+  local hpf = self:addObject("hpf", app.ParameterAdapter())
+  hpf:hardSet("Bias", 60)
+  tie(op, "HPF", hpf, "Out")
+  self:addMonoBranch("hpf", hpf, "In", hpf, "Out")
 
   local early = self:addObject("early", app.ParameterAdapter())
   early:hardSet("Bias", 0.4)
@@ -170,7 +178,7 @@ function Fabula:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.041
     },
-    mix = GainBias {
+    mix = MixHpfControl {
       button = "mix",
       description = "Dry/Wet",
       branch = self.branches.mix,
@@ -179,7 +187,8 @@ function Fabula:onLoadViews()
       biasMap = zeroOneMap,
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.40
+      initialBias = 0.40,
+      hpfParam = self.objects.hpf:getParameter("Bias")
     },
     early = GainBias {
       button = "ER",

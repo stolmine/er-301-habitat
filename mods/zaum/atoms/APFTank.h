@@ -609,8 +609,13 @@ namespace zaum
   // coeff drives the complementary dry-under LP, so the crossover stays matched.
   // Coeff a = 1 - exp(-2*pi*fc/sr); at fc=60, sr=48000 -> a ~= 0.007823.
   // hp = x - lp; lp += a*(x - lp).
-  static const float kWetHpF = 60.0f;
-  static const float kWetHpA = 0.007823f;
+  static const float kWetHpF = 60.0f;      // default corner; now a knob (HPF, 20-500 Hz)
+  static const float kWetHpA = 0.007823f;  // coeff at the 60 Hz default (mHpfASmooth init)
+  static const float kHpfMinHz = 20.0f;
+  static const float kHpfMaxHz = 500.0f;
+  // One-pole HP coeff a = 2*pi*fc/sr (small-angle; exact within ~3% at 500 Hz,
+  // inaudible for a corner knob, and no libm expf at runtime -> am335x-safe).
+  static const float kTwoPiOverSR = 0.0001308997f;  // 2*pi / 48000
 
   // Living Freeze (continuous 0..1): as Freeze rises, the tank feedback ramps to
   // unity (the spiral governor keeps it bounded/stable), the tank input mutes so
@@ -889,6 +894,7 @@ namespace zaum
       addInput(mXform);            // xform gate (re-roll a new room)
       addParameter(mXformTarget);  // which param(s) to re-roll
       addParameter(mXformDepth);   // re-roll depth
+      addParameter(mHpf);          // wet highpass corner (Hz)
 
       memset(mPD,     0, sizeof(mPD));
       memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
@@ -1004,6 +1010,7 @@ namespace zaum
       mTankWetR_prev = mTankWetR_curr = 0.0f;
       mWetHpLp1_L = mWetHpLp2_L = mWetHpLp1_R = mWetHpLp2_R = 0.0f;
       mDryLp1_L = mDryLp2_L = mDryLp1_R = mDryLp2_R = 0.0f;
+      mHpfASmooth = kWetHpA;   // start at the 60 Hz default coeff
       mFreezeSmoothed = 0.0f;
       memset(mVizLp, 0, sizeof(mVizLp));
       memset(mVizEnv, 0, sizeof(mVizEnv));
@@ -1065,6 +1072,7 @@ namespace zaum
     od::Inlet     mXform{"Xform"};                       // gate: re-roll a new room
     od::Parameter mXformTarget{"Xform Target", 0.0f};    // 0=all,1..5=one param,6=reset
     od::Parameter mXformDepth{"Xform Depth", 0.5f};      // 0=no change, 1=fully random
+    od::Parameter mHpf{"HPF", 60.0f};                    // wet highpass corner, Hz (NOT xform-targeted)
 
     // --- Overview viz accessors (inline; read by the FabricGraphic). NOT virtual. ---
     // vizSample(i): the decimated mono-wet ring in chronological order (0 = oldest).
@@ -1313,6 +1321,15 @@ namespace zaum
       const float diffMakeup = 1.0f + kDiffMakeup * diffusionParam;
       // Dry low passthrough gain (scaled by Mix -> fills in as the wet takes over).
       const float dryUnderGain = mMix.value() * kDryUnder;
+
+      // Wet-HPF corner from the HPF knob (Hz -> one-pole coeff), clamped and
+      // block-rate smoothed so a knob sweep glides the corner (no zipper). The
+      // same coeff drives the complementary dry-under LP so the crossover tracks.
+      float hpfHz = mHpf.value();
+      if (hpfHz < kHpfMinHz) hpfHz = kHpfMinHz;
+      else if (hpfHz > kHpfMaxHz) hpfHz = kHpfMaxHz;
+      mHpfASmooth += 0.1f * (kTwoPiOverSR * hpfHz - mHpfASmooth);
+      const float wetHpA = mHpfASmooth;
 
       // Base delay lengths are no longer quantized to integers here: the main
       // D-reads glide the float base (smD1_L etc.) toward targetD1_L (computed
@@ -2067,13 +2084,13 @@ namespace zaum
 
         // Static 200 Hz wet highpass (12 dB/oct = two cascaded one-poles/ch).
         // Applied to the full wet (tank + ER) before the mix, at host rate.
-        mWetHpLp1_L += kWetHpA * (wetL - mWetHpLp1_L);
+        mWetHpLp1_L += wetHpA * (wetL - mWetHpLp1_L);
         float hp1L = wetL - mWetHpLp1_L;
-        mWetHpLp2_L += kWetHpA * (hp1L - mWetHpLp2_L);
+        mWetHpLp2_L += wetHpA * (hp1L - mWetHpLp2_L);
         wetL = hp1L - mWetHpLp2_L;
-        mWetHpLp1_R += kWetHpA * (wetR - mWetHpLp1_R);
+        mWetHpLp1_R += wetHpA * (wetR - mWetHpLp1_R);
         float hp1R = wetR - mWetHpLp1_R;
-        mWetHpLp2_R += kWetHpA * (hp1R - mWetHpLp2_R);
+        mWetHpLp2_R += wetHpA * (hp1R - mWetHpLp2_R);
         wetR = hp1R - mWetHpLp2_R;
 
         // Overview viz tap: 16-band spectrum of the mono wet, run at 1/4 host rate
@@ -2113,10 +2130,10 @@ namespace zaum
         // Dry low passthrough: complementary 200 Hz LP of the dry (2 cascaded
         // one-poles, 12 dB/oct) added underneath the HPF'd wet, so clean low body
         // stays even at high Mix.
-        mDryLp1_L += kWetHpA * (drySampleL - mDryLp1_L);
-        mDryLp2_L += kWetHpA * (mDryLp1_L - mDryLp2_L);
-        mDryLp1_R += kWetHpA * (drySampleR - mDryLp1_R);
-        mDryLp2_R += kWetHpA * (mDryLp1_R - mDryLp2_R);
+        mDryLp1_L += wetHpA * (drySampleL - mDryLp1_L);
+        mDryLp2_L += wetHpA * (mDryLp1_L - mDryLp2_L);
+        mDryLp1_R += wetHpA * (drySampleR - mDryLp1_R);
+        mDryLp2_R += wetHpA * (mDryLp1_R - mDryLp2_R);
         outL += mDryLp2_L * dryUnderGain;
         outR += mDryLp2_R * dryUnderGain;
 
@@ -2262,6 +2279,7 @@ namespace zaum
     // Wet-output 200 Hz highpass: LP states of the two cascaded one-poles/ch.
     float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
     float  mDryLp1_L, mDryLp2_L, mDryLp1_R, mDryLp2_R;  // dry low passthrough LP states
+    float  mHpfASmooth;   // block-rate-smoothed wet-HPF coeff (from the HPF Hz knob)
     float  mFreezeSmoothed;       // block-rate smoothed Freeze amount (0..1)
     // Xform (Pecto-style destructive re-roll of the adapter Bias params).
     uint64_t mXformSeed;          // xorshift64 state for re-rolls
