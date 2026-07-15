@@ -1,8 +1,0 @@
-[[item]]
-id = "larets-feature-additions"
-title = "Larets: add reset input, random step selection, ring-mod + chorus effects, width + panning effects"
-status = "todo"
-stamped = "2026-07-15T08:07:54-05:00"
-area = "units"
-verify = { kind = "manual", ref = "Larets gains: a reset gate/trigger input for the step sequencer; a random-step-selection mode; ring modulation and chorus added to the effect roster; and width + panning stereo-field effects. Each is CV-controllable and serializes." }
-note = """Feature pass on Larets. (1) reset input: a gate/trigger that resets the 16-step sequencer to step 0 (Comparator inlet, >0.5 edge per [[feedback_comparator_gate_threshold]]). (2) random step selection: a mode where the active step is chosen randomly instead of advancing linearly (xorshift, decimated). (3) new effects: ring modulation and chorus added to the stepped effect roster (extend the effect enum + per-effect param wiring; mind Larets' internal-stereo Object pattern [[feedback_stereo_pattern_selection]]). (4) stereo-field effects: width (M/S widen-narrow) and panning. All new params CV-modulatable and round-tripped through the existing Larets serialization."""
