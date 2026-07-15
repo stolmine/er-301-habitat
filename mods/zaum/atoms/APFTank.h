@@ -989,10 +989,7 @@ namespace zaum
       //
       //   mSizeFactorSmoothed initialized to 0.7650 (matches first-block target exactly
       //   → no first-block step; the smoother starts converged).
-      mScaledD1_L = 2749;   // SR/2 tank: half the 48k default scaled lengths
-      mScaledD2_L = 1951;   // (block-rate compute overwrites on first block)
-      mScaledD1_R = 2603;
-      mScaledD2_R = 2427;
+      // Per-sample smoothed float bases (the tank reads these; no int lengths).
       mSmD1_L = 2749.0f; mSmD2_L = 1951.0f; mSmD1_R = 2603.0f; mSmD2_R = 2427.0f;
       mSmPD = 0.0f; mSmEarly = 0.4f;
       mWalkPhase = 0;
@@ -1314,56 +1311,14 @@ namespace zaum
       // Dry low passthrough gain (scaled by Mix -> fills in as the wet takes over).
       const float dryUnderGain = mMix.value() * kDryUnder;
 
-      // Scaled delay lengths — recomputed every block from sizeFactorEff (smoothed),
-      // since the smoothed value moves continuously when converging.
-      // Round to nearest odd; clamp to [1, maxBase].
+      // Base delay lengths are no longer quantized to integers here: the main
+      // D-reads glide the float base (smD1_L etc.) toward targetD1_L (computed
+      // above from sizeFactorEff, clamped to maxBase), and the intermediate taps
+      // now read at a FRACTION of that same smoothed float base. So there is no
+      // per-block integer step left to zipper on a Size sweep. (The old
+      // mScaledD1_L int lengths + toOdd tap offsets are gone.)
       mLastSize  = sizeParam;    // track for reference (no longer used as change guard)
       mLastEarly = earlyParam;
-      {
-        int d1L = toOdd((int)(kD1_L_base * sizeFactorEff + 0.5));
-        int d2L = toOdd((int)(kD2_L_base * sizeFactorEff + 0.5));
-        int d1R = toOdd((int)(kD1_R_base * sizeFactorEff + 0.5));
-        int d2R = toOdd((int)(kD2_R_base * sizeFactorEff + 0.5));
-        if (d1L > kD1_L_maxBase) d1L = kD1_L_maxBase;
-        if (d2L > kD2_L_maxBase) d2L = kD2_L_maxBase;
-        if (d1R > kD1_R_maxBase) d1R = kD1_R_maxBase;
-        if (d2R > kD2_R_maxBase) d2R = kD2_R_maxBase;
-        if (d1L < 1) d1L = 1;
-        if (d2L < 1) d2L = 1;
-        if (d1R < 1) d1R = 1;
-        if (d2R < 1) d2R = 1;
-        mScaledD1_L = d1L;
-        mScaledD2_L = d2L;
-        mScaledD1_R = d1R;
-        mScaledD2_R = d2R;
-      }
-
-      // Load scaled lengths as local ints for the sample loop.
-      const int scaledD1_L = mScaledD1_L;
-      const int scaledD2_L = mScaledD2_L;
-      const int scaledD1_R = mScaledD1_R;
-      const int scaledD2_R = mScaledD2_R;
-
-      // Multi-tap intermediate offset computation (block rate).
-      // Each offset = fraction * scaledLength, rounded to nearest odd integer.
-      // Bounds: fraction < 1.0 so off < scaledLength <= bufSize — always safe.
-      // The same fractions apply to both L and R loops (only scaled lengths differ).
-      // toOdd() guarantees odd integer >= 1; clamp is unnecessary (fractions < 0.70).
-      //
-      // L-loop D1 taps (three intermediate points):
-      const int offD1a_L = toOdd((int)(kFD1a * scaledD1_L + 0.5));
-      const int offD1b_L = toOdd((int)(kFD1b * scaledD1_L + 0.5));
-      const int offD1c_L = toOdd((int)(kFD1c * scaledD1_L + 0.5));
-      // L-loop D2 taps (two intermediate points):
-      const int offD2a_L = toOdd((int)(kFD2a * scaledD2_L + 0.5));
-      const int offD2b_L = toOdd((int)(kFD2b * scaledD2_L + 0.5));
-      // R-loop D1 taps:
-      const int offD1a_R = toOdd((int)(kFD1a * scaledD1_R + 0.5));
-      const int offD1b_R = toOdd((int)(kFD1b * scaledD1_R + 0.5));
-      const int offD1c_R = toOdd((int)(kFD1c * scaledD1_R + 0.5));
-      // R-loop D2 taps:
-      const int offD2a_R = toOdd((int)(kFD2a * scaledD2_R + 0.5));
-      const int offD2b_R = toOdd((int)(kFD2b * scaledD2_R + 0.5));
 
       // Inner AP coefficients — fixed this sub-phase; hard cap < 0.95.
       const float gTA1_in = (kGTA1_in > 0.95) ? 0.95 : kGTA1_in;
@@ -1776,7 +1731,7 @@ namespace zaum
         }
 
         // D1_L: Brownian-modulated read with linear interpolation.
-        // Uses Size-scaled base length (scaledD1_L).
+        // Uses the smoothed float base smD1_L (Size-scaled, glided).
         float d1Read_L;
         {
           // Write current sample to buffer.
@@ -1805,17 +1760,26 @@ namespace zaum
           if (mWrD1_L >= kD1_L_size) mWrD1_L = 0;
         }
 
-        // D1_L intermediate taps — STATIC (unmodulated), read from the same buffer.
-        // Offsets computed at block rate as fraction of scaledD1_L, rounded to odd.
-        // Modular wrap matches the end-read pattern; all offsets < scaledD1_L < bufSize.
+        // D1_L intermediate taps — STATIC (unmodulated) but positioned as a
+        // FRACTION of the per-sample-smoothed base (smD1_L) and read fractionally,
+        // so Size changes glide the taps instead of stepping the old integer
+        // offset by whole samples (zipper fix — same pattern as the main read
+        // above). No walk term -> still unmodulated. +kD1_L_size biases readPos
+        // >= 0 so the (int) cast truncates == floor; size is pow2 so &-mask wraps.
         float d1tap_a_L, d1tap_b_L, d1tap_c_L;
         {
-          int ia = ((mWrD1_L - offD1a_L) & (kD1_L_size - 1));
-          int ib = ((mWrD1_L - offD1b_L) & (kD1_L_size - 1));
-          int ic = ((mWrD1_L - offD1c_L) & (kD1_L_size - 1));
-          d1tap_a_L = mD1_L[ia];
-          d1tap_b_L = mD1_L[ib];
-          d1tap_c_L = mD1_L[ic];
+          float pa = (float)mWrD1_L - (float)kFD1a * smD1_L + (float)kD1_L_size;
+          float pb = (float)mWrD1_L - (float)kFD1b * smD1_L + (float)kD1_L_size;
+          float pc = (float)mWrD1_L - (float)kFD1c * smD1_L + (float)kD1_L_size;
+          int oa = (int)pa; float fa = pa - (float)oa;
+          int ob = (int)pb; float fb = pb - (float)ob;
+          int oc = (int)pc; float fc = pc - (float)oc;
+          int ia0 = oa & (kD1_L_size - 1), ia1 = (ia0 + 1) & (kD1_L_size - 1);
+          int ib0 = ob & (kD1_L_size - 1), ib1 = (ib0 + 1) & (kD1_L_size - 1);
+          int ic0 = oc & (kD1_L_size - 1), ic1 = (ic0 + 1) & (kD1_L_size - 1);
+          d1tap_a_L = (1.0f - fa) * mD1_L[ia0] + fa * mD1_L[ia1];
+          d1tap_b_L = (1.0f - fb) * mD1_L[ib0] + fb * mD1_L[ib1];
+          d1tap_c_L = (1.0f - fc) * mD1_L[ic0] + fc * mD1_L[ic1];
         }
 
         // HF damp: one-pole LP on D1 output (Schroeder/Jot feedback form).
@@ -1856,7 +1820,7 @@ namespace zaum
         }
 
         // D2_L: Brownian-modulated read with linear interpolation.
-        // Uses Size-scaled base length (scaledD2_L).
+        // Uses the smoothed float base smD2_L (Size-scaled, glided).
         float d2Read_L;
         {
           mD2_L[mWrD2_L] = ap2Out_L;
@@ -1877,13 +1841,17 @@ namespace zaum
           if (mWrD2_L >= kD2_L_size) mWrD2_L = 0;
         }
 
-        // D2_L intermediate taps — STATIC (unmodulated).
+        // D2_L intermediate taps — STATIC, fraction of smoothed base (zipper fix).
         float d2tap_a_L, d2tap_b_L;
         {
-          int ia = ((mWrD2_L - offD2a_L) & (kD2_L_size - 1));
-          int ib = ((mWrD2_L - offD2b_L) & (kD2_L_size - 1));
-          d2tap_a_L = mD2_L[ia];
-          d2tap_b_L = mD2_L[ib];
+          float pa = (float)mWrD2_L - (float)kFD2a * smD2_L + (float)kD2_L_size;
+          float pb = (float)mWrD2_L - (float)kFD2b * smD2_L + (float)kD2_L_size;
+          int oa = (int)pa; float fa = pa - (float)oa;
+          int ob = (int)pb; float fb = pb - (float)ob;
+          int ia0 = oa & (kD2_L_size - 1), ia1 = (ia0 + 1) & (kD2_L_size - 1);
+          int ib0 = ob & (kD2_L_size - 1), ib1 = (ib0 + 1) & (kD2_L_size - 1);
+          d2tap_a_L = (1.0f - fa) * mD2_L[ia0] + fa * mD2_L[ia1];
+          d2tap_b_L = (1.0f - fb) * mD2_L[ib0] + fb * mD2_L[ib1];
         }
 
         // -- R LOOP --
@@ -1930,7 +1898,7 @@ namespace zaum
           if (mWrTA1i_R >= kTA1i) mWrTA1i_R = 0;
         }
 
-        // D1_R: Brownian-modulated read, ASYMMETRIC base (scaledD1_R), R-specific seed.
+        // D1_R: Brownian-modulated read, ASYMMETRIC base (smD1_R), R-specific seed.
         float d1Read_R;
         {
           mD1_R[mWrD1_R] = ap1Out_R;
@@ -1951,15 +1919,21 @@ namespace zaum
           if (mWrD1_R >= kD1_R_size) mWrD1_R = 0;
         }
 
-        // D1_R intermediate taps — STATIC (unmodulated).
+        // D1_R intermediate taps — STATIC, fraction of smoothed base (zipper fix).
         float d1tap_a_R, d1tap_b_R, d1tap_c_R;
         {
-          int ia = ((mWrD1_R - offD1a_R) & (kD1_R_size - 1));
-          int ib = ((mWrD1_R - offD1b_R) & (kD1_R_size - 1));
-          int ic = ((mWrD1_R - offD1c_R) & (kD1_R_size - 1));
-          d1tap_a_R = mD1_R[ia];
-          d1tap_b_R = mD1_R[ib];
-          d1tap_c_R = mD1_R[ic];
+          float pa = (float)mWrD1_R - (float)kFD1a * smD1_R + (float)kD1_R_size;
+          float pb = (float)mWrD1_R - (float)kFD1b * smD1_R + (float)kD1_R_size;
+          float pc = (float)mWrD1_R - (float)kFD1c * smD1_R + (float)kD1_R_size;
+          int oa = (int)pa; float fa = pa - (float)oa;
+          int ob = (int)pb; float fb = pb - (float)ob;
+          int oc = (int)pc; float fc = pc - (float)oc;
+          int ia0 = oa & (kD1_R_size - 1), ia1 = (ia0 + 1) & (kD1_R_size - 1);
+          int ib0 = ob & (kD1_R_size - 1), ib1 = (ib0 + 1) & (kD1_R_size - 1);
+          int ic0 = oc & (kD1_R_size - 1), ic1 = (ic0 + 1) & (kD1_R_size - 1);
+          d1tap_a_R = (1.0f - fa) * mD1_R[ia0] + fa * mD1_R[ia1];
+          d1tap_b_R = (1.0f - fb) * mD1_R[ib0] + fb * mD1_R[ib1];
+          d1tap_c_R = (1.0f - fc) * mD1_R[ic0] + fc * mD1_R[ic1];
         }
 
         // HF damp: one-pole LP on D1_R output. Uses dampCoeffEff (macro-biased).
@@ -1996,7 +1970,7 @@ namespace zaum
           if (mWrTA2i_R >= kTA2i) mWrTA2i_R = 0;
         }
 
-        // D2_R: Brownian-modulated read, ASYMMETRIC base (scaledD2_R), R-specific seed.
+        // D2_R: Brownian-modulated read, ASYMMETRIC base (smD2_R), R-specific seed.
         float d2Read_R;
         {
           mD2_R[mWrD2_R] = ap2Out_R;
@@ -2017,13 +1991,17 @@ namespace zaum
           if (mWrD2_R >= kD2_R_size) mWrD2_R = 0;
         }
 
-        // D2_R intermediate taps — STATIC (unmodulated).
+        // D2_R intermediate taps — STATIC, fraction of smoothed base (zipper fix).
         float d2tap_a_R, d2tap_b_R;
         {
-          int ia = ((mWrD2_R - offD2a_R) & (kD2_R_size - 1));
-          int ib = ((mWrD2_R - offD2b_R) & (kD2_R_size - 1));
-          d2tap_a_R = mD2_R[ia];
-          d2tap_b_R = mD2_R[ib];
+          float pa = (float)mWrD2_R - (float)kFD2a * smD2_R + (float)kD2_R_size;
+          float pb = (float)mWrD2_R - (float)kFD2b * smD2_R + (float)kD2_R_size;
+          int oa = (int)pa; float fa = pa - (float)oa;
+          int ob = (int)pb; float fb = pb - (float)ob;
+          int ia0 = oa & (kD2_R_size - 1), ia1 = (ia0 + 1) & (kD2_R_size - 1);
+          int ib0 = ob & (kD2_R_size - 1), ib1 = (ib0 + 1) & (kD2_R_size - 1);
+          d2tap_a_R = (1.0f - fa) * mD2_R[ia0] + fa * mD2_R[ia1];
+          d2tap_b_R = (1.0f - fb) * mD2_R[ib0] + fb * mD2_R[ib1];
         }
 
         // -- CROSS-FEED UPDATE (for next sample) --
@@ -2259,15 +2237,10 @@ namespace zaum
     double mDCx1_L;  double mDCy1_L;
     double mDCx1_R;  double mDCy1_R;
 
-    // Size-scaled delay lengths — updated every block from sizeFactorEff (smoothed).
-    // Initialized consistent with defaults Size=0.35, Early=0.4 in constructor.
-    int    mScaledD1_L;
-    int    mScaledD2_L;
-    int    mScaledD1_R;
-    int    mScaledD2_R;
-    // Per-sample-smoothed FLOAT delay bases (zipper fix): the main feedback
-    // end-reads glide off these instead of the int mScaled* (which still feed the
-    // secondary intermediate taps). Plus smoothed predelay tap + ER level.
+    // Per-sample-smoothed FLOAT delay bases (zipper fix): BOTH the main feedback
+    // end-reads AND the secondary intermediate taps now glide off these (no int
+    // delay lengths remain), so a Size sweep no longer steps any tap. Plus
+    // smoothed predelay tap + ER level.
     float  mSmD1_L, mSmD2_L, mSmD1_R, mSmD2_R;
     float  mSmPD;
     float  mSmEarly;
