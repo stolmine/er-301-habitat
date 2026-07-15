@@ -1090,7 +1090,7 @@ namespace zaum
     od::Parameter mEarly{"Early", 0.4f};
     od::Parameter mFreeze{"Freeze", 0.0f};
     od::Inlet     mXform{"Xform"};                       // gate: re-roll a new room
-    od::Parameter mXformTarget{"Xform Target", 0.0f};    // 0=all,1..5=one param,6=reset
+    od::Parameter mXformTarget{"Xform Target", 0.0f};    // 0=all-but-freeze(default),1=all,2..8=one,9=reset
     od::Parameter mXformDepth{"Xform Depth", 0.5f};      // 0=no change, 1=fully random
     od::Parameter mHpf{"HPF", 60.0f};                    // wet highpass corner, Hz (NOT xform-targeted)
 
@@ -1116,7 +1116,7 @@ namespace zaum
     void applyRandomize()
     {
       int target = (int)(mXformTarget.value() + 0.5f);
-      if (target < 0) target = 0; else if (target > 8) target = 8;
+      if (target < 0) target = 0; else if (target > 9) target = 9;
       float depth = mXformDepth.value();
       if (depth < 0.0f) depth = 0.0f; else if (depth > 1.0f) depth = 1.0f;
 
@@ -1126,7 +1126,16 @@ namespace zaum
 
       switch (target)
       {
-      case 0:  // all room-shape params
+      case 0:  // all EXCEPT Freeze (DEFAULT) - reshape the room without randomly
+               // freezing it (Freeze is a performance hold, not a room param)
+        rnd(mBiasSize,      0.05f, 0.95f);
+        rnd(mBiasDecay,     0.10f, 0.90f);
+        rnd(mBiasDamp,      0.10f, 0.90f);
+        rnd(mBiasDiffusion, 0.20f, 0.90f);
+        rnd(mBiasEarly,     0.00f, 0.80f);
+        rnd(mBiasPredelay,  0.00f, 0.30f);
+        break;
+      case 1:  // all (incl Freeze)
         rnd(mBiasSize,      0.05f, 0.95f);
         rnd(mBiasDecay,     0.10f, 0.90f);
         rnd(mBiasDamp,      0.10f, 0.90f);
@@ -1135,17 +1144,17 @@ namespace zaum
         rnd(mBiasPredelay,  0.00f, 0.30f);
         rnd(mBiasFreeze,    0.00f, 1.00f);
         break;
-      case 1: rnd(mBiasSize,      0.05f, 0.95f); break;
-      case 2: rnd(mBiasDecay,     0.10f, 0.90f); break;
-      case 3: rnd(mBiasDamp,      0.10f, 0.90f); break;
-      case 4: rnd(mBiasDiffusion, 0.20f, 0.90f); break;
-      case 5: rnd(mBiasEarly,     0.00f, 0.80f); break;
-      case 6: rnd(mBiasPredelay,  0.00f, 0.30f); break;
-      case 7: rnd(mBiasFreeze,    0.00f, 1.00f); break;
-      case 8:  // reset to factory defaults
+      case 2: rnd(mBiasSize,      0.05f, 0.95f); break;
+      case 3: rnd(mBiasDecay,     0.10f, 0.90f); break;
+      case 4: rnd(mBiasDamp,      0.10f, 0.90f); break;
+      case 5: rnd(mBiasDiffusion, 0.20f, 0.90f); break;
+      case 6: rnd(mBiasEarly,     0.00f, 0.80f); break;
+      case 7: rnd(mBiasPredelay,  0.00f, 0.30f); break;
+      case 8: rnd(mBiasFreeze,    0.00f, 1.00f); break;
+      case 9:  // reset to factory defaults (match the Lua adapter hardSets)
         if (mBiasSize)      mBiasSize->hardSet(0.35f);
-        if (mBiasDecay)     mBiasDecay->hardSet(0.30f);
-        if (mBiasDamp)      mBiasDamp->hardSet(0.40f);
+        if (mBiasDecay)     mBiasDecay->hardSet(0.55f);
+        if (mBiasDamp)      mBiasDamp->hardSet(0.25f);
         if (mBiasDiffusion) mBiasDiffusion->hardSet(0.45f);
         if (mBiasEarly)     mBiasEarly->hardSet(0.40f);
         if (mBiasPredelay)  mBiasPredelay->hardSet(0.041f);

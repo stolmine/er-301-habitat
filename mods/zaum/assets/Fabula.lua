@@ -31,9 +31,10 @@ end
 local zeroOneMap = floatMap(0, 1)
 
 -- Xform target selector (which param(s) a re-roll touches). Order matches
--- APFTank::applyRandomize: 0=all, 1..7 = one param, 8 = reset to defaults.
+-- APFTank::applyRandomize: 0 = all-but-freeze (default), 1 = all, 2..8 = one
+-- param, 9 = reset to defaults.
 local xformTargetNames = {
-  [0] = "all", "size", "dcay", "damp", "diff", "ER", "pre", "frz", "reset"
+  [0] = "noFrz", "all", "size", "dcay", "damp", "diff", "ER", "pre", "frz", "reset"
 }
 
 local function intMap(lo, hi)
@@ -219,7 +220,7 @@ function Fabula:onLoadViews()
       branch = self.branches.xform,
       comparator = self.objects.xform,
       funcNames = xformTargetNames,
-      funcMap = intMap(0, 8),
+      funcMap = intMap(0, 9),
       funcParam = self.objects.xformTarget:getParameter("Bias"),
       paramALabel = "depth",
       factorParam = self.objects.xformDepth:getParameter("Bias"),
