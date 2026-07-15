@@ -656,17 +656,13 @@ namespace zaum
     0.747223f, 0.818122f, 0.879051f, 0.927051f,
   };
 
-  // Xform: a gate that re-rolls a new "room" by deviating the five room-shape
-  // params (Size/Decay/Damp/Diffusion/Early) from the user's current settings.
-  // Modelled on Pecto's xform gate + depth, but NON-destructive: the deviations
-  // are internal offsets added to the read values (the adapter-tied knobs stay
-  // put), scaled by the Amount param and glided so the morph is smooth. Amount=0
-  // -> exactly the user's settings; a re-roll to ~0 offsets returns there too.
-  static const int kXformN = 5;   // size, decay, damp, diffusion, early
-  // Per-param deviation half-range at Amount=1 (in 0..1 param units). Tuned so a
-  // full re-roll lands in a distinctly different but still musical room.
-  static constexpr float kXformRange[kXformN] = { 0.45f, 0.40f, 0.40f, 0.35f, 0.45f };
-  static const float kXformSlew = 0.04f;   // block-rate one-pole glide on the offsets (~smooth morph)
+  // Xform: a gate (or manual fire) that re-rolls a new "room" by randomizing the
+  // five room-shape params (Size/Decay/Damp/Diffusion/Early). Modelled on Pecto's
+  // xform: DESTRUCTIVE - it hardSets the adapter Bias params (the knobs visibly
+  // move, and the new room serializes into the preset), reached via setTopLevelBias
+  // pointers Lua hands the op. A Target selects which param(s) to re-roll; Depth
+  // blends between the current value and a random one (0 = no change, 1 = fully
+  // random). A "reset" target restores the factory defaults.
 
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
@@ -888,7 +884,8 @@ namespace zaum
       addParameter(mEarly);
       addParameter(mFreeze);
       addInput(mXform);            // xform gate (re-roll a new room)
-      addParameter(mXformAmount);  // deviation depth for the re-roll
+      addParameter(mXformTarget);  // which param(s) to re-roll
+      addParameter(mXformDepth);   // re-roll depth
 
       memset(mPD,     0, sizeof(mPD));
       memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
@@ -1014,10 +1011,12 @@ namespace zaum
       mVizDecimCtr = kVizAnDecim;
       mVizFreeze = 0.0f;
 
-      // Xform state: no deviation until the first gate. Distinct nonzero seed.
+      // Xform state. Distinct nonzero seed; bias pointers wired later from Lua.
       mXformSeed = UINT64_C(0x2545F4914F6CDD1D);
       mXformGateWasHigh = false;
-      for (int k = 0; k < kXformN; k++) { mXformOff[k] = 0.0f; mXformTgt[k] = 0.0f; }
+      mManualFire = false;
+      mBiasSize = mBiasDecay = mBiasDamp = mBiasDiffusion = mBiasEarly = 0;
+      mBiasPredelay = mBiasFreeze = 0;
 
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
@@ -1026,6 +1025,27 @@ namespace zaum
     }
 
     virtual ~APFTank() {}
+
+    // --- Xform hooks called from Lua (MUST stay outside the #ifndef SWIGLUA
+    //     guard below so SWIG wraps them). Lua hands the op pointers to the
+    //     adapter Bias params so a re-roll can hardSet them (destructive:
+    //     the knobs move). which: 0=Size 1=Decay 2=Damp 3=Diffusion 4=Early
+    //     5=Predelay 6=Freeze. fireRandomize() defers a manual re-roll to the
+    //     audio thread (one per fire, consistent with a gate edge). ---
+    void setTopLevelBias(int which, od::Parameter *param)
+    {
+      switch (which)
+      {
+      case 0: mBiasSize = param; break;
+      case 1: mBiasDecay = param; break;
+      case 2: mBiasDamp = param; break;
+      case 3: mBiasDiffusion = param; break;
+      case 4: mBiasEarly = param; break;
+      case 5: mBiasPredelay = param; break;
+      case 6: mBiasFreeze = param; break;
+      }
+    }
+    void fireRandomize() { mManualFire = true; }
 
 #ifndef SWIGLUA
     od::Inlet     mInL{"In L"};
@@ -1042,14 +1062,69 @@ namespace zaum
     od::Parameter mMix{"Mix", 0.40f};
     od::Parameter mEarly{"Early", 0.4f};
     od::Parameter mFreeze{"Freeze", 0.0f};
-    od::Inlet     mXform{"Xform"};                     // gate: re-roll a new room
-    od::Parameter mXformAmount{"Xform Amount", 0.0f};  // 0..1 deviation depth
+    od::Inlet     mXform{"Xform"};                       // gate: re-roll a new room
+    od::Parameter mXformTarget{"Xform Target", 0.0f};    // 0=all,1..5=one param,6=reset
+    od::Parameter mXformDepth{"Xform Depth", 0.5f};      // 0=no change, 1=fully random
 
     // --- Overview viz accessors (inline; read by the FabricGraphic). NOT virtual. ---
     // vizSample(i): the decimated mono-wet ring in chronological order (0 = oldest).
     int   vizCols() const { return kVizCols; }
     float vizSample(int i) const { return mVizEnv[i]; }   // band-k energy (spectrum)
     float vizFreeze() const { return mVizFreeze; }
+
+    // Blend the current value toward a random point in [mn,mx] by depth.
+    // Uses xorshift64 (no libc rand()) so it is am335x-safe. Called at fire time.
+    float randomizeValue(float cur, float mn, float mx, float depth)
+    {
+      mXformSeed = xorshift64(mXformSeed);
+      float r = (float)(mXformSeed & 0x7FFF) * (1.0f / 32767.0f);  // 0..1
+      float randomPos = mn + r * (mx - mn);
+      return cur + (randomPos - cur) * depth;
+    }
+
+    // Re-roll the room: hardSet the targeted adapter Bias params. Ranges are
+    // musical; Target 0 re-rolls everything, 1..7 a single param, 8 resets to
+    // factory defaults. Guarded on null (Lua may not have wired every pointer).
+    void applyRandomize()
+    {
+      int target = (int)(mXformTarget.value() + 0.5f);
+      if (target < 0) target = 0; else if (target > 8) target = 8;
+      float depth = mXformDepth.value();
+      if (depth < 0.0f) depth = 0.0f; else if (depth > 1.0f) depth = 1.0f;
+
+      auto rnd = [&](od::Parameter *p, float mn, float mx) {
+        if (p) p->hardSet(randomizeValue(p->value(), mn, mx, depth));
+      };
+
+      switch (target)
+      {
+      case 0:  // all room-shape params
+        rnd(mBiasSize,      0.05f, 0.95f);
+        rnd(mBiasDecay,     0.10f, 0.90f);
+        rnd(mBiasDamp,      0.10f, 0.90f);
+        rnd(mBiasDiffusion, 0.20f, 0.90f);
+        rnd(mBiasEarly,     0.00f, 0.80f);
+        rnd(mBiasPredelay,  0.00f, 0.30f);
+        rnd(mBiasFreeze,    0.00f, 1.00f);
+        break;
+      case 1: rnd(mBiasSize,      0.05f, 0.95f); break;
+      case 2: rnd(mBiasDecay,     0.10f, 0.90f); break;
+      case 3: rnd(mBiasDamp,      0.10f, 0.90f); break;
+      case 4: rnd(mBiasDiffusion, 0.20f, 0.90f); break;
+      case 5: rnd(mBiasEarly,     0.00f, 0.80f); break;
+      case 6: rnd(mBiasPredelay,  0.00f, 0.30f); break;
+      case 7: rnd(mBiasFreeze,    0.00f, 1.00f); break;
+      case 8:  // reset to factory defaults
+        if (mBiasSize)      mBiasSize->hardSet(0.35f);
+        if (mBiasDecay)     mBiasDecay->hardSet(0.30f);
+        if (mBiasDamp)      mBiasDamp->hardSet(0.40f);
+        if (mBiasDiffusion) mBiasDiffusion->hardSet(0.45f);
+        if (mBiasEarly)     mBiasEarly->hardSet(0.40f);
+        if (mBiasPredelay)  mBiasPredelay->hardSet(0.041f);
+        if (mBiasFreeze)    mBiasFreeze->hardSet(0.00f);
+        break;
+      }
+    }
 
     virtual void process()
     {
@@ -1082,12 +1157,11 @@ namespace zaum
       float earlyParam     = mEarly.value();      // 0..1
 
       // ------------------------------------------------------------------
-      // Xform (re-roll a new room). A rising edge on the Xform gate draws a
-      // fresh random target per room-shape param; the offsets glide toward it
-      // (block rate) so the room morphs smoothly; each offset is added to its
-      // param scaled by Amount and the per-param range, then clamped to 0..1.
-      // Non-destructive: the user's Size/Decay/Damp/Diffusion/Early knobs are
-      // unchanged (these are internal deviations). Amount=0 -> no deviation.
+      // Xform (re-roll a new room). A rising edge on the Xform gate, or a manual
+      // fire, hardSets the adapter Bias params to new random values (destructive,
+      // Pecto-style): the knobs move, the sizeParam/etc. reads below pick up the
+      // new values from the tie next block, and the room serializes. Target
+      // picks which param(s); Depth blends current->random.
       // ------------------------------------------------------------------
       {
         float *xg = mXform.buffer();
@@ -1095,24 +1169,14 @@ namespace zaum
         {
           bool high = xg[i] > 0.5f;   // gate threshold (feedback_comparator_gate_threshold)
           if (high && !mXformGateWasHigh)
-            for (int k = 0; k < kXformN; k++)
-            {
-              mXformSeed = xorshift64(mXformSeed);
-              // 16-bit fraction -> [-1, 1]
-              mXformTgt[k] = ((float)(mXformSeed & 0xFFFF) * (1.0f / 32767.5f)) - 1.0f;
-            }
+            applyRandomize();
           mXformGateWasHigh = high;
         }
-        const float xfAmount = mXformAmount.value();  // 0..1 depth
-        float base[kXformN] = { sizeParam, decayParam, dampParam, diffusionParam, earlyParam };
-        for (int k = 0; k < kXformN; k++)
+        if (mManualFire)
         {
-          mXformOff[k] += kXformSlew * (mXformTgt[k] - mXformOff[k]);   // smooth morph
-          float v = base[k] + mXformOff[k] * kXformRange[k] * xfAmount;
-          base[k] = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);           // clamp 0..1
+          applyRandomize();
+          mManualFire = false;
         }
-        sizeParam = base[0]; decayParam = base[1]; dampParam = base[2];
-        diffusionParam = base[3]; earlyParam = base[4];
       }
 
       // Predelay tap is now a per-sample-smoothed FLOAT (targetPD below); the old
@@ -2223,11 +2287,12 @@ namespace zaum
     float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
     float  mDryLp1_L, mDryLp2_L, mDryLp1_R, mDryLp2_R;  // dry low passthrough LP states
     float  mFreezeSmoothed;       // block-rate smoothed Freeze amount (0..1)
-    // Xform: per-param glided offset + its random target, plus RNG + edge latch.
-    float    mXformOff[kXformN];  // current (glided) deviation, -1..1 * range
-    float    mXformTgt[kXformN];  // random target set on each gate re-roll
+    // Xform (Pecto-style destructive re-roll of the adapter Bias params).
     uint64_t mXformSeed;          // xorshift64 state for re-rolls
     bool     mXformGateWasHigh;   // rising-edge latch for the Xform gate
+    bool     mManualFire;         // set by fireRandomize(), consumed in process()
+    od::Parameter *mBiasSize, *mBiasDecay, *mBiasDamp, *mBiasDiffusion, *mBiasEarly;
+    od::Parameter *mBiasPredelay, *mBiasFreeze;
     // Overview viz state: decimated mono-wet ring + freeze mirror (graphic reads
     // these via the inline getters below).
     float  mVizLp[kVizCols];   // per-band one-pole LP states

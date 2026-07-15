@@ -18,8 +18,8 @@ local libzaum = require "zaum.libzaum"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
-local Gate = require "Unit.ViewControl.Gate"
 local FabulaOverviewControl = require "zaum.FabulaOverviewControl"
+local TransformGateControl = require "zaum.TransformGateControl"
 
 local floatMap = function(min, max, precision)
   local map = app.LinearDialMap(min, max)
@@ -28,6 +28,19 @@ local floatMap = function(min, max, precision)
 end
 
 local zeroOneMap = floatMap(0, 1)
+
+-- Xform target selector (which param(s) a re-roll touches). Order matches
+-- APFTank::applyRandomize: 0=all, 1..7 = one param, 8 = reset to defaults.
+local xformTargetNames = {
+  [0] = "all", "size", "dcay", "damp", "diff", "ER", "pre", "frz", "reset"
+}
+
+local function intMap(lo, hi)
+  local map = app.LinearDialMap(lo, hi)
+  map:setSteps(1, 1, 1, 1)
+  map:setRounding(1)
+  return map
+end
 
 local Fabula = Class {}
 Fabula:include(Unit)
@@ -92,18 +105,39 @@ function Fabula:onLoadGraph(channelCount)
   tie(op, "Freeze", freeze, "Out")
   self:addMonoBranch("freeze", freeze, "In", freeze, "Out")
 
-  -- Xform: a trigger that re-rolls a new room (a smoothed deviation from the
-  -- current Size/Decay/Damp/Diffusion/Early, scaled by Amount). The op edge-
-  -- detects the gate and morphs internally, so the knobs above stay put.
+  -- Xform: a trigger/gate that re-rolls a new room (Pecto-style DESTRUCTIVE
+  -- randomize - the op hardSets the adapter Bias params, so the knobs visibly
+  -- move and the new room serializes). Target picks which param(s); Depth the
+  -- blend from current toward random. Fire manually from the control's sub.
   local xformGate = self:addObject("xform", app.Comparator())
   xformGate:setTriggerMode()
   connect(xformGate, "Out", op, "Xform")
   self:addMonoBranch("xform", xformGate, "In", xformGate, "Out")
 
-  local amount = self:addObject("amount", app.ParameterAdapter())
-  amount:hardSet("Bias", 0.0)
-  tie(op, "Xform Amount", amount, "Out")
-  self:addMonoBranch("amount", amount, "In", amount, "Out")
+  local xformTarget = self:addObject("xformTarget", app.ParameterAdapter())
+  xformTarget:hardSet("Bias", 0)
+  tie(op, "Xform Target", xformTarget, "Out")
+  self:addMonoBranch("xformTarget", xformTarget, "In", xformTarget, "Out")
+
+  local xformDepth = self:addObject("xformDepth", app.ParameterAdapter())
+  xformDepth:hardSet("Bias", 0.5)
+  tie(op, "Xform Depth", xformDepth, "Out")
+  self:addMonoBranch("xformDepth", xformDepth, "In", xformDepth, "Out")
+
+  -- Hand the op pointers to the Bias params a re-roll touches. The 0..6 order
+  -- matches APFTank::setTopLevelBias (Size/Decay/Damp/Diffusion/Early/Pre/Freeze).
+  op:setTopLevelBias(0, size:getParameter("Bias"))
+  op:setTopLevelBias(1, decay:getParameter("Bias"))
+  op:setTopLevelBias(2, damp:getParameter("Bias"))
+  op:setTopLevelBias(3, diffusion:getParameter("Bias"))
+  op:setTopLevelBias(4, early:getParameter("Bias"))
+  op:setTopLevelBias(5, predelay:getParameter("Bias"))
+  op:setTopLevelBias(6, freeze:getParameter("Bias"))
+end
+
+-- Manual fire from the TransformGateControl sub (paramMode -> sub 3).
+function Fabula:fireTransform()
+  self.objects.op:fireRandomize()
 end
 
 function Fabula:onLoadViews()
@@ -169,25 +203,22 @@ function Fabula:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.0
     },
-    xform = Gate {
-      button = "xfrm",
-      description = "Xform (re-roll room)",
+    xform = TransformGateControl {
+      seq = self,
+      button = "xform",
+      description = "Randomize",
       branch = self.branches.xform,
-      comparator = self.objects.xform
-    },
-    amount = GainBias {
-      button = "amt",
-      description = "Xform Amount",
-      branch = self.branches.amount,
-      gainbias = self.objects.amount,
-      range = self.objects.amount,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.0
+      comparator = self.objects.xform,
+      funcNames = xformTargetNames,
+      funcMap = intMap(0, 8),
+      funcParam = self.objects.xformTarget:getParameter("Bias"),
+      paramALabel = "depth",
+      factorParam = self.objects.xformDepth:getParameter("Bias"),
+      factorMap = floatMap(0, 1),
+      factorPrecision = 2
     }
   }, {
-    expanded = { "size", "predelay", "early", "freeze", "xform", "amount", "mix" },
+    expanded = { "size", "predelay", "early", "freeze", "xform", "mix" },
     collapsed = {}
   }
 end
