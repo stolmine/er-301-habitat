@@ -225,10 +225,66 @@ function Fabula:onLoadViews()
       factorParam = self.objects.xformDepth:getParameter("Bias"),
       factorMap = floatMap(0, 1),
       factorPrecision = 2
+    },
+    -- Expansion controls: full faders reached by pressing enter on their parent
+    -- (Size -> Decay/Damp/Diff, Mix -> HPF). They bind the SAME adapter Bias as
+    -- the parent's compact submenu readouts, so both stay in sync. Not listed in
+    -- expanded/collapsed - they live only in the per-control views below (the
+    -- impasto/parfait BandControl pattern).
+    decay = GainBias {
+      button = "dcy",
+      description = "Decay",
+      branch = self.branches.decay,
+      gainbias = self.objects.decay,
+      range = self.objects.decay,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.55
+    },
+    damp = GainBias {
+      button = "damp",
+      description = "Damp",
+      branch = self.branches.damp,
+      gainbias = self.objects.damp,
+      range = self.objects.damp,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.25
+    },
+    diffusion = GainBias {
+      button = "diff",
+      description = "Diffusion",
+      branch = self.branches.diffusion,
+      gainbias = self.objects.diffusion,
+      range = self.objects.diffusion,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.45
+    },
+    hpf = GainBias {
+      button = "hpf",
+      description = "Wet Highpass",
+      branch = self.branches.hpf,
+      gainbias = self.objects.hpf,
+      range = self.objects.hpf,
+      biasMap = (function()
+        local m = app.LinearDialMap(20, 500)
+        m:setSteps(50, 10, 1, 1)
+        return m
+      end)(),
+      biasUnits = app.unitHertz,
+      biasPrecision = 0,
+      initialBias = 60
     }
   }, {
     expanded = { "size", "predelay", "early", "freeze", "xform", "mix" },
-    collapsed = {}
+    collapsed = {},
+    -- Per-control expansion views (enter on the parent toggles into these).
+    size = { "size", "decay", "damp", "diffusion" },
+    mix = { "mix", "hpf" }
   }
 end
 
