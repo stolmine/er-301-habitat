@@ -73,8 +73,6 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 
 ### Original Units
 
-Some units incorporate DSP derived from Airwindows by Chris Johnson (MIT License) -- notably the spiral saturator and nested-allpass math reused across the effects.
-
 | Package | Unit(s) | Description |
 |---------|---------|-------------|
 | **biome** | NR | Gate sequencer inspired by the Noise Engineering Numeric Repetitor |
@@ -113,6 +111,10 @@ Some units incorporate DSP derived from Airwindows by Chris Johnson (MIT License
 | **catchall** | Sfera | Z-plane morphing filter -- 32 configs, audio-reactive ferrofluid visualization (experimental) |
 | | Lambda | Seeded procedural synth -- PRNG wavetable + filter bank generation (experimental) |
 | | Flakes | Granular shimmer/freeze -- feedback looper with self-modulating delay (experimental) |
+
+## Acknowledgements
+
+Some units incorporate DSP derived from Airwindows by Chris Johnson (MIT License).
 
 ## Changelog
 
