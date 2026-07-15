@@ -601,13 +601,16 @@ namespace zaum
   // ---------------------------------------------------------------------------
   static const float kDCBlockR = 0.999;
 
-  // Static wet-output highpass (housekeeping): keeps the reverb out of the low
-  // mids so it doesn't mud up the mix or pump the tank on bass. Two cascaded
-  // one-pole highpasses = 12 dB/oct at ~200 Hz, run at the 48 kHz host rate on
-  // the reconstructed wet (per channel). Coeff a = 1 - exp(-2*pi*fc/sr); at
-  // fc=200, sr=48000 -> a ~= 0.02593. hp = x - lp; lp += a*(x - lp).
-  static const float kWetHpF = 200.0f;
-  static const float kWetHpA = 0.025918f;
+  // Static wet-output highpass (housekeeping): a gentle sub-sonic / DC-buildup
+  // guard that no longer eats the body. Lowered 200 -> 60 Hz (fabula-body-decay
+  // plan A1) so the reverberant 60-200 Hz weight is retained (faustian keeps it
+  // all; 200 Hz was gutting the low-mids). Two cascaded one-pole highpasses =
+  // 12 dB/oct, run at 48 kHz on the reconstructed wet (per channel). The SAME
+  // coeff drives the complementary dry-under LP, so the crossover stays matched.
+  // Coeff a = 1 - exp(-2*pi*fc/sr); at fc=60, sr=48000 -> a ~= 0.007823.
+  // hp = x - lp; lp += a*(x - lp).
+  static const float kWetHpF = 60.0f;
+  static const float kWetHpA = 0.007823f;
 
   // Living Freeze (continuous 0..1): as Freeze rises, the tank feedback ramps to
   // unity (the spiral governor keeps it bounded/stable), the tank input mutes so
@@ -1050,8 +1053,8 @@ namespace zaum
     od::Outlet    mOutL{"Out L"};
     od::Outlet    mOutR{"Out R"};
     od::Parameter mSize{"Size", 0.35f};
-    od::Parameter mDecay{"Decay", 0.30f};
-    od::Parameter mDamp{"Damp", 0.40f};
+    od::Parameter mDecay{"Decay", 0.55f};   // A2: fuller default tail (was 0.30)
+    od::Parameter mDamp{"Damp", 0.25f};     // A2/B3: brighter default (was 0.40)
     od::Parameter mDiffusion{"Diffusion", 0.45f};
     od::Parameter mMod{"Mod", 0.40f};
     od::Parameter mModRate{"ModRate", 0.2f};

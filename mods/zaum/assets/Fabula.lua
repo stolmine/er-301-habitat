@@ -68,12 +68,12 @@ function Fabula:onLoadGraph(channelCount)
   self:addMonoBranch("size", size, "In", size, "Out")
 
   local decay = self:addObject("decay", app.ParameterAdapter())
-  decay:hardSet("Bias", 0.30)
+  decay:hardSet("Bias", 0.55)
   tie(op, "Decay", decay, "Out")
   self:addMonoBranch("decay", decay, "In", decay, "Out")
 
   local damp = self:addObject("damp", app.ParameterAdapter())
-  damp:hardSet("Bias", 0.40)
+  damp:hardSet("Bias", 0.25)
   tie(op, "Damp", damp, "Out")
   self:addMonoBranch("damp", damp, "In", damp, "Out")
 
