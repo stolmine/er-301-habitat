@@ -1,0 +1,8 @@
+[[item]]
+id = "readme-airwindows-attribution"
+title = "Add an attribution line in the README for Airwindows' creator Chris Johnson"
+status = "todo"
+stamped = "2026-07-14T21:25:05-05:00"
+area = "docs"
+verify = { kind = "manual", ref = "README has a credit/attribution line naming Chris Johnson (Airwindows), acknowledging his MIT-licensed plugins as the source/derivation basis." }
+note = "Habitat carries Airwindows-derived DSP: the house package AW atom ports ([[feedback_aw_atom_port_template]]) and the spiralFastSaturate / allpassNestedStep math reused across units (e.g. Fabula's tank governor). Add a proper attribution line in the README crediting Chris Johnson (Airwindows), whose plugins are MIT-licensed. Keep it a plain credit (no third-party branding in unit names per [[feedback_no_third_party_branding]]); the README credit is the right place for the acknowledgement."
