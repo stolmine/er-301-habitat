@@ -359,5 +359,5 @@ Nick Collins - Colmatage's algorithm descends from the BBCut library (ICMC 2002)
 
 Remy Muller - The Livecut VST (GPLv2) served as the primary C++ reference for the cut procedures
 
-Chris Johnson (Airwindows) - Some units incorporate DSP derived from your MIT-licensed plugins
+Chris Johnson (Airwindows) - I have ported several of your excellent reverbs and reused Spiral quite a bit, along with other bits and pieces
 
