@@ -3,7 +3,7 @@ id = "fabula-promote-spreadsheet"
 title = "Promote Fabula from the zaum package to the spreadsheet package"
 status = "todo"
 stamped = "2026-07-14T21:19:03-05:00"
-area = "packaging"
+area = "units"
 verify = { kind = "manual", ref = "Fabula loads from the spreadsheet library (loadUnit libraryName='spreadsheet'), builds both arches clean, NEON/vtable-clean, inserts + all controls work (viz, overview submenu, expand-to-fader, xform, HPF knob), and zaum still builds with its remaining units intact." }
 note = """Fabula is feature-complete on branch fabula-am335x (habitat 0.2.0.62): SR/2 Dattorro tank, ER network, Living Freeze, 60Hz HPF knob, soft-knee tail, Pecto-exact cursor, expand-to-fader controls, xform re-roll. Promote it into the flagship spreadsheet package. Distinct from the faustian DattorroPlusPlus (er-301-units) and from the resonant units on the map (Pecto/Network/Filterbank/Rings) - it is the algorithmic ROOM reverb the catalog lacks (see [[project_spreadsheet_effect_positioning]]).
 

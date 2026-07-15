@@ -1306,3 +1306,25 @@ attested = "2026-07-14T21:13:43-05:00"
 area = "docs"
 verify = { kind = "manual", ref = "docs/knowledge-base.md 'Control expansion views' section documents the pattern; in the emu, unit:hasView('<parentKey>') is true and pressing ENTER on the parent toggles into a fader view of its sub-params. Shipped on Fabula 0.2.0.62 (size/mix views)." }
 note = "Canonical UI pattern, now documented in docs/knowledge-base.md (UI Patterns & Controls -> 'Control expansion views'). A control expands on ENTER iff the unit declares a view named after the control's key: register each sub-param as its own full GainBias/ModeSelector control (binding the same adapter Bias as the parent's compact submenu readout), keep them OUT of expanded/collapsed, and add a per-control view listing the parent first + the expansion controls (e.g. size = { 'size','decay','damp','diffusion' }). Framework does the rest via ViewControl:enterReleased -> toggleContext gated on callUp('hasView', self.id) - no enterReleased override. Ref impl: mods/spreadsheet/assets/MultibandSaturator.lua (impasto band views) + mods/zaum/assets/Fabula.lua. The pattern was already used ad hoc (Visadhara/Parfait/FadeMixer 'per-control expansion views') but undocumented; this ledgers + notes it canonically. Pecto still lacks it: see [[pecto-expansion-views]]."
+
+[[item]]
+id = "fabula-promote-spreadsheet"
+title = "Promote Fabula from the zaum package to the spreadsheet package"
+status = "todo"
+stamped = "2026-07-14T21:20:41-05:00"
+area = "units"
+verify = { kind = "manual", ref = "Fabula loads from the spreadsheet library (loadUnit libraryName='spreadsheet'), builds both arches clean, NEON/vtable-clean, inserts + all controls work (viz, overview submenu, expand-to-fader, xform, HPF knob), and zaum still builds with its remaining units intact." }
+note = """Fabula is feature-complete on branch fabula-am335x (habitat 0.2.0.62): SR/2 Dattorro tank, ER network, Living Freeze, 60Hz HPF knob, soft-knee tail, Pecto-exact cursor, expand-to-fader controls, xform re-roll. Promote it into the flagship spreadsheet package. Distinct from the faustian DattorroPlusPlus (er-301-units) and from the resonant units on the map (Pecto/Network/Filterbank/Rings) - it is the algorithmic ROOM reverb the catalog lacks (see [[project_spreadsheet_effect_positioning]]).
+
+Migration steps:
+- MOVE Fabula-specific files zaum -> spreadsheet: atoms/APFTank.h, FabricGraphic.h, assets/Fabula.lua, assets/FabulaOverviewControl.lua, assets/MixHpfControl.lua.
+- REUSE spreadsheet's existing copies (delete the zaum duplicates, do NOT re-copy): ShiftHelpers.lua, TransformGateControl.lua (both already in mods/spreadsheet/assets/).
+- SWIG: move the FabricGraphic.h + APFTank includes from zaum.cpp.swig into the spreadsheet .swig (both #include and %include blocks); force-clean the spreadsheet swig wrapper after (sizeof change, [[feedback_swig_header_dep]]).
+- Repoint require paths in the moved Lua: zaum.libzaum -> spreadsheet.libspreadsheet, zaum.ShiftHelpers -> spreadsheet.ShiftHelpers, zaum.FabulaOverviewControl/MixHpfControl/TransformGateControl -> spreadsheet.*.
+- Register Fabula in mods/spreadsheet/assets/toc.lua; remove from zaum toc.lua.
+- Bump spreadsheet PKGVERSION (4th digit during dev, [[feedback_package_version_bump]]); reset Fabula's own 0.2.0.x line into the spreadsheet version scheme.
+- Leave zaum intact with its remaining units (Sujet, STFTSpectral); confirm zaum still builds after Fabula's files leave.
+- Verify both arches ([[feedback_always_build_both_arches]]), NEON-clean, FabricGraphic vtable weak, expand-to-fader views ([[control-expansion-views-pattern]]), then hardware audition on am335x.
+- Update [[project_fabula_am335x]] with the new home + library name once done.
+
+See [[project_fabula_am335x]] for full state."""
