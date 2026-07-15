@@ -77,9 +77,19 @@ Framework calls `addSubGraphic(self.subGraphic)` on cursor enter and `removeSubG
 - show()/hide() elements per mode
 - Grab "shiftPressed"/"shiftReleased" in onCursorEnter, release in onCursorLeave
 - shiftPressed toggles mode, shiftReleased returns true (consume, no-op)
+## Control expansion views (expand-to-fader on ENTER)  [CANONICAL]
+Make a control's sub-parameters expand to full faders when the user presses ENTER on it (the impasto/parfait band behavior). Do NOT override `enterReleased` - the framework already handles it: `ViewControl:enterReleased -> toggleContext()`, gated on `callUp("hasView", self.id)`. A control expands iff the unit declares a **view named after that control's key**.
+- Register each sub-param as its OWN full ViewControl (GainBias/ModeSelector/...) in the `controls` table, binding the SAME adapter Bias (`gainbias = self.objects.X`, `X:getParameter("Bias")`) as the parent's compact submenu readout, so the readout and the fader stay in sync. These are "expansion controls."
+- Do NOT list them in `expanded`/`collapsed`.
+- In the second return table, add a view keyed by the PARENT control's key, parent listed FIRST then the expansion controls:
+  - `size = { "size", "decay", "damp", "diffusion" }`, `mix = { "mix", "hpf" }`
+  - impasto: `bandlo = { "bandlo", "loAmt", "loBias", "loType", "loWt", "loFreq", "loMorph", "loQ" }`
+- The compact shift-submenu readouts (paramMode) and the expansion faders coexist. Verify with `unit:hasView("<key>")` in the emu.
+- The expand is view-registration, not control code: structurally identical GainBias+setControlGraphic controls (impasto BandControl vs Pecto DensityControl) differ ONLY in whether the unit declares the per-control view. That is why a control "doesn't expand."
 ## Reference
 - xroot/Unit/ViewControl/Gate.lua
 - mods/stolmine/assets/TransformGateControl.lua
+- Control expansion views: mods/spreadsheet/assets/MultibandSaturator.lua (onLoadViews band views), mods/zaum/assets/Fabula.lua (size/mix views); framework: xroot/Unit/ViewControl/init.lua enterReleased/getFloatingMenuItems
 - mods/stolmine/assets/NRCircle.lua
 
 Pattern for adding a second sub-display mode to a GainBias control, toggled by shift key. Used in Filterbank's MixControl.

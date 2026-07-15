@@ -1,0 +1,9 @@
+[[item]]
+id = "control-expansion-views-pattern"
+title = "Canonical pattern: control expansion views (expand sub-params to full faders on ENTER)"
+status = "done"
+stamped = "2026-07-14T21:13:43-05:00"
+attested = "2026-07-14T21:13:43-05:00"
+area = "docs"
+verify = { kind = "manual", ref = "docs/knowledge-base.md 'Control expansion views' section documents the pattern; in the emu, unit:hasView('<parentKey>') is true and pressing ENTER on the parent toggles into a fader view of its sub-params. Shipped on Fabula 0.2.0.62 (size/mix views)." }
+note = "Canonical UI pattern, now documented in docs/knowledge-base.md (UI Patterns & Controls -> 'Control expansion views'). A control expands on ENTER iff the unit declares a view named after the control's key: register each sub-param as its own full GainBias/ModeSelector control (binding the same adapter Bias as the parent's compact submenu readout), keep them OUT of expanded/collapsed, and add a per-control view listing the parent first + the expansion controls (e.g. size = { 'size','decay','damp','diffusion' }). Framework does the rest via ViewControl:enterReleased -> toggleContext gated on callUp('hasView', self.id) - no enterReleased override. Ref impl: mods/spreadsheet/assets/MultibandSaturator.lua (impasto band views) + mods/zaum/assets/Fabula.lua. The pattern was already used ad hoc (Visadhara/Parfait/FadeMixer 'per-control expansion views') but undocumented; this ledgers + notes it canonically. Pecto still lacks it: see [[pecto-expansion-views]]."
