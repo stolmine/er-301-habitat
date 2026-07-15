@@ -1,5 +1,5 @@
 PKGNAME ?= spreadsheet
-PKGVERSION ?= 2.8.2
+PKGVERSION ?= 2.8.2.4
 
 include scripts/env.mk
 
@@ -40,7 +40,9 @@ SWIG_HEADER_DEPS := $(call rwildcard, $(MOD_DIR), *.h)
 
 ASSETS := $(call rwildcard, $(ASSET_DIR), *)
 
-INCLUDES = $(MOD_DIR) mods $(SDKPATH) $(SDKPATH)/arch/$(ARCH) $(SDKPATH)/emu $(EURORACK)
+# mods/house/atoms: header-only Airwindows-derived atoms (AllpassMono.h, Spiral.h)
+# used by APFTank.h (Fabula). No link deps; they compile into the swig .o.
+INCLUDES = $(MOD_DIR) mods mods/house/atoms $(SDKPATH) $(SDKPATH)/arch/$(ARCH) $(SDKPATH)/emu $(EURORACK)
 
 SYMBOLS = TEST
 
@@ -83,10 +85,14 @@ CFLAGS += $(CFLAGS.common) $(CFLAGS.$(ARCH)) $(CFLAGS.$(PROFILE))
 CFLAGS += $(addprefix -I,$(INCLUDES))
 CFLAGS += $(addprefix -D,$(SYMBOLS))
 CFLAGS += -Wno-unused-variable -Wno-unused-parameter -Wno-sign-compare
-# Append am335x NEON-safety overrides LAST so they win against any
-# -ftree-vectorize that came from CFLAGS.speed earlier in the line.
-# See feedback_disable_tree_vectorize_am335x — TOP-PRIORITY rule.
-ifeq ($(ARCH),am335x)
+# Append -fno-tree-vectorize LAST so it wins against the -ftree-vectorize that
+# CFLAGS.speed added earlier in the line. On am335x this is the TOP-PRIORITY
+# NEON-safety rule (feedback_disable_tree_vectorize_am335x). On linux it also
+# stops -msse4 + -ffast-math from auto-vectorizing expf/sinf/cosf/powf loops
+# (e.g. DrumVoice) into libmvec calls (_ZGVbN4v_*) that are undefined at load
+# and make the whole .so fail to dlopen in the emu - and it keeps emu codegen
+# in parity with hardware. Units use explicit intrinsics, so no perf is lost.
+ifneq ($(filter $(ARCH),am335x linux),)
 CFLAGS += -fno-tree-vectorize
 endif
 

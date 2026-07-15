@@ -10,11 +10,11 @@
 -- logic caused the caret weirdness - see the retired fabula-overview-caret note).
 
 local app = app
-local libzaum = require "zaum.libzaum"
+local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
-local ShiftHelpers = require "zaum.ShiftHelpers"
+local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -36,7 +36,7 @@ function FabulaOverviewControl:init(args)
   GainBias.init(self, args)
 
   -- Replace the fader with the fabric waterfall viz (follows the APFTank op).
-  local fabric = libzaum.FabricGraphic(0, 0, ply, 64)
+  local fabric = libspreadsheet.FabricGraphic(0, 0, ply, 64)
   fabric:follow(args.tank)
   local container = app.Graphic(0, 0, ply, 64)
   container:addChild(fabric)

@@ -52,6 +52,8 @@
 // See planning/mirror-unit-design.md.
 #include "Mirror.h"
 #include "MirrorPhosphorGraphic.h"
+#include "APFTank.h"
+#include "FabricGraphic.h"
 #define SWIGLUA
 %}
 
@@ -99,3 +101,5 @@
 %include "CanalsRoutingGraphic.h"
 %include "Mirror.h"
 %include "MirrorPhosphorGraphic.h"
+%include "APFTank.h"
+%include "FabricGraphic.h"

@@ -280,7 +280,7 @@
 #include <stdint.h>
 #include <string.h>
 
-namespace zaum
+namespace stolmine
 {
 
   // Float (single-precision) variants of the house helpers, for the am335x
@@ -295,8 +295,15 @@ namespace zaum
 // SWIG's parser does not understand __attribute__, so hide it behind a macro.
 #ifdef SWIG
 #define ZAUM_ALWAYS_INLINE inline
+#define ZAUM_NO_VECTORIZE
 #else
 #define ZAUM_ALWAYS_INLINE inline __attribute__((always_inline))
+// Fabula is intentionally scalar (NEON-no-go on this tank). Disable auto-
+// vectorization of process() so the aggressive linux flags (-O3 -ffast-math
+// -msse4) do not rewrite the block-rate pow() into a libmvec vector call
+// (_ZGVbN4v_expf, undefined at load) - and, per feedback_disable_tree_vectorize
+// _am335x, so the am335x build never emits trapping auto-vectorized code.
+#define ZAUM_NO_VECTORIZE __attribute__((optimize("no-tree-vectorize")))
 #endif
   static ZAUM_ALWAYS_INLINE void allpassNestedStepF(
       float xNow, float vDelayed, float g, float &vNew, float &yOut)
@@ -1144,7 +1151,7 @@ namespace zaum
       }
     }
 
-    virtual void process()
+    virtual void process() ZAUM_NO_VECTORIZE
     {
       float *in1  = mInL.buffer();
       float *in2  = mInR.buffer();
@@ -2342,4 +2349,4 @@ namespace zaum
 #endif
   };
 
-} // namespace zaum
+} // namespace stolmine

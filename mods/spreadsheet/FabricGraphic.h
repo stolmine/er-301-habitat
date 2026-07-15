@@ -1,11 +1,11 @@
 #pragma once
 
 #include <od/graphics/Graphic.h>
-#include "atoms/APFTank.h"
+#include "APFTank.h"
 #include <string.h>
 #include <math.h>
 
-namespace zaum
+namespace stolmine
 {
   // 2.5D "fabric" overview: a stack of serial lines (an orthographic
   // parallelogram, no perspective) whose FRONT edge is the decimated mono-wet

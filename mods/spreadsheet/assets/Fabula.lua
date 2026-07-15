@@ -14,13 +14,13 @@
 -- creating a more present, immediate room character.
 
 local app = app
-local libzaum = require "zaum.libzaum"
+local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
-local FabulaOverviewControl = require "zaum.FabulaOverviewControl"
-local TransformGateControl = require "zaum.TransformGateControl"
-local MixHpfControl = require "zaum.MixHpfControl"
+local FabulaOverviewControl = require "spreadsheet.FabulaOverviewControl"
+local TransformGateControl = require "spreadsheet.TransformGateControl"
+local MixHpfControl = require "spreadsheet.MixHpfControl"
 
 local floatMap = function(min, max, precision)
   local map = app.LinearDialMap(min, max)
@@ -54,7 +54,7 @@ function Fabula:init(args)
 end
 
 function Fabula:onLoadGraph(channelCount)
-  local op = self:addObject("op", libzaum.APFTank())
+  local op = self:addObject("op", libspreadsheet.APFTank())
 
   connect(self, "In1", op, "In L")
   connect(op, "Out L", self, "Out1")
