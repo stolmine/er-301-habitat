@@ -1,0 +1,8 @@
+[[item]]
+id = "diffusion-makeup-model-notate"
+title = "Notate Fabula's diffusion-makeup gain model as a reusable pattern for tap-based units (main target: Network)"
+status = "todo"
+stamped = "2026-07-14T19:19:36-05:00"
+area = "docs"
+verify = { kind = "manual", ref = "a short design note exists (e.g. planning/ or docs/) capturing the diffusion-makeup model - the level-loss mechanism, the static param-driven makeup formula, why static beats dynamic AGC here, and the tuning knobs - written so it can be dropped into another tap/multitap unit; Network cited as the first port target" }
+note = "Fabula's fabula-diffusion-makeup shipped a STATIC, param-driven makeup gain (kDiffMakeup, wetMix = mix * (1 + kDiffMakeup*diffusion), up to ~+5.6dB) rather than a dynamic AGC: the perceived level lost to diffusion (and the multi-tap signed sum) is a deterministic function of the diffusion knob, so a static makeup compensates it exactly with NO tail pumping (a real envelope-tracked AGC would fight the reverb's natural decay). Notate this as a portable model: (1) the loss mechanism (signed multi-tap sum + allpass diffusion drops coherent level as density rises), (2) the makeup formula + where it folds into the wet gain, (3) the static-vs-dynamic rationale, (4) interaction caveats (Freeze makeup kFreezeMakeup, SR/2 tank, normalize before makeup). Main port target = Network (tap-based); also applies to Petrichor/Larets/Pecto multi-tap sums. See [[project_fabula_am335x]], [[feedback_multitap_weighted_feedback]]."
