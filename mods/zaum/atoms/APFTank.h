@@ -313,25 +313,6 @@ namespace zaum
     return (x > 0.0f) ? (s / densityA) : -(s / densityA);
   }
 
-  // Soft-knee feedback limiter (fabula-body-decay plan B1, tail length). The
-  // plain spiralFastSaturateF is a sin() curve, and sin(x) < x for ALL x>0, so
-  // it bleeds loop gain on EVERY recirculation -> shorter tail. This version is
-  // LINEAR below a threshold (the tail rings cleanly, no gain loss) and only
-  // saturates above it, still hard-bounded to +-1 so a true runaway is caught.
-  // kSoftKneeRInv is the precomputed reciprocal of (1-thr) so there is no
-  // per-sample vdiv (see feedback_static_inline_not_guaranteed).
-  static const float kSoftKneeThr  = 0.7f;         // linear region |x| <= 0.7
-  static const float kSoftKneeInv  = 0.3f;         // 1 - thr
-  static const float kSoftKneeRInv = 3.3333333f;   // 1 / (1 - thr)
-  static ZAUM_ALWAYS_INLINE float softKneeSaturateF(float x)
-  {
-    float a = x < 0.0f ? -x : x;
-    if (a <= kSoftKneeThr) return x;                       // linear: no gain loss
-    float over = (a - kSoftKneeThr) * kSoftKneeRInv;       // multiply, no vdiv
-    float sat = spiralFastSaturateF(over, 1.0f) * kSoftKneeInv;  // bounded to (1-thr)
-    float mag = kSoftKneeThr + sat;                        // bounded to thr+(1-thr)=1
-    return x < 0.0f ? -mag : mag;
-  }
 
   // ---------------------------------------------------------------------------
   // Buffer size constants
@@ -2061,11 +2042,8 @@ namespace zaum
         // Cross-feed uses g_d_eff (macro-biased decay) — shorter tail as Early rises.
         // gdFreezeA/B ramp to unity as Freeze rises (staggered L/R); the spiral
         // governor bounds the loop so unity feedback sustains without runaway.
-        // B1: soft-knee limiter (linear below 0.7) instead of the pure sin()
-        // saturator, so the loop rings without bleeding gain every lap -> longer
-        // tail. Still hard-bounded to +-1 above the knee (runaway governor).
-        mFeedback_L = softKneeSaturateF(d2Read_R * gdFreezeA);
-        mFeedback_R = softKneeSaturateF(d2Read_L * gdFreezeB);
+        mFeedback_L = spiralFastSaturateF(d2Read_R * gdFreezeA, 1.0f);
+        mFeedback_R = spiralFastSaturateF(d2Read_L * gdFreezeB, 1.0f);
 
         // ----------------------------------------------------------------
         // 5. Stereo wet taps — Dattorro-style multi-tap signed sum (0.1.0.7).
