@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**130 items** — 37 done, 3 wip, 87 todo, 3 blocked. *Rendered 2026-07-14.*
+**131 items** — 37 done, 3 wip, 88 todo, 3 blocked. *Rendered 2026-07-14.*
 
 ## DSP
 
@@ -116,6 +116,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `mirror-step-and-viz` | Mirror: fine/coarse/super step audit on all controls + custom overview-ply viz | screenshot: confirm each fader's coarse/fine/super steps match musical granularity (Hz = octave/cents/sub-Hz; 0..1 = 0.1/0.01/0.001; Mirror knob approaches the Nyquist-flip region smoothly); confirm a custom overview viz (concentric fire wheels / rubber-band sphere / L-vs-R Lissajous) renders · 2026-07-09 |
 |   | `ngoma-viz-and-docs` | Ngoma: cube viz refinement + documentation refresh | screenshot: confirm cube scaled 0.85x with breathing room, state-driven face-fill textures (Character/Grit/Shape/ampEnv), exaggerated parallax + face-shrink/edge-expand-on-hit; drum-voice.md updated or superseded by the codex reference · 2026-07-09 |
 |   | `peaks-refinements` | Peaks: Tap LFO clock frequency-counter display, PLO continuous phase-increment, step-position viz | manual · 2026-07-09 |
+|   | `pecto-expansion-views` | Pecto: add per-control expansion views so submenu params open as full faders on enter (impasto pattern) | manual · 2026-07-14 |
 |   | `petrichor-tap-macros` | Petrichor: CV-modulatable macro filter-cutoff offset + tap-pitch macro + xform spread param | manual · 2026-07-09 |
 |   | `scope-channel-focus` | Scope: channel focus display switching (show L or R by channel-button selection) | manual · 2026-07-09 |
 |   | `scope-goniometer` | Goniometer / Lissajous — XY stereo-field scope with correlation readout | screenshot: insert; confirm goniometer (L+R vs L-R) or arbitrary-XY Lissajous display with a +1..-1 correlation readout; negligible DSP · 2026-07-09 |
