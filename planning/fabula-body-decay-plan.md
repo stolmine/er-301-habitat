@@ -24,9 +24,7 @@ practical, verify at the binary level).
 - **Change:** lower the corner to ~60 Hz. New coeff `a = 2*pi*fc/SR`:
   60 Hz @48k -> `kWetHpA ~= 0.007854` (70 Hz -> 0.009163 if 60 feels too loose).
   Keeps a gentle sub-sonic / DC-buildup guard while restoring 60-200 Hz body.
-- **Open decision (D1):** fixed 60 Hz, OR expose as a "Body"/HPF control
-  (20-500 Hz)? Recommend **fixed 60 Hz** now; expose later only if wanted (the
-  unit's control surface is already full).
+- **DECIDED (D1):** fixed 60 Hz (no new control).
 - **Risk:** low. Restores lows; may reintroduce a little mud at high feedback -
   acceptable, that is the ask.
 
@@ -36,14 +34,8 @@ practical, verify at the binary level).
   perceived length; see B3 - same change).
 - **Risk:** low (defaults only). Preset-voicing pass; confirm by ear.
 
-### A3. Input bandwidth LP (faustian `bw_filter`)  [warmth]
-- Faustian runs a one-pole LP on the tank input (`bw` default 0.6) - it darkens
-  the diffusion feed, which reads as warmth/weight, not dullness.
-- **Change:** add a one-pole LP on `diffIn` (pre-diffusion) or the tank input,
-  coeff from a `bw` value ~0.6. Block-rate coeff, click-free.
-- **Open decision (D2):** fixed at 0.6, OR expose as a "Tone"/"Bandwidth"
-  control? Recommend **fixed 0.6** first; expose only if it earns a knob.
-- **Risk:** low-moderate (new filter in the input path; keep it click-free).
+### A3. Input bandwidth LP (faustian `bw_filter`)  [warmth]  -- DECIDED (D2): SKIP
+- Cut from scope. Rely on A1 + A2 for body. Revisit only if A1/A2 fall short.
 
 ### A4. Structural density  [DEFER - larger rewrite]
 - Faustian's single long serial tank (4 decay diffusers + 4 multi-tap delay
@@ -88,16 +80,15 @@ faustian's ~0.64). The gap is structural.
 
 ### B2. Raise the feedback ceiling / remap Decay  [only if still short after B1]
 - **Now:** `kGdMin=0.30`, `kGdMax=0.97`, `kGdCap=0.985`, `kDecayShape=0.277`.
-- **Change (staged, conservative):** with B1 restoring the linear tail, the
-  effective loop gain at a given g_d rises, so this may not be needed. If the
-  top of the knob still falls short of faustian: raise `kGdMax 0.97 -> 0.985`
-  and `kGdCap 0.985 -> 0.992` (never >= 1.0). Re-solve `kDecayShape` if we want
-  a specific Decay->g_d pin, else accept the curve shift (A2 already moves the
-  default).
+- **DECIDED (D3): aggressive.** Raise `kGdMax 0.97 -> 0.992` and
+  `kGdCap 0.985 -> 0.995` (still < 1.0). Re-solve `kDecayShape` only if we want a
+  specific Decay->g_d pin; else accept the curve shift (A2 moves the default to
+  0.55 anyway). Still gated behind a B1 audition - do B1 first, and if the tail
+  is already long enough, we can stop short of the full 0.992.
 - **Risk:** high near unity. `g_d` must stay < 1 with margin so damping + DC
   blocker guarantee decay; the soft-knee saturator only bounds amplitude, it
-  does not force decay. Test max Decay for drone/self-oscillation before
-  shipping. Do B1 first and re-audition before touching this.
+  does not force decay. **Must** test max Decay for drone/self-oscillation and
+  confirm the tank level keeps falling (does not plateau) before shipping .59.
 
 ### B3. Lower default damping
 - Same edit as A2 (Damp default 0.40 -> 0.25). Damping is an in-loop LP applied
@@ -115,14 +106,15 @@ faustian's ~0.64). The gap is structural.
 - **Phase 1 (quick, low-risk, high-impact):** A1 (HPF -> 60 Hz) + A2/B3
   (defaults Decay 0.55, Damp 0.25). One build. A/B vs faustian.  -> 0.2.0.57
 - **Phase 2 (tail):** B1 (soft-knee saturator, thr 0.7). Re-audition tail length
-  and max-Decay stability. Only then B2 (ceiling/remap) if still short. -> .58(/.59)
-- **Phase 3 (warmth):** A3 (input bandwidth LP ~0.6, fixed). -> .60
-- **Phase 4 (defer):** A4 structural density - separate effort, own plan.
+  and max-Decay stability. Then B2 (aggressive ceiling, kGdMax 0.992) if still
+  short. -> .58 (/ .59)
+- **Phase 3 (defer):** A4 structural density - separate effort, own plan.
+  (A3 input-bandwidth cut per D2.)
 
-## Open decisions for the user (before/with Phase 1 & 3)
-- **D1** - Wet HPF: fixed 60 Hz, or expose as a "Body/HPF" control? (rec: fixed)
-- **D2** - Input bandwidth: fixed 0.6, or expose as "Tone"? (rec: fixed)
-- **D3** - Decay ceiling aggressiveness in B2: 0.985 vs 0.992 (drone risk at max).
+## Decisions - RESOLVED
+- **D1** - Wet HPF: **fixed 60 Hz** (no control).
+- **D2** - Input bandwidth (A3): **skipped**.
+- **D3** - Decay ceiling: **aggressive**, kGdMax 0.992 / kGdCap 0.995 (test drone).
 
 ## Verification per phase
 - Both arches build clean; `check-neon-hints.sh` clean; FabricGraphic vtable
