@@ -112,10 +112,6 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Lambda | Seeded procedural synth -- PRNG wavetable + filter bank generation (experimental) |
 | | Flakes | Granular shimmer/freeze -- feedback looper with self-modulating delay (experimental) |
 
-## Acknowledgements
-
-Some units incorporate DSP derived from Airwindows by Chris Johnson (MIT License).
-
 ## Changelog
 
 ### v2.5.1
@@ -362,4 +358,6 @@ Joe Filbrun - I drew directly from your menu paging schemes in Accents
 Nick Collins - Colmatage's algorithm descends from the BBCut library (ICMC 2002)
 
 Remy Muller - The Livecut VST (GPLv2) served as the primary C++ reference for the cut procedures
+
+Chris Johnson (Airwindows) - Some units incorporate DSP derived from your MIT-licensed plugins
 
