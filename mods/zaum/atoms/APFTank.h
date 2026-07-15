@@ -656,6 +656,18 @@ namespace zaum
     0.747223f, 0.818122f, 0.879051f, 0.927051f,
   };
 
+  // Xform: a gate that re-rolls a new "room" by deviating the five room-shape
+  // params (Size/Decay/Damp/Diffusion/Early) from the user's current settings.
+  // Modelled on Pecto's xform gate + depth, but NON-destructive: the deviations
+  // are internal offsets added to the read values (the adapter-tied knobs stay
+  // put), scaled by the Amount param and glided so the morph is smooth. Amount=0
+  // -> exactly the user's settings; a re-roll to ~0 offsets returns there too.
+  static const int kXformN = 5;   // size, decay, damp, diffusion, early
+  // Per-param deviation half-range at Amount=1 (in 0..1 param units). Tuned so a
+  // full re-roll lands in a distinctly different but still musical room.
+  static constexpr float kXformRange[kXformN] = { 0.45f, 0.40f, 0.40f, 0.35f, 0.45f };
+  static const float kXformSlew = 0.04f;   // block-rate one-pole glide on the offsets (~smooth morph)
+
   // ---------------------------------------------------------------------------
   // Series-cascade inner AP coefficients (0.1.0.7).
   // Both inner stages fixed at 0.50 this sub-phase (Dattorro value).
@@ -875,6 +887,8 @@ namespace zaum
       addParameter(mMix);
       addParameter(mEarly);
       addParameter(mFreeze);
+      addInput(mXform);            // xform gate (re-roll a new room)
+      addParameter(mXformAmount);  // deviation depth for the re-roll
 
       memset(mPD,     0, sizeof(mPD));
       memset(mER,     0, sizeof(mER));   // ER ring buffer — all silence
@@ -1000,6 +1014,11 @@ namespace zaum
       mVizDecimCtr = kVizAnDecim;
       mVizFreeze = 0.0f;
 
+      // Xform state: no deviation until the first gate. Distinct nonzero seed.
+      mXformSeed = UINT64_C(0x2545F4914F6CDD1D);
+      mXformGateWasHigh = false;
+      for (int k = 0; k < kXformN; k++) { mXformOff[k] = 0.0f; mXformTgt[k] = 0.0f; }
+
       mLastSize         = 0.35f;
       mLastEarly        = 0.4f;
       mSizeFactor       = 0.850;    // raw sizeFactor (Size only), for reference
@@ -1023,6 +1042,8 @@ namespace zaum
     od::Parameter mMix{"Mix", 0.40f};
     od::Parameter mEarly{"Early", 0.4f};
     od::Parameter mFreeze{"Freeze", 0.0f};
+    od::Inlet     mXform{"Xform"};                     // gate: re-roll a new room
+    od::Parameter mXformAmount{"Xform Amount", 0.0f};  // 0..1 deviation depth
 
     // --- Overview viz accessors (inline; read by the FabricGraphic). NOT virtual. ---
     // vizSample(i): the decimated mono-wet ring in chronological order (0 = oldest).
@@ -1053,12 +1074,46 @@ namespace zaum
       const float mix            = mMix.value();        // 0..1
       const float modParam       = mMod.value();        // 0..1 (baked-in, see ctor)
       const float modRateParam   = mModRate.value();    // 0..1 (baked-in, see ctor)
-      const float dampParam      = mDamp.value();       // 0..1
-      const float decayParam     = mDecay.value();      // 0..1
-      const float sizeParam      = mSize.value();       // 0..1
-      const float diffusionParam = mDiffusion.value();  // 0..1
+      float dampParam      = mDamp.value();       // 0..1
+      float decayParam     = mDecay.value();      // 0..1
+      float sizeParam      = mSize.value();       // 0..1
+      float diffusionParam = mDiffusion.value();  // 0..1
       // Early: 0..1, scales ER contribution. At 0 → no ER (exact 0.1.0.8 output).
-      const float earlyParam     = mEarly.value();      // 0..1
+      float earlyParam     = mEarly.value();      // 0..1
+
+      // ------------------------------------------------------------------
+      // Xform (re-roll a new room). A rising edge on the Xform gate draws a
+      // fresh random target per room-shape param; the offsets glide toward it
+      // (block rate) so the room morphs smoothly; each offset is added to its
+      // param scaled by Amount and the per-param range, then clamped to 0..1.
+      // Non-destructive: the user's Size/Decay/Damp/Diffusion/Early knobs are
+      // unchanged (these are internal deviations). Amount=0 -> no deviation.
+      // ------------------------------------------------------------------
+      {
+        float *xg = mXform.buffer();
+        for (int i = 0; i < FRAMELENGTH; i++)
+        {
+          bool high = xg[i] > 0.5f;   // gate threshold (feedback_comparator_gate_threshold)
+          if (high && !mXformGateWasHigh)
+            for (int k = 0; k < kXformN; k++)
+            {
+              mXformSeed = xorshift64(mXformSeed);
+              // 16-bit fraction -> [-1, 1]
+              mXformTgt[k] = ((float)(mXformSeed & 0xFFFF) * (1.0f / 32767.5f)) - 1.0f;
+            }
+          mXformGateWasHigh = high;
+        }
+        const float xfAmount = mXformAmount.value();  // 0..1 depth
+        float base[kXformN] = { sizeParam, decayParam, dampParam, diffusionParam, earlyParam };
+        for (int k = 0; k < kXformN; k++)
+        {
+          mXformOff[k] += kXformSlew * (mXformTgt[k] - mXformOff[k]);   // smooth morph
+          float v = base[k] + mXformOff[k] * kXformRange[k] * xfAmount;
+          base[k] = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);           // clamp 0..1
+        }
+        sizeParam = base[0]; decayParam = base[1]; dampParam = base[2];
+        diffusionParam = base[3]; earlyParam = base[4];
+      }
 
       // Predelay tap is now a per-sample-smoothed FLOAT (targetPD below); the old
       // integer predelayTap is gone (zipper fix on Pre).
@@ -2168,6 +2223,11 @@ namespace zaum
     float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
     float  mDryLp1_L, mDryLp2_L, mDryLp1_R, mDryLp2_R;  // dry low passthrough LP states
     float  mFreezeSmoothed;       // block-rate smoothed Freeze amount (0..1)
+    // Xform: per-param glided offset + its random target, plus RNG + edge latch.
+    float    mXformOff[kXformN];  // current (glided) deviation, -1..1 * range
+    float    mXformTgt[kXformN];  // random target set on each gate re-roll
+    uint64_t mXformSeed;          // xorshift64 state for re-rolls
+    bool     mXformGateWasHigh;   // rising-edge latch for the Xform gate
     // Overview viz state: decimated mono-wet ring + freeze mirror (graphic reads
     // these via the inline getters below).
     float  mVizLp[kVizCols];   // per-band one-pole LP states

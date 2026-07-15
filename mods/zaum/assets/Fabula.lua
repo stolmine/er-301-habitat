@@ -18,6 +18,7 @@ local libzaum = require "zaum.libzaum"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Gate = require "Unit.ViewControl.Gate"
 local FabulaOverviewControl = require "zaum.FabulaOverviewControl"
 
 local floatMap = function(min, max, precision)
@@ -90,6 +91,19 @@ function Fabula:onLoadGraph(channelCount)
   freeze:hardSet("Bias", 0.0)
   tie(op, "Freeze", freeze, "Out")
   self:addMonoBranch("freeze", freeze, "In", freeze, "Out")
+
+  -- Xform: a trigger that re-rolls a new room (a smoothed deviation from the
+  -- current Size/Decay/Damp/Diffusion/Early, scaled by Amount). The op edge-
+  -- detects the gate and morphs internally, so the knobs above stay put.
+  local xformGate = self:addObject("xform", app.Comparator())
+  xformGate:setTriggerMode()
+  connect(xformGate, "Out", op, "Xform")
+  self:addMonoBranch("xform", xformGate, "In", xformGate, "Out")
+
+  local amount = self:addObject("amount", app.ParameterAdapter())
+  amount:hardSet("Bias", 0.0)
+  tie(op, "Xform Amount", amount, "Out")
+  self:addMonoBranch("amount", amount, "In", amount, "Out")
 end
 
 function Fabula:onLoadViews()
@@ -154,9 +168,26 @@ function Fabula:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
+    },
+    xform = Gate {
+      button = "xfrm",
+      description = "Xform (re-roll room)",
+      branch = self.branches.xform,
+      comparator = self.objects.xform
+    },
+    amount = GainBias {
+      button = "amt",
+      description = "Xform Amount",
+      branch = self.branches.amount,
+      gainbias = self.objects.amount,
+      range = self.objects.amount,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
     }
   }, {
-    expanded = { "size", "predelay", "early", "freeze", "mix" },
+    expanded = { "size", "predelay", "early", "freeze", "xform", "amount", "mix" },
     collapsed = {}
   }
 end
