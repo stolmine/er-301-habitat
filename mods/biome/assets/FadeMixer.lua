@@ -64,7 +64,7 @@ local views = {
 
 local function fadeMap()
   local m = app.LinearDialMap(0, 1)
-  m:setSteps(0.25, 0.1, 0.01, 0.001)
+  m:setSteps(0.1, 0.01, 0.001, 0.0001)
   return m
 end
 
