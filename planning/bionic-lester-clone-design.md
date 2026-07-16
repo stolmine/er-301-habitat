@@ -44,20 +44,38 @@ A filter is only as good as its FM. Cutoff AND resonance (and ideally the switch
 clock / aliasing) must be modulatable at **audio rate (per sample)**, not block
 rate. This is a from-day-one architectural decision, not a bolt-on.
 
-The ER-301 has a Parameter/Inlet split: an `od::Parameter` updates per BLOCK
-(`ParameterAdapter` + `tie` -> block-rate, "flappy" under fast mod), while an
-`od::Inlet` carries a per-SAMPLE buffer (`GainBias` + `connect` -> audio-rate).
-So every audio-rate-modulatable target must be an `od::Inlet` read per sample in
-`process()`, not a `Parameter.value()` read once per block
-([[feedback_inlet_vs_parameter_audio_rate_mod]]; Canals Span/Quality are the
-audio-rate reference). Consequence for this build: the SVF coefficient update
-has to run per sample from inlet buffers (cutoff, resonance, FM), which changes
-the DSP loop shape and the CPU budget - design the coefficient recompute to be
-cheap per sample (or a fast per-sample approx) from the outset.
+The ER-301 has a Parameter/Inlet split (code-verified, see
+planning/audio-rate-modulation-notes.md): `process()` runs once per 128-sample
+frame (~375 Hz). An `od::Parameter` is a per-frame scalar, and
+`ParameterAdapter` + `tie` reads ONLY the last sample of the CV frame - a
+~375 Hz sample-and-hold = the "flappy" artifact. An `od::Inlet` carries a
+per-SAMPLE buffer, wired audio-rate via `GainBias` + `connect`. So cutoff,
+resonance, and FM must each be an `od::Inlet` read per sample
+([[feedback_inlet_vs_parameter_audio_rate_mod]]).
 
-Detailed research of how the built-in units and SDK handle this is being done by
-a dispatched agent -> findings land in planning/audio-rate-modulation-notes.md
-and fold back into this note.
+**The coefficient recompute is per sample, with a cheap approximation - that is
+the universal pattern, not a block-coeff + interp hybrid.** The built-in
+`StereoLadderFilter` recomputes ALL coefficients per sample from Inlets (NEON
+simd_exp/sin + Newton-Raphson) at ~1.28% CPU; SistersSvf uses a cubic-Taylor tan
++ one fdiv per sample. No unit does block-rate coeffs + per-sample interp for a
+modulatable cutoff. So design the Lester's SVF coeff update as a cheap per-sample
+recompute from the inlet buffers from the outset.
+
+**This composes well with the variable-rate switch clock.** At low fc the SVF
+ticks at the low internal switch clock, so the per-sample coeff recompute runs at
+that lower rate (cheaper) AND the cutoff modulation is naturally band-limited to
+the switch clock - which is physically authentic, the real SCF samples its
+control at the clock. At high fc it is a per-sample recompute at host rate.
+
+**Canals cautionary tale (important):** audio-rate cutoff WAS tried on Canals and
+FULLY REVERTED (spreadsheet 2.8.1.12) - Span's wide exponential cutoff leverage
+popped, and entangled LUT/soft-knee changes added stepping, caught on a hardware
+A/B. Lessons for the Lester: (1) hardware A/B the audio-rate cutoff EARLY, not
+late; (2) knob-detent slew is a separate concern from CV rate; (3) crucially, the
+Lester's Q is BOUNDED (no self-oscillation), so it lacks Canals' self-osc SVF
+state memory + exponential leverage that caused the pops - the Lester is a
+**safer audio-rate target than Canals was.** Ref: StereoLadderFilter,
+mods/spreadsheet/SistersSvf.h, planning/audio-rate-modulation-notes.md.
 
 ## Modeling approach
 
