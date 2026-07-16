@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**138 items** — 40 done, 3 wip, 92 todo, 3 blocked. *Rendered 2026-07-15.*
+**139 items** — 40 done, 3 wip, 93 todo, 3 blocked. *Rendered 2026-07-15.*
 
 ## DSP
 
@@ -67,6 +67,7 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `bionic-lester-clone` | Profiling-informed clone of a switched-capacitor dual filter (target: Bionic Lester Mk1) | manual · 2026-07-15 |
 |   | `blanda-scan-mixer` | Blanda — 3-input scan mixer (Morph-4-style continuous bell-scan, not a crossover) | manual · 2026-07-09 |
 |   | `etcher-io-range-and-presets` | Etcher: change I/O ranges to ±1V + add sine/triangle/user presets + hardware deviation verify | manual · 2026-07-09 |
 |   | `jf-phase6-ship` | JF Phase 6: polish + ship (trig-LUT audit, CPU profile, test procedures, vanilla-compat, FM consolidation) | manual · 2026-07-09 |
