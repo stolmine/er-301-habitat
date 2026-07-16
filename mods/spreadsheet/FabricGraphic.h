@@ -50,6 +50,9 @@ namespace stolmine
       if (!mpTank)
         return;
 
+      // Keep the DSP-side spectrum analyzer alive: it idles when we stop drawing.
+      mpTank->vizPing();
+
       if (!mInit)
       {
         memset(mHist, 0, sizeof(mHist));

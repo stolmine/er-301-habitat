@@ -662,6 +662,10 @@ namespace stolmine
   static const int kVizCols   = 16;
   static const int kVizAnDecim = 4;         // analyzer runs 1/4 host rate (12 kHz) - CPU
   static const float kVizEnvRel = 0.0006f;  // ~140 ms release @12k (attack is instant/max)
+  // Analyzer stays live this many blocks after the last graphic draw (~170 ms at
+  // 32-sample blocks / 48k). Long enough to ride out UI hitches, short enough
+  // that leaving the overview quickly idles the analyzer.
+  static const int kVizHeartbeatBlocks = 256;
   // One-pole LP coefficients, log-spaced fc 200 Hz..5 kHz @12k (band k = LP[k]-LP[k-1]).
   // (The SR/2 tank is band-limited, and the analyzer input is 4-sample box-averaged
   //  -> decimating to 12 kHz costs 1/4 with negligible spectral loss for a viz.)
@@ -1025,6 +1029,7 @@ namespace stolmine
       mVizAcc = 0.0f;
       mVizDecimCtr = kVizAnDecim;
       mVizFreeze = 0.0f;
+      mVizHeartbeat = 0;   // analyzer idle until the overview graphic pings
 
       // Xform state. Distinct nonzero seed; bias pointers wired later from Lua.
       mXformSeed = UINT64_C(0x2545F4914F6CDD1D);
@@ -1087,6 +1092,10 @@ namespace stolmine
     int   vizCols() const { return kVizCols; }
     float vizSample(int i) const { return mVizEnv[i]; }   // band-k energy (spectrum)
     float vizFreeze() const { return mVizFreeze; }
+    // Called by the FabricGraphic on every draw(): keeps the spectrum analyzer
+    // alive for kVizHeartbeatBlocks blocks. When the overview is off screen the
+    // pings stop and process() skips the analyzer entirely (audio unaffected).
+    void  vizPing() { mVizHeartbeat = kVizHeartbeatBlocks; }
 
     // Blend the current value toward a random point in [mn,mx] by depth.
     // Uses xorshift64 (no libc rand()) so it is am335x-safe. Called at fire time.
@@ -1347,6 +1356,14 @@ namespace stolmine
       else if (hpfHz > kHpfMaxHz) hpfHz = kHpfMaxHz;
       mHpfASmooth += 0.1f * (kTwoPiOverSR * hpfHz - mHpfASmooth);
       const float wetHpA = mHpfASmooth;
+
+      // Overview viz gate (block rate): the FabricGraphic pings the op each draw,
+      // topping up mVizHeartbeat; here it counts down. vizActive is block-constant,
+      // so the per-sample analyzer below is a cheap predictable branch. When the
+      // overview is off screen the pings stop and the analyzer goes idle - it only
+      // feeds the graphic, never the audio.
+      const bool vizActive = (mVizHeartbeat > 0);
+      if (mVizHeartbeat > 0) mVizHeartbeat--;
 
       // Base delay lengths are no longer quantized to integers here: the main
       // D-reads glide the float base (smD1_L etc.) toward targetD1_L (computed
@@ -2114,21 +2131,28 @@ namespace stolmine
         // (12 kHz) on the box-averaged wet for CPU. Each band = the difference of
         // successive log-spaced one-pole LPs (cheap bandpass) -> peak envelope
         // (instant attack via max, slow release; branchless).
-        mVizAcc += 0.5f * (wetL + wetR);
-        if (--mVizDecimCtr <= 0)
+        // GATED on vizActive (block-constant): the FabricGraphic pings the op on
+        // every draw(); when the overview is not on screen the ping stops, the
+        // heartbeat expires, and this whole analyzer is skipped - it feeds only
+        // the graphic, so skipping it has zero effect on the audio.
+        if (vizActive)
         {
-          mVizDecimCtr = kVizAnDecim;
-          float xm = mVizAcc * (1.0f / (float)kVizAnDecim);
-          mVizAcc = 0.0f;
-          float prevLp = 0.0f;
-          for (int k = 0; k < kVizCols; k++)
+          mVizAcc += 0.5f * (wetL + wetR);
+          if (--mVizDecimCtr <= 0)
           {
-            mVizLp[k] += kVizBandA[k] * (xm - mVizLp[k]);
-            float band = mVizLp[k] - prevLp;
-            prevLp = mVizLp[k];
-            float a = band < 0.0f ? -band : band;
-            float e = mVizEnv[k] + kVizEnvRel * (a - mVizEnv[k]);
-            mVizEnv[k] = e > a ? e : a;   // instant attack, slow release
+            mVizDecimCtr = kVizAnDecim;
+            float xm = mVizAcc * (1.0f / (float)kVizAnDecim);
+            mVizAcc = 0.0f;
+            float prevLp = 0.0f;
+            for (int k = 0; k < kVizCols; k++)
+            {
+              mVizLp[k] += kVizBandA[k] * (xm - mVizLp[k]);
+              float band = mVizLp[k] - prevLp;
+              prevLp = mVizLp[k];
+              float a = band < 0.0f ? -band : band;
+              float e = mVizEnv[k] + kVizEnvRel * (a - mVizEnv[k]);
+              mVizEnv[k] = e > a ? e : a;   // instant attack, slow release
+            }
           }
         }
 
@@ -2311,6 +2335,7 @@ namespace stolmine
     float  mVizAcc;            // box-average accumulator for the decimated analyzer
     int    mVizDecimCtr;
     float  mVizFreeze;
+    int    mVizHeartbeat;      // blocks the analyzer stays live after the last graphic draw
     float  mLastSize;           // last seen Size (reference only; no longer used as change guard)
     float  mLastEarly;          // last seen Early (reference only)
     double mSizeFactor;         // raw sizeFactor from Size param only (for reference)
