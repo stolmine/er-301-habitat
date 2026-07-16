@@ -327,6 +327,12 @@ namespace stolmine
     float *out = mOut.buffer();
 
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
+    // Equal-power (sqrt-law) dry/wet crossfade: the cut/reversed wet is
+    // decorrelated from the dry, so a linear crossfade dipped ~3 dB at mix=0.5.
+    // sqrt-law holds constant power -> flat loudness across mix. Block rate.
+    // (feedback_equal_power_drywet_crossfade)
+    const float dryGain = sqrtf(1.0f - mix);
+    const float wetGain = sqrtf(mix);
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
     float tanhAmt = CLAMP(0.0f, 1.0f, mTanhAmt.value());
@@ -416,7 +422,7 @@ namespace stolmine
       }
       s.prevOutput = wet;
 
-      float mixed = inSample * (1.0f - mix) + wet * mix;
+      float mixed = inSample * dryGain + wet * wetGain;
 
       if (tanhAmt > 0.001f)
         mixed = fast_tanh(mixed * (1.0f + tanhAmt * 4.0f));

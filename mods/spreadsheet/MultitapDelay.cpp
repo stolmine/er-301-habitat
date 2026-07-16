@@ -591,6 +591,12 @@ namespace stolmine
     float masterTimeRaw = CLAMP(0.001f, maxBufferTime, mMasterTime.value());
     float feedback = CLAMP(0.0f, 0.95f, mFeedback.value());
     float mix = CLAMP(0.0f, 1.0f, mMix.value());
+    // Equal-power (sqrt-law) dry/wet crossfade: the delayed wet is decorrelated
+    // from the dry, so a linear crossfade dipped ~3 dB at mix=0.5. sqrt-law holds
+    // constant power -> flat loudness across mix. Block rate.
+    // (feedback_equal_power_drywet_crossfade)
+    const float dryGain = sqrtf(1.0f - mix);
+    const float wetGain = sqrtf(mix);
     float inputLevel = CLAMP(0.0f, 4.0f, mInputLevel.value());
     float outputLevel = CLAMP(0.0f, 4.0f, mOutputLevel.value());
     float tanhAmt = CLAMP(0.0f, 1.0f, mTanhAmt.value());
@@ -1094,8 +1100,8 @@ namespace stolmine
       s.writeIndex = (s.writeIndex + 1) % maxDelay;
 
       // Mix
-      float mixedL = x * (1.0f - mix) + wetL * mix;
-      float mixedR = x * (1.0f - mix) + wetR * mix;
+      float mixedL = x * dryGain + wetL * wetGain;
+      float mixedR = x * dryGain + wetR * wetGain;
 
       // User saturation
       if (tanhAmt > 0.001f)

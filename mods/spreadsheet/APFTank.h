@@ -1346,6 +1346,14 @@ namespace stolmine
       // Diffusion makeup: static wet gain compensating the perceived level lost as
       // Diffusion spreads the energy (see kDiffMakeup).
       const float diffMakeup = 1.0f + kDiffMakeup * diffusionParam;
+      // Equal-power (sqrt-law) dry/wet crossfade: wetL/R are decorrelated from
+      // the dry (figure-8 cross-coupling, noted below), so the old linear
+      // crossfade dipped ~3 dB at Mix=0.5. sqrt-law keeps constant power for
+      // decorrelated signals -> flat loudness across Mix. diffMakeup stays folded
+      // into the wet gain. Block rate. (feedback_equal_power_drywet_crossfade)
+      const float mixC = mix < 0.0f ? 0.0f : (mix > 1.0f ? 1.0f : mix);
+      const float dryMixG = sqrtf(1.0f - mixC);
+      const float wetMixG = sqrtf(mixC) * diffMakeup;
       // Dry low passthrough gain (scaled by Mix -> fills in as the wet takes over).
       const float dryUnderGain = mMix.value() * kDryUnder;
 
@@ -2182,10 +2190,9 @@ namespace stolmine
         //    mixed information between the loops via the figure-8 feedback,
         //    so wetL and wetR are decorrelated even from a mono source.
         // ----------------------------------------------------------------
-        float dryMix  = (1.0f - mix);
-        float wetMix  = mix * diffMakeup;   // diffusion makeup folded into wet gain
-        float outL = drySampleL * dryMix + wetL * wetMix;
-        float outR = drySampleR * dryMix + wetR * wetMix;
+        // Equal-power crossfade (gains dryMixG/wetMixG computed block-rate above).
+        float outL = drySampleL * dryMixG + wetL * wetMixG;
+        float outR = drySampleR * dryMixG + wetR * wetMixG;
 
         // Dry low passthrough: complementary 200 Hz LP of the dry (2 cascaded
         // one-poles, 12 dB/oct) added underneath the HPF'd wet, so clean low body
