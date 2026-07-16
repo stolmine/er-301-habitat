@@ -16,8 +16,13 @@ No other units changed.
 
 Fabula is a Dattorro/Griesinger figure-8 recirculating-allpass tank. The
 recirculating tank runs at half the sample rate (band-limited, plate-like top
-end); the input diffusion, predelay, and early-reflection network stay at full
-rate. The result is a believable, smooth room with a long, dense tail.
+end); the input diffusion and predelay stay at full rate. The result is a
+believable, smooth room with a long, dense tail.
+
+It runs at roughly a quarter of one core in stereo. The half-rate tank, an
+early-reflection network folded to that same rate, and an overview analyzer
+that idles whenever Fabula's display is off screen all keep the cost down, so
+watching the overview costs a little more than running it unseen.
 
 What gives it its character, versus a textbook Dattorro:
 
