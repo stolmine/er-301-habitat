@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**140 items** — 40 done, 3 wip, 94 todo, 3 blocked. *Rendered 2026-07-15.*
+**141 items** — 41 done, 3 wip, 94 todo, 3 blocked. *Rendered 2026-07-15.*
 
 ## DSP
 
@@ -18,6 +18,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `biome-utility-dsp-units` | biome DSP utility units: simple allpass, dome filter, frequency shifter, bitcrush/downsample | manual · 2026-07-09 |
 |   | `canals-audiorate-and-cpu` | Canals: audio-rate Span-sweep aliasing (halfband decimator) + hardware CPU/NEON pass | manual · 2026-07-09 |
 |   | `canals-response-tuning` | Canals: SPAN/volume/low-band/Q/soft-clip response tuning against hardware capture corpus | manual · 2026-07-09 |
+|   | `drywet-crossfade-audit` | Audit all wet/dry units for the linear-crossfade center dip; switch decorrelated wets to equal-power | manual · 2026-07-15 |
 |   | `fabula-diffusion-makeup` | Fabula: AGC / intelligent gain control to make up volume lost to diffusion | manual · 2026-07-14 |
 |   | `fabula-dry-under-hpf` | Fabula: dry passthrough underneath the 200Hz wet HPF | manual · 2026-07-14 |
 |   | `fabula-xform` | Fabula: xform (transform/randomize) control, modeled on Pecto/Petrichor | manual · 2026-07-14 |
@@ -31,7 +32,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `mi-clouds-warps-improvements` | MI: Clouds gain-comp + further NEON (Clouds ShyFFT/SRC, Rings sympathetic/FM); Warps vocoder + drive | manual · 2026-07-09 |
 |   | `mirror-promotion` | Mirror: final habitat name + Voss-McCartney 1/f drift + wavetable frame-inventory audition | manual · 2026-07-09 |
 |   | `multiout-nlc-chaos` | NLC chaotic modulation sources (clean-room): Sloth, Chua, Hyperchaos, Squid Axon, + lower-pri | manual · 2026-07-09 |
-|   | `network-gain-compensation` | Gain compensation for Network (Fabula's makeup model, tap-weight-energy basis) | manual · 2026-07-15 |
 |   | `ngoma-cpu-optimization` | Ngoma: CPU optimization round 2 (~33% mono Cortex-A8 idle is steep) | manual · 2026-07-09 |
 |   | `ngoma-sound-tuning` | Ngoma: careful sound-tuning pass (param cross-couplings, per-partial decay, mode ratios, sub-octave) | manual · 2026-07-09 |
 |   | `open303-port` | Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit | manual · 2026-07-11 |
@@ -52,6 +52,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `fx-tilt-djfilter` | Tilt EQ + DJ Filter shipped (bipolar LP/HP sweep with resonance) | manual *(attested)* · 2026-07-09 |
 | ✓ | `house-aw-reverbs` | House package — 6 faithful Airwindows reverb ports (kWoodRoom…Galactic), hardware-validated | manual *(attested)* · 2026-07-09 |
 | ✓ | `house-rotcoat` | RotCoat (codename) — first original-design reverb: multi-world per-line reduced-rate FDN | manual *(attested)* · 2026-07-09 |
+| ✓ | `network-gain-compensation` | Gain compensation for Network (Fabula's makeup model, tap-weight-energy basis) | manual *(attested)* · 2026-07-15 |
 | ✓ | `spreadsheet-canals` | Canals — Three Sisters clone, DSP refresh + 4-input normalling topology; moved biome→spreadsheet | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-filterbank` | Filterbank (FFB/Tomograph) — parallel fixed filter bank, 2-16 bands, Scala scales, radial viz | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-helicase` | Helicase — 2-op FM oscillator (OPL3 waveforms, discontinuity folder, phase-receptivity sync) | manual *(attested)* · 2026-07-09 |

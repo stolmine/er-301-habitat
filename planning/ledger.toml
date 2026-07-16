@@ -1400,8 +1400,18 @@ note = """Full design note: planning/bionic-lester-clone-design.md. Target = IME
 [[item]]
 id = "network-gain-compensation"
 title = "Gain compensation for Network (Fabula's makeup model, tap-weight-energy basis)"
-status = "todo"
-stamped = "2026-07-15T22:19:45-05:00"
+status = "done"
+attested = "2026-07-15T22:42:06-05:00"
+stamped = "2026-07-15T22:42:07-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "an RMS/loudness sweep across Network's Density + Size shows roughly constant perceived level with the makeup on vs stepping without it; a Motion sweep leaves the stereo image intact (pan preserved, no loudness change); no transient pumping; the density swell still audible (not flattened). Block-rate cost only (no per-sample additions), am335x-confirmed." }
 note = """Full design note: planning/network-gain-compensation-design.md. Bring Fabula's gain-compensation PRINCIPLE (static, block-rate, param-driven scalar - deterministic compensation, never a dynamic AGC that pumps) to Network, but with a tap-weight-energy BASIS instead of Fabula's single-knob linear makeup, because Network's level is a 32-way weighted sum (driven by Density = active-tap fraction, Size/geometry, and feedback) not a one-knob function. Phase 1 (high value): in the block-rate per-tap geometry loop, accumulate E = sum(gainL^2 + gainR^2) over active taps, makeup = sqrt(E_ref/max(E,eps)) reference-normalized + clamped, applied as ONE common scalar to BOTH wet channels (per-channel normalization would flatten the azimuth-panned stereo image - stabilize loudness, preserve balance). Partial-strength exponent (<1) so the density swell is not flattened ([[feedback_self_balancing_converges_to_bypass]]). Phase 2 (optional): f(Decay,Connectivity) feedback-tail term modeled on Fabula's Freeze-makeup. Reuses Petrichor tap normalization ([[feedback_multitap_weighted_feedback]]) as the basis + Fabula's diffusion-makeup principle ([[project_fabula_am335x]]). Folds into [[diffusion-makeup-model-notate]]: one principle, two implementations (single-knob vs tap-weight energy). Cheap: ~32 mul-adds + 1 sqrt/div per block, no per-sample cost."""
+
+[[item]]
+id = "drywet-crossfade-audit"
+title = "Audit all wet/dry units for the linear-crossfade center dip; switch decorrelated wets to equal-power"
+status = "todo"
+stamped = "2026-07-15T22:42:07-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "every wet/dry effect that mixes a decorrelated wet (reverb/delay/chorus/granular) either uses a sqrt-law equal-power crossfade or has a reasoned exception; no unit loses ~3dB at 50% mix that recovers at 100%." }
+note = """Network's 'gain loss at Wet=0.5' was a LINEAR dry/wet crossfade dipping ~3dB at center for a decorrelated wet (fixed via sqrt-law equal-power, spreadsheet 2.8.3.1; see [[feedback_equal_power_drywet_crossfade]]). Same bug is likely across the catalog. Grep each wet/dry unit's mix for 'x*(1-wet) + wet*...' / '(1.0f - wet)' and switch decorrelated wets to dryGain=sqrt(1-wet), wetGain=sqrt(wet) (block rate, 2 sqrts). Candidates: Fabula (uses the same linear form - diffusion-makeup only masks it), Petrichor, Larets, Sujet, Colmatage, Flakes, Stratos, any delay/reverb/chorus. Each is a shipped-behavior change (intermediate mix ~3dB louder, 50% patches shift up) -> dev build + hardware A/B per unit -> batch into a point release. Skip units whose 'wet' is CORRELATED with dry (equal-power would then +3dB bump)."""
