@@ -1019,6 +1019,7 @@ namespace stolmine
       mTankPhase = 0;
       mDecimPrev = 0.0f;
       mTankWetL_prev = mTankWetL_curr = 0.0f;
+      mErSumL_prev = mErSumL_curr = mErSumR_prev = mErSumR_curr = 0.0f;
       mTankWetR_prev = mTankWetR_curr = 0.0f;
       mWetHpLp1_L = mWetHpLp2_L = mWetHpLp1_R = mWetHpLp2_R = 0.0f;
       mDryLp1_L = mDryLp2_L = mDryLp1_R = mDryLp2_R = 0.0f;
@@ -1552,19 +1553,30 @@ namespace stolmine
         // residual beyond the invariant 0 * anything = 0).
         // ----------------------------------------------------------------
         mER[mWrER] = diffIn;
-        float erSumL = 0.0f;
-        float erSumR = 0.0f;
-        if (smEarly > 1e-4f)
+        int erWrNow = mWrER;
+        mWrER = (mWrER + 1) & (kER - 1);   // ring advance stays full rate
+
+        // fabula-er-sr2: the ER FIR + diffuser now recompute ONLY on the SR/2 tank
+        // tick. The ring above stays full rate so the tap delay times are exact;
+        // the 48k output is reconstructed by the same linear interpolation as the
+        // tank wet (below). Halves the ER per-sample cost, for a small early-
+        // reflection top-end softening (band-limited to ~12k, like the tank).
+        if (tankTick)
         {
-          for (int t = 0; t < kER_tapCount; t++)
+          mErSumL_prev = mErSumL_curr;
+          mErSumR_prev = mErSumR_curr;
+          float erSumL = 0.0f;
+          float erSumR = 0.0f;
+          if (smEarly > 1e-4f)
           {
-            int idxL = (mWrER - kER_delayL[t]) & (kER - 1);
-            int idxR = (mWrER - kER_delayR[t]) & (kER - 1);
-            erSumL += kER_gain[t] * (float)mER[idxL];
-            erSumR += kER_gain[t] * (float)mER[idxR];
+            for (int t = 0; t < kER_tapCount; t++)
+            {
+              int idxL = (erWrNow - kER_delayL[t]) & (kER - 1);
+              int idxR = (erWrNow - kER_delayR[t]) & (kER - 1);
+              erSumL += kER_gain[t] * (float)mER[idxL];
+              erSumR += kER_gain[t] * (float)mER[idxR];
+            }
           }
-        }
-        mWrER = (mWrER + 1) & (kER - 1);
 
         // ----------------------------------------------------------------
         // 2c. ER diffuser — 2 series plain Schroeder allpasses per channel (0.1.0.12).
@@ -1629,6 +1641,9 @@ namespace stolmine
             erSumR = yOut;
           }
         }
+          mErSumL_curr = erSumL;
+          mErSumR_curr = erSumR;
+        }  // end if (tankTick) — ER FIR + diffuser recompute at SR/2
 
         // ----------------------------------------------------------------
         // 3. Input diffusion: 4 series allpasses (fixed coefficients).
@@ -2112,6 +2127,10 @@ namespace stolmine
         // Add ER contribution (parallel, AFTER tank multi-tap).
         // Scales to zero when earlyParam=0 → exact 0.1.0.8 output.
         // ER is purely feedforward (FIR): no feedback, no stability concern.
+        // Reconstruct the ER output (computed at SR/2) to 48k with the same
+        // linear interp as the tank wet (interpF above), then scale by Early.
+        float erSumL = mErSumL_prev + (mErSumL_curr - mErSumL_prev) * interpF;
+        float erSumR = mErSumR_prev + (mErSumR_curr - mErSumR_prev) * interpF;
         float erScale = (kERLevel * smEarly);
         wetL += erScale * erSumL;
         wetR += erScale * erSumR;
@@ -2317,6 +2336,10 @@ namespace stolmine
     float  mDecimPrev;            // previous host-sample diffIn (decimator tap)
     float  mTankWetL_prev, mTankWetL_curr;
     float  mTankWetR_prev, mTankWetR_curr;
+    // ER FIR+diffuser output, computed at SR/2 (fabula-er-sr2), linear-interp'd
+    // to 48k like the tank wet.
+    float  mErSumL_prev, mErSumL_curr;
+    float  mErSumR_prev, mErSumR_curr;
     // Wet-output 200 Hz highpass: LP states of the two cascaded one-poles/ch.
     float  mWetHpLp1_L, mWetHpLp2_L, mWetHpLp1_R, mWetHpLp2_R;
     float  mDryLp1_L, mDryLp2_L, mDryLp1_R, mDryLp2_R;  // dry low passthrough LP states
