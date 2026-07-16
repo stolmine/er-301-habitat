@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**143 items** — 41 done, 3 wip, 96 todo, 3 blocked. *Rendered 2026-07-16.*
+**144 items** — 41 done, 3 wip, 97 todo, 3 blocked. *Rendered 2026-07-16.*
 
 ## DSP
 
@@ -22,6 +22,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `fabula-diffusion-makeup` | Fabula: AGC / intelligent gain control to make up volume lost to diffusion | manual · 2026-07-14 |
 |   | `fabula-dry-under-hpf` | Fabula: dry passthrough underneath the 200Hz wet HPF | manual · 2026-07-14 |
 |   | `fabula-xform` | Fabula: xform (transform/randomize) control, modeled on Pecto/Petrichor | manual · 2026-07-14 |
+|   | `fdn-reverb` | NEON FDN reverb (Householder core + per-line filters + spectral flavor overlay) | manual · 2026-07-16 |
 |   | `flakes-shards-fidelity` | Flakes: tune self-modulation engine to Shards, steeper LP on feedback, evaluate manual-loops fidelity | manual · 2026-07-09 |
 |   | `fx-delay-units` | Combined Petrichor+Pecto (CPU-efficient) + character-forward Lofi delay | manual · 2026-07-09 |
 |   | `helicase-sync-polyblep` | Helicase: PolyBLEP at the carrier reset discontinuity on hard sync | manual · 2026-07-09 |
