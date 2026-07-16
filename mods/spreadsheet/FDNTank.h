@@ -4,8 +4,10 @@
 // planning/fdn-reverb-design.md). 8 delay lines, a lossless Householder
 // feedback matrix, per-line frequency-dependent loss filters (Phase 2:
 // RT60-based gain + HF damping + bass low-shelf = the "spectral RT60"),
-// a 4-stage Schroeder input diffuser, and an equal-power dry/wet
-// crossfade. Internal-stereo (one shared tank,
+// modulated fractional delay reads (Phase 2d: per-line slow LFOs
+// de-metalize the tail, base-delay slew gives Doppler-smooth Size
+// sweeps), a 4-stage Schroeder input diffuser, and an equal-power
+// dry/wet crossfade. Internal-stereo (one shared tank,
 // decorrelated L/R output taps) so the Lua wiring just maps In1/In2 ->
 // In L/In R and Out L/Out R -> Out1/Out2 (the Fabula pattern).
 //
@@ -95,6 +97,27 @@ namespace stolmine
   static const float kFdnGainCeil   = 0.9995f;      // per-loop gain clamp
   static const float kFdnBassHz     = 300.0f;       // low-shelf corner (one-pole)
 
+  // ---- Phase-2d modulation + fractional reads --------------------------------
+  // Per-line slow LFOs wobble the delay lengths to break the fixed
+  // eigenfrequencies (de-metalize sustained tails); fractional (linearly
+  // interpolated) reads make the moving delay continuous and also smooth Size
+  // sweeps. Depth is a small fraction of each line's length (chorus-subtle).
+  static const float kFdnModDepthFrac = 0.0025f;    // +/- 0.25% of line length
+  static const float kFdnBaseSlewTau  = 0.030f;     // s, Size-sweep glide (Doppler)
+  // Decorrelated slow LFO rates (Hz), mutually non-harmonic.
+  static const float kFdnLfoHz[kFdnLines] = {
+    0.37f, 0.48f, 0.59f, 0.71f, 0.83f, 0.95f, 1.07f, 1.19f
+  };
+  // Init points spread around the unit circle (8 * 2pi/8) so the per-line
+  // magic-circle LFOs start at decorrelated phases -- no runtime trig needed
+  // (avoids the package sinf/cosf hazard, feedback_package_trig_lut).
+  static const float kFdnLfoX0[kFdnLines] = {
+    1.0f, 0.70710678f, 0.0f, -0.70710678f, -1.0f, -0.70710678f, 0.0f, 0.70710678f
+  };
+  static const float kFdnLfoY0[kFdnLines] = {
+    0.0f, 0.70710678f, 1.0f, 0.70710678f, 0.0f, -0.70710678f, -1.0f, -0.70710678f
+  };
+
   // Proven Schroeder allpass step (carbon copy of Network's
   // networkAllpassStep): v = in + g*buf; out = -g*v + buf; buf = v.
   // Phase-scrambles, magnitude spectrum unchanged. buf is a circular
@@ -130,6 +153,13 @@ namespace stolmine
       memset(mHfLp, 0, sizeof(mHfLp));
       memset(mBassLp, 0, sizeof(mBassLp));
       for (int a = 0; a < 4; a++) mDiffIdx[a] = 0;
+      for (int i = 0; i < kFdnLines; i++)
+      {
+        mBaseDelay[i] = 0.0f;         // primed to target on first process()
+        mLfoX[i] = kFdnLfoX0[i];      // decorrelated LFO start phases
+        mLfoY[i] = kFdnLfoY0[i];
+      }
+      mPrimed = false;
       mWrite = 0;
       mDcX1 = 0.0f;
       mDcY1 = 0.0f;
@@ -171,16 +201,39 @@ namespace stolmine
       if (!(mixN >= 0.0f)) mixN = 0.0f;
       if (mixN > 1.0f) mixN = 1.0f;
 
-      // Size -> integer line lengths (block rate). 0.1..1.0 of the base
-      // delays; clamped into the ring. Reads stay contiguous per sample.
+      const float invSR = 1.0f / globalConfig.sampleRate;
+
+      // Size -> target base delays (float samples, block rate). 0.1..1.0 of
+      // the base delays; leave 2 samples of headroom above the min and below
+      // the ring end for the +1 interpolation tap and the LFO swing.
       const float sizeScale = 0.1f + 0.9f * sizeN;
-      int L[kFdnLines];
+      const float delayMax = (float)(kFdnLineMask - 2);
+      float targetLf[kFdnLines];
       for (int i = 0; i < kFdnLines; i++)
       {
-        int l = (int)(kFdnBaseMs[i] * 0.001f * globalConfig.sampleRate * sizeScale);
-        if (l < 4) l = 4;
-        if (l > kFdnLineMask) l = kFdnLineMask;
-        L[i] = l;
+        float lf = kFdnBaseMs[i] * 0.001f * globalConfig.sampleRate * sizeScale;
+        if (lf < 4.0f) lf = 4.0f;
+        if (lf > delayMax) lf = delayMax;
+        targetLf[i] = lf;
+      }
+      // Prime the smoothed base delays to target on the first block so Size
+      // doesn't glide up from 0 at insert (a startup swoop).
+      if (!mPrimed)
+      {
+        for (int i = 0; i < kFdnLines; i++) mBaseDelay[i] = targetLf[i];
+        mPrimed = true;
+      }
+      // Per-sample base-delay slew coefficient (one-pole ~30 ms) -> Size
+      // sweeps glide (Doppler) instead of zippering. Per-line LFO increment
+      // (small-angle magic-circle: eps = 2*pi*f/SR) + proportional mod depth.
+      const float slewCoef =
+        1.0f - expf(-1.0f / (kFdnBaseSlewTau * globalConfig.sampleRate));
+      float lfoEps[kFdnLines];
+      float modDepth[kFdnLines];
+      for (int i = 0; i < kFdnLines; i++)
+      {
+        lfoEps[i] = 6.2831853f * invSR * kFdnLfoHz[i];
+        modDepth[i] = kFdnModDepthFrac * mBaseDelay[i];
       }
 
       // Diffuser stage lengths (constant given fixed SR; recomputed each
@@ -202,7 +255,6 @@ namespace stolmine
       const float bassRatio = powf(2.0f, (bassN - 0.5f) * 2.0f);
       const float rt60Bass = rt60Mid * bassRatio;
 
-      const float invSR = 1.0f / globalConfig.sampleRate;
       // Per-line loss gains: mid g_i and bass-band g_bass_i, both RT60 gains
       // clamped < 1 for stability. r_i = g_bass_i / g_i is the low-shelf ratio.
       // 8 expf pairs at BLOCK rate (scalar expf is am335x-safe -- Network uses
@@ -211,7 +263,7 @@ namespace stolmine
       float rBass[kFdnLines];
       for (int i = 0; i < kFdnLines; i++)
       {
-        const float Ti = (float)L[i] * invSR;   // line delay, seconds
+        const float Ti = targetLf[i] * invSR;   // line delay, seconds
         float gi = expf(kFdnNeg3Ln10 * Ti / rt60Mid);
         if (gi > kFdnGainCeil) gi = kFdnGainCeil;
         float gb = expf(kFdnNeg3Ln10 * Ti / rt60Bass);
@@ -252,12 +304,30 @@ namespace stolmine
         x = fdnAllpassStep(x, mDiff[3], diffLen[3], mDiffIdx[3], kFdnDiffG);
         const float inject = kFdnInGain * x;
 
-        // Read the 8 delayed line outputs (contiguous per line).
+        // Read the 8 delayed line outputs at a MODULATED FRACTIONAL delay.
+        // Per line: slew the base delay toward its Size target (Doppler
+        // glide), add a slow magic-circle LFO (de-metalizes the tail), then
+        // linearly interpolate between the two straddling samples. The read
+        // is still a local 2-tap (contiguous), not a scattered gather, so it
+        // stays NEON-friendly for Phase 4.
         float d[kFdnLines];
         for (int i = 0; i < kFdnLines; i++)
         {
-          const int ri = (mWrite - L[i]) & kFdnLineMask;
-          d[i] = mLine[i][ri];
+          mBaseDelay[i] += slewCoef * (targetLf[i] - mBaseDelay[i]);
+
+          // Magic-circle LFO (area-preserving, amplitude-stable, no trig).
+          mLfoX[i] += lfoEps[i] * mLfoY[i];
+          mLfoY[i] -= lfoEps[i] * mLfoX[i];
+
+          float Df = mBaseDelay[i] + modDepth[i] * mLfoX[i];
+          if (Df < 4.0f) Df = 4.0f;
+          else if (Df > delayMax) Df = delayMax;
+
+          const int Di = (int)Df;
+          const float frac = Df - (float)Di;
+          const float s0 = mLine[i][(mWrite - Di) & kFdnLineMask];
+          const float s1 = mLine[i][(mWrite - Di - 1) & kFdnLineMask];
+          d[i] = s0 + frac * (s1 - s0);
         }
 
         // Per-line loss filter (Phase 2): gain g_i + HF one-pole damping +
@@ -330,6 +400,10 @@ namespace stolmine
     int mDiffIdx[4];
     float mHfLp[kFdnLines];    // per-line HF-damping one-pole state
     float mBassLp[kFdnLines];  // per-line bass-shelf one-pole state
+    float mBaseDelay[kFdnLines]; // per-line slewed base delay (samples)
+    float mLfoX[kFdnLines];    // per-line magic-circle LFO state (x)
+    float mLfoY[kFdnLines];    // per-line magic-circle LFO state (y)
+    bool mPrimed;              // base delays primed to target on first block
     int mWrite;
     float mDcX1, mDcY1;
 #endif
