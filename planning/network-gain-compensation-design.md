@@ -9,6 +9,23 @@ Goal: bring Fabula's gain-compensation model to Network so its perceived loudnes
 stays stable as the spatial controls (Density, geometry, decay) move, without
 pumping and without flattening the effect.
 
+## UPDATE (2026-07-15): the actual reported problem was the mix law, not tap comp
+
+User report: at default Wet=0.5 there is substantial gain loss vs input; full
+Wet relieves it. Root cause was NOT tap-count/energy compensation - it was the
+dry/wet crossfade. Network mixed `x*(1-wet) + wet*wet` (LINEAR), and dry vs wet
+are decorrelated (a reverb spreads energy in time), so a linear crossfade dips
+~3 dB at the center (worse on present material where the dry attenuation
+dominates). Fixed by an **equal-power (sqrt-law) crossfade** (`dryGain=sqrt(1-wet)`,
+`wetGain=sqrt(wet)`, block rate), which holds constant power for decorrelated
+signals -> flat loudness across the sweep (spreadsheet 2.8.3.1, Network.h mix).
+Note: changes shipped behavior - intermediate Wet is now ~3 dB louder / more
+present; existing patches at Wet=0.5 shift up. Audition on hardware.
+
+The tap-weight-energy geometry comp below remains a SEPARATE, optional refinement
+(catches Size/Motion level drift at constant density), gated on whether that
+drift is actually audible - not the fix for the reported dry/wet loss.
+
 ## The transferable principle (from Fabula)
 
 Fabula's diffusion-makeup is `wetGain = mix * (1 + kDiff*Diffusion)`: a STATIC,
