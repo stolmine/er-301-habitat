@@ -1,21 +1,22 @@
 #pragma once
 
 // FDNTank -- a feedback-delay-network reverb core (working name; see
-// planning/fdn-reverb-design.md). Phase 1 = a dense, smooth, audible
-// scaffold: 8 delay lines, a lossless Householder feedback matrix,
-// per-line one-pole HF damping, a 4-stage Schroeder input diffuser, and
-// an equal-power dry/wet crossfade. Internal-stereo (one shared tank,
+// planning/fdn-reverb-design.md). 8 delay lines, a lossless Householder
+// feedback matrix, per-line frequency-dependent loss filters (Phase 2:
+// RT60-based gain + HF damping + bass low-shelf = the "spectral RT60"),
+// a 4-stage Schroeder input diffuser, and an equal-power dry/wet
+// crossfade. Internal-stereo (one shared tank,
 // decorrelated L/R output taps) so the Lua wiring just maps In1/In2 ->
 // In L/In R and Out L/Out R -> Out1/Out2 (the Fabula pattern).
 //
 // The point of this topology (vs Fabula's Dattorro tank) is the NEON
 // ceiling: fixed / block-modulated delay lengths mean CONTIGUOUS reads
 // at a moving write head (not per-sample gathers), and the matrix is a
-// reduce + broadcast-subtract. Phase 1 keeps the DSP SCALAR and
-// am335x-safe so we can hear it and A/B the tail; the NEON pass
-// (matrix + damping bank + output dot-products) is Phase 2, once the
-// voicing is settled. See feedback_neon_soa_svf_bank / Visadhara.h for
-// the vectorization template.
+// reduce + broadcast-subtract. The DSP stays SCALAR and am335x-safe
+// through the Phase-2 voicing so we can hear it and A/B the tail; the
+// NEON pass (matrix + loss-filter bank + output dot-products) is Phase 4,
+// once the voicing is settled. See feedback_neon_soa_svf_bank /
+// Visadhara.h for the vectorization template.
 //
 // All virtuals defined inline in this header per
 // feedback_no_out_of_line_virtuals (COMDAT vtable, immune to
@@ -83,6 +84,17 @@ namespace stolmine
   // the way in rather than let a slow offset circulate.
   static const float kFdnDcR = 0.9935f;
 
+  // ---- Phase-2 decay: frequency-dependent RT60 -------------------------------
+  // Decay maps log-spaced to a mid-band RT60 in seconds; each line takes a
+  // per-loop gain g_i = exp(kFdnNeg3Ln10 * T_i / RT60) so every line reaches
+  // -60 dB at the same wall-clock time (a uniform, tuned tail). The matrix
+  // stays lossless; all decay lives in the per-line loss filters.
+  static const float kFdnRt60Min   = 0.2f;         // s at Decay=0
+  static const float kFdnRt60Max   = 30.0f;        // s at Decay=1
+  static const float kFdnNeg3Ln10  = -6.9077553f;  // -3*ln(10)
+  static const float kFdnGainCeil   = 0.9995f;      // per-loop gain clamp
+  static const float kFdnBassHz     = 300.0f;       // low-shelf corner (one-pole)
+
   // Proven Schroeder allpass step (carbon copy of Network's
   // networkAllpassStep): v = in + g*buf; out = -g*v + buf; buf = v.
   // Phase-scrambles, magnitude spectrum unchanged. buf is a circular
@@ -109,12 +121,14 @@ namespace stolmine
       addOutput(mOutR);
       addParameter(mSize);
       addParameter(mDecay);
+      addParameter(mBass);
       addParameter(mDamp);
       addParameter(mMix);
 
       memset(mLine, 0, sizeof(mLine));
       memset(mDiff, 0, sizeof(mDiff));
-      memset(mDampState, 0, sizeof(mDampState));
+      memset(mHfLp, 0, sizeof(mHfLp));
+      memset(mBassLp, 0, sizeof(mBassLp));
       for (int a = 0; a < 4; a++) mDiffIdx[a] = 0;
       mWrite = 0;
       mDcX1 = 0.0f;
@@ -144,6 +158,10 @@ namespace stolmine
       float decayN = mDecay.value();
       if (!(decayN >= 0.0f)) decayN = 0.0f;
       if (decayN > 1.0f) decayN = 1.0f;
+
+      float bassN = mBass.value();
+      if (!(bassN >= 0.0f)) bassN = 0.0f;
+      if (bassN > 1.0f) bassN = 1.0f;
 
       float dampN = mDamp.value();
       if (!(dampN >= 0.0f)) dampN = 0.0f;
@@ -176,15 +194,38 @@ namespace stolmine
         diffLen[a] = l;
       }
 
-      // Decay -> loop gain. Lossless Householder + g<1 guarantees a
-      // decaying tail; 0.97 ceiling keeps a long-but-finite RT60. (The
-      // perceptual RT60 curve is a Phase-2 voicing choice.)
-      const float g = decayN * 0.97f;
+      // ---- Phase-2 frequency-dependent decay (block rate) ----
+      // Decay -> mid RT60, log-spaced so the knob travel is musical.
+      const float rt60Mid = kFdnRt60Min * powf(kFdnRt60Max / kFdnRt60Min, decayN);
+      // Bass -> bass-RT60 ratio (0.5 = neutral). 2^((bass-0.5)*2) ~ 0.25x..4x:
+      // bass rings shorter (<0.5) or longer / boomier (>0.5).
+      const float bassRatio = powf(2.0f, (bassN - 0.5f) * 2.0f);
+      const float rt60Bass = rt60Mid * bassRatio;
 
-      // Damp -> one-pole LP coefficient. dampN 0 = bright (a=1, no
-      // damping), dampN 1 = dark (a=0.1). Passive, so it only removes
-      // loop energy -> stays stable.
-      const float dampA = 1.0f - 0.9f * dampN;
+      const float invSR = 1.0f / globalConfig.sampleRate;
+      // Per-line loss gains: mid g_i and bass-band g_bass_i, both RT60 gains
+      // clamped < 1 for stability. r_i = g_bass_i / g_i is the low-shelf ratio.
+      // 8 expf pairs at BLOCK rate (scalar expf is am335x-safe -- Network uses
+      // it; the per-sample loop below stays transcendental-free).
+      float gLine[kFdnLines];
+      float rBass[kFdnLines];
+      for (int i = 0; i < kFdnLines; i++)
+      {
+        const float Ti = (float)L[i] * invSR;   // line delay, seconds
+        float gi = expf(kFdnNeg3Ln10 * Ti / rt60Mid);
+        if (gi > kFdnGainCeil) gi = kFdnGainCeil;
+        float gb = expf(kFdnNeg3Ln10 * Ti / rt60Bass);
+        if (gb > kFdnGainCeil) gb = kFdnGainCeil;
+        gLine[i] = gi;
+        rBass[i] = gb / gi;
+      }
+
+      // Damp -> HF one-pole coefficient (0 = flat, up to ~0.7 = dark). The
+      // loss filter is g_i * one-pole-LP: DC gain g_i, HF gain
+      // g_i*(1-hf)/(1+hf) -> highs decay faster than mids.
+      const float hfCoef = 0.7f * dampN;
+      // Bass-band one-pole corner (~300 Hz), a = exp(-2*pi*fc/SR).
+      const float bassCoef = expf(-6.2831853f * kFdnBassHz * invSR);
 
       // Equal-power (sqrt-law) dry/wet: the wet is decorrelated from the
       // dry, so a linear crossfade would dip ~3 dB at center. This is the
@@ -219,17 +260,27 @@ namespace stolmine
           d[i] = mLine[i][ri];
         }
 
-        // Per-line one-pole HF damping (SoA states; the future NEON bank).
+        // Per-line loss filter (Phase 2): gain g_i + HF one-pole damping +
+        // bass low-shelf -> frequency-dependent RT60. SoA one-pole states
+        // (the future NEON bank). d[] stays RAW for the brighter wet taps;
+        // the loss-filtered signal feeds the lossless matrix.
+        float loss[kFdnLines];
         for (int i = 0; i < kFdnLines; i++)
         {
-          mDampState[i] += dampA * (d[i] - mDampState[i]);
-          d[i] = mDampState[i];
+          // HF damping one-pole (DC gain 1): lp = (1-hf)*d + hf*lp.
+          mHfLp[i] += (1.0f - hfCoef) * (d[i] - mHfLp[i]);
+          const float base = gLine[i] * mHfLp[i];   // DC -> g_i, HF -> g_i*less
+          // Bass low-shelf toward g_bass at DC (r_i = g_bass/g_i, monotonic
+          // first-order shelf so no overshoot -> stays < 1).
+          mBassLp[i] += (1.0f - bassCoef) * (base - mBassLp[i]);
+          loss[i] = base + (rBass[i] - 1.0f) * mBassLp[i];
         }
 
-        // Householder reflection: f = d - (2/N) * sum(d) = d - 0.25*sum.
-        // Orthonormal (lossless) -> stability comes from the g<1 scale.
+        // Lossless Householder reflection on the loss-filtered signal:
+        // out = loss - (2/N)*sum(loss). All decay lives in loss[]; the matrix
+        // preserves energy, so stability follows from the RT60 gain clamps.
         float s = 0.0f;
-        for (int i = 0; i < kFdnLines; i++) s += d[i];
+        for (int i = 0; i < kFdnLines; i++) s += loss[i];
         s *= 0.25f;
 
         // Write feedback + injection; accumulate the stereo wet taps.
@@ -237,10 +288,10 @@ namespace stolmine
         float wetR = 0.0f;
         for (int i = 0; i < kFdnLines; i++)
         {
-          float fb = g * (d[i] - s);
-          // Pure blow-up guard (the math already guarantees decay); this
-          // never engages in normal use, so it colors nothing. A voiced
-          // soft-saturator is a Phase-2 decision.
+          float fb = loss[i] - s;
+          // Pure blow-up guard (RT60 gains are clamped < 1, so this never
+          // engages in normal use and colors nothing). A voiced in-loop
+          // soft-saturator is a later Phase-2 item.
           if (fb > 16.0f) fb = 16.0f;
           else if (fb < -16.0f) fb = -16.0f;
 
@@ -265,7 +316,8 @@ namespace stolmine
     od::Outlet mOutR{"Out R"};
 
     od::Parameter mSize{"Size", 0.5f};    // 0..1, line-length scale (room size)
-    od::Parameter mDecay{"Decay", 0.6f};  // 0..1, loop gain (RT60)
+    od::Parameter mDecay{"Decay", 0.6f};  // 0..1, mid RT60 (log-spaced)
+    od::Parameter mBass{"Bass", 0.5f};    // 0..1, bass-decay ratio (0.5 = neutral)
     od::Parameter mDamp{"Damp", 0.3f};    // 0..1, HF damping (dark tail)
     od::Parameter mMix{"Mix", 0.35f};     // 0..1, equal-power dry/wet
 
@@ -276,7 +328,8 @@ namespace stolmine
     float mLine[kFdnLines][kFdnLineBufLen];
     float mDiff[4][kFdnDiffBufLen];
     int mDiffIdx[4];
-    float mDampState[kFdnLines];
+    float mHfLp[kFdnLines];    // per-line HF-damping one-pole state
+    float mBassLp[kFdnLines];  // per-line bass-shelf one-pole state
     int mWrite;
     float mDcX1, mDcY1;
 #endif

@@ -54,6 +54,11 @@ function Plenum:onLoadGraph(channelCount)
   tie(op, "Decay", decay, "Out")
   self:addMonoBranch("decay", decay, "In", decay, "Out")
 
+  local bass = self:addObject("bass", app.ParameterAdapter())
+  bass:hardSet("Bias", 0.5)
+  tie(op, "Bass", bass, "Out")
+  self:addMonoBranch("bass", bass, "In", bass, "Out")
+
   local damp = self:addObject("damp", app.ParameterAdapter())
   damp:hardSet("Bias", 0.3)
   tie(op, "Damp", damp, "Out")
@@ -89,6 +94,17 @@ function Plenum:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.6
     },
+    bass = GainBias {
+      button = "bass",
+      description = "Bass Decay",
+      branch = self.branches.bass,
+      gainbias = self.objects.bass,
+      range = self.objects.bass,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.5
+    },
     damp = GainBias {
       button = "damp",
       description = "Damp",
@@ -112,7 +128,7 @@ function Plenum:onLoadViews()
       initialBias = 0.35
     }
   }, {
-    expanded = { "size", "decay", "damp", "mix" },
+    expanded = { "size", "decay", "bass", "damp", "mix" },
     collapsed = {}
   }
 end

@@ -96,15 +96,103 @@ loop, and the per-line filters are an SoA bank (objdump the .o). am335x rails:
 every graphic virtual inline, file-level no-tree-vectorize, class-member work
 buffers (no stack NEON :64 trap), whole-.o hint scan.
 
-## Phasing
+## Phased build-out (detailed roadmap)
 
-1. **Core POC**: N=8 Householder FDN, fixed prime delays, per-line low+high-shelf
-   damping, 3-4 input allpasses. Get it dense, smooth, and NEON-clean. A/B the
-   tail vs Fabula/yrn1; confirm CPU well under 20% stereo.
-2. **Voicing**: delay tunings (Erbe ratios as a start), matrix choice
-   (Householder vs Hadamard), decay/damping curves, optional block-rate delay mod.
-3. **Spectral flavor**: pick option 2 (band-split) or option 3 (Sujet STFT send)
-   once the core sings. Option 3 recycles Sujet.
+The Phase-1 scaffold is a *correct* FDN but a minimal one: it recirculates and
+decays, but almost all of the character work that separates a lush, believable
+reverb from a clean-but-ringy delay net is still ahead. What follows is the full
+scope, ordered by how much each item changes the SOUND.
+
+### Phase 1 - core POC  [DONE - spreadsheet 2.8.3.5, unit "Plenum", atom FDNTank.h]
+
+8-line Householder FDN (`f = d - 0.25*sum`), 4-stage Schroeder input diffuser,
+per-line one-pole HF damping, DC-blocked mono feed, decorrelated +/-1 stereo
+output taps (one shared tank -> true stereo), equal-power dry/wet. Scalar,
+am335x-safe (zero q-reg / alignment hints). Controls: Size/Decay/Damp/Mix.
+
+Its minimality, and where each gap is addressed:
+- Decay is frequency-flat AND length-uniform (one HF filter; one shared loop
+  gain across lines of different length) -> booms in the bass, RT60 uncontrolled
+  -> **Phase 2a/2b**.
+- No modulation -> fixed eigenfrequencies -> metallic ring on sustained/long
+  tails -> **Phase 2d**.
+- Mono-summed input, no predelay, fixed diffusion, no wet tone -> **Phase 2d**.
+- Scalar DSP -> **Phase 4** (NEON).
+- No spectral-flavor layer (the concept's differentiator) -> **Phase 3**.
+
+### Phase 2 - voicing: the jump from "delay net" to "reverb"  [IN PROGRESS]
+
+**2a. RT60-based per-line gain (replaces the uniform loop gain).**
+A single `g` across lines of different length means short lines decay faster in
+wall-clock time -> the tail's spectral/temporal balance drifts and RT60 isn't a
+real control. Fix: per line, `g_i = 10^(-3 * T_i / RT60)` where `T_i = L_i / SR`
+(seconds). Equivalently `g_i = exp(-6.907755 * T_i / RT60)`. Now every line
+reaches -60 dB at the same wall-clock time -> a uniform, tuned tail. The
+Householder matrix stays purely lossless; ALL decay comes from the per-line
+loss filters. `g_i` computed at BLOCK rate (8 expf/block; block-rate scalar expf
+is am335x-safe - Network.h uses one). Clamp `g_i < 0.9995`.
+
+**2b. Frequency-dependent loss filter per line (Jot absorptive filter).**
+The per-line loss becomes a first-order shelving filter with three regimes:
+- **Mid** gain `g_i` (from 2a).
+- **High**: a one-pole LP folds HF damping into the loss:
+  `lp_i = (1-hf)*d_i + hf*lp_i; base = g_i * lp_i` -> DC gain `g_i`, HF gain
+  `g_i*(1-hf)/(1+hf)`. `hf` from the Damp control (0..~0.7).
+- **Low**: a low-shelf toward a SEPARATE bass gain `g_bass_i` computed from a
+  bass RT60 = `RT60 * bassRatio`. `r_i = g_bass_i / g_i`;
+  `bassLp_i = (1-bA)*base + bA*bassLp_i; out = base + (r_i - 1)*bassLp_i`.
+  At DC -> `g_bass_i` (bass rings longer/shorter), at HF -> unchanged. `bA` is a
+  fixed ~300 Hz one-pole corner; `bassRatio` from a new **Bass** control
+  (`2^((bass-0.5)*2)` ~ 0.25x..4x, default 0.5 = neutral). Stable by
+  construction because `g_bass_i` is itself an RT60 gain clamped < 0.9995.
+This is the design note's ranked-#1 spectral element ("spectral RT60"), and it
+is exactly yrn1/Erbe's per-line 3-band EQ done as a compact shelving pair.
+
+**2c. Perceptual Decay -> RT60 curve.** Map Decay 0..1 log-spaced to
+RT60 ~0.2..30 s (`0.2 * 150^decay`), so the knob's travel is musical instead of
+crammed near max (the Phase-1 linear `g = decay*0.97` put all the action at the
+top).
+
+  [2a-2c are the current work; they add one control -> Size/Decay/Bass/Damp/Mix.]
+
+**2d. The rest of voicing (next, after the decay pass auditions):**
+- **Delay-length modulation + fractional reads.** Slow, decorrelated per-line
+  delay wobble to break the fixed eigenfrequencies (de-metalize the tail) and to
+  smooth Size sweeps (currently block-rate integer length recompute -> zipper).
+  Needs fractional (linear/allpass-interpolated) reads; currently integer taps.
+- **Diffusion control** (allpass g and/or stage count; fixed at 0.5 now).
+- **Predelay** line (gap before the tail).
+- **True-stereo input** injection (currently mono-summed -> loses input width).
+- **Wet tone**: HPF (keep rumble out; Fabula has one) + LPF / global tilt.
+- **Matrix A/B**: Householder vs Hadamard/FWHT (density/coloration differ - the
+  note wants both prototyped).
+- Optional in-loop soft-saturator / Spiral governor ([[feedback_spiral_feedback_governor]])
+  for glue + safely higher feedback (currently only a +/-16 blow-up guard).
+
+### Phase 3 - spectral flavor layer (the concept's differentiator)
+
+Ranked cheapest-first (see "The spectral element" section above):
+1. Per-line filters as spectral control (the Phase-2b shelves are the start).
+2. **Band-split parallel FDNs** -> explicit per-band RT60 as a control surface.
+3. **STFT send** reusing zaum/STFTSpectral (Sujet) Space-width + Bloom-shimmer,
+   kept OUT of the recirculation (frame latency would washout the loop).
+Character features that live here too: **Freeze / infinite hold** (g_i -> 1, cut
+input), **shimmer** (pitch in the loop), wet **ducking** under dry input.
+
+### Phase 4 - performance (NEON)
+
+The whole reason for a custom atom. Vectorize the matrix (reduce + broadcast-
+subtract), the per-line loss-filter bank (SoA one-poles + shelves ->
+[[feedback_neon_soa_svf_bank]]), and the output dot-products. Contiguous
+fixed-delay reads make this vectorize where Fabula's gathers could not. Then
+actually measure CPU vs the native-object FDN ~20% stereo target.
+
+### Phase 5 - UI / UX
+
+Custom overview + a decay/spectral viz; expansion views; readouts in real units
+(RT60 in seconds, Size in ms); an xform/randomize "re-roll a room"
+(Pecto/Fabula pattern); serialize any added internal state; final habitat name
+(Plenum is provisional).
 
 ## Gotchas / risks
 
