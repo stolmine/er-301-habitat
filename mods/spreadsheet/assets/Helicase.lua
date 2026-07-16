@@ -165,7 +165,7 @@ function Helicase:onLoadViews()
     branch = self.branches.f0,
     gainbias = self.objects.f0,
     range = self.objects.f0,
-    biasMap = f0Map,
+    biasMap = Encoder.getMap("oscFreq"),
     biasUnits = app.unitHertz,
     biasPrecision = 1,
     initialBias = 110.0

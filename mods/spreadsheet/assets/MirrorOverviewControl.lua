@@ -74,7 +74,7 @@ function MirrorOverviewControl:init(args)
     return m
   end)()
 
-  self.f0Readout       = makeReadout(args.fundamental, f0Map, app.unitHertz, 1, col1)
+  self.f0Readout       = makeReadout(args.fundamental, Encoder.getMap("oscFreq"), app.unitHertz, 1, col1)
   self.formantReadout  = makeReadout(args.formant,     f0Map, app.unitHertz, 1, col2)
   self.feedbackReadout = makeReadout(args.feedback,    fbMap, app.unitNone,  2, col3)
 
