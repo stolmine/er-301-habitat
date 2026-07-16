@@ -169,15 +169,90 @@ top).
 - Optional in-loop soft-saturator / Spiral governor ([[feedback_spiral_feedback_governor]])
   for glue + safely higher feedback (currently only a +/-16 blow-up guard).
 
-### Phase 3 - spectral flavor layer (the concept's differentiator)
+### Phase 3 - spectral flavor layer: the coupled filterbank vocoder [SPEC'd]
 
-Ranked cheapest-first (see "The spectral element" section above):
-1. Per-line filters as spectral control (the Phase-2b shelves are the start).
-2. **Band-split parallel FDNs** -> explicit per-band RT60 as a control surface.
-3. **STFT send** reusing zaum/STFTSpectral (Sujet) Space-width + Bloom-shimmer,
-   kept OUT of the recirculation (frame latency would washout the loop).
-Character features that live here too: **Freeze / infinite hold** (g_i -> 1, cut
-input), **shimmer** (pitch in the loop), wet **ducking** under dry input.
+Chosen design (interviewed 2026-07-16). Of the three ranked options, we take a
+variant of #3 built on a **6-8 band SVF channel vocoder** rather than an STFT
+(am335x-affordable, low-latency, NEON-friendly, reuses Tomograph/SoA-SVF; the
+full STFT is deferred to a CM4-class "quality" variant). It is **COUPLED**, not
+layered: the processed spectrum refeeds the tank input at low level and the
+time-domain FDN re-densifies it -> spectral as a *modulator* of a strong time
+engine, never the washy engine Sujet was.
+
+**Signal flow (coupling):**
+```
+in -> diffuser -> [ FDN tank ] -> wet out
+                     ^      |
+                     |      v  (mono tap of the tank field)
+                     +-- 6-8 band SVF vocoder <-+
+                          (refeed at level that rises with the macro)
+```
+
+**The one macro ("Spectral", provisional name) - a continuous morph through 5
+stations, freeze at the top.** The knob is BOTH a refeed-amount ramp (0 = send
+off = the plain reverb) AND a character journey; adjacent stations
+CONTINUOUSLY crossfade (no flat zones) in the envelope/gain domain:
+```
+0.00  clean            (send off, refeed 0)
+0.25  contour / tilt   (spectral coloration of the refed energy)
+0.50  gate / sparkle   (drop quiet bands -> sparse, crystalline)
+0.75  bloom / smear    (asymmetric slow per-band envelopes -> swell)
+1.00  freeze           (held magnitudes -> resynth pad, refeed near ceiling)
+```
+
+**The engine - a 6-8 band SVF channel vocoder:**
+- *Analysis:* 6-8 SVF bandpasses (SoA, NEON later) -> per band a band signal
+  `b_k` and an envelope `env_k` (rectify + one-pole).
+- *Per-band station transforms* (all operate on env / band gain, so they
+  crossfade cleanly):
+  - **Contour:** `gain_k = tilt(f_k)` - spectral tilt across the bands.
+  - **Gate:** `gain_k = softgate(env_k, threshold)` - drop quiet bands.
+  - **Bloom:** `gain_k` driven by an ASYMMETRIC-smeared env (slow attack/
+    release) - swelling.
+  - **Freeze:** latch `env_k` (hold magnitudes) and RESYNTHESIZE
+    `excitation_k * heldEnv_k`. (User chose the resynth freeze over an
+    FDN-unity self-freeze: purer/glassier hold, and it keeps the FDN loop gain
+    fixed so the coupling cannot run away - freeze is bounded resynth energy,
+    not a unity-gain tank.)
+- *Resynthesis:* crossfade "live band signal * gain" (natural; low/mid knob)
+  -> "excitation * held magnitude" (freeze; top). Excitation = band-limited
+  noise and/or band-center oscillators (voicing choice - noise = airy pad,
+  sines = glassy tonal pad). The refed signal need not sound natural alone; the
+  FDN re-densifies it.
+- *Sum bands -> soft-limited refeed* into the tank input.
+
+**Controls (macro + hidden depth):**
+- Top level: **Spectral** macro (0..1) - the 6th control (Size/Decay/Bass/Damp/
+  Mix + Spectral).
+- Expansion / hidden subs:
+  - **Refeed ceiling / intensity** - how hard the coupling drives at max (how
+    close freeze gets to infinite, overall spectral presence).
+  - **Spectral tilt / voice** - bright<->dark of the refed spectrum, whole
+    journey.
+  - **Spectral focus** - rolls the 6-8 band CENTER FREQUENCIES around
+    (compress toward low / spread wide / shift up) -> a movable spectral lens,
+    not a fixed grid. The spectral operations then act on wherever the focus
+    sits.
+
+**Stability / CPU:** resynth-freeze keeps the tank loop gain as Decay sets it;
+the refeed only adds bounded, soft-limited energy -> no runaway. Bypass the
+whole vocoder when the macro is 0. 6-8 SVF bands + envelopes + resynth is
+am335x-affordable; NEON the SVF bank later (SoA, [[feedback_neon_soa_svf_bank]]).
+
+**Build order:**
+- **P3.1** - 6-8 band SVF analysis + coupling plumbing (mono tank tap, soft-
+  limited refeed), macro = amount + contour/tilt only. Get the loop stable and
+  audible; confirm the coupling densifies rather than rings.
+- **P3.2** - gate + bloom envelope transforms + the continuous-morph crossfade.
+- **P3.3** - resynth freeze (excitation + held magnitudes) at the top; voice the
+  excitation.
+- **P3.4** - hidden subs (refeed ceiling, tilt/voice, spectral focus).
+- **P3.5** - NEON the SVF bank + resynth; measure CPU.
+
+Deferred to a later/CM4 variant: the full STFT (Sujet reuse) as a heavier
+"quality" spectral mode; band-split parallel FDNs (demoted - mostly "EQ'd
+decay", which the per-line shelves already approximate, for far more CPU);
+shimmer (time-domain in-loop pitch shift) as a separate future intervention.
 
 ### Phase 4 - performance (NEON)
 
