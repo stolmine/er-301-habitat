@@ -23,6 +23,15 @@ local function floatMap(min, max)
   return map
 end
 
+-- Normalized (0..1 / -1..1) controls: framework standard coarse step 0.01
+-- (= Encoder.getMap("[0,1]")/("[-1,1]")). floatMap's coarser 0.1 stays on the
+-- level/time/feedback controls that want it.
+local function normMap(min, max)
+  local map = app.LinearDialMap(min, max)
+  map:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return map
+end
+
 local function intMap(min, max)
   local map = app.LinearDialMap(min, max)
   map:setSteps(4, 1, 0.25, 0.25)
@@ -63,17 +72,17 @@ local xformTargetNames = {
   "reset"
 }
 
-local mixMap = floatMap(0, 1)
+local mixMap = normMap(0, 1)
 -- Default timeMap; rebuilt in onLoadViews to match buffer size
 local timeMap = floatMap(0.01, 20.0)
 local feedbackMap = floatMap(0, 0.95)
-local feedbackToneMap = floatMap(-1, 1)
+local feedbackToneMap = normMap(-1, 1)
 local tapCountMap = intMap(1, 8)
 local skewMap = floatMap(-2, 2)
-local grainSizeMap = floatMap(0, 1)
+local grainSizeMap = normMap(0, 1)
 local inputLevelMap = floatMap(0, 4)
 local outputLevelMap = floatMap(0, 4)
-local tanhMap = floatMap(0, 1)
+local tanhMap = normMap(0, 1)
 
 local MultitapDelay = Class {}
 MultitapDelay:include(Unit)
@@ -784,11 +793,11 @@ function MultitapDelay:onLoadViews()
       funcParam = self.objects.xformTarget:getParameter("Bias"),
       paramALabel = "depth",
       factorParam = self.objects.xformDepth:getParameter("Bias"),
-      factorMap = floatMap(0, 1),
+      factorMap = normMap(0, 1),
       factorPrecision = 2,
       paramBParam = self.objects.xformSpread:getParameter("Bias"),
       paramBLabel = "sprd",
-      paramBMap = floatMap(0, 1),
+      paramBMap = normMap(0, 1),
       paramBPrecision = 2
     }
   }, {

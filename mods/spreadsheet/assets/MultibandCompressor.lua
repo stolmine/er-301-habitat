@@ -17,21 +17,29 @@ local function floatMap(min, max)
   return map
 end
 
+-- Normalized (0..1 / -1..1) controls: framework standard coarse step 0.01
+-- (= Encoder.getMap("[0,1]")/("[-1,1]")). floatMap coarse 0.1 stays on levels.
+local function normMap(min, max)
+  local map = app.LinearDialMap(min, max)
+  map:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return map
+end
+
 local driveMap = (function()
   local m = app.LinearDialMap(0, 4)
   m:setSteps(0.5, 0.1, 0.01, 0.001)
   return m
 end)()
 
-local toneMap = floatMap(0, 1)
+local toneMap = normMap(0, 1)
 local toneFreqMap = (function()
   local m = app.LinearDialMap(20, 20000)
   m:setSteps(1000, 100, 10, 1)
   return m
 end)()
 
-local skewMap = floatMap(-1, 1)
-local mixMap = floatMap(0, 1)
+local skewMap = normMap(-1, 1)
+local mixMap = normMap(0, 1)
 local outputMap = floatMap(0, 2)
 local weightMap = (function()
   local m = app.LinearDialMap(0.1, 4)
@@ -51,7 +59,7 @@ local ratioMap = (function()
   return m
 end)()
 
-local speedMap = floatMap(0, 1)
+local speedMap = normMap(0, 1)
 
 local attackMap = (function()
   local m = app.LinearDialMap(0.0001, 0.1)

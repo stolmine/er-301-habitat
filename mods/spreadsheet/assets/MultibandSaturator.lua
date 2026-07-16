@@ -27,6 +27,14 @@ local function floatMap(min, max)
   return map
 end
 
+-- Normalized (0..1 / -1..1) controls: framework standard coarse step 0.01
+-- (= Encoder.getMap("[0,1]")/("[-1,1]")). floatMap coarse 0.1 stays on levels.
+local function normMap(min, max)
+  local map = app.LinearDialMap(min, max)
+  map:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return map
+end
+
 local driveMap = (function()
   local map = app.LinearDialMap(0, 16)
   map:setSteps(1, 0.1, 0.01, 0.01)
@@ -39,10 +47,10 @@ local skewMap = (function()
   return map
 end)()
 
-local mixMap = floatMap(0, 1)
+local mixMap = normMap(0, 1)
 local bandLevelMap = floatMap(0, 2)
-local amtMap = floatMap(0, 1)
-local biasMap = floatMap(-1, 1)
+local amtMap = normMap(0, 1)
+local biasMap = normMap(-1, 1)
 local weightMap = (function()
   local map = app.LinearDialMap(0.1, 4)
   map:setSteps(0.5, 0.1, 0.01, 0.01)
@@ -53,7 +61,7 @@ local freqMap = (function()
   map:setSteps(1000, 100, 10, 1)
   return map
 end)()
-local morphMap = floatMap(0, 1)
+local morphMap = normMap(0, 1)
 local qMap = (function()
   local map = app.LinearDialMap(0.5, 20)
   map:setSteps(1, 0.1, 0.01, 0.01)
@@ -70,15 +78,15 @@ local typeMap = (function()
   map:setRounding(1)
   return map
 end)()
-local toneAmtMap = floatMap(-1, 1)
+local toneAmtMap = normMap(-1, 1)
 local toneFreqMap = (function()
   local map = app.LinearDialMap(50, 5000)
   map:setSteps(100, 10, 1, 1)
   return map
 end)()
-local compMap = floatMap(0, 1)
+local compMap = normMap(0, 1)
 local outputMap = floatMap(0, 4)
-local tanhMap = floatMap(0, 1)
+local tanhMap = normMap(0, 1)
 local scHpfMap = (function()
   local map = app.LinearDialMap(0, 1)
   map:setSteps(1, 1, 1, 1)

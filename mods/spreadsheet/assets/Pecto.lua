@@ -16,6 +16,16 @@ local function floatMap(min, max)
   return map
 end
 
+-- Normalized (0..1 / -1..1) controls: framework standard coarse step 0.01
+-- (matches Encoder.getMap("[0,1]")/("[-1,1]"): superCoarse 0.1, COARSE 0.01,
+-- fine 0.001, superFine 0.0001). Use for any 0..1 / -1..1 control; floatMap's
+-- coarser 0.1 stays on the level/gain faders.
+local function normMap(min, max)
+  local map = app.LinearDialMap(min, max)
+  map:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return map
+end
+
 local function intMap(min, max)
   local map = app.LinearDialMap(min, max)
   map:setSteps(4, 1, 0.25, 0.25)
@@ -29,11 +39,11 @@ local sizeMap = (function()
   return map
 end)()
 
-local feedbackMap = floatMap(-0.99, 0.99)
-local mixMap = floatMap(0, 1)
+local feedbackMap = normMap(-0.99, 0.99)
+local mixMap = normMap(0, 1)
 local inputLevelMap = floatMap(0, 4)
 local outputLevelMap = floatMap(0, 4)
-local tanhMap = floatMap(0, 1)
+local tanhMap = normMap(0, 1)
 local densityMap = intMap(1, 24)
 
 local xformTargetNames = {
@@ -224,7 +234,7 @@ function Pecto:onLoadViews()
       funcParam = self.objects.xformTarget:getParameter("Bias"),
       paramALabel = "depth",
       factorParam = self.objects.xformDepth:getParameter("Bias"),
-      factorMap = floatMap(0, 1),
+      factorMap = normMap(0, 1),
       factorPrecision = 2
     },
     mix = MixControl {

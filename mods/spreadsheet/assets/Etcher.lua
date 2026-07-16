@@ -18,6 +18,14 @@ local function floatMap(min, max)
   return map
 end
 
+-- Normalized (0..1 / -1..1) controls: framework standard coarse step 0.01
+-- (= Encoder.getMap("[0,1]")/("[-1,1]")). floatMap coarse 0.1 stays on levels.
+local function normMap(min, max)
+  local map = app.LinearDialMap(min, max)
+  map:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return map
+end
+
 local function intMap(min, max)
   local map = app.LinearDialMap(min, max)
   map:setSteps(4, 1, 0.25, 0.25)
@@ -25,11 +33,11 @@ local function intMap(min, max)
   return map
 end
 
-local inputMap = floatMap(-1, 1)
-local skewMap = floatMap(-1, 1)
+local inputMap = normMap(-1, 1)
+local skewMap = normMap(-1, 1)
 local segCountMap = intMap(4, 32)
-local levelMap = floatMap(-1, 1)
-local deviationMap = floatMap(0, 1)
+local levelMap = normMap(-1, 1)
+local deviationMap = normMap(0, 1)
 
 local devScopeMap = (function()
   local m = app.LinearDialMap(0, 3)
