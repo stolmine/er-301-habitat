@@ -1374,3 +1374,16 @@ note = """Two designs seen:
 Open problem - GATES: with per-voice samples, each voice needs its own gate one way or another. Round-robin distribution from a single gate would mean only one sample plays at a time (defeats poly). Real per-voice gating likely needs a MIDI implementation, so (B) may have to wait for MIDI. Capture both designs; (A) is buildable now, (B)'s gate story is the blocker.
 
 Refs: VariSpeed slice-param mapping (v/oct | index | nearest); tomf Polygon series; a future MIDI unit for per-voice gates."""
+
+[[item]]
+id = "viz-offscreen-gate-all"
+title = "Bring the offscreen-viz gate to all spreadsheet units with a DSP-side visualization"
+status = "todo"
+stamped = "2026-07-15T20:23:24-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "each spreadsheet unit whose graphic is fed by per-sample (or per-frame) DSP-side analysis skips that work when its overview/viz ply is off screen; measure a CPU drop with the viz hidden, no change with it shown, and no audio difference either way." }
+note = """Generalize Fabula's viz-visibility gate (spreadsheet 2.8.3.1) to every spreadsheet unit that does DSP-side work purely to feed a graphic. Pattern: the graphic calls op->vizPing() in draw() to top up a heartbeat; process() counts it down at BLOCK rate and skips the analyzer/tap when it expires (kVizHeartbeatBlocks ~256 blocks). vizActive is block-constant so the per-sample guard is a cheap predictable branch (safe on am335x - it is a data-constant bool, not a runtime dispatch, see [[feedback_runtime_branched_dsp_dispatch]]). Zero audio impact - the gated work only ever fed the graphic.
+
+Biggest wins (FFT per frame is expensive and pure UI): Parfait (MultibandSaturator + SpectrumGraphic), Impasto (MultibandCompressor + CompressorSpectrumGraphic), and any Spectrogram/SpectrumGraphic user. Also worth gating: Rauschen (phase space), Helicase (orbital/phase/curve), Mirror (phosphor phase space), Ngoma (DrumCube), Visadhara (corona), Network (overview). Skip units whose graphic only reads static/latched state (no per-sample DSP work).
+
+Ref impl: mods/spreadsheet/APFTank.h (mVizHeartbeat + vizPing + vizActive gate) and FabricGraphic.h (vizPing on draw). Caution: keep the ping cheap and the gate block-constant; do not put per-sample branches on a runtime tier. See [[feedback_viz_encoder_capture_architectural]]."""
