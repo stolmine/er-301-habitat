@@ -38,6 +38,27 @@ and, per the CPU note below, cheap to reproduce.
 Sources: analoguehaven.com/the-harvestman/model-1873/ ; postmodular.co.uk
 /modules/bionic-lester/ ; modulargrid.net IME Bionic Lester.
 
+## Requirement: audio-rate modulation from the start (structural)
+
+A filter is only as good as its FM. Cutoff AND resonance (and ideally the switch
+clock / aliasing) must be modulatable at **audio rate (per sample)**, not block
+rate. This is a from-day-one architectural decision, not a bolt-on.
+
+The ER-301 has a Parameter/Inlet split: an `od::Parameter` updates per BLOCK
+(`ParameterAdapter` + `tie` -> block-rate, "flappy" under fast mod), while an
+`od::Inlet` carries a per-SAMPLE buffer (`GainBias` + `connect` -> audio-rate).
+So every audio-rate-modulatable target must be an `od::Inlet` read per sample in
+`process()`, not a `Parameter.value()` read once per block
+([[feedback_inlet_vs_parameter_audio_rate_mod]]; Canals Span/Quality are the
+audio-rate reference). Consequence for this build: the SVF coefficient update
+has to run per sample from inlet buffers (cutoff, resonance, FM), which changes
+the DSP loop shape and the CPU budget - design the coefficient recompute to be
+cheap per sample (or a fast per-sample approx) from the outset.
+
+Detailed research of how the built-in units and SDK handle this is being done by
+a dispatched agent -> findings land in planning/audio-rate-modulation-notes.md
+and fold back into this note.
+
 ## Modeling approach
 
 1. **Linear core = MF10-class universal SVF biquad**, derivable from the
