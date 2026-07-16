@@ -54,6 +54,9 @@
 #include "MirrorPhosphorGraphic.h"
 #include "APFTank.h"
 #include "FabricGraphic.h"
+// FDNTank: NEON-oriented feedback-delay-network reverb (working name).
+// See planning/fdn-reverb-design.md.
+#include "FDNTank.h"
 #define SWIGLUA
 %}
 
@@ -103,3 +106,4 @@
 %include "MirrorPhosphorGraphic.h"
 %include "APFTank.h"
 %include "FabricGraphic.h"
+%include "FDNTank.h"
