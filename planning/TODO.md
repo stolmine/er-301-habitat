@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**142 items** — 41 done, 3 wip, 95 todo, 3 blocked. *Rendered 2026-07-16.*
+**143 items** — 41 done, 3 wip, 96 todo, 3 blocked. *Rendered 2026-07-16.*
 
 ## DSP
 
@@ -110,6 +110,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 | ~ | `anamnesis-viz-opt` | Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf) | manual · 2026-07-11 |
 |   | `alembic-phase9-polish` | Alembic Phase 9: naming/defaults/mnemonic polish + serial stacked-waveform viz | screenshot: confirm final names/defaults/control labels + sphere-viz refinements, plus a stacked/cascading render of mWavetableLUT[64][256] with active reagent-scan frames lit and neighbors dimmed · 2026-07-09 |
+|   | `control-step-standards` | Adopt built-in dial-map standards across habitat; inventory every control vs the framework registry | manual · 2026-07-16 |
 |   | `controls-bias-modrange-audit` | Bias + mod-input range audit across all packages (CV can't reach full param range at 10x gainMap) | manual · 2026-07-09 |
 |   | `controls-discrete-encoder-rollout` | Roll out discrete-encoder ModeSelector mode to other discrete selectors (acceleration-independent) | manual · 2026-07-09 |
 |   | `controls-fader-response-audit` | Repo-wide fader response audit (dial-map shape, coarse/fine steps, encoder velocity, bias range) | manual · 2026-07-09 |
