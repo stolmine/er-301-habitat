@@ -24,7 +24,20 @@ Network is a 32-tap stereo field. Per tap: (delay, gainL, gainR) from distance +
 azimuth. Params: Size (max tap delay), **Density (fraction of reflectors
 active)**, Motion (listener orbit phase), **Connectivity (fraction of taps
 recycling)** + **Decay (feedback gain scaler)**, Wet, InputLevel. Per-tap L/R
-gains = azimuth panning. There is NO gain compensation today.
+gains = azimuth panning.
+
+**CORRECTION (2026-07-15): Network already has gain compensation.** The direct
+tap sum is normalized by tap COUNT: `densityCompGain = 2.5 * activeTaps^-0.4`
+(Network.h:683), deliberately softer than 1/sqrt(N) so ~+3.5 dB of density swell
+survives (a voicing choice = the "don't flatten the swell" point, already made).
+The feedback path has its own `1/sqrt(k)` normalization. So this is NOT an
+uncompensated unit; the real gap is COUNT-based vs ENERGY-based - the current
+comp misses level variation from geometry (Size / Motion) at CONSTANT count, and
+an energy-based makeup `sqrt(E_ref/E)` would catch that. Naive energy comp risks
+DOUBLE-compensating density (already handled by N^-0.4), so it must either
+REPLACE the count comp (unified, but re-voices the shipped unit) or target only
+the constant-count geometry residual. Un-decided; needs the user's read on
+whether/where the loudness actually swings before touching a shipped unit.
 
 So level moves with:
 - **Density / Size / geometry** -> the number of active taps and their gains,
