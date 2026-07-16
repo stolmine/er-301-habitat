@@ -68,6 +68,11 @@ function Plenum:onLoadGraph(channelCount)
   mix:hardSet("Bias", 0.35)
   tie(op, "Mix", mix, "Out")
   self:addMonoBranch("mix", mix, "In", mix, "Out")
+
+  local spectral = self:addObject("spectral", app.ParameterAdapter())
+  spectral:hardSet("Bias", 0.0)
+  tie(op, "Spectral", spectral, "Out")
+  self:addMonoBranch("spectral", spectral, "In", spectral, "Out")
 end
 
 function Plenum:onLoadViews()
@@ -126,9 +131,20 @@ function Plenum:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.35
+    },
+    spectral = GainBias {
+      button = "spec",
+      description = "Spectral",
+      branch = self.branches.spectral,
+      gainbias = self.objects.spectral,
+      range = self.objects.spectral,
+      biasMap = zeroOneMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
     }
   }, {
-    expanded = { "size", "decay", "bass", "damp", "mix" },
+    expanded = { "size", "decay", "bass", "damp", "mix", "spectral" },
     collapsed = {}
   }
 end

@@ -6,8 +6,10 @@
 // RT60-based gain + HF damping + bass low-shelf = the "spectral RT60"),
 // modulated fractional delay reads (Phase 2d: per-line slow LFOs
 // de-metalize the tail, base-delay slew gives Doppler-smooth Size
-// sweeps), a 4-stage Schroeder input diffuser, and an equal-power
-// dry/wet crossfade. Internal-stereo (one shared tank,
+// sweeps), a 4-stage Schroeder input diffuser, an equal-power dry/wet
+// crossfade, and (Phase 3.1) a coupled 8-band SVF filterbank send that
+// refeeds a spectrally-shaped tap of the tank field back into the tank.
+// Internal-stereo (one shared tank,
 // decorrelated L/R output taps) so the Lua wiring just maps In1/In2 ->
 // In L/In R and Out L/Out R -> Out1/Out2 (the Fabula pattern).
 //
@@ -118,6 +120,40 @@ namespace stolmine
     0.0f, 0.70710678f, 1.0f, 0.70710678f, 0.0f, -0.70710678f, -1.0f, -0.70710678f
   };
 
+  // ---- Phase-3 spectral layer: coupled filterbank vocoder --------------------
+  // An 8-band SVF bandpass bank analyzes a mono tap of the tank field; the
+  // (P3.1: contour/tilt) shaped sum is soft-limited and REFED into the tank
+  // input, so the FDN re-densifies the spectrally-shaped energy. The Spectral
+  // macro is both a refeed-amount ramp (0 = send off) and the station morph
+  // (P3.1 has only the contour station; gate/bloom/freeze land in P3.2-P3.3).
+  static const int kFdnBands = 8;
+  // Log-spaced band centers ~100 Hz .. 8 kHz (Hz). Fixed in P3.1; a "spectral
+  // focus" sub will roll these around in P3.4.
+  static const float kFdnBandHz[kFdnBands] = {
+    100.0f, 187.0f, 350.0f, 654.0f, 1223.0f, 2287.0f, 4277.0f, 8000.0f
+  };
+  static const float kFdnBandDamp  = 0.5f;    // SVF 1/Q (Q = 2)
+  static const float kFdnRefeedCeil = 0.25f;  // max refeed level at Spectral=1
+  static const float kFdnSpectralOn = 0.001f; // below this the bank is bypassed
+
+  // Cheap tan approximation for the TPT-SVF prewarp g = tan(pi*fc/SR), valid
+  // over the band range (arg < ~0.6 rad): x + x^3/3 + 2x^5/15. Avoids runtime
+  // tanf/sinf (feedback_package_trig_lut) and is block-rate anyway.
+  static inline float fdnTanApprox(float x)
+  {
+    const float x2 = x * x;
+    return x * (1.0f + x2 * (0.33333333f + x2 * 0.13333333f));
+  }
+
+  // Bounded soft governor for the refeed (x / (1 + |x|)): near-identity for
+  // small x, hard-bounded to +/-1 -> the coupling can never run away
+  // ([[feedback_spiral_feedback_governor]]). All hardware VFP (vabs + vdiv),
+  // no per-sample libcall (sqrtf compiles to bl <sqrtf> here, not vsqrt).
+  static inline float fdnSoftGov(float x)
+  {
+    return x / (1.0f + fabsf(x));
+  }
+
   // Proven Schroeder allpass step (carbon copy of Network's
   // networkAllpassStep): v = in + g*buf; out = -g*v + buf; buf = v.
   // Phase-scrambles, magnitude spectrum unchanged. buf is a circular
@@ -147,11 +183,14 @@ namespace stolmine
       addParameter(mBass);
       addParameter(mDamp);
       addParameter(mMix);
+      addParameter(mSpectral);
 
       memset(mLine, 0, sizeof(mLine));
       memset(mDiff, 0, sizeof(mDiff));
       memset(mHfLp, 0, sizeof(mHfLp));
       memset(mBassLp, 0, sizeof(mBassLp));
+      memset(mSvf1, 0, sizeof(mSvf1));
+      memset(mSvf2, 0, sizeof(mSvf2));
       for (int a = 0; a < 4; a++) mDiffIdx[a] = 0;
       for (int i = 0; i < kFdnLines; i++)
       {
@@ -285,6 +324,28 @@ namespace stolmine
       const float dryG = sqrtf(1.0f - mixN);
       const float wetG = sqrtf(mixN);
 
+      // ---- Phase-3 spectral send (block rate) ----
+      float spectralN = mSpectral.value();
+      if (!(spectralN >= 0.0f)) spectralN = 0.0f;
+      if (spectralN > 1.0f) spectralN = 1.0f;
+      const bool spectralActive = spectralN > kFdnSpectralOn;
+      const float refeedLevel = spectralN * kFdnRefeedCeil;
+      // TPT-SVF bandpass coefficients per band. g = tan(pi*fc/SR) (tan approx);
+      // a1 = 1/(1 + g*(g + 1/Q)); a2 = g*a1; a3 = g*a2. Band gains are flat in
+      // P3.1 -- the contour/tilt curve and the movable focus arrive in P3.4.
+      float svfA1[kFdnBands], svfA2[kFdnBands], svfA3[kFdnBands];
+      if (spectralActive)
+      {
+        for (int b = 0; b < kFdnBands; b++)
+        {
+          const float g = fdnTanApprox(3.14159265f * kFdnBandHz[b] * invSR);
+          const float a1 = 1.0f / (1.0f + g * (g + kFdnBandDamp));
+          svfA1[b] = a1;
+          svfA2[b] = g * a1;
+          svfA3[b] = g * svfA2[b];
+        }
+      }
+
       for (int n = 0; n < FRAMELENGTH; n++)
       {
         const float dryL = inL[n];
@@ -330,6 +391,30 @@ namespace stolmine
           d[i] = s0 + frac * (s1 - s0);
         }
 
+        // ---- Phase-3 spectral send: analyze the tank field, shape, refeed ----
+        // Mono field tap -> 8-band TPT-SVF bandpass -> (P3.1) flat sum ->
+        // bounded governor -> refeed into the tank input. The FDN re-densifies
+        // the shaped energy; the governor keeps the coupling from running away.
+        float refeedInject = 0.0f;
+        if (spectralActive)
+        {
+          float tankTap = 0.0f;
+          for (int i = 0; i < kFdnLines; i++) tankTap += d[i];
+          tankTap *= 0.125f;   // 1/8 mono average
+
+          float spectralOut = 0.0f;
+          for (int b = 0; b < kFdnBands; b++)
+          {
+            const float v3 = tankTap - mSvf2[b];
+            const float v1 = svfA1[b] * mSvf1[b] + svfA2[b] * v3;   // bandpass
+            const float v2 = mSvf2[b] + svfA2[b] * mSvf1[b] + svfA3[b] * v3;
+            mSvf1[b] = 2.0f * v1 - mSvf1[b];
+            mSvf2[b] = 2.0f * v2 - mSvf2[b];
+            spectralOut += v1;   // flat band gain in P3.1 (contour = P3.4)
+          }
+          refeedInject = refeedLevel * fdnSoftGov(spectralOut);
+        }
+
         // Per-line loss filter (Phase 2): gain g_i + HF one-pole damping +
         // bass low-shelf -> frequency-dependent RT60. SoA one-pole states
         // (the future NEON bank). d[] stays RAW for the brighter wet taps;
@@ -365,7 +450,7 @@ namespace stolmine
           if (fb > 16.0f) fb = 16.0f;
           else if (fb < -16.0f) fb = -16.0f;
 
-          mLine[i][mWrite] = inject * kFdnInj[i] + fb;
+          mLine[i][mWrite] = (inject + refeedInject) * kFdnInj[i] + fb;
 
           wetL += d[i] * kFdnOutL[i];
           wetR += d[i] * kFdnOutR[i];
@@ -390,6 +475,7 @@ namespace stolmine
     od::Parameter mBass{"Bass", 0.5f};    // 0..1, bass-decay ratio (0.5 = neutral)
     od::Parameter mDamp{"Damp", 0.3f};    // 0..1, HF damping (dark tail)
     od::Parameter mMix{"Mix", 0.35f};     // 0..1, equal-power dry/wet
+    od::Parameter mSpectral{"Spectral", 0.0f}; // 0..1, coupled filterbank macro
 
   private:
     // Delay-line rings (256 KB) + diffuser + one-pole states. Class
@@ -403,6 +489,8 @@ namespace stolmine
     float mBaseDelay[kFdnLines]; // per-line slewed base delay (samples)
     float mLfoX[kFdnLines];    // per-line magic-circle LFO state (x)
     float mLfoY[kFdnLines];    // per-line magic-circle LFO state (y)
+    float mSvf1[kFdnBands];    // spectral-bank SVF state (ic1eq) per band
+    float mSvf2[kFdnBands];    // spectral-bank SVF state (ic2eq) per band
     bool mPrimed;              // base delays primed to target on first block
     int mWrite;
     float mDcX1, mDcY1;
