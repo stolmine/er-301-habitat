@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**139 items** — 40 done, 3 wip, 93 todo, 3 blocked. *Rendered 2026-07-15.*
+**140 items** — 40 done, 3 wip, 94 todo, 3 blocked. *Rendered 2026-07-15.*
 
 ## DSP
 
@@ -31,6 +31,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `mi-clouds-warps-improvements` | MI: Clouds gain-comp + further NEON (Clouds ShyFFT/SRC, Rings sympathetic/FM); Warps vocoder + drive | manual · 2026-07-09 |
 |   | `mirror-promotion` | Mirror: final habitat name + Voss-McCartney 1/f drift + wavetable frame-inventory audition | manual · 2026-07-09 |
 |   | `multiout-nlc-chaos` | NLC chaotic modulation sources (clean-room): Sloth, Chua, Hyperchaos, Squid Axon, + lower-pri | manual · 2026-07-09 |
+|   | `network-gain-compensation` | Gain compensation for Network (Fabula's makeup model, tap-weight-energy basis) | manual · 2026-07-15 |
 |   | `ngoma-cpu-optimization` | Ngoma: CPU optimization round 2 (~33% mono Cortex-A8 idle is steep) | manual · 2026-07-09 |
 |   | `ngoma-sound-tuning` | Ngoma: careful sound-tuning pass (param cross-couplings, per-partial decay, mode ratios, sub-octave) | manual · 2026-07-09 |
 |   | `open303-port` | Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit | manual · 2026-07-11 |
