@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**144 items** — 41 done, 4 wip, 96 todo, 3 blocked. *Rendered 2026-07-16.*
+**145 items** — 41 done, 4 wip, 97 todo, 3 blocked. *Rendered 2026-07-16.*
 
 ## DSP
 
@@ -17,6 +17,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
 |   | `alembic-userbias-derivations` | Alembic Phases 7-8: per-region user-bias sub-params + Order 2/3 derivations + sample excitation | manual · 2026-07-09 |
 |   | `biome-utility-dsp-units` | biome DSP utility units: simple allpass, dome filter, frequency shifter, bitcrush/downsample | manual · 2026-07-09 |
+|   | `ca-noise-texture` | Cellular-automata granular noise texture source (Vivary) | manual · 2026-07-16 |
 |   | `canals-audiorate-and-cpu` | Canals: audio-rate Span-sweep aliasing (halfband decimator) + hardware CPU/NEON pass | manual · 2026-07-09 |
 |   | `canals-response-tuning` | Canals: SPAN/volume/low-band/Q/soft-clip response tuning against hardware capture corpus | manual · 2026-07-09 |
 |   | `drywet-crossfade-audit` | Audit all wet/dry units for the linear-crossfade center dip; switch decorrelated wets to equal-power | manual · 2026-07-15 |
