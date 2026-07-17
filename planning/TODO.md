@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**145 items** — 41 done, 5 wip, 96 todo, 3 blocked. *Rendered 2026-07-17.*
+**146 items** — 41 done, 5 wip, 97 todo, 3 blocked. *Rendered 2026-07-17.*
 
 ## DSP
 
@@ -182,6 +182,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 |   | `alembic-serialization` | Alembic Phase 6: serialize sample ref + trained per-node state + user biases | manual · 2026-07-09 |
 |   | `infra-cross-package-dep-audit` | Cross-package dependency audit — no require/%import/#include reaching into another package's tree | manual · 2026-07-09 |
+|   | `rauschen-header-only-migration` | Migrate Rauschen to header-only (COMDAT vtable) - drop Rauschen.cpp | manual · 2026-07-17 |
 | ✓ | `infra-ledger-regime` | Ledger + BDG regime stood up (gate, render, hooks, blessed entrypoint) | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-serialization-audit` | Spreadsheet-package serialization + stale-label audit (ParameterAdapter Bias round-trip, updateLabel) | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-vanilla-compat` | Habitat packages load on vanilla ER-301 firmware (non-stolmine) | manual *(attested)* · 2026-07-09 |

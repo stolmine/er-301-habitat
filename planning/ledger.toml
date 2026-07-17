@@ -1457,3 +1457,28 @@ note = """Full design note: planning/ca-wavetable-noise-design.md. Inspired-in-s
 2026-07-17 Rauschen CA FREQUENCY is emergent too (spreadsheet 2.8.3.30). Rauschen has no V/Oct for the CA, so pitch is a function of the same per-instance X/Y field, NOT wired to voctPitch: caF0 = 50 * 2^(2.4*nFreq + 3.6*Y^2), nFreq=caVNoise(px,py,caSeed+505). Field term spreads pitch per instance+position; Y^2 term lifts it with Y. Constants tuned in planning/ca-freq-tune.py (mirrors caVNoise exactly, 240 instances x 24x24 grid): ~50% of cases below 220Hz (49.0%), floor ~50Hz, low-Y median ~124Hz (93% below 220), high-Y median ~684Hz reaching ~1.3kHz p95 (2% below 220) = low weighting with upward excursions along Y, per user. Dropped the earlier V/Oct-base + caCenterOct scaffold. am335x re-verified: CellularEngine all 0/0, Rauschen::process 0 q/0 hints (powf now 6, all block-rate).
 
 2026-07-17 RESEED unit-config action (spreadsheet 2.8.3.31). Rauschen.h SWIG-visible void reseedCellular(); impl re-draws caSeed from the instance counter + caEngine.init() -> a fresh emergent personality (textures AND frequencies) on demand, no delete/reinsert. Exposed via onShowMenu: MenuHeader "Cellular" + Task "Reseed field" -> self.objects.op:reseedCellular(). Glitch-safe mid-block (bounded/masked indices, same as Etcher preset/clear tasks); am335x reseedCellular 0q/0hints (only bl memset), init 0/0. Force-cleaned swig (Rauschen.h changed). No effect on the other 11 algorithms."""
+
+[[item]]
+id = "rauschen-header-only-migration"
+title = "Migrate Rauschen to header-only (COMDAT vtable) - drop Rauschen.cpp"
+status = "todo"
+stamped = "2026-07-17T12:56:11-05:00"
+area = "infra"
+touches = ["mods/spreadsheet/Rauschen.h", "mods/spreadsheet/Rauschen.cpp"]
+verify = { kind = "manual", ref = "no Rauschen.o in testing/am335x/mods/spreadsheet/; nm of spreadsheet_swig.o shows 'vtable for stolmine::Rauschen' as W/V (weak/vague); loads on hardware" }
+note = """LOW PRIORITY / far future if ever. Rauschen defines process() (and ctor/dtor)
+out-of-line in Rauschen.cpp, so its derived vtable emits with strong linkage in a
+single .o (GCC key-function rule) instead of COMDAT. Per feedback_no_out_of_line_virtuals
+this is the crash-on-insert anti-pattern (DrumCubeGraphic, Visadhara Phase 2) and Rauschen
+is explicitly on that memory's "silently at risk" migration list. It loads today on
+linker/firmware-rebuild luck; a future firmware vtable-slot shift could hard-fault it on
+insert. Fix = move Internal struct + ctor + dtor + process() (and the CA algo block,
+already backed by the header-only CellularEngine.h) fully into Rauschen.h and delete
+Rauschen.cpp, mirroring Visadhara (the canonical all-inline pattern). Migration is
+mechanical but process() is large. Same latent risk applies to the sibling units in that
+memory's list (DrumVoice/Ngoma, Helicase, JF, Pecto, Petrichor, Etcher, Parfait, Impasto,
+Tomograph, Excel, Ballot, Larets, Blanda, Colmatage, catchall/Alembic); batch them if the
+ABI ever actually shifts. Enforced-adjacent: tools/check-graphic-virtual-defs.sh (currently
+graphic-virtuals only; extend to od::Object virtuals -- process/serialize/deserialize -- to
+flag these). Do NOT do pre-emptively; only when touching Rauschen substantially or when a
+firmware rebuild surfaces the fault."""
