@@ -213,6 +213,7 @@ namespace stolmine
       addParameter(mDamp);
       addParameter(mMix);
       addParameter(mSpectral);
+      addParameter(mWeave);
 
       memset(mLine, 0, sizeof(mLine));
       memset(mDiff, 0, sizeof(mDiff));
@@ -276,6 +277,14 @@ namespace stolmine
       float mixN = mMix.value();
       if (!(mixN >= 0.0f)) mixN = 0.0f;
       if (mixN > 1.0f) mixN = 1.0f;
+
+      // Weave = alpha: feedback-matrix morph. 1 = full Householder (dense
+      // wash), 0 = identity (each line isolated -> sparse addressable echoes).
+      // A(alpha) = I - alpha*(2/N)*11^T stays symmetric with all singular
+      // values <= 1 for alpha in [0,1] -> contractive, stable at every alpha.
+      float warpN = mWeave.value();
+      if (!(warpN >= 0.0f)) warpN = 0.0f;
+      if (warpN > 1.0f) warpN = 1.0f;
 
       const float invSR = 1.0f / globalConfig.sampleRate;
 
@@ -513,12 +522,13 @@ namespace stolmine
           loss[i] = base + (rBass[i] - 1.0f) * mBassLp[i];
         }
 
-        // Lossless Householder reflection on the loss-filtered signal:
-        // out = loss - (2/N)*sum(loss). All decay lives in loss[]; the matrix
-        // preserves energy, so stability follows from the RT60 gain clamps.
+        // Feedback matrix, morphed by Weave (alpha): out = loss - alpha*(2/N)*
+        // sum(loss). alpha=1 -> Householder (dense wash); alpha=0 -> identity
+        // (isolated lines = sparse addressable echoes). Contractive at every
+        // alpha, so stability still follows from the RT60 gain clamps.
         float s = 0.0f;
         for (int i = 0; i < kFdnLines; i++) s += loss[i];
-        s *= 0.25f;
+        s *= 0.25f * warpN;
 
         // Write feedback + injection; accumulate the stereo wet taps.
         float wetL = 0.0f;
@@ -558,6 +568,7 @@ namespace stolmine
     od::Parameter mDamp{"Damp", 0.3f};    // 0..1, HF damping (dark tail)
     od::Parameter mMix{"Mix", 0.35f};     // 0..1, equal-power dry/wet
     od::Parameter mSpectral{"Spectral", 0.0f}; // 0..1, coupled filterbank macro
+    od::Parameter mWeave{"Weave", 1.0f};  // 0..1, feedback topology morph (alpha)
 
   private:
     // Delay-line rings (256 KB) + diffuser + one-pole states. Class
