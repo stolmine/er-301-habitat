@@ -53,6 +53,7 @@ function Vivary:onLoadGraph(channelCount)
   end
 
   param("Freq", "freq", 110.0)
+  param("Family", "family", 0.0)
   param("Rule", "rule", 0.0)
   param("Res", "res", 0.24)
   param("Evolve", "evolve", 1.0)
@@ -79,6 +80,17 @@ function Vivary:onLoadViews()
       biasUnits = app.unitHertz,
       biasPrecision = 1,
       initialBias = 110.0
+    },
+    family = GainBias {
+      button = "fam",
+      description = "Family (bin/3/4-state)",
+      branch = self.branches.family,
+      gainbias = self.objects.family,
+      range = self.objects.family,
+      biasMap = normMap(),
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
     },
     rule = GainBias {
       button = "rule",
@@ -136,7 +148,7 @@ function Vivary:onLoadViews()
       initialBias = 0.0
     }
   }, {
-    expanded = { "tune", "freq", "rule", "res", "evolve", "reset", "smooth" },
+    expanded = { "tune", "freq", "family", "rule", "res", "evolve", "reset", "smooth" },
     collapsed = {}
   }
 end
