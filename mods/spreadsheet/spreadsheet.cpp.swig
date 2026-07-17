@@ -57,6 +57,9 @@
 // FDNTank: NEON-oriented feedback-delay-network reverb (working name).
 // See planning/fdn-reverb-design.md.
 #include "FDNTank.h"
+// Vivary: 1D cellular-automata granular noise texture (POC).
+// See planning/ca-wavetable-noise-design.md.
+#include "Vivary.h"
 #define SWIGLUA
 %}
 
@@ -107,3 +110,4 @@
 %include "APFTank.h"
 %include "FabricGraphic.h"
 %include "FDNTank.h"
+%include "Vivary.h"

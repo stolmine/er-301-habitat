@@ -24,6 +24,7 @@ return {
     { title = "Canals",       moduleName = "Canals",              category = "Spreadsheet", keywords = "filter, resonant, svf, three sisters, crossover, formant, canals" },
     { title = "Mirror",       moduleName = "Mirror",              category = "Spreadsheet", keywords = "oscillator, alias, fold, sync, complex, voice, generator, source, mirror" },
     { title = "Fabula",       moduleName = "Fabula",              category = "Spreadsheet", keywords = "reverb, room, hall, dattorro, algorithmic, tank, allpass, space, freeze, fabula" },
-    { title = "Plenum",       moduleName = "Plenum",              category = "Spreadsheet", keywords = "reverb, fdn, feedback, delay, network, hall, householder, space, plenum" }
+    { title = "Plenum",       moduleName = "Plenum",              category = "Spreadsheet", keywords = "reverb, fdn, feedback, delay, network, hall, householder, space, plenum" },
+    { title = "Vivary",       moduleName = "Vivary",              category = "Spreadsheet", keywords = "noise, source, cellular, automata, wavetable, texture, generative, rule, vivary" }
   }
 }
