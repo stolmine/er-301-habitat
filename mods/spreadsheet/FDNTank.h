@@ -8,7 +8,10 @@
 // de-metalize the tail, base-delay slew gives Doppler-smooth Size
 // sweeps), a 4-stage Schroeder input diffuser, an equal-power dry/wet
 // crossfade, and (Phase 3.1) a coupled 8-band SVF filterbank send that
-// refeeds a spectrally-shaped tap of the tank field back into the tank.
+// refeeds a spectrally-shaped tap of the tank field back into the tank
+// -- with decorrelated per-band focus drift and input cross-synthesis
+// (the dry input's per-band envelope keys the refeed, so the reverb
+// tracks your playing; keying releases toward freeze as the macro rises).
 // Internal-stereo (one shared tank,
 // decorrelated L/R output taps) so the Lua wiring just maps In1/In2 ->
 // In L/In R and Out L/Out R -> Out1/Out2 (the Fabula pattern).
@@ -153,6 +156,15 @@ namespace stolmine
   static const float kFdnFocusDepthOct = 0.8f;  // +/- 0.8 octave per band
   static const float kFdnPrewarpMax    = 0.55f; // cap tan-approx arg (validity)
 
+  // Input cross-synthesis (vocoder keying): a second 8-band analysis of the DRY
+  // input (same band centers) follows each band's envelope; the tank carrier is
+  // gated per band by that envelope so the reverb spectrally TRACKS the input.
+  // The keying amount is strong at low knob and RELEASES toward freeze at the
+  // top (reactive -> autonomous), via keyAmt = clamp((1-Spectral)*2).
+  static const float kFdnEnvTau    = 0.030f;  // input band envelope follower (s)
+  static const float kFdnKeyThresh = 0.02f;   // per-band gate threshold (env)
+  static const float kFdnKeySlope  = 8.0f;    // gate ramp above threshold
+
   // Cheap tan approximation for the TPT-SVF prewarp g = tan(pi*fc/SR), valid
   // over the band range (arg < ~0.6 rad): x + x^3/3 + 2x^5/15. Avoids runtime
   // tanf/sinf (feedback_package_trig_lut) and is block-rate anyway.
@@ -208,6 +220,9 @@ namespace stolmine
       memset(mBassLp, 0, sizeof(mBassLp));
       memset(mSvf1, 0, sizeof(mSvf1));
       memset(mSvf2, 0, sizeof(mSvf2));
+      memset(mInSvf1, 0, sizeof(mInSvf1));
+      memset(mInSvf2, 0, sizeof(mInSvf2));
+      memset(mInEnv, 0, sizeof(mInEnv));
       for (int b = 0; b < kFdnBands; b++)
       {
         mFocusX[b] = kFdnLfoX0[b];   // decorrelated focus-LFO start phases
@@ -382,6 +397,13 @@ namespace stolmine
           bandGain[b] = kFdnBandTiltBase[b] * sqrtf(focusMult);
         }
       }
+      // Input-envelope follower coefficient + keying amount. keyAmt holds full
+      // through the reactive lower half then releases toward freeze at the top.
+      const float envCoef = 1.0f - expf(-1.0f / (kFdnEnvTau * globalConfig.sampleRate));
+      float keyAmt = (1.0f - spectralN) * 2.0f;
+      if (keyAmt < 0.0f) keyAmt = 0.0f;
+      else if (keyAmt > 1.0f) keyAmt = 1.0f;
+      const float baseKey = 1.0f - keyAmt;   // full-pass floor (autonomous end)
 
       for (int n = 0; n < FRAMELENGTH; n++)
       {
@@ -435,6 +457,22 @@ namespace stolmine
         float refeedInject = 0.0f;
         if (spectralActive)
         {
+          // Modulator: analyze the dry input (hp) into the same 8 bands and
+          // follow each band's envelope (the vocoder's control signal).
+          for (int b = 0; b < kFdnBands; b++)
+          {
+            const float u3 = hp - mInSvf2[b];
+            const float u1 = svfA1[b] * mInSvf1[b] + svfA2[b] * u3;
+            const float u2 = mInSvf2[b] + svfA2[b] * mInSvf1[b] + svfA3[b] * u3;
+            mInSvf1[b] = 2.0f * u1 - mInSvf1[b];
+            mInSvf2[b] = 2.0f * u2 - mInSvf2[b];
+            const float mag = u1 < 0.0f ? -u1 : u1;
+            mInEnv[b] += envCoef * (mag - mInEnv[b]);
+          }
+
+          // Carrier: the tank field, keyed per band by the input envelope.
+          // effKey blends the full-pass floor (autonomous/freeze end) with the
+          // input gate (reactive end); keyAmt releases as the macro rises.
           float tankTap = 0.0f;
           for (int i = 0; i < kFdnLines; i++) tankTap += d[i];
           tankTap *= 0.125f;   // 1/8 mono average
@@ -447,7 +485,14 @@ namespace stolmine
             const float v2 = mSvf2[b] + svfA2[b] * mSvf1[b] + svfA3[b] * v3;
             mSvf1[b] = 2.0f * v1 - mSvf1[b];
             mSvf2[b] = 2.0f * v2 - mSvf2[b];
-            spectralOut += bandGain[b] * v1;   // bright tilt on the swept centers
+
+            // Soft per-band gate from the input envelope, blended by keyAmt.
+            float keyGain = (mInEnv[b] - kFdnKeyThresh) * kFdnKeySlope;
+            if (keyGain < 0.0f) keyGain = 0.0f;
+            else if (keyGain > 1.0f) keyGain = 1.0f;
+            const float effKey = baseKey + keyAmt * keyGain;
+
+            spectralOut += bandGain[b] * v1 * effKey;
           }
           refeedInject = refeedLevel * fdnSoftGov(spectralOut);
         }
@@ -526,8 +571,11 @@ namespace stolmine
     float mBaseDelay[kFdnLines]; // per-line slewed base delay (samples)
     float mLfoX[kFdnLines];    // per-line magic-circle LFO state (x)
     float mLfoY[kFdnLines];    // per-line magic-circle LFO state (y)
-    float mSvf1[kFdnBands];    // spectral-bank SVF state (ic1eq) per band
-    float mSvf2[kFdnBands];    // spectral-bank SVF state (ic2eq) per band
+    float mSvf1[kFdnBands];    // carrier (tank) SVF state (ic1eq) per band
+    float mSvf2[kFdnBands];    // carrier (tank) SVF state (ic2eq) per band
+    float mInSvf1[kFdnBands];  // modulator (input) SVF state (ic1eq) per band
+    float mInSvf2[kFdnBands];  // modulator (input) SVF state (ic2eq) per band
+    float mInEnv[kFdnBands];   // per-band input envelope (vocoder keying)
     float mFocusX[kFdnBands];  // per-band magic-circle focus LFO state (x)
     float mFocusY[kFdnBands];  // per-band magic-circle focus LFO state (y)
     bool mPrimed;              // base delays primed to target on first block
