@@ -143,11 +143,14 @@ namespace stolmine
   static const float kFdnBandTiltBase[kFdnBands] = {
     0.333f, 0.456f, 0.624f, 0.852f, 1.166f, 1.594f, 2.180f, 2.981f
   };
-  // "Spectral focus" motion: a slow magic-circle LFO sweeps ALL band centers
-  // together over +/- depth octaves so the resonant hold glides across the
-  // spectrum instead of locking to one pitch.
-  static const float kFdnFocusRateHz  = 0.11f;  // slow sweep (~9 s period)
-  static const float kFdnFocusDepthOct = 1.0f;  // +/- 1 octave
+  // "Spectral focus" motion: a slow magic-circle LFO PER BAND, each at a
+  // decorrelated rate, so the band centers drift INDEPENDENTLY (the spectrum
+  // churns) rather than sweeping coherently (which read as a phaser). Each
+  // wanders +/- depth octaves.
+  static const float kFdnFocusRateHz[kFdnBands] = {
+    0.071f, 0.089f, 0.103f, 0.127f, 0.061f, 0.113f, 0.083f, 0.097f
+  };
+  static const float kFdnFocusDepthOct = 0.8f;  // +/- 0.8 octave per band
   static const float kFdnPrewarpMax    = 0.55f; // cap tan-approx arg (validity)
 
   // Cheap tan approximation for the TPT-SVF prewarp g = tan(pi*fc/SR), valid
@@ -205,8 +208,11 @@ namespace stolmine
       memset(mBassLp, 0, sizeof(mBassLp));
       memset(mSvf1, 0, sizeof(mSvf1));
       memset(mSvf2, 0, sizeof(mSvf2));
-      mFocusX = 1.0f;   // magic-circle LFO start (phase 0)
-      mFocusY = 0.0f;
+      for (int b = 0; b < kFdnBands; b++)
+      {
+        mFocusX[b] = kFdnLfoX0[b];   // decorrelated focus-LFO start phases
+        mFocusY[b] = kFdnLfoY0[b];
+      }
       for (int a = 0; a < 4; a++) mDiffIdx[a] = 0;
       for (int i = 0; i < kFdnLines; i++)
       {
@@ -353,19 +359,19 @@ namespace stolmine
       float bandGain[kFdnBands];
       if (spectralActive)
       {
-        // Advance the slow spectral-focus LFO (magic-circle, block rate) and
-        // sweep all band centers together by focusMult = 2^(depth*lfo) octaves
-        // so the resonant hold glides instead of locking. The bright tilt is on
-        // absolute frequency, so as the bank sweeps up it brightens (tiltGlobal
-        // = sqrt(focusMult)), keeping energy off the low-mid mud.
-        const float epsF =
-          6.2831853f * kFdnFocusRateHz * (float)FRAMELENGTH * invSR;
-        mFocusX += epsF * mFocusY;
-        mFocusY -= epsF * mFocusX;
-        const float focusMult = powf(2.0f, kFdnFocusDepthOct * mFocusX);
-        const float tiltGlobal = sqrtf(focusMult);
+        // Per-band spectral-focus drift (decorrelated magic-circle LFOs, block
+        // rate): each band center wanders independently by focusMult =
+        // 2^(depth*lfo_b) octaves so the spectrum churns rather than sweeping
+        // as one (coherent motion read as a phaser). Bright tilt is on absolute
+        // frequency (sqrt(focusMult_b)) so higher-swept bands brighten -> energy
+        // stays off the low-mid mud.
         for (int b = 0; b < kFdnBands; b++)
         {
+          const float epsF =
+            6.2831853f * kFdnFocusRateHz[b] * (float)FRAMELENGTH * invSR;
+          mFocusX[b] += epsF * mFocusY[b];
+          mFocusY[b] -= epsF * mFocusX[b];
+          const float focusMult = powf(2.0f, kFdnFocusDepthOct * mFocusX[b]);
           float arg = 3.14159265f * kFdnBandHz[b] * focusMult * invSR;
           if (arg > kFdnPrewarpMax) arg = kFdnPrewarpMax;   // keep tan-approx valid
           const float g = fdnTanApprox(arg);
@@ -373,7 +379,7 @@ namespace stolmine
           svfA1[b] = a1;
           svfA2[b] = g * a1;
           svfA3[b] = g * svfA2[b];
-          bandGain[b] = kFdnBandTiltBase[b] * tiltGlobal;
+          bandGain[b] = kFdnBandTiltBase[b] * sqrtf(focusMult);
         }
       }
 
@@ -522,7 +528,8 @@ namespace stolmine
     float mLfoY[kFdnLines];    // per-line magic-circle LFO state (y)
     float mSvf1[kFdnBands];    // spectral-bank SVF state (ic1eq) per band
     float mSvf2[kFdnBands];    // spectral-bank SVF state (ic2eq) per band
-    float mFocusX, mFocusY;    // magic-circle LFO for the spectral-focus sweep
+    float mFocusX[kFdnBands];  // per-band magic-circle focus LFO state (x)
+    float mFocusY[kFdnBands];  // per-band magic-circle focus LFO state (y)
     bool mPrimed;              // base delays primed to target on first block
     int mWrite;
     float mDcX1, mDcY1;
