@@ -8,6 +8,8 @@ local ViewControl = require "Unit.ViewControl"
 local ModeSelector = require "spreadsheet.ModeSelector"
 local RauschenCutoffControl = require "spreadsheet.RauschenCutoffControl"
 local ThresholdFader = require "spreadsheet.ThresholdFader"
+local MenuHeader = require "Unit.MenuControl.Header"
+local Task = require "Unit.MenuControl.Task"
 local Encoder = require "Encoder"
 
 local ply = app.SECTION_PLY
@@ -129,6 +131,26 @@ function Rauschen:onLoadGraph(channelCount)
 
   -- V/Oct branch
   self:addMonoBranch("tune", tune, "In", tune, "Out")
+end
+
+function Rauschen:onShowMenu(objects, branches)
+  local controls = {}
+
+  -- Cellular algorithm: re-roll its emergent per-instance field (textures AND
+  -- frequencies) without deleting/reinserting the unit. No effect on the other
+  -- algorithms.
+  controls.cellularHeader = MenuHeader {
+    description = "Cellular"
+  }
+  controls.reseed = Task {
+    description = "Reseed field",
+    task = function() self.objects.op:reseedCellular() end
+  }
+
+  return controls, {
+    "cellularHeader",
+    "reseed"
+  }
 end
 
 function Rauschen:onLoadViews(objects, branches)

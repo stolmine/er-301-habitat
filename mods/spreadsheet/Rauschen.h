@@ -18,6 +18,7 @@ namespace stolmine
     // SWIG-visible
     float getOutputSample(int idx);
     int getCurrentAlgorithm();
+    void reseedCellular();   // re-roll the Cellular algo's emergent per-instance field
 
 #ifndef SWIGLUA
     virtual void process();

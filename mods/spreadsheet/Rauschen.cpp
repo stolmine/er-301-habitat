@@ -145,6 +145,17 @@ namespace stolmine
     return mpInternal->outputRing[(mpInternal->ringPos + idx) & 255];
   }
 
+  // Re-roll the Cellular algorithm's per-instance emergent field: draw the next
+  // seed from the instance counter and reset the CA state, so the whole X/Y
+  // landscape (textures + frequencies) becomes a fresh personality on demand.
+  // Bounded arrays with masked/clamped indices -> the reset is glitch-safe even
+  // if it lands mid-block (same as Etcher's preset/clear tasks).
+  void Rauschen::reseedCellular()
+  {
+    mpInternal->caSeed = caHashU(0x9E3779B9u + (g_caInstanceCounter++) * 0x85EBCA6Bu);
+    mpInternal->caEngine.init();
+  }
+
   int Rauschen::getCurrentAlgorithm()
   {
     return mpInternal->currentAlgo;
