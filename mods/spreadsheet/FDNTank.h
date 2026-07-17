@@ -157,6 +157,30 @@ namespace stolmine
     return x - x * x * x * 0.33333333f;
   }
 
+  // Cheap tan approximation for the TPT-SVF prewarp g = tan(pi*fc/SR) over the
+  // audio range (arg < ~0.6 rad): x + x^3/3 + 2x^5/15. No runtime tanf/sinf
+  // (feedback_package_trig_lut); block-rate.
+  static inline float fdnTanApprox(float x)
+  {
+    const float x2 = x * x;
+    return x * (1.0f + x2 * (0.33333333f + x2 * 0.13333333f));
+  }
+
+  // ---- Wooden-body resonator (WoodenBox-flavored) ----------------------------
+  // An inharmonic modal bank (TPT-SVF bandpasses) rung by the wet and mixed in
+  // only at the sparse (low-Weave) end, so the isolated resonators pick up a
+  // hollow wooden body. This captures WoodenBox's resonant-body essence cheaply
+  // in-atom (the real WoodenBox is a full double FDN reverb -- too heavy to nest).
+  static const int kFdnModes = 5;
+  static const float kFdnModeHz[kFdnModes] = {
+    180.0f, 296.0f, 471.0f, 683.0f, 1029.0f   // inharmonic ~1:1.6:2.6:3.8:5.7
+  };
+  static const float kFdnModeGain[kFdnModes] = {
+    1.0f, 0.8f, 0.6f, 0.45f, 0.3f             // lower modes carry the body
+  };
+  static const float kFdnModeDamp  = 0.167f;  // 1/Q, Q~6 (woody, not ringy)
+  static const float kFdnBodyDepth = 0.06f;   // body level at Weave=0 (by ear)
+
   // Proven Schroeder allpass step (carbon copy of Network's
   // networkAllpassStep): v = in + g*buf; out = -g*v + buf; buf = v.
   // Phase-scrambles, magnitude spectrum unchanged. buf is a circular
@@ -192,6 +216,8 @@ namespace stolmine
       memset(mDiff, 0, sizeof(mDiff));
       memset(mHfLp, 0, sizeof(mHfLp));
       memset(mBassLp, 0, sizeof(mBassLp));
+      memset(mBody1, 0, sizeof(mBody1));
+      memset(mBody2, 0, sizeof(mBody2));
       for (int a = 0; a < 4; a++) mDiffIdx[a] = 0;
       for (int i = 0; i < kFdnLines; i++)
       {
@@ -351,6 +377,19 @@ namespace stolmine
       const float dryG = sqrtf(1.0f - mixN);
       const float wetG = sqrtf(mixN);
 
+      // Wooden-body modal SVF coefficients (block rate) + Weave-tied mix: the
+      // body fades in toward the sparse end (bodyMix = (1-Weave)*depth).
+      float bodyA1[kFdnModes], bodyA2[kFdnModes], bodyA3[kFdnModes];
+      for (int m = 0; m < kFdnModes; m++)
+      {
+        const float g = fdnTanApprox(3.14159265f * kFdnModeHz[m] * invSR);
+        const float a1 = 1.0f / (1.0f + g * (g + kFdnModeDamp));
+        bodyA1[m] = a1;
+        bodyA2[m] = g * a1;
+        bodyA3[m] = g * bodyA2[m];
+      }
+      const float bodyMix = (1.0f - warpN) * kFdnBodyDepth;
+
       for (int n = 0; n < FRAMELENGTH; n++)
       {
         const float dryL = inL[n];
@@ -460,6 +499,24 @@ namespace stolmine
         wetL *= kFdnOutNorm * kFdnWetMakeup;
         wetR *= kFdnOutNorm * kFdnWetMakeup;
 
+        // Wooden-body resonator: an inharmonic modal bank rung by the wet, added
+        // back scaled by bodyMix (present only at the sparse end). Branchless
+        // (always run, scaled by bodyMix) per feedback_runtime_branched_dsp.
+        const float bodyIn = 0.5f * (wetL + wetR);
+        float body = 0.0f;
+        for (int m = 0; m < kFdnModes; m++)
+        {
+          const float v3 = bodyIn - mBody2[m];
+          const float v1 = bodyA1[m] * mBody1[m] + bodyA2[m] * v3;   // bandpass
+          const float v2 = mBody2[m] + bodyA2[m] * mBody1[m] + bodyA3[m] * v3;
+          mBody1[m] = 2.0f * v1 - mBody1[m];
+          mBody2[m] = 2.0f * v2 - mBody2[m];
+          body += kFdnModeGain[m] * v1;
+        }
+        body *= bodyMix;
+        wetL += body;
+        wetR += body;
+
         outL[n] = dryL * dryG + wetL * wetG;
         outR[n] = dryR * dryG + wetR * wetG;
       }
@@ -489,6 +546,8 @@ namespace stolmine
     float mBaseDelay[kFdnLines]; // per-line slewed base delay (samples)
     float mLfoX[kFdnLines];    // per-line magic-circle LFO state (x)
     float mLfoY[kFdnLines];    // per-line magic-circle LFO state (y)
+    float mBody1[kFdnModes];   // wooden-body modal SVF state (ic1eq)
+    float mBody2[kFdnModes];   // wooden-body modal SVF state (ic2eq)
     bool mPrimed;              // base delays primed to target on first block
     int mWrite;
     float mDcX1, mDcY1;
