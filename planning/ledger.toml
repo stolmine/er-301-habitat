@@ -1482,3 +1482,53 @@ ABI ever actually shifts. Enforced-adjacent: tools/check-graphic-virtual-defs.sh
 graphic-virtuals only; extend to od::Object virtuals -- process/serialize/deserialize -- to
 flag these). Do NOT do pre-emptively; only when touching Rauschen substantially or when a
 firmware rebuild surfaces the fault."""
+
+[[item]]
+id = "voice-profiling-workflow"
+title = "Hardware voice profiling workflow (manual + MIDI + record + sox null-test)"
+status = "todo"
+stamped = "2026-07-17T17:36:36-05:00"
+area = "tooling"
+touches = ["planning/hardware-voice-profiling.md"]
+verify = { kind = "manual", ref = "planning/hardware-voice-profiling.md exists; a capture-matrix + null-test pass has been run end-to-end on at least one target" }
+note = """Reusable graybox system-ID workflow for reverse-engineering a hardware synth/
+drum/DSP voice into a habitat unit: manual -> model structure; MIDI -> repeatable
+one-parameter sweeps -> knob->DSP transfer curves + automated capture matrix; record ->
+observable; sox (+ light FFT scripting) -> envelopes/spectra/band-isolation and the null
+test (sox -m orig -v -1 emu diff; stat) as the objective acceptance gate. Full method,
+sox command starters, effectiveness/limits, and compound-architecture decomposition in
+planning/hardware-voice-profiling.md. Naming per feedback_no_third_party_branding: units
++ persisted docs use generic functional names; source hardware referenced only via local
+files in planning/refs/<slug>/."""
+
+[[item]]
+id = "compound-dsp-voice-profile"
+title = "Profile + emulate on-hand compound DSP module (workflow shakedown)"
+status = "todo"
+stamped = "2026-07-17T17:36:36-05:00"
+area = "dsp"
+touches = ["planning/refs/compound-dsp-voice/*"]
+verify = { kind = "manual", ref = "per-stage decomposition documented; graybox model A/Bs against captures within target null-test residual" }
+note = """FIRST target, runs voice-profiling-workflow. User's on-hand hardware with a
+slightly compound architecture -> expect extensive per-stage decomposition (enumerate
+blocks, solo/bypass each, establish routing, subtract non-soloable stages via null test,
+reassemble). Inputs pending from user: manual + panel photos/graphics -> drop in
+planning/refs/compound-dsp-voice/. Architecture TBD from those; functional unit name TBD
+once the signal flow is mapped. Confirm MIDI reaches all params (else some sweeps go
+manual)."""
+
+[[item]]
+id = "multimode-drum-voice-profile"
+title = "Profile + emulate multi-engine digital drum voice (per mode)"
+status = "todo"
+stamped = "2026-07-17T17:36:36-05:00"
+area = "dsp"
+touches = ["planning/refs/multimode-drum-voice/*"]
+verify = { kind = "manual", ref = "each mode profiled (envelope/spectrum/pitch/param curves); per-mode emulation within null-test residual" }
+note = """LATER target (after the compound-DSP shakedown). Multi-engine/multi-mode digital
+drum voice: treat each mode as its own profiling target sharing one capture harness.
+Inputs pending from user: manual + MIDI implementation chart (critical for scripted mode+
+param sweeps) + panel graphics -> planning/refs/multimode-drum-voice/. Generic per-mode
+functional names at build time (feedback_no_third_party_branding). Watch for sample-ROM
+modes (capture-plus-model) vs true synthesis modes, and per-hit variation to model
+statistically."""

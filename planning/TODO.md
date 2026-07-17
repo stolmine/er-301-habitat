@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**146 items** — 41 done, 5 wip, 97 todo, 3 blocked. *Rendered 2026-07-17.*
+**149 items** — 41 done, 5 wip, 100 todo, 3 blocked. *Rendered 2026-07-17.*
 
 ## DSP
 
@@ -20,6 +20,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `biome-utility-dsp-units` | biome DSP utility units: simple allpass, dome filter, frequency shifter, bitcrush/downsample | manual · 2026-07-09 |
 |   | `canals-audiorate-and-cpu` | Canals: audio-rate Span-sweep aliasing (halfband decimator) + hardware CPU/NEON pass | manual · 2026-07-09 |
 |   | `canals-response-tuning` | Canals: SPAN/volume/low-band/Q/soft-clip response tuning against hardware capture corpus | manual · 2026-07-09 |
+|   | `compound-dsp-voice-profile` | Profile + emulate on-hand compound DSP module (workflow shakedown) | manual · 2026-07-17 |
 |   | `drywet-crossfade-audit` | Audit all wet/dry units for the linear-crossfade center dip; switch decorrelated wets to equal-power | manual · 2026-07-15 |
 |   | `fabula-diffusion-makeup` | Fabula: AGC / intelligent gain control to make up volume lost to diffusion | manual · 2026-07-14 |
 |   | `fabula-dry-under-hpf` | Fabula: dry passthrough underneath the 200Hz wet HPF | manual · 2026-07-14 |
@@ -33,6 +34,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `house-xyz-engine` | XYZ engine — cryptic 3-param original reverb (X morph, Y saturate+undersample, Z meta-routing) | manual · 2026-07-09 |
 |   | `mi-clouds-warps-improvements` | MI: Clouds gain-comp + further NEON (Clouds ShyFFT/SRC, Rings sympathetic/FM); Warps vocoder + drive | manual · 2026-07-09 |
 |   | `mirror-promotion` | Mirror: final habitat name + Voss-McCartney 1/f drift + wavetable frame-inventory audition | manual · 2026-07-09 |
+|   | `multimode-drum-voice-profile` | Profile + emulate multi-engine digital drum voice (per mode) | manual · 2026-07-17 |
 |   | `multiout-nlc-chaos` | NLC chaotic modulation sources (clean-room): Sloth, Chua, Hyperchaos, Squid Axon, + lower-pri | manual · 2026-07-09 |
 |   | `ngoma-cpu-optimization` | Ngoma: CPU optimization round 2 (~33% mono Cortex-A8 idle is steep) | manual · 2026-07-09 |
 |   | `ngoma-sound-tuning` | Ngoma: careful sound-tuning pass (param cross-couplings, per-partial decay, mode ratios, sub-octave) | manual · 2026-07-09 |
@@ -165,6 +167,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `audit-passthrough-remaining` | Review remaining units for clean passthrough vs non-passthrough delineation | manual · 2026-07-09 |
 |   | `dsp-neon-audit` | Repo-wide NEON audit — identify hot DSP paths without SIMD and assess vectorization | manual · 2026-07-09 |
 |   | `tooling-keyword-metadata-audit` | Normalize per-unit picker `keywords` metadata across all packages | manual · 2026-07-09 |
+|   | `voice-profiling-workflow` | Hardware voice profiling workflow (manual + MIDI + record + sox null-test) | manual · 2026-07-17 |
 | ✓ | `tooling-build-defenses` | am335x build defenses: graphic-vtable lint + NEON-hint lint + -fno-tree-vectorize | manual *(attested)* · 2026-07-09 |
 
 ## Documentation
