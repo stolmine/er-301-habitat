@@ -38,7 +38,7 @@ namespace stolmine
       addParameter(mFreq);
       addParameter(mRule);
       addParameter(mRes);
-      addParameter(mNClk);
+      addParameter(mEvolve);
       addParameter(mReset);
 
       memset(mCells, 0, sizeof(mCells));
@@ -90,28 +90,41 @@ namespace stolmine
       float *out = mOut.buffer();
 
       // ---- Block-rate params ----
-      float f0 = mFreq.value();
-      if (!(f0 >= 0.0f)) f0 = 0.0f;
-      if (f0 > 20000.0f) f0 = 20000.0f;
+      // All user controls are normalized 0..1 so a plain 0..1 CV at unity gain
+      // sweeps the full range (easy modulation from any unit); mapped to their
+      // real ranges here.
+      float freqN = mFreq.value();
+      if (!(freqN >= 0.0f)) freqN = 0.0f;
+      else if (freqN > 1.0f) freqN = 1.0f;
+      float f0 = powf(8000.0f, freqN) - 1.0f;   // 0..1 -> ~0 Hz .. 8 kHz (exp)
+      if (f0 < 0.0f) f0 = 0.0f;
 
-      int ruleNum = (int)(mRule.value() + 0.5f);
-      if (ruleNum < 0) ruleNum = 0;
-      else if (ruleNum > 255) ruleNum = 255;
+      float ruleN = mRule.value();
+      if (!(ruleN >= 0.0f)) ruleN = 0.0f;
+      else if (ruleN > 1.0f) ruleN = 1.0f;
+      int ruleNum = (int)(ruleN * 255.0f + 0.5f);
       if (ruleNum != mLastRule)
       {
         for (int b = 0; b < 8; b++) mRuleLut[b] = (uint8_t)((ruleNum >> b) & 1);
         mLastRule = ruleNum;
       }
 
-      int res = (int)(mRes.value() + 0.5f);
-      if (res < 2) res = 2;
-      else if (res > kVivaryMaxCells) res = kVivaryMaxCells;
+      float resN = mRes.value();
+      if (!(resN >= 0.0f)) resN = 0.0f;
+      else if (resN > 1.0f) resN = 1.0f;
+      int res = 2 + (int)(resN * (float)(kVivaryMaxCells - 2) + 0.5f);
 
-      int nClk = (int)(mNClk.value() + 0.5f);
-      if (nClk < 1) nClk = 1;
+      // Evolve: 1 = a new generation every pass (noise), 0 = frozen (static
+      // tone). Maps to the CA clock interval nClk = 1..64 passes/update.
+      float evoN = mEvolve.value();
+      if (!(evoN >= 0.0f)) evoN = 0.0f;
+      else if (evoN > 1.0f) evoN = 1.0f;
+      int nClk = 1 + (int)((1.0f - evoN) * 63.0f + 0.5f);
 
-      int rClk = (int)(mReset.value() + 0.5f);
-      if (rClk < 0) rClk = 0;
+      float resetN = mReset.value();
+      if (!(resetN >= 0.0f)) resetN = 0.0f;
+      else if (resetN > 1.0f) resetN = 1.0f;
+      int rClk = (int)(resetN * 256.0f + 0.5f);   // 0 = off
 
       if (!mSeeded)
       {
@@ -159,11 +172,11 @@ namespace stolmine
     }
 
     od::Outlet mOut{"Out"};
-    od::Parameter mFreq{"Freq", 110.0f};   // Hz (oscFreq map in Lua)
-    od::Parameter mRule{"Rule", 30.0f};    // 0..255 elementary rule
-    od::Parameter mRes{"Res", 64.0f};      // 2..256 active cells
-    od::Parameter mNClk{"NClk", 1.0f};     // CA update interval in passes
-    od::Parameter mReset{"Reset", 0.0f};   // reseed every N updates (0 = off)
+    od::Parameter mFreq{"Freq", 0.52f};    // 0..1 -> ~0 Hz .. 8 kHz (exp)
+    od::Parameter mRule{"Rule", 0.12f};    // 0..1 -> rule 0..255
+    od::Parameter mRes{"Res", 0.24f};      // 0..1 -> 2..256 cells
+    od::Parameter mEvolve{"Evolve", 1.0f}; // 0..1 -> static tone .. per-pass noise
+    od::Parameter mReset{"Reset", 0.0f};   // 0..1 -> reseed interval (0 = off)
 
   private:
     uint8_t mCells[kVivaryMaxCells];

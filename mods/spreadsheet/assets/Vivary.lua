@@ -10,12 +10,12 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
-local Encoder = require "Encoder"
 
-local function intMap(lo, hi, coarse)
-  local map = app.LinearDialMap(lo, hi)
-  map:setSteps(coarse, coarse, 1, 1)
-  map:setRounding(1)
+-- All controls are normalized 0..1 (easy modulation from any unit; the C++
+-- atom maps each to its real range). House coarse step 0.01.
+local function normMap()
+  local map = app.LinearDialMap(0, 1)
+  map:setSteps(0.1, 0.01, 0.001, 0.0001)
   return map
 end
 
@@ -43,11 +43,11 @@ function Vivary:onLoadGraph(channelCount)
     return a
   end
 
-  param("Freq", "freq", 110.0)
-  param("Rule", "rule", 30)
-  param("Res", "res", 64)
-  param("NClk", "nclk", 1)
-  param("Reset", "reset", 0)
+  param("Freq", "freq", 0.52)
+  param("Rule", "rule", 0.12)
+  param("Res", "res", 0.24)
+  param("Evolve", "evolve", 1.0)
+  param("Reset", "reset", 0.0)
 end
 
 function Vivary:onLoadViews()
@@ -58,43 +58,43 @@ function Vivary:onLoadViews()
       branch = self.branches.freq,
       gainbias = self.objects.freq,
       range = self.objects.freq,
-      biasMap = Encoder.getMap("oscFreq"),
-      biasUnits = app.unitHertz,
-      biasPrecision = 1,
-      initialBias = 110.0
+      biasMap = normMap(),
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.52
     },
     rule = GainBias {
       button = "rule",
-      description = "Rule (0-255)",
+      description = "Rule",
       branch = self.branches.rule,
       gainbias = self.objects.rule,
       range = self.objects.rule,
-      biasMap = intMap(0, 255, 8),
+      biasMap = normMap(),
       biasUnits = app.unitNone,
-      biasPrecision = 0,
-      initialBias = 30
+      biasPrecision = 2,
+      initialBias = 0.12
     },
     res = GainBias {
       button = "res",
-      description = "Resolution (cells)",
+      description = "Resolution",
       branch = self.branches.res,
       gainbias = self.objects.res,
       range = self.objects.res,
-      biasMap = intMap(2, 256, 8),
+      biasMap = normMap(),
       biasUnits = app.unitNone,
-      biasPrecision = 0,
-      initialBias = 64
+      biasPrecision = 2,
+      initialBias = 0.24
     },
-    nclk = GainBias {
-      button = "clk",
-      description = "CA clock (passes/update)",
-      branch = self.branches.nclk,
-      gainbias = self.objects.nclk,
-      range = self.objects.nclk,
-      biasMap = intMap(1, 64, 4),
+    evolve = GainBias {
+      button = "evo",
+      description = "Evolve (static-noise)",
+      branch = self.branches.evolve,
+      gainbias = self.objects.evolve,
+      range = self.objects.evolve,
+      biasMap = normMap(),
       biasUnits = app.unitNone,
-      biasPrecision = 0,
-      initialBias = 1
+      biasPrecision = 2,
+      initialBias = 1.0
     },
     reset = GainBias {
       button = "rset",
@@ -102,13 +102,13 @@ function Vivary:onLoadViews()
       branch = self.branches.reset,
       gainbias = self.objects.reset,
       range = self.objects.reset,
-      biasMap = intMap(0, 256, 8),
+      biasMap = normMap(),
       biasUnits = app.unitNone,
-      biasPrecision = 0,
-      initialBias = 0
+      biasPrecision = 2,
+      initialBias = 0.0
     }
   }, {
-    expanded = { "freq", "rule", "res", "nclk", "reset" },
+    expanded = { "freq", "rule", "res", "evolve", "reset" },
     collapsed = {}
   }
 end
