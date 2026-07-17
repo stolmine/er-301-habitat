@@ -59,6 +59,37 @@ Grain (raw <-> windowed/overlap), Seed (trigger + density), Smooth (binary <->
 grayscale), Scatter (mono <-> stereo). All the important ones as modulatable
 inlets where audio-rate matters (Rate especially -> [[feedback_inlet_vs_parameter_audio_rate_mod]]).
 
+### Confirmed from the tonemata tutorial (2026-07-16, screencaps) -- informative, not prescriptive
+
+The device's actual control set (we don't follow exactly, but these sharpen the design):
+- **rule** (0-255): "updates occur only at the exact END of wavetable playback,
+  ensuring noise-free transitions." -> advance the CA at the cycle-wrap boundary
+  (phase-continuous, click-free) -- confirms the per-pass update AND the reason.
+- **n-clk**: CA update interval in WAVETABLE PASSES (1 = every pass; higher =
+  fewer updates = more static). This IS our Evolve, as an integer count. Coupled
+  to playback rate (faster playback -> passes complete sooner -> updates sooner).
+- **r-clk** + **rand**: reset the wavetable to init every r-clk CA-updates
+  (0 = off); rand randomizes the reset state. "Some rules CONVERGE through
+  repeated updates, so adjust to maintain motion" -- CONFIRMS the die-out
+  watchdog is essential, not optional. Ship a reset interval + random reseed.
+- **res** (STANDOUT, under-weighted before): variable CA RESOLUTION -- cell count
+  down to a minimum of 2, WHILE MAINTAINING playback frequency. A whole timbral
+  axis: 2-cell brute square -> fine 256-cell detail, at constant pitch. Add it.
+- **o-lap**: grain/particle overlap (interacts strongly with res, fb, pitch).
+- **fb**: pre/post feedback around the granular engine -> resonance/buildup. Add.
+- **freeze**: hold wavetable updates (stop the CA) while keeping playback.
+- **trigger**: manual reseed to last-init state (modulatable inlet on ER-301).
+- **f-clk / pitch / gate**: fixed-clock playback vs MIDI-note pitch-tracked; gate
+  for note-held output -> "played monophonically as a melodic instrument despite
+  being a noise generator." For ER-301: make Rate V/oct-able (pitch-track via an
+  inlet); gating is patched externally (VCA). Optional built-in gate later.
+
+Refined ER-301 control set: **Freq/Rate** (V/oct-able), **Rule** (0-255),
+**Evolve/n-clk** (update interval in passes), **Res** (cell count 2..256),
+**Overlap**, **Feedback**, **Reset** (interval, 0=off) + **Rand**, **Freeze**,
+**Trig** (reseed inlet), and our **Smooth** (binary<->grayscale) as an extension
+(tonemata appears purely binary). ~10 params -> core faders + options + submenu.
+
 ## Fit / rails
 
 - **am335x**: trivially cheap -- the CA is bitwise on a 256-int array run once
