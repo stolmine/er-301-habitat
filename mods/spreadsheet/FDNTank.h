@@ -7,11 +7,11 @@
 // modulated fractional delay reads (Phase 2d: per-line slow LFOs
 // de-metalize the tail, base-delay slew gives Doppler-smooth Size
 // sweeps), a 4-stage Schroeder input diffuser, an equal-power dry/wet
-// crossfade, and (Phase 3.1) a coupled 8-band SVF filterbank send that
-// refeeds a spectrally-shaped tap of the tank field back into the tank
-// -- with decorrelated per-band focus drift and input cross-synthesis
-// (the dry input's per-band envelope keys the refeed, so the reverb
-// tracks your playing; keying releases toward freeze as the macro rises).
+// crossfade, and a Weave control that morphs the feedback matrix through
+// a butterfly network of 2x2 rotations (isolated lines -> coupled pairs
+// -> coupled quads -> full Hadamard wash), traversing reverb
+// architectures -- the Erbe-Verb alpha-matrix idea, always orthonormal
+// so stable + energy-preserving at every setting.
 // Internal-stereo (one shared tank,
 // decorrelated L/R output taps) so the Lua wiring just maps In1/In2 ->
 // In L/In R and Out L/Out R -> Out1/Out2 (the Fabula pattern).
@@ -123,64 +123,26 @@ namespace stolmine
     0.0f, 0.70710678f, 1.0f, 0.70710678f, 0.0f, -0.70710678f, -1.0f, -0.70710678f
   };
 
-  // ---- Phase-3 spectral layer: coupled filterbank vocoder --------------------
-  // An 8-band SVF bandpass bank analyzes a mono tap of the tank field; the
-  // (P3.1: contour/tilt) shaped sum is soft-limited and REFED into the tank
-  // input, so the FDN re-densifies the spectrally-shaped energy. The Spectral
-  // macro is both a refeed-amount ramp (0 = send off) and the station morph
-  // (P3.1 has only the contour station; gate/bloom/freeze land in P3.2-P3.3).
-  static const int kFdnBands = 8;
-  // Log-spaced band centers ~100 Hz .. 8 kHz (Hz). Fixed in P3.1; a "spectral
-  // focus" sub will roll these around in P3.4.
-  static const float kFdnBandHz[kFdnBands] = {
-    100.0f, 187.0f, 350.0f, 654.0f, 1223.0f, 2287.0f, 4277.0f, 8000.0f
-  };
-  static const float kFdnBandDamp  = 0.5f;    // SVF 1/Q (Q = 2)
-  static const float kFdnRefeedCeil = 0.25f;  // max refeed level at Spectral=1
-  static const float kFdnSpectralOn = 0.001f; // below this the bank is bypassed
+  // ---- Weave: feedback-matrix architecture morph -----------------------------
+  // The 8x8 feedback matrix is a 3-stage butterfly network of 2x2 rotations
+  // (the FWHT structure). Opening the stages progressively grows the mixing
+  // blocks: identity -> coupled pairs -> coupled quads -> full Hadamard wash.
+  // A product of rotations is orthonormal at EVERY setting -> stable and
+  // energy-preserving across the whole Weave sweep. Weave maps to three stage
+  // "openness" values (p0/p1/p2) that ramp in sequence; angle = p * pi/4.
+  static const float kFdnQuarterPi = 0.7853981634f;  // 45 deg = full butterfly
 
-  // Bright tilt on the band sum, attached to ABSOLUTE frequency (sqrt(fc/900),
-  // +3 dB/oct-ish) so the refed energy is pulled UP off the low-mid mud that a
-  // flat static refeed locks onto. Precomputed at the base centers; the block-
-  // rate focus motion multiplies in the sweep's contribution (tiltGlobal).
-  static const float kFdnBandTiltBase[kFdnBands] = {
-    0.333f, 0.456f, 0.624f, 0.852f, 1.166f, 1.594f, 2.180f, 2.981f
-  };
-  // "Spectral focus" motion: a slow magic-circle LFO PER BAND, each at a
-  // decorrelated rate, so the band centers drift INDEPENDENTLY (the spectrum
-  // churns) rather than sweeping coherently (which read as a phaser). Each
-  // wanders +/- depth octaves.
-  static const float kFdnFocusRateHz[kFdnBands] = {
-    0.071f, 0.089f, 0.103f, 0.127f, 0.061f, 0.113f, 0.083f, 0.097f
-  };
-  static const float kFdnFocusDepthOct = 0.8f;  // +/- 0.8 octave per band
-  static const float kFdnPrewarpMax    = 0.55f; // cap tan-approx arg (validity)
-
-  // Input cross-synthesis (vocoder keying): a second 8-band analysis of the DRY
-  // input (same band centers) follows each band's envelope; the tank carrier is
-  // gated per band by that envelope so the reverb spectrally TRACKS the input.
-  // The keying amount is strong at low knob and RELEASES toward freeze at the
-  // top (reactive -> autonomous), via keyAmt = clamp((1-Spectral)*2).
-  static const float kFdnEnvTau    = 0.030f;  // input band envelope follower (s)
-  static const float kFdnKeyThresh = 0.02f;   // per-band gate threshold (env)
-  static const float kFdnKeySlope  = 8.0f;    // gate ramp above threshold
-
-  // Cheap tan approximation for the TPT-SVF prewarp g = tan(pi*fc/SR), valid
-  // over the band range (arg < ~0.6 rad): x + x^3/3 + 2x^5/15. Avoids runtime
-  // tanf/sinf (feedback_package_trig_lut) and is block-rate anyway.
-  static inline float fdnTanApprox(float x)
+  // Polynomial cos/sin on [0, pi/4] (Taylor, ~1e-5) so no runtime sinf/cosf
+  // (feedback_package_trig_lut); used at BLOCK rate for the 3 stage angles.
+  static inline float fdnCosApprox(float x)
   {
     const float x2 = x * x;
-    return x * (1.0f + x2 * (0.33333333f + x2 * 0.13333333f));
+    return 1.0f + x2 * (-0.5f + x2 * 0.04166667f);
   }
-
-  // Bounded soft governor for the refeed (x / (1 + |x|)): near-identity for
-  // small x, hard-bounded to +/-1 -> the coupling can never run away
-  // ([[feedback_spiral_feedback_governor]]). All hardware VFP (vabs + vdiv),
-  // no per-sample libcall (sqrtf compiles to bl <sqrtf> here, not vsqrt).
-  static inline float fdnSoftGov(float x)
+  static inline float fdnSinApprox(float x)
   {
-    return x / (1.0f + fabsf(x));
+    const float x2 = x * x;
+    return x * (1.0f + x2 * (-0.16666667f + x2 * 0.00833333f));
   }
 
   // Proven Schroeder allpass step (carbon copy of Network's
@@ -212,23 +174,12 @@ namespace stolmine
       addParameter(mBass);
       addParameter(mDamp);
       addParameter(mMix);
-      addParameter(mSpectral);
       addParameter(mWeave);
 
       memset(mLine, 0, sizeof(mLine));
       memset(mDiff, 0, sizeof(mDiff));
       memset(mHfLp, 0, sizeof(mHfLp));
       memset(mBassLp, 0, sizeof(mBassLp));
-      memset(mSvf1, 0, sizeof(mSvf1));
-      memset(mSvf2, 0, sizeof(mSvf2));
-      memset(mInSvf1, 0, sizeof(mInSvf1));
-      memset(mInSvf2, 0, sizeof(mInSvf2));
-      memset(mInEnv, 0, sizeof(mInEnv));
-      for (int b = 0; b < kFdnBands; b++)
-      {
-        mFocusX[b] = kFdnLfoX0[b];   // decorrelated focus-LFO start phases
-        mFocusY[b] = kFdnLfoY0[b];
-      }
       for (int a = 0; a < 4; a++) mDiffIdx[a] = 0;
       for (int i = 0; i < kFdnLines; i++)
       {
@@ -278,13 +229,25 @@ namespace stolmine
       if (!(mixN >= 0.0f)) mixN = 0.0f;
       if (mixN > 1.0f) mixN = 1.0f;
 
-      // Weave = alpha: feedback-matrix morph. 1 = full Householder (dense
-      // wash), 0 = identity (each line isolated -> sparse addressable echoes).
-      // A(alpha) = I - alpha*(2/N)*11^T stays symmetric with all singular
-      // values <= 1 for alpha in [0,1] -> contractive, stable at every alpha.
+      // Weave: feedback-matrix architecture morph via a 3-stage butterfly.
+      // 0 = identity (isolated lines / sparse echoes); ~1/3 = coupled pairs;
+      // ~2/3 = coupled quads; 1 = full Hadamard wash. Progressive stage
+      // openness p0/p1/p2, angle = p*pi/4; cos/sin at block rate.
       float warpN = mWeave.value();
       if (!(warpN >= 0.0f)) warpN = 0.0f;
       if (warpN > 1.0f) warpN = 1.0f;
+      float p0 = warpN * 3.0f;
+      if (p0 > 1.0f) p0 = 1.0f;
+      float p1 = (warpN - 0.33333333f) * 3.0f;
+      if (p1 < 0.0f) p1 = 0.0f; else if (p1 > 1.0f) p1 = 1.0f;
+      float p2 = (warpN - 0.66666667f) * 3.0f;
+      if (p2 < 0.0f) p2 = 0.0f; else if (p2 > 1.0f) p2 = 1.0f;
+      const float c0 = fdnCosApprox(p0 * kFdnQuarterPi);
+      const float sN0 = fdnSinApprox(p0 * kFdnQuarterPi);
+      const float c1 = fdnCosApprox(p1 * kFdnQuarterPi);
+      const float sN1 = fdnSinApprox(p1 * kFdnQuarterPi);
+      const float c2 = fdnCosApprox(p2 * kFdnQuarterPi);
+      const float sN2 = fdnSinApprox(p2 * kFdnQuarterPi);
 
       const float invSR = 1.0f / globalConfig.sampleRate;
 
@@ -370,50 +333,6 @@ namespace stolmine
       const float dryG = sqrtf(1.0f - mixN);
       const float wetG = sqrtf(mixN);
 
-      // ---- Phase-3 spectral send (block rate) ----
-      float spectralN = mSpectral.value();
-      if (!(spectralN >= 0.0f)) spectralN = 0.0f;
-      if (spectralN > 1.0f) spectralN = 1.0f;
-      const bool spectralActive = spectralN > kFdnSpectralOn;
-      const float refeedLevel = spectralN * kFdnRefeedCeil;
-      // TPT-SVF bandpass coefficients per band. g = tan(pi*fc/SR) (tan approx);
-      // a1 = 1/(1 + g*(g + 1/Q)); a2 = g*a1; a3 = g*a2. Band gains are flat in
-      // P3.1 -- the contour/tilt curve and the movable focus arrive in P3.4.
-      float svfA1[kFdnBands], svfA2[kFdnBands], svfA3[kFdnBands];
-      float bandGain[kFdnBands];
-      if (spectralActive)
-      {
-        // Per-band spectral-focus drift (decorrelated magic-circle LFOs, block
-        // rate): each band center wanders independently by focusMult =
-        // 2^(depth*lfo_b) octaves so the spectrum churns rather than sweeping
-        // as one (coherent motion read as a phaser). Bright tilt is on absolute
-        // frequency (sqrt(focusMult_b)) so higher-swept bands brighten -> energy
-        // stays off the low-mid mud.
-        for (int b = 0; b < kFdnBands; b++)
-        {
-          const float epsF =
-            6.2831853f * kFdnFocusRateHz[b] * (float)FRAMELENGTH * invSR;
-          mFocusX[b] += epsF * mFocusY[b];
-          mFocusY[b] -= epsF * mFocusX[b];
-          const float focusMult = powf(2.0f, kFdnFocusDepthOct * mFocusX[b]);
-          float arg = 3.14159265f * kFdnBandHz[b] * focusMult * invSR;
-          if (arg > kFdnPrewarpMax) arg = kFdnPrewarpMax;   // keep tan-approx valid
-          const float g = fdnTanApprox(arg);
-          const float a1 = 1.0f / (1.0f + g * (g + kFdnBandDamp));
-          svfA1[b] = a1;
-          svfA2[b] = g * a1;
-          svfA3[b] = g * svfA2[b];
-          bandGain[b] = kFdnBandTiltBase[b] * sqrtf(focusMult);
-        }
-      }
-      // Input-envelope follower coefficient + keying amount. keyAmt holds full
-      // through the reactive lower half then releases toward freeze at the top.
-      const float envCoef = 1.0f - expf(-1.0f / (kFdnEnvTau * globalConfig.sampleRate));
-      float keyAmt = (1.0f - spectralN) * 2.0f;
-      if (keyAmt < 0.0f) keyAmt = 0.0f;
-      else if (keyAmt > 1.0f) keyAmt = 1.0f;
-      const float baseKey = 1.0f - keyAmt;   // full-pass floor (autonomous end)
-
       for (int n = 0; n < FRAMELENGTH; n++)
       {
         const float dryL = inL[n];
@@ -459,53 +378,6 @@ namespace stolmine
           d[i] = s0 + frac * (s1 - s0);
         }
 
-        // ---- Phase-3 spectral send: analyze the tank field, shape, refeed ----
-        // Mono field tap -> 8-band TPT-SVF bandpass -> (P3.1) flat sum ->
-        // bounded governor -> refeed into the tank input. The FDN re-densifies
-        // the shaped energy; the governor keeps the coupling from running away.
-        float refeedInject = 0.0f;
-        if (spectralActive)
-        {
-          // Modulator: analyze the dry input (hp) into the same 8 bands and
-          // follow each band's envelope (the vocoder's control signal).
-          for (int b = 0; b < kFdnBands; b++)
-          {
-            const float u3 = hp - mInSvf2[b];
-            const float u1 = svfA1[b] * mInSvf1[b] + svfA2[b] * u3;
-            const float u2 = mInSvf2[b] + svfA2[b] * mInSvf1[b] + svfA3[b] * u3;
-            mInSvf1[b] = 2.0f * u1 - mInSvf1[b];
-            mInSvf2[b] = 2.0f * u2 - mInSvf2[b];
-            const float mag = u1 < 0.0f ? -u1 : u1;
-            mInEnv[b] += envCoef * (mag - mInEnv[b]);
-          }
-
-          // Carrier: the tank field, keyed per band by the input envelope.
-          // effKey blends the full-pass floor (autonomous/freeze end) with the
-          // input gate (reactive end); keyAmt releases as the macro rises.
-          float tankTap = 0.0f;
-          for (int i = 0; i < kFdnLines; i++) tankTap += d[i];
-          tankTap *= 0.125f;   // 1/8 mono average
-
-          float spectralOut = 0.0f;
-          for (int b = 0; b < kFdnBands; b++)
-          {
-            const float v3 = tankTap - mSvf2[b];
-            const float v1 = svfA1[b] * mSvf1[b] + svfA2[b] * v3;   // bandpass
-            const float v2 = mSvf2[b] + svfA2[b] * mSvf1[b] + svfA3[b] * v3;
-            mSvf1[b] = 2.0f * v1 - mSvf1[b];
-            mSvf2[b] = 2.0f * v2 - mSvf2[b];
-
-            // Soft per-band gate from the input envelope, blended by keyAmt.
-            float keyGain = (mInEnv[b] - kFdnKeyThresh) * kFdnKeySlope;
-            if (keyGain < 0.0f) keyGain = 0.0f;
-            else if (keyGain > 1.0f) keyGain = 1.0f;
-            const float effKey = baseKey + keyAmt * keyGain;
-
-            spectralOut += bandGain[b] * v1 * effKey;
-          }
-          refeedInject = refeedLevel * fdnSoftGov(spectralOut);
-        }
-
         // Per-line loss filter (Phase 2): gain g_i + HF one-pole damping +
         // bass low-shelf -> frequency-dependent RT60. SoA one-pole states
         // (the future NEON bank). d[] stays RAW for the brighter wet taps;
@@ -522,27 +394,47 @@ namespace stolmine
           loss[i] = base + (rBass[i] - 1.0f) * mBassLp[i];
         }
 
-        // Feedback matrix, morphed by Weave (alpha): out = loss - alpha*(2/N)*
-        // sum(loss). alpha=1 -> Householder (dense wash); alpha=0 -> identity
-        // (isolated lines = sparse addressable echoes). Contractive at every
-        // alpha, so stability still follows from the RT60 gain clamps.
-        float s = 0.0f;
-        for (int i = 0; i < kFdnLines; i++) s += loss[i];
-        s *= 0.25f * warpN;
+        // Feedback matrix = Weave butterfly (3-stage FWHT of 2x2 rotations):
+        // stage 0 mixes pairs (i,i^1), stage 1 (i,i^2), stage 2 (i,i^4). The
+        // per-stage angle opens with Weave -> identity -> pairs -> quads ->
+        // Hadamard. Product of rotations = orthonormal at every angle, so the
+        // loop stays stable and energy-preserving; decay is set by loss[].
+        float t[kFdnLines];
+        for (int i = 0; i < kFdnLines; i++) t[i] = loss[i];
+        for (int i = 0; i < kFdnLines; i += 2)   // stage 0: (0,1)(2,3)(4,5)(6,7)
+        {
+          const float a = t[i], b = t[i + 1];
+          t[i]     = c0 * a - sN0 * b;
+          t[i + 1] = sN0 * a + c0 * b;
+        }
+        for (int i = 0; i < kFdnLines; i += 4)   // stage 1: (0,2)(1,3)(4,6)(5,7)
+          for (int k = 0; k < 2; k++)
+          {
+            const int p = i + k, q = i + k + 2;
+            const float a = t[p], b = t[q];
+            t[p] = c1 * a - sN1 * b;
+            t[q] = sN1 * a + c1 * b;
+          }
+        for (int k = 0; k < 4; k++)              // stage 2: (0,4)(1,5)(2,6)(3,7)
+        {
+          const int p = k, q = k + 4;
+          const float a = t[p], b = t[q];
+          t[p] = c2 * a - sN2 * b;
+          t[q] = sN2 * a + c2 * b;
+        }
 
         // Write feedback + injection; accumulate the stereo wet taps.
         float wetL = 0.0f;
         float wetR = 0.0f;
         for (int i = 0; i < kFdnLines; i++)
         {
-          float fb = loss[i] - s;
-          // Pure blow-up guard (RT60 gains are clamped < 1, so this never
-          // engages in normal use and colors nothing). A voiced in-loop
-          // soft-saturator is a later Phase-2 item.
+          float fb = t[i];
+          // Pure blow-up guard (orthonormal matrix + loss gains < 1 keep this
+          // from ever engaging in normal use).
           if (fb > 16.0f) fb = 16.0f;
           else if (fb < -16.0f) fb = -16.0f;
 
-          mLine[i][mWrite] = (inject + refeedInject) * kFdnInj[i] + fb;
+          mLine[i][mWrite] = inject * kFdnInj[i] + fb;
 
           wetL += d[i] * kFdnOutL[i];
           wetR += d[i] * kFdnOutR[i];
@@ -567,8 +459,7 @@ namespace stolmine
     od::Parameter mBass{"Bass", 0.5f};    // 0..1, bass-decay ratio (0.5 = neutral)
     od::Parameter mDamp{"Damp", 0.3f};    // 0..1, HF damping (dark tail)
     od::Parameter mMix{"Mix", 0.35f};     // 0..1, equal-power dry/wet
-    od::Parameter mSpectral{"Spectral", 0.0f}; // 0..1, coupled filterbank macro
-    od::Parameter mWeave{"Weave", 1.0f};  // 0..1, feedback topology morph (alpha)
+    od::Parameter mWeave{"Weave", 1.0f};  // 0..1, feedback-matrix architecture morph
 
   private:
     // Delay-line rings (256 KB) + diffuser + one-pole states. Class
@@ -582,13 +473,6 @@ namespace stolmine
     float mBaseDelay[kFdnLines]; // per-line slewed base delay (samples)
     float mLfoX[kFdnLines];    // per-line magic-circle LFO state (x)
     float mLfoY[kFdnLines];    // per-line magic-circle LFO state (y)
-    float mSvf1[kFdnBands];    // carrier (tank) SVF state (ic1eq) per band
-    float mSvf2[kFdnBands];    // carrier (tank) SVF state (ic2eq) per band
-    float mInSvf1[kFdnBands];  // modulator (input) SVF state (ic1eq) per band
-    float mInSvf2[kFdnBands];  // modulator (input) SVF state (ic2eq) per band
-    float mInEnv[kFdnBands];   // per-band input envelope (vocoder keying)
-    float mFocusX[kFdnBands];  // per-band magic-circle focus LFO state (x)
-    float mFocusY[kFdnBands];  // per-band magic-circle focus LFO state (y)
     bool mPrimed;              // base delays primed to target on first block
     int mWrite;
     float mDcX1, mDcY1;

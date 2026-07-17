@@ -69,11 +69,6 @@ function Plenum:onLoadGraph(channelCount)
   tie(op, "Mix", mix, "Out")
   self:addMonoBranch("mix", mix, "In", mix, "Out")
 
-  local spectral = self:addObject("spectral", app.ParameterAdapter())
-  spectral:hardSet("Bias", 0.0)
-  tie(op, "Spectral", spectral, "Out")
-  self:addMonoBranch("spectral", spectral, "In", spectral, "Out")
-
   local weave = self:addObject("weave", app.ParameterAdapter())
   weave:hardSet("Bias", 1.0)
   tie(op, "Weave", weave, "Out")
@@ -137,17 +132,6 @@ function Plenum:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.35
     },
-    spectral = GainBias {
-      button = "spec",
-      description = "Spectral",
-      branch = self.branches.spectral,
-      gainbias = self.objects.spectral,
-      range = self.objects.spectral,
-      biasMap = zeroOneMap,
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.0
-    },
     weave = GainBias {
       button = "weav",
       description = "Weave (sparse->wash)",
@@ -160,7 +144,7 @@ function Plenum:onLoadViews()
       initialBias = 1.0
     }
   }, {
-    expanded = { "size", "decay", "bass", "damp", "mix", "spectral", "weave" },
+    expanded = { "size", "decay", "bass", "damp", "mix", "weave" },
     collapsed = {}
   }
 end
