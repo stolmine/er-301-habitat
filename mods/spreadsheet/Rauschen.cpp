@@ -1,4 +1,5 @@
 #include "Rauschen.h"
+#include "CellularEngine.h"
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
@@ -71,6 +72,11 @@ namespace stolmine
     // RNG
     uint32_t rngSeed;
 
+    // Cellular-automaton wavetable voice (algorithm 11) + its per-instance seed
+    // for the emergent X/Y parameter field (set uniquely per unit in the ctor).
+    CellularEngine caEngine;
+    uint32_t caSeed;
+
     // Current algorithm (for graphic to detect switches)
     int currentAlgo;
 
@@ -100,9 +106,16 @@ namespace stolmine
       memset(outputRing, 0, sizeof(outputRing));
       ringPos = 0;
       rngSeed = 42;
+      caEngine.init();
+      caSeed = 0;
       currentAlgo = -1;
     }
   };
+
+  // Each unit instance gets a distinct emergent-field seed, so two Rauschen CA
+  // voices in the same patch grow their own texture landscapes (deterministic
+  // per session -- no Date/rand, which are unsafe on this platform).
+  static uint32_t g_caInstanceCounter = 0;
 
   Rauschen::Rauschen()
   {
@@ -118,6 +131,7 @@ namespace stolmine
 
     mpInternal = new Internal();
     mpInternal->Init();
+    mpInternal->caSeed = caHashU(0x9E3779B9u + (g_caInstanceCounter++) * 0x85EBCA6Bu);
   }
 
   Rauschen::~Rauschen()
@@ -142,7 +156,7 @@ namespace stolmine
     float *voct = mVOct.buffer();
     float *out = mOut.buffer();
 
-    int algo = CLAMP(0, 10, (int)(mAlgorithm.value() + 0.5f));
+    int algo = CLAMP(0, 11, (int)(mAlgorithm.value() + 0.5f));
     s.currentAlgo = algo;
     float px = CLAMP(0.0f, 1.0f, mParamX.value());
     float py = CLAMP(0.0f, 1.0f, mParamY.value());
@@ -165,6 +179,49 @@ namespace stolmine
     float g = (cosVal > 1e-10f) ? sinVal / cosVal : 100.0f;
     float r = 1.0f / filterQ;
     float h = 1.0f / (1.0f + r * g + g * g);
+
+    // Cellular-automaton wavetable voice (algorithm 11). Its 8 CA parameters are
+    // an EMERGENT per-instance field of the X/Y macros:
+    //   X = character -- sweeps the rule across the three families
+    //       (chaos -> structure -> gliders). One knob picks the texture.
+    //   Y = life -- drives a value-noise field (caVNoise, seeded uniquely per
+    //       unit instance via caSeed) that is biased differently per parameter:
+    //       resolution weighted LOW (islands of high = grit->white-noise),
+    //       evolve weighted HIGH (islands of static), reset mostly OFF (islands
+    //       of stutter), overlap + feedback rising with Y. So each instance has
+    //       its own texture landscape, and sweeping Y explores it.
+    // Resolved once per block (X/Y/pitch are block-rate); the sample loop only
+    // ticks the engine.
+    if (algo == 11)
+    {
+      int caFamily; float caRuleN;
+      if (px < 0.4f)      { caFamily = 0; caRuleN = px * 2.5f; }             // chaos
+      else if (px < 0.7f) { caFamily = 1; caRuleN = (px - 0.4f) * 3.33333f; } // structure
+      else                { caFamily = 2; caRuleN = (px - 0.7f) * 3.33333f; } // gliders
+      if (caRuleN > 1.0f) caRuleN = 1.0f;
+
+      const float nRes = caVNoise(px, py, s.caSeed + 0u);
+      const float nEvo = caVNoise(px, py, s.caSeed + 101u);
+      const float nRst = caVNoise(px, py, s.caSeed + 202u);
+      const float nOlp = caVNoise(px, py, s.caSeed + 303u);
+      const float nFb  = caVNoise(px, py, s.caSeed + 404u);
+
+      const float caResN = nRes * nRes;                          // low-weighted, high islands
+      const float caEvoN = 1.0f - (1.0f - nEvo) * (1.0f - nEvo); // high-weighted, low islands
+      const float caRstN = (nRst > 0.7f) ? (nRst - 0.7f) * 3.33333f : 0.0f; // off, islands of stutter
+      float caOlpN = py * 0.5f + (nOlp - 0.5f) * 0.6f;           // rises with Y + wobble
+      if (caOlpN < 0.0f) caOlpN = 0.0f; else if (caOlpN > 1.0f) caOlpN = 1.0f;
+      float caFbGate = (py - 0.4f) * 1.6f;                       // comes in only high on Y
+      if (caFbGate < 0.0f) caFbGate = 0.0f; else if (caFbGate > 1.0f) caFbGate = 1.0f;
+      const float caFbN = caFbGate * (0.4f + 0.6f * nFb);        // per-instance amount
+
+      float caF0 = 55.0f * powf(2.0f, voctPitch);                // V/Oct-pitched fundamental
+      if (caF0 < 1.0f) caF0 = 1.0f;
+      else if (caF0 > sr * 0.49f) caF0 = sr * 0.49f;
+
+      s.caEngine.setup(caFamily, caRuleN, caResN, caEvoN, caRstN,
+                       caOlpN, caFbN, caF0, sr);
+    }
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -460,6 +517,12 @@ namespace stolmine
           s.lorY = 0.0f; s.lorZ = 25.0f;
         }
         sample = s.lorX * 0.05f;
+        break;
+      }
+
+      case 11: // Cellular automaton -- X: rule/family, Y: emergent energy field
+      {
+        sample = s.caEngine.tick();
         break;
       }
 

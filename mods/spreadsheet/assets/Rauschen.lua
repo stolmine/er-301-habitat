@@ -23,11 +23,12 @@ local algoNames = {
   [7] = "Clocked",
   [8] = "Velvet",
   [9] = "Gendy",
-  [10] = "Lorenz"
+  [10] = "Lorenz",
+  [11] = "Cellular"
 }
 
 local algoMap = (function()
-  local m = app.LinearDialMap(0, 10)
+  local m = app.LinearDialMap(0, 11)
   m:setSteps(1, 1, 1, 1)
   m:setRounding(1)
   return m
