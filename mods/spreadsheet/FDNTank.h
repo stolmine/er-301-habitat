@@ -181,6 +181,32 @@ namespace stolmine
   static const float kFdnModeDamp  = 0.167f;  // 1/Q, Q~6 (woody, not ringy)
   static const float kFdnBodyDepth = 0.06f;   // body level at Weave=0 (by ear)
 
+  // ---- Wardrobe: aggregate-driven bold coloration on the wet -----------------
+  // A mono series chain (wavefold -> bitcrush -> ring-mod -> comb) whose params
+  // are driven by AGGREGATES of the whole control state, not one knob:
+  //   mass     = 1/2(Size + Decay)      -- bigness
+  //   ferocity = Decay * (1 - Weave)    -- long + sparse = hot resonators
+  //   bright   = 1/2 + Bass - Damp      -- dark <-> bright
+  // The added color (chain - mono) is scaled by wardPresence (~0 at the default
+  // clean wash, rising in the resonant zone) and mixed into BOTH wet channels,
+  // so the clean stereo is preserved and centered color rides on top.
+  static const int kFdnCombBufLen = 512;
+  static const int kFdnCombMask   = kFdnCombBufLen - 1;
+  static const float kFdnRmHzMin = 50.0f;
+  static const float kFdnRmHzMax = 800.0f;
+
+  // Triangle wavefolder (stateless, 3 reflections; no trig): folds signal back
+  // into [-1,1] for complex harmonics as drive pushes it past the rails.
+  static inline float fdnFold(float x)
+  {
+    for (int r = 0; r < 3; r++)
+    {
+      if (x > 1.0f) x = 2.0f - x;
+      else if (x < -1.0f) x = -2.0f - x;
+    }
+    return x;
+  }
+
   // Proven Schroeder allpass step (carbon copy of Network's
   // networkAllpassStep): v = in + g*buf; out = -g*v + buf; buf = v.
   // Phase-scrambles, magnitude spectrum unchanged. buf is a circular
@@ -218,6 +244,12 @@ namespace stolmine
       memset(mBassLp, 0, sizeof(mBassLp));
       memset(mBody1, 0, sizeof(mBody1));
       memset(mBody2, 0, sizeof(mBody2));
+      mCrushPhase = 0.0f;
+      mCrushHold = 0.0f;
+      mRmX = 1.0f;   // ring-mod carrier magic-circle init (phase 0)
+      mRmY = 0.0f;
+      memset(mComb, 0, sizeof(mComb));
+      mCombW = 0;
       for (int a = 0; a < 4; a++) mDiffIdx[a] = 0;
       for (int i = 0; i < kFdnLines; i++)
       {
@@ -390,6 +422,26 @@ namespace stolmine
       }
       const float bodyMix = (1.0f - warpN) * kFdnBodyDepth;
 
+      // ---- Wardrobe aggregates + effect params (block rate) ----
+      const float mass = 0.5f * (sizeN + decayN);
+      const float ferocity = decayN * (1.0f - warpN);
+      float bright = 0.5f + bassN - dampN;
+      if (bright < 0.0f) bright = 0.0f; else if (bright > 1.0f) bright = 1.0f;
+      const float foldDrive = 1.0f + ferocity * 3.0f;           // wavefold drive
+      const float crushRate = 1.0f - mass * 0.85f;              // decimate rate
+      const float crushStep = 0.002f + mass * 0.15f;            // quantize step
+      const float invCrushStep = 1.0f / crushStep;
+      const float rmEps =                                       // ring-mod carrier
+        6.2831853f * (kFdnRmHzMin + bright * (kFdnRmHzMax - kFdnRmHzMin)) * invSR;
+      const float rmAmt = ferocity * 0.7f;
+      int combLen = (int)(40.0f + mass * 400.0f);               // comb tuning
+      if (combLen > kFdnCombMask) combLen = kFdnCombMask;
+      const float combFb = decayN * 0.85f;                     // comb resonance
+      const float combMix = ferocity * 0.6f;
+      float wardPresence = ferocity + mass * 0.3f - 0.15f;     // ~0 at default
+      if (wardPresence < 0.0f) wardPresence = 0.0f;
+      else if (wardPresence > 1.0f) wardPresence = 1.0f;
+
       for (int n = 0; n < FRAMELENGTH; n++)
       {
         const float dryL = inL[n];
@@ -517,6 +569,28 @@ namespace stolmine
         wetL += body;
         wetR += body;
 
+        // Wardrobe: aggregate-driven mono chain (fold -> crush -> ring-mod ->
+        // comb), added as centered color scaled by wardPresence (stereo kept).
+        const float wetMono = 0.5f * (wetL + wetR);
+        float w = fdnFold(wetMono * foldDrive);           // wavefold + drive
+        mCrushPhase += crushRate;                         // bitcrush / decimate
+        const float doHold = mCrushPhase >= 1.0f ? 1.0f : 0.0f;
+        mCrushPhase -= doHold;
+        const float q = crushStep * (float)(int)(w * invCrushStep);
+        mCrushHold += doHold * (q - mCrushHold);
+        w = mCrushHold;
+        mRmX += rmEps * mRmY;                             // ring-mod (AM by carrier)
+        mRmY -= rmEps * mRmX;
+        w = w * (1.0f - rmAmt + rmAmt * mRmX);
+        const int rd = (mCombW - combLen) & kFdnCombMask; // comb resonator
+        const float delayed = mComb[rd];
+        mComb[mCombW] = w + combFb * delayed;
+        mCombW = (mCombW + 1) & kFdnCombMask;
+        w = w + combMix * delayed;
+        const float colorDelta = wardPresence * (w - wetMono);
+        wetL += colorDelta;
+        wetR += colorDelta;
+
         outL[n] = dryL * dryG + wetL * wetG;
         outR[n] = dryR * dryG + wetR * wetG;
       }
@@ -548,6 +622,10 @@ namespace stolmine
     float mLfoY[kFdnLines];    // per-line magic-circle LFO state (y)
     float mBody1[kFdnModes];   // wooden-body modal SVF state (ic1eq)
     float mBody2[kFdnModes];   // wooden-body modal SVF state (ic2eq)
+    float mCrushPhase, mCrushHold; // wardrobe bitcrush decimator (mono)
+    float mRmX, mRmY;          // wardrobe ring-mod carrier (magic circle)
+    float mComb[kFdnCombBufLen]; // wardrobe comb delay (mono)
+    int mCombW;
     bool mPrimed;              // base delays primed to target on first block
     int mWrite;
     float mDcX1, mDcY1;
