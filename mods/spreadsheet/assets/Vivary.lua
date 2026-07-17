@@ -10,6 +10,8 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Pitch = require "Unit.ViewControl.Pitch"
+local Encoder = require "Encoder"
 
 -- All controls are normalized 0..1 (easy modulation from any unit; the C++
 -- atom maps each to its real range). House coarse step 0.01.
@@ -35,6 +37,13 @@ function Vivary:onLoadGraph(channelCount)
     connect(op, "Out", self, "Out2")
   end
 
+  -- V/Oct pitch input (ER-301 pitch convention).
+  local tune = self:addObject("tune", app.ConstantOffset())
+  local tuneRange = self:addObject("tuneRange", app.MinMax())
+  connect(tune, "Out", tuneRange, "In")
+  connect(tune, "Out", op, "V/Oct")
+  self:addMonoBranch("tune", tune, "In", tune, "Out")
+
   local function param(name, key, default)
     local a = self:addObject(key, app.ParameterAdapter())
     a:hardSet("Bias", default)
@@ -43,25 +52,33 @@ function Vivary:onLoadGraph(channelCount)
     return a
   end
 
-  param("Freq", "freq", 0.52)
+  param("Freq", "freq", 110.0)
   param("Rule", "rule", 0.12)
   param("Res", "res", 0.24)
   param("Evolve", "evolve", 1.0)
   param("Reset", "reset", 0.0)
+  param("Smooth", "smooth", 0.0)
 end
 
 function Vivary:onLoadViews()
   return {
+    tune = Pitch {
+      button = "V/Oct",
+      branch = self.branches.tune,
+      description = "V/Oct",
+      offset = self.objects.tune,
+      range = self.objects.tuneRange
+    },
     freq = GainBias {
-      button = "freq",
-      description = "Frequency",
+      button = "f0",
+      description = "Fundamental",
       branch = self.branches.freq,
       gainbias = self.objects.freq,
       range = self.objects.freq,
-      biasMap = normMap(),
-      biasUnits = app.unitNone,
-      biasPrecision = 2,
-      initialBias = 0.52
+      biasMap = Encoder.getMap("oscFreq"),
+      biasUnits = app.unitHertz,
+      biasPrecision = 1,
+      initialBias = 110.0
     },
     rule = GainBias {
       button = "rule",
@@ -106,9 +123,20 @@ function Vivary:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
+    },
+    smooth = GainBias {
+      button = "smth",
+      description = "Smooth (harsh-soft)",
+      branch = self.branches.smooth,
+      gainbias = self.objects.smooth,
+      range = self.objects.smooth,
+      biasMap = normMap(),
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
     }
   }, {
-    expanded = { "freq", "rule", "res", "evolve", "reset" },
+    expanded = { "tune", "freq", "rule", "res", "evolve", "reset", "smooth" },
     collapsed = {}
   }
 end

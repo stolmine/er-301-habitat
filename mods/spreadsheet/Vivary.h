@@ -34,15 +34,18 @@ namespace stolmine
   public:
     Vivary()
     {
+      addInput(mVOct);
       addOutput(mOut);
       addParameter(mFreq);
       addParameter(mRule);
       addParameter(mRes);
       addParameter(mEvolve);
       addParameter(mReset);
+      addParameter(mSmooth);
 
       memset(mCells, 0, sizeof(mCells));
       memset(mNext, 0, sizeof(mNext));
+      memset(mGray, 0, sizeof(mGray));
       memset(mRuleLut, 0, sizeof(mRuleLut));
       mPhase = 0.0f;
       mPassCount = 0;
@@ -70,7 +73,9 @@ namespace stolmine
     }
 
     // Advance one elementary CA generation over `res` cells (toroidal;
-    // branch-wrapped edges, no integer division).
+    // branch-wrapped edges, no integer division). Also updates the per-cell
+    // grayscale EMA (a smoothed history of the +/-1 cell states) that Smooth
+    // blends toward -> softer waveforms that bake in the time structure.
     void caStep(int res)
     {
       for (int i = 0; i < res; i++)
@@ -82,7 +87,12 @@ namespace stolmine
         const int r = mCells[rIdx];
         mNext[i] = mRuleLut[(l << 2) | (c << 1) | r];
       }
-      for (int i = 0; i < res; i++) mCells[i] = mNext[i];
+      for (int i = 0; i < res; i++)
+      {
+        mCells[i] = mNext[i];
+        const float cv = mCells[i] ? 1.0f : -1.0f;
+        mGray[i] += 0.35f * (cv - mGray[i]);   // ~3-4 generation EMA
+      }
     }
 
     virtual void process()
@@ -90,14 +100,16 @@ namespace stolmine
       float *out = mOut.buffer();
 
       // ---- Block-rate params ----
-      // All user controls are normalized 0..1 so a plain 0..1 CV at unity gain
-      // sweeps the full range (easy modulation from any unit); mapped to their
-      // real ranges here.
-      float freqN = mFreq.value();
-      if (!(freqN >= 0.0f)) freqN = 0.0f;
-      else if (freqN > 1.0f) freqN = 1.0f;
-      float f0 = powf(8000.0f, freqN) - 1.0f;   // 0..1 -> ~0 Hz .. 8 kHz (exp)
+      // Freq is a normal oscillator f0 (Hz, oscFreq map in Lua) with a V/Oct
+      // input: f0 = fundamental * 2^(V/Oct*10) (the ER-301 pitch convention,
+      // block rate). The other controls stay normalized 0..1 for easy mod.
+      const float voct = mVOct.buffer()[0];
+      float fund = mFreq.value();
+      if (!(fund >= 0.0f)) fund = 0.0f;
+      float f0 = fund * powf(2.0f, voct * 10.0f);
       if (f0 < 0.0f) f0 = 0.0f;
+      const float f0Max = globalConfig.sampleRate * 0.49f;
+      if (f0 > f0Max) f0 = f0Max;
 
       float ruleN = mRule.value();
       if (!(ruleN >= 0.0f)) ruleN = 0.0f;
@@ -125,6 +137,11 @@ namespace stolmine
       if (!(resetN >= 0.0f)) resetN = 0.0f;
       else if (resetN > 1.0f) resetN = 1.0f;
       int rClk = (int)(resetN * 256.0f + 0.5f);   // 0 = off
+
+      // Smooth: 0 = binary +/-1 (harsh), 1 = grayscale EMA (soft, time-baked).
+      float smooth = mSmooth.value();
+      if (!(smooth >= 0.0f)) smooth = 0.0f;
+      else if (smooth > 1.0f) smooth = 1.0f;
 
       if (!mSeeded)
       {
@@ -158,29 +175,35 @@ namespace stolmine
           }
         }
 
-        // Linear-interp read of the current row (binary cells -> +/-1).
+        // Linear-interp read; Smooth blends each cell from binary +/-1 toward
+        // its grayscale EMA.
         const float p = mPhase * (float)res;
         int i0 = (int)p;
         if (i0 >= res) i0 = res - 1;
         int i1 = i0 + 1;
         if (i1 >= res) i1 = 0;
         const float frac = p - (float)i0;
-        const float v0 = mCells[i0] ? 1.0f : -1.0f;
-        const float v1 = mCells[i1] ? 1.0f : -1.0f;
+        const float b0 = mCells[i0] ? 1.0f : -1.0f;
+        const float b1 = mCells[i1] ? 1.0f : -1.0f;
+        const float v0 = b0 + smooth * (mGray[i0] - b0);
+        const float v1 = b1 + smooth * (mGray[i1] - b1);
         out[n] = v0 + frac * (v1 - v0);
       }
     }
 
+    od::Inlet mVOct{"V/Oct"};
     od::Outlet mOut{"Out"};
-    od::Parameter mFreq{"Freq", 0.52f};    // 0..1 -> ~0 Hz .. 8 kHz (exp)
+    od::Parameter mFreq{"Freq", 110.0f};   // Hz fundamental (oscFreq map in Lua)
     od::Parameter mRule{"Rule", 0.12f};    // 0..1 -> rule 0..255
     od::Parameter mRes{"Res", 0.24f};      // 0..1 -> 2..256 cells
     od::Parameter mEvolve{"Evolve", 1.0f}; // 0..1 -> static tone .. per-pass noise
     od::Parameter mReset{"Reset", 0.0f};   // 0..1 -> reseed interval (0 = off)
+    od::Parameter mSmooth{"Smooth", 0.0f}; // 0..1 -> binary harsh .. grayscale soft
 
   private:
     uint8_t mCells[kVivaryMaxCells];
     uint8_t mNext[kVivaryMaxCells];
+    float mGray[kVivaryMaxCells];   // per-cell grayscale EMA (Smooth target)
     uint8_t mRuleLut[8];
     float mPhase;
     int mPassCount;
