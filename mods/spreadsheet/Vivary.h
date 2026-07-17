@@ -29,6 +29,18 @@ namespace stolmine
 {
   static const int kVivaryMaxCells = 256;
 
+  // Curated elementary rules: the sonically interesting (Wolfram class III/IV)
+  // rules, DEDUPLICATED by symmetry class (mirror/complement twins removed) and
+  // ranked by complexity = spatial-entropy x row-variety, from an offline sweep
+  // of all 256 (planning/ca-rule-analysis.py). The Rule control indexes this
+  // list so every knob position is a distinct, lively texture -- no dead rules.
+  static const int kVivaryNumRules = 48;
+  static const uint8_t kVivaryRules[kVivaryNumRules] = {
+    86, 163, 73, 101, 193, 57, 214, 129, 145, 188, 169, 65, 67, 150, 105, 107,
+    81, 43, 212, 213, 209, 174, 185, 166, 3, 226, 241, 83, 240, 115, 85, 147,
+    176, 122, 7, 88, 38, 167, 20, 151, 187, 175, 18, 146, 231, 144, 2, 199
+  };
+
   class Vivary : public od::Object
   {
   public:
@@ -111,10 +123,15 @@ namespace stolmine
       const float f0Max = globalConfig.sampleRate * 0.49f;
       if (f0 > f0Max) f0 = f0Max;
 
+      // Rule 0..1 indexes the curated interesting-rule table (distinct textures,
+      // no dead rules) rather than the raw 0..255 space.
       float ruleN = mRule.value();
       if (!(ruleN >= 0.0f)) ruleN = 0.0f;
       else if (ruleN > 1.0f) ruleN = 1.0f;
-      int ruleNum = (int)(ruleN * 255.0f + 0.5f);
+      int ruleIdx = (int)(ruleN * (float)(kVivaryNumRules - 1) + 0.5f);
+      if (ruleIdx < 0) ruleIdx = 0;
+      else if (ruleIdx >= kVivaryNumRules) ruleIdx = kVivaryNumRules - 1;
+      int ruleNum = kVivaryRules[ruleIdx];
       if (ruleNum != mLastRule)
       {
         for (int b = 0; b < 8; b++) mRuleLut[b] = (uint8_t)((ruleNum >> b) & 1);
@@ -194,7 +211,7 @@ namespace stolmine
     od::Inlet mVOct{"V/Oct"};
     od::Outlet mOut{"Out"};
     od::Parameter mFreq{"Freq", 110.0f};   // Hz fundamental (oscFreq map in Lua)
-    od::Parameter mRule{"Rule", 0.12f};    // 0..1 -> rule 0..255
+    od::Parameter mRule{"Rule", 0.0f};    // 0..1 -> curated rule index
     od::Parameter mRes{"Res", 0.24f};      // 0..1 -> 2..256 cells
     od::Parameter mEvolve{"Evolve", 1.0f}; // 0..1 -> static tone .. per-pass noise
     od::Parameter mReset{"Reset", 0.0f};   // 0..1 -> reseed interval (0 = off)

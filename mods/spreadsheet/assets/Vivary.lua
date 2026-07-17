@@ -53,7 +53,7 @@ function Vivary:onLoadGraph(channelCount)
   end
 
   param("Freq", "freq", 110.0)
-  param("Rule", "rule", 0.12)
+  param("Rule", "rule", 0.0)
   param("Res", "res", 0.24)
   param("Evolve", "evolve", 1.0)
   param("Reset", "reset", 0.0)
@@ -89,7 +89,7 @@ function Vivary:onLoadViews()
       biasMap = normMap(),
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.12
+      initialBias = 0.0
     },
     res = GainBias {
       button = "res",
