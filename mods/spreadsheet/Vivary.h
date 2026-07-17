@@ -60,6 +60,35 @@ namespace stolmine
     2554615134u, 1007213646u, 3578051715u, 4205207733u, 842670642u, 2876285495u
   };
 
+  // EDGE OF CHAOS (Wolfram class IV): radius-1 rules with high variety AND
+  // moderate change -> coherent gliders/particles that persist and travel while
+  // the pattern keeps evolving (rule 110 & kin). Curated by variety x
+  // moderate-change, symmetry-deduped. planning/ca-rule-analysis.py.
+  static const int kVivaryNumRulesEOC = 40;
+  static const uint8_t kVivaryRulesEOC[kVivaryNumRulesEOC] = {
+    230, 193, 158, 126, 161, 209, 173, 52, 208, 66, 149, 2, 20, 130, 175, 73,
+    195, 213, 34, 169, 212, 171, 210, 240, 75, 18, 146, 22, 82, 176, 165, 145,
+    185, 15, 43, 202, 234, 184, 218, 93
+  };
+
+  // REVERSIBLE 2nd-order: next = f(l,c,r) XOR previous-generation. Cannot die
+  // (time-symmetric) -> perpetual wave-like motion + interference. These are
+  // the base rules f that give the liveliest reversible dynamics (curated by
+  // variety). caStep runs the 2nd-order recurrence.
+  static const int kVivaryNumRulesREV = 40;
+  static const uint8_t kVivaryRulesREV[kVivaryNumRulesREV] = {
+    191, 3, 6, 239, 9, 11, 207, 13, 143, 15, 25, 167, 39, 28, 30, 123, 187, 35,
+    38, 235, 41, 42, 43, 203, 45, 139, 54, 56, 57, 163, 60, 62, 73, 78, 133,
+    106, 110, 161, 190, 134
+  };
+
+  // ADDITIVE / LINEAR (XOR): the linear-over-GF(2) rules -> nested, self-similar
+  // Sierpinski-like fractal patterns. A crystalline/recursive character.
+  static const int kVivaryNumRulesFRAC = 10;
+  static const uint8_t kVivaryRulesFRAC[kVivaryNumRulesFRAC] = {
+    90, 60, 165, 195, 102, 153, 101, 89, 75, 45
+  };
+
   class Vivary : public od::Object
   {
   public:
@@ -78,6 +107,7 @@ namespace stolmine
 
       memset(mCells, 0, sizeof(mCells));
       memset(mNext, 0, sizeof(mNext));
+      memset(mPrev, 0, sizeof(mPrev));
       memset(mGray, 0, sizeof(mGray));
       memset(mGenRing, 0, sizeof(mGenRing));
       memset(mRuleTable, 0, sizeof(mRuleTable));
@@ -96,7 +126,7 @@ namespace stolmine
     // generation-history ring so grain overlap has no stale generations.
     void reseed(int res)
     {
-      for (int i = 0; i < res; i++) mCells[i] = 0;
+      for (int i = 0; i < res; i++) { mCells[i] = 0; mPrev[i] = 0; }
       mCells[res / 2] = 1;
       for (int g = 0; g < kVivaryGenHist; g++)
         for (int i = 0; i < res; i++) mGenRing[g][i] = mCells[i];
@@ -112,21 +142,12 @@ namespace stolmine
     }
 
     // Advance one binary CA generation (toroidal; branch-wrapped edges, no
-    // division). radius 1 = 3-neighbor LUT[8]; radius 2 = 5-neighbor LUT[32].
-    // Then update the per-cell grayscale EMA (+/-1 amplitude) for Smooth.
-    void caStep(int res, int radius)
+    // division). mode 0 = radius-1 (3-neighbor LUT[8]); mode 1 = radius-2
+    // (5-neighbor LUT[32]); mode 2 = reversible 2nd-order (next = f(l,c,r) XOR
+    // previous generation -> cannot die). Then update the grayscale EMA.
+    void caStep(int res, int mode)
     {
-      if (radius == 1)
-      {
-        for (int i = 0; i < res; i++)
-        {
-          const int l = mCells[(i == 0) ? (res - 1) : (i - 1)];
-          const int c = mCells[i];
-          const int r = mCells[(i == res - 1) ? 0 : (i + 1)];
-          mNext[i] = mRuleTable[(l << 2) | (c << 1) | r];
-        }
-      }
-      else
+      if (mode == 1)
       {
         for (int i = 0; i < res; i++)
         {
@@ -137,6 +158,27 @@ namespace stolmine
           const int idx = (mCells[l2] << 4) | (mCells[l1] << 3) |
                           (mCells[i] << 2) | (mCells[r1] << 1) | mCells[r2];
           mNext[i] = mRuleTable[idx];
+        }
+      }
+      else if (mode == 2)
+      {
+        for (int i = 0; i < res; i++)
+        {
+          const int l = mCells[(i == 0) ? (res - 1) : (i - 1)];
+          const int c = mCells[i];
+          const int r = mCells[(i == res - 1) ? 0 : (i + 1)];
+          mNext[i] = mRuleTable[(l << 2) | (c << 1) | r] ^ mPrev[i];
+        }
+        for (int i = 0; i < res; i++) mPrev[i] = mCells[i];   // current -> previous
+      }
+      else
+      {
+        for (int i = 0; i < res; i++)
+        {
+          const int l = mCells[(i == 0) ? (res - 1) : (i - 1)];
+          const int c = mCells[i];
+          const int r = mCells[(i == res - 1) ? 0 : (i + 1)];
+          mNext[i] = mRuleTable[(l << 2) | (c << 1) | r];
         }
       }
       for (int i = 0; i < res; i++)
@@ -171,39 +213,46 @@ namespace stolmine
       else if (resN > 1.0f) resN = 1.0f;
       int res = 2 + (int)(resN * (float)(kVivaryMaxCells - 2) + 0.5f);
 
-      // Family: 0 = radius-1 elementary (3-neighbor), 1 = radius-2 (5-neighbor)
-      // binary. Both keep sharp +/-1 edges; radius 2 sees a wider neighborhood
-      // for richer long-range rhythmic structure.
+      // Family (5): 0 = radius-1 chaos, 1 = radius-2 structure, 2 = edge-of-chaos
+      // (class IV / gliders), 3 = reversible 2nd-order, 4 = additive/XOR fractal.
+      // All binary. Each maps to a caStep mode + a curated rule table.
       float familyN = mFamily.value();
       if (!(familyN >= 0.0f)) familyN = 0.0f;
       else if (familyN > 1.0f) familyN = 1.0f;
-      int family = (int)(familyN + 0.5f);
+      int family = (int)(familyN * 4.0f + 0.5f);
       if (family < 0) family = 0;
-      else if (family > 1) family = 1;
-      const int radius = family + 1;   // 1 or 2
+      else if (family > 4) family = 4;
 
-      // Rule 0..1 indexes the curated rule table for this family.
       float ruleN = mRule.value();
       if (!(ruleN >= 0.0f)) ruleN = 0.0f;
       else if (ruleN > 1.0f) ruleN = 1.0f;
+
+      // Pick the family's caStep mode, rule table, and rule number.
+      int mode = 0;               // 0 = radius-1, 1 = radius-2, 2 = reversible
+      int nbits = 8;
       uint32_t ruleNum;
-      if (radius == 1)
+      if (family == 1)            // radius-2 structure (32-bit rules)
       {
-        int idx = (int)(ruleN * (float)(kVivaryNumRules - 1) + 0.5f);
-        if (idx >= kVivaryNumRules) idx = kVivaryNumRules - 1;
-        ruleNum = kVivaryRules[idx];
-      }
-      else
-      {
+        mode = 1; nbits = 32;
         int idx = (int)(ruleN * (float)(kVivaryNumRulesR2 - 1) + 0.5f);
         if (idx >= kVivaryNumRulesR2) idx = kVivaryNumRulesR2 - 1;
         ruleNum = kVivaryRulesR2[idx];
+      }
+      else                        // radius-1 or reversible (8-bit rules)
+      {
+        const uint8_t *tbl; int count;
+        if (family == 0)      { tbl = kVivaryRules;     count = kVivaryNumRules;     mode = 0; }
+        else if (family == 2) { tbl = kVivaryRulesEOC;  count = kVivaryNumRulesEOC;  mode = 0; }
+        else if (family == 3) { tbl = kVivaryRulesREV;  count = kVivaryNumRulesREV;  mode = 2; }
+        else                  { tbl = kVivaryRulesFRAC; count = kVivaryNumRulesFRAC; mode = 0; }
+        int idx = (int)(ruleN * (float)(count - 1) + 0.5f);
+        if (idx >= count) idx = count - 1;
+        ruleNum = tbl[idx];
       }
       // Rebuild the LUT when family/rule changes; reseed on a family change.
       if (family != mLastFamily || ruleNum != mLastRule)
       {
         if (family != mLastFamily) reseed(res);
-        const int nbits = (radius == 1) ? 8 : 32;
         for (int b = 0; b < nbits; b++)
           mRuleTable[b] = (uint8_t)((ruleNum >> b) & 1u);
         mLastFamily = family;
@@ -252,7 +301,7 @@ namespace stolmine
           if (++mPassCount >= nClk)
           {
             mPassCount = 0;
-            caStep(res, radius);
+            caStep(res, mode);
             // Reset watchdog: reseed every rClk updates (0 = off) OR on a
             // uniform row (so a converged rule never leaves it silent).
             const bool dead = caIsUniform(res);
@@ -307,6 +356,7 @@ namespace stolmine
   private:
     uint8_t mCells[kVivaryMaxCells];
     uint8_t mNext[kVivaryMaxCells];
+    uint8_t mPrev[kVivaryMaxCells];   // previous generation (reversible mode)
     float mGray[kVivaryMaxCells];   // per-cell grayscale EMA (Smooth target)
     uint8_t mGenRing[kVivaryGenHist][kVivaryMaxCells]; // recent generations
     int mGenHead;                   // newest generation index in the ring
