@@ -42,23 +42,22 @@ namespace stolmine
     176, 122, 7, 88, 38, 167, 20, 151, 187, 175, 18, 146, 231, 144, 2, 199
   };
 
-  // Multi-state TOTALISTIC rule families (next state from the neighborhood SUM;
-  // cells 0..k-1 -> multi-LEVEL waveforms, a genuinely different palette than
-  // binary +/-1). Curated + symmetry-deduped + complexity-ranked from offline
-  // sweeps (planning/ca-rule-analysis.py): k=3 (sum 0..6, base-3 rule 0..2186),
-  // k=4 (sum 0..9, base-4 rule 0..1048575).
-  static const int kVivaryNumRules3 = 32;
-  static const uint16_t kVivaryRules3[kVivaryNumRules3] = {
-    926, 532, 1317, 1149, 797, 1770, 1280, 1767, 150, 1263, 1315, 1874, 794,
-    2010, 289, 1281, 1017, 1504, 1600, 1990, 345, 2040, 471, 1878, 552, 939,
-    538, 554, 835, 383, 936, 920
-  };
-  static const int kVivaryNumRules4 = 32;
-  static const uint32_t kVivaryRules4[kVivaryNumRules4] = {
-    709509, 214947, 317657, 809197, 603848, 706256, 160376, 58586, 924446,
-    138960, 231324, 647648, 225912, 364148, 119512, 308785, 494029, 107769,
-    706249, 317658, 815727, 75574, 887246, 860605, 186590, 578473, 126054,
-    124137, 156110, 495174, 96562, 675403
+  // RADIUS-2 binary rules (5-neighbor elementary; 32-bit rule = LUT[32]). Same
+  // sharp +/-1 edges as radius-1 (so the rhythmic bite is kept) but a wider
+  // neighborhood -> richer long-range structure. Curated from a 16k sample of
+  // the 2^32 space by a STRUCTURE metric (spectral tonality x timbral motion,
+  // NOT chaos/entropy -- which produced undifferentiated mush), symmetry-
+  // deduped (mirror + complement). planning/ca-rule-analysis.py.
+  static const int kVivaryNumRulesR2 = 48;
+  static const uint32_t kVivaryRulesR2[kVivaryNumRulesR2] = {
+    3398369426u, 759324534u, 4177033246u, 4114992578u, 3086421935u, 3910581980u,
+    1544131983u, 2329997991u, 369903460u, 1690060914u, 3221231564u, 3367379758u,
+    619872570u, 3222040542u, 134872461u, 3954537172u, 1820643164u, 3318187892u,
+    763436670u, 1329721008u, 3398736973u, 361192849u, 390675973u, 2915329299u,
+    2828958812u, 2281223153u, 1343069455u, 202170121u, 2071495672u, 3745633775u,
+    738237887u, 1614717498u, 4139086520u, 1602537455u, 4119543197u, 3289435452u,
+    2501213765u, 1849757627u, 2063414177u, 638294042u, 3473376867u, 1693127281u,
+    2554615134u, 1007213646u, 3578051715u, 4205207733u, 842670642u, 2876285495u
   };
 
   class Vivary : public od::Object
@@ -86,19 +85,19 @@ namespace stolmine
       mPhase = 0.0f;
       mPassCount = 0;
       mResetCount = 0;
-      mLastRule = -1;
+      mLastRule = 0xFFFFFFFFu;
       mLastFamily = -1;   // forces reseed + table build on the first block
     }
 
     virtual ~Vivary() {}
 
 #ifndef SWIGLUA
-    // Reseed the row to a single max-state center cell (deterministic); fill
-    // the generation-history ring so grain overlap has no stale generations.
-    void reseed(int res, int k)
+    // Reseed the row to a single live center cell (deterministic); fill the
+    // generation-history ring so grain overlap has no stale generations.
+    void reseed(int res)
     {
       for (int i = 0; i < res; i++) mCells[i] = 0;
-      mCells[res / 2] = (uint8_t)(k - 1);
+      mCells[res / 2] = 1;
       for (int g = 0; g < kVivaryGenHist; g++)
         for (int i = 0; i < res; i++) mGenRing[g][i] = mCells[i];
     }
@@ -112,37 +111,38 @@ namespace stolmine
       return true;
     }
 
-    // Advance one CA generation (toroidal; branch-wrapped edges, no division).
-    // Elementary = LUT by the (l,c,r) pattern; totalistic = table by the
-    // neighborhood SUM (multi-state). Then update the per-cell grayscale EMA in
-    // the AMPLITUDE domain (ampScale = 2/(k-1)) that Smooth blends toward.
-    void caStep(int res, bool totalistic, float ampScale)
+    // Advance one binary CA generation (toroidal; branch-wrapped edges, no
+    // division). radius 1 = 3-neighbor LUT[8]; radius 2 = 5-neighbor LUT[32].
+    // Then update the per-cell grayscale EMA (+/-1 amplitude) for Smooth.
+    void caStep(int res, int radius)
     {
-      if (totalistic)
+      if (radius == 1)
       {
         for (int i = 0; i < res; i++)
         {
-          const int lIdx = (i == 0) ? (res - 1) : (i - 1);
-          const int rIdx = (i == res - 1) ? 0 : (i + 1);
-          mNext[i] = mRuleTable[mCells[lIdx] + mCells[i] + mCells[rIdx]];
+          const int l = mCells[(i == 0) ? (res - 1) : (i - 1)];
+          const int c = mCells[i];
+          const int r = mCells[(i == res - 1) ? 0 : (i + 1)];
+          mNext[i] = mRuleTable[(l << 2) | (c << 1) | r];
         }
       }
       else
       {
         for (int i = 0; i < res; i++)
         {
-          const int lIdx = (i == 0) ? (res - 1) : (i - 1);
-          const int rIdx = (i == res - 1) ? 0 : (i + 1);
-          const int l = mCells[lIdx];
-          const int c = mCells[i];
-          const int r = mCells[rIdx];
-          mNext[i] = mRuleTable[(l << 2) | (c << 1) | r];
+          int l2 = i - 2; if (l2 < 0) l2 += res;
+          int l1 = i - 1; if (l1 < 0) l1 += res;
+          int r1 = i + 1; if (r1 >= res) r1 -= res;
+          int r2 = i + 2; if (r2 >= res) r2 -= res;
+          const int idx = (mCells[l2] << 4) | (mCells[l1] << 3) |
+                          (mCells[i] << 2) | (mCells[r1] << 1) | mCells[r2];
+          mNext[i] = mRuleTable[idx];
         }
       }
       for (int i = 0; i < res; i++)
       {
         mCells[i] = mNext[i];
-        const float amp = (float)mCells[i] * ampScale - 1.0f;
+        const float amp = mCells[i] ? 1.0f : -1.0f;
         mGray[i] += 0.35f * (amp - mGray[i]);
       }
       // Push this generation into the history ring for grain overlap.
@@ -171,57 +171,41 @@ namespace stolmine
       else if (resN > 1.0f) resN = 1.0f;
       int res = 2 + (int)(resN * (float)(kVivaryMaxCells - 2) + 0.5f);
 
-      // Family: 0 = elementary binary (k=2), 1 = totalistic 3-state, 2 = 4-state.
-      // Multi-state cells map to multi-LEVEL waveforms (ampScale = 2/(k-1)).
+      // Family: 0 = radius-1 elementary (3-neighbor), 1 = radius-2 (5-neighbor)
+      // binary. Both keep sharp +/-1 edges; radius 2 sees a wider neighborhood
+      // for richer long-range rhythmic structure.
       float familyN = mFamily.value();
       if (!(familyN >= 0.0f)) familyN = 0.0f;
       else if (familyN > 1.0f) familyN = 1.0f;
-      int family = (int)(familyN * 2.0f + 0.5f);
+      int family = (int)(familyN + 0.5f);
       if (family < 0) family = 0;
-      else if (family > 2) family = 2;
-      const int k = (family == 0) ? 2 : (family == 1) ? 3 : 4;
-      const bool totalistic = (family != 0);
-      const float ampScale = 2.0f / (float)(k - 1);
+      else if (family > 1) family = 1;
+      const int radius = family + 1;   // 1 or 2
 
-      // Rule 0..1 indexes the curated interesting-rule table for this family.
+      // Rule 0..1 indexes the curated rule table for this family.
       float ruleN = mRule.value();
       if (!(ruleN >= 0.0f)) ruleN = 0.0f;
       else if (ruleN > 1.0f) ruleN = 1.0f;
-      int ruleNum;
-      if (family == 0)
+      uint32_t ruleNum;
+      if (radius == 1)
       {
         int idx = (int)(ruleN * (float)(kVivaryNumRules - 1) + 0.5f);
         if (idx >= kVivaryNumRules) idx = kVivaryNumRules - 1;
         ruleNum = kVivaryRules[idx];
       }
-      else if (family == 1)
-      {
-        int idx = (int)(ruleN * (float)(kVivaryNumRules3 - 1) + 0.5f);
-        if (idx >= kVivaryNumRules3) idx = kVivaryNumRules3 - 1;
-        ruleNum = kVivaryRules3[idx];
-      }
       else
       {
-        int idx = (int)(ruleN * (float)(kVivaryNumRules4 - 1) + 0.5f);
-        if (idx >= kVivaryNumRules4) idx = kVivaryNumRules4 - 1;
-        ruleNum = (int)kVivaryRules4[idx];
+        int idx = (int)(ruleN * (float)(kVivaryNumRulesR2 - 1) + 0.5f);
+        if (idx >= kVivaryNumRulesR2) idx = kVivaryNumRulesR2 - 1;
+        ruleNum = kVivaryRulesR2[idx];
       }
-      // Rebuild the rule table when family/rule changes; reseed on a family
-      // change (stale cells would be out of range for the new k). Base-k digit
-      // unpack (totalistic) uses idiv but only block-rate-on-change.
+      // Rebuild the LUT when family/rule changes; reseed on a family change.
       if (family != mLastFamily || ruleNum != mLastRule)
       {
-        if (family != mLastFamily) reseed(res, k);
-        if (family == 0)
-        {
-          for (int b = 0; b < 8; b++) mRuleTable[b] = (uint8_t)((ruleNum >> b) & 1);
-        }
-        else
-        {
-          const int T = 3 * (k - 1) + 1;   // 7 (k=3) or 10 (k=4)
-          int rr = ruleNum;
-          for (int j = 0; j < T; j++) { mRuleTable[j] = (uint8_t)(rr % k); rr /= k; }
-        }
+        if (family != mLastFamily) reseed(res);
+        const int nbits = (radius == 1) ? 8 : 32;
+        for (int b = 0; b < nbits; b++)
+          mRuleTable[b] = (uint8_t)((ruleNum >> b) & 1u);
         mLastFamily = family;
         mLastRule = ruleNum;
       }
@@ -268,23 +252,23 @@ namespace stolmine
           if (++mPassCount >= nClk)
           {
             mPassCount = 0;
-            caStep(res, totalistic, ampScale);
+            caStep(res, radius);
             // Reset watchdog: reseed every rClk updates (0 = off) OR on a
             // uniform row (so a converged rule never leaves it silent).
             const bool dead = caIsUniform(res);
             if ((rClk > 0 && ++mResetCount >= rClk) || dead)
             {
               mResetCount = 0;
-              reseed(res, k);
+              reseed(res);
             }
           }
         }
 
         // Grain overlap-add: sum the last `activeGen` generations read at the
         // shared pass-phase, weighted by a decaying window over the overlap
-        // depth (age m weight = max(0, 1 - (m+phase)/D)), normalized. Each cell
-        // maps to a multi-level amplitude (ampScale = 2/(k-1)). Then Smooth
-        // blends toward the grayscale EMA. activeGen=1 -> just the current gen.
+        // depth (age m weight = max(0, 1 - (m+phase)/D)), normalized. Binary
+        // cells -> +/-1. Then Smooth blends toward the grayscale EMA.
+        // activeGen=1 -> just the current generation.
         const float p = mPhase * (float)res;
         int i0 = (int)p;
         if (i0 >= res) i0 = res - 1;
@@ -298,8 +282,8 @@ namespace stolmine
           if (wt < 0.0f) wt = 0.0f;
           const uint8_t *row =
             mGenRing[(mGenHead - m + kVivaryGenHist) & (kVivaryGenHist - 1)];
-          const float a0 = (float)row[i0] * ampScale - 1.0f;
-          const float a1 = (float)row[i1] * ampScale - 1.0f;
+          const float a0 = row[i0] ? 1.0f : -1.0f;
+          const float a1 = row[i1] ? 1.0f : -1.0f;
           acc += wt * (a0 + frac * (a1 - a0));
           wsum += wt;
         }
@@ -326,11 +310,11 @@ namespace stolmine
     float mGray[kVivaryMaxCells];   // per-cell grayscale EMA (Smooth target)
     uint8_t mGenRing[kVivaryGenHist][kVivaryMaxCells]; // recent generations
     int mGenHead;                   // newest generation index in the ring
-    uint8_t mRuleTable[16];         // elementary LUT[8] or totalistic table[<=10]
+    uint8_t mRuleTable[32];         // radius-1 LUT[8] or radius-2 LUT[32]
     float mPhase;
     int mPassCount;
     int mResetCount;
-    int mLastRule;
+    uint32_t mLastRule;
     int mLastFamily;
 #endif
   };
