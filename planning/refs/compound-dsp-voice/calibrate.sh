@@ -1,30 +1,28 @@
 #!/usr/bin/env bash
-# Loopback level calibration helper.
+# Loopback level-calibration helper.
 #
-# Plays a calibration tone out the default sink, records the return off the
-# default source, and prints the return's peak/RMS (and clip count). Rerun it
-# while nudging the 301 input VCA until return RMS matches the tone's RMS.
+# Targets the MOTU nodes EXPLICITLY -- WirePlumber re-picks the "default"
+# source, so never rely on it. 48 kHz throughout (the 301's rate).
+#   SINK = MOTU Line2 (outputs 3-4; out 3 -> 301 input)
+#   SRC  = MOTU Line5 (inputs 3-4; euro->line return, mono duplicated to stereo)
+# Override with SINK=/SRC= env vars if the routing changes.
 #
-# One-time setup: point the PipeWire defaults at the MOTU endpoints in the loop.
-#   pactl list short sinks ;  pactl list short sources
-#   pactl set-default-sink   <MOTU line out feeding the 301>
-#   pactl set-default-source <MOTU input taking the return>
-#
-# Usage:  ./calibrate.sh cal_1k_rms-18.wav
-#         ./calibrate.sh cal_1k_rms-18.wav 3      # capture 3 s (default 3)
+# Usage:  ./calibrate.sh cal_1k_rms-18.wav [seconds]
+# Rerun after each 301-VCA nudge until return RMS matches the tone's RMS.
 set -u
+SINK="${SINK:-alsa_output.usb-MOTU_M4_M4MA0617JK-00.HiFi__Line2__sink}"
+SRC="${SRC:-alsa_input.usb-MOTU_M4_M4MA0617JK-00.HiFi__Line5__source}"
 TONE="${1:?usage: calibrate.sh <tone.wav> [seconds]}"
 SECS="${2:-3}"
-OUT="$(mktemp --suffix=.wav)"
+OUT="${TONE%.wav}__return.wav"
 
-pw-play "$TONE" >/dev/null 2>&1 &
+pw-play --target "$SINK" "$TONE" >/dev/null 2>&1 &
 PLAY=$!
-sleep 0.4                                   # let the tone reach steady state
-arecord -f S24_3LE -r 48000 -c 2 -d "$SECS" "$OUT" >/dev/null 2>&1 \
-  || arecord -f S16_LE -r 48000 -c 2 -d "$SECS" "$OUT" >/dev/null 2>&1
+sleep 0.4                                        # let the tone reach steady state
+parec -d "$SRC" --rate=48000 --channels=2 --format=float32le --no-remix 2>/dev/null \
+  | sox -t raw -r 48000 -c 2 -e float -b 32 - "$OUT" trim 0 "$SECS"
 kill "$PLAY" 2>/dev/null; wait "$PLAY" 2>/dev/null
 
-echo "tone : $(basename "$TONE")"
-echo "== return =="
+echo "tone   : $(basename "$TONE")"
+echo "return : $(basename "$OUT")  (Line5)"
 sox "$OUT" -n stats 2>&1 | grep -E "Pk lev dB|RMS lev dB|Pk count|Crest factor"
-rm -f "$OUT"
