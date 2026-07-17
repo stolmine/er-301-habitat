@@ -145,6 +145,18 @@ namespace stolmine
     return x * (1.0f + x2 * (-0.16666667f + x2 * 0.00833333f));
   }
 
+  // Cubic soft clipper (sin-free, Spiral-flavored warmth): unity slope at the
+  // origin so it can't boost small-signal loop gain (stable), a smooth knee at
+  // +/-1, hard-bounded to +/-2/3. Drive is applied OUTSIDE and divided back out
+  // (sat(drive*x)/drive) so higher drive = harder saturation WITHOUT changing
+  // the small-signal loop gain. Also serves as the feedback blow-up guard.
+  static inline float fdnSoftSat(float x)
+  {
+    if (x > 1.0f) return 0.66666667f;
+    if (x < -1.0f) return -0.66666667f;
+    return x - x * x * x * 0.33333333f;
+  }
+
   // Proven Schroeder allpass step (carbon copy of Network's
   // networkAllpassStep): v = in + g*buf; out = -g*v + buf; buf = v.
   // Phase-scrambles, magnitude spectrum unchanged. buf is a circular
@@ -248,6 +260,12 @@ namespace stolmine
       const float sN1 = fdnSinApprox(p1 * kFdnQuarterPi);
       const float c2 = fdnCosApprox(p2 * kFdnQuarterPi);
       const float sN2 = fdnSinApprox(p2 * kFdnQuarterPi);
+
+      // In-loop saturation drive, tied to Weave: driven/gnarly at the sparse
+      // (isolated-resonator) end, clean at the dense wash end. sat(drive*x)/drive
+      // keeps small-signal gain unity (stable) while raising saturation hardness.
+      const float satDrive = 1.0f + (1.0f - warpN) * 2.0f;   // 3 (sparse) .. 1 (wash)
+      const float invSatDrive = 1.0f / satDrive;
 
       const float invSR = 1.0f / globalConfig.sampleRate;
 
@@ -428,11 +446,9 @@ namespace stolmine
         float wetR = 0.0f;
         for (int i = 0; i < kFdnLines; i++)
         {
-          float fb = t[i];
-          // Pure blow-up guard (orthonormal matrix + loss gains < 1 keep this
-          // from ever engaging in normal use).
-          if (fb > 16.0f) fb = 16.0f;
-          else if (fb < -16.0f) fb = -16.0f;
+          // In-loop soft saturation (also the blow-up guard: output bounded to
+          // +/-2/3*invSatDrive < 1). Warmth compounds every recirculation.
+          const float fb = fdnSoftSat(satDrive * t[i]) * invSatDrive;
 
           mLine[i][mWrite] = inject * kFdnInj[i] + fb;
 
