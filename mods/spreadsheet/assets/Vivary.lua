@@ -84,7 +84,7 @@ function Vivary:onLoadViews()
     },
     family = GainBias {
       button = "fam",
-      description = "Family (chaos/struct/glider/rev/fractal)",
+      description = "Family (chaos/struct/glider)",
       branch = self.branches.family,
       gainbias = self.objects.family,
       range = self.objects.family,

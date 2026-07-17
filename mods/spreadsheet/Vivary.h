@@ -71,23 +71,6 @@ namespace stolmine
     185, 15, 43, 202, 234, 184, 218, 93
   };
 
-  // REVERSIBLE 2nd-order: next = f(l,c,r) XOR previous-generation. Cannot die
-  // (time-symmetric) -> perpetual wave-like motion + interference. These are
-  // the base rules f that give the liveliest reversible dynamics (curated by
-  // variety). caStep runs the 2nd-order recurrence.
-  static const int kVivaryNumRulesREV = 40;
-  static const uint8_t kVivaryRulesREV[kVivaryNumRulesREV] = {
-    191, 3, 6, 239, 9, 11, 207, 13, 143, 15, 25, 167, 39, 28, 30, 123, 187, 35,
-    38, 235, 41, 42, 43, 203, 45, 139, 54, 56, 57, 163, 60, 62, 73, 78, 133,
-    106, 110, 161, 190, 134
-  };
-
-  // ADDITIVE / LINEAR (XOR): the linear-over-GF(2) rules -> nested, self-similar
-  // Sierpinski-like fractal patterns. A crystalline/recursive character.
-  static const int kVivaryNumRulesFRAC = 10;
-  static const uint8_t kVivaryRulesFRAC[kVivaryNumRulesFRAC] = {
-    90, 60, 165, 195, 102, 153, 101, 89, 75, 45
-  };
 
   class Vivary : public od::Object
   {
@@ -107,7 +90,6 @@ namespace stolmine
 
       memset(mCells, 0, sizeof(mCells));
       memset(mNext, 0, sizeof(mNext));
-      memset(mPrev, 0, sizeof(mPrev));
       memset(mGray, 0, sizeof(mGray));
       memset(mGenRing, 0, sizeof(mGenRing));
       memset(mRuleTable, 0, sizeof(mRuleTable));
@@ -126,7 +108,7 @@ namespace stolmine
     // generation-history ring so grain overlap has no stale generations.
     void reseed(int res)
     {
-      for (int i = 0; i < res; i++) { mCells[i] = 0; mPrev[i] = 0; }
+      for (int i = 0; i < res; i++) mCells[i] = 0;
       mCells[res / 2] = 1;
       for (int g = 0; g < kVivaryGenHist; g++)
         for (int i = 0; i < res; i++) mGenRing[g][i] = mCells[i];
@@ -143,8 +125,7 @@ namespace stolmine
 
     // Advance one binary CA generation (toroidal; branch-wrapped edges, no
     // division). mode 0 = radius-1 (3-neighbor LUT[8]); mode 1 = radius-2
-    // (5-neighbor LUT[32]); mode 2 = reversible 2nd-order (next = f(l,c,r) XOR
-    // previous generation -> cannot die). Then update the grayscale EMA.
+    // (5-neighbor LUT[32]). Then update the grayscale EMA.
     void caStep(int res, int mode)
     {
       if (mode == 1)
@@ -159,17 +140,6 @@ namespace stolmine
                           (mCells[i] << 2) | (mCells[r1] << 1) | mCells[r2];
           mNext[i] = mRuleTable[idx];
         }
-      }
-      else if (mode == 2)
-      {
-        for (int i = 0; i < res; i++)
-        {
-          const int l = mCells[(i == 0) ? (res - 1) : (i - 1)];
-          const int c = mCells[i];
-          const int r = mCells[(i == res - 1) ? 0 : (i + 1)];
-          mNext[i] = mRuleTable[(l << 2) | (c << 1) | r] ^ mPrev[i];
-        }
-        for (int i = 0; i < res; i++) mPrev[i] = mCells[i];   // current -> previous
       }
       else
       {
@@ -219,16 +189,17 @@ namespace stolmine
       float familyN = mFamily.value();
       if (!(familyN >= 0.0f)) familyN = 0.0f;
       else if (familyN > 1.0f) familyN = 1.0f;
-      int family = (int)(familyN * 4.0f + 0.5f);
+      int family = (int)(familyN * 2.0f + 0.5f);
       if (family < 0) family = 0;
-      else if (family > 4) family = 4;
+      else if (family > 2) family = 2;
 
       float ruleN = mRule.value();
       if (!(ruleN >= 0.0f)) ruleN = 0.0f;
       else if (ruleN > 1.0f) ruleN = 1.0f;
 
       // Pick the family's caStep mode, rule table, and rule number.
-      int mode = 0;               // 0 = radius-1, 1 = radius-2, 2 = reversible
+      // 0 = radius-1 chaos, 1 = radius-2 structure, 2 = edge-of-chaos (r1).
+      int mode = 0;
       int nbits = 8;
       uint32_t ruleNum;
       if (family == 1)            // radius-2 structure (32-bit rules)
@@ -238,13 +209,10 @@ namespace stolmine
         if (idx >= kVivaryNumRulesR2) idx = kVivaryNumRulesR2 - 1;
         ruleNum = kVivaryRulesR2[idx];
       }
-      else                        // radius-1 or reversible (8-bit rules)
+      else                        // radius-1 chaos (0) or edge-of-chaos (2)
       {
-        const uint8_t *tbl; int count;
-        if (family == 0)      { tbl = kVivaryRules;     count = kVivaryNumRules;     mode = 0; }
-        else if (family == 2) { tbl = kVivaryRulesEOC;  count = kVivaryNumRulesEOC;  mode = 0; }
-        else if (family == 3) { tbl = kVivaryRulesREV;  count = kVivaryNumRulesREV;  mode = 2; }
-        else                  { tbl = kVivaryRulesFRAC; count = kVivaryNumRulesFRAC; mode = 0; }
+        const uint8_t *tbl = (family == 0) ? kVivaryRules : kVivaryRulesEOC;
+        const int count = (family == 0) ? kVivaryNumRules : kVivaryNumRulesEOC;
         int idx = (int)(ruleN * (float)(count - 1) + 0.5f);
         if (idx >= count) idx = count - 1;
         ruleNum = tbl[idx];
@@ -276,16 +244,26 @@ namespace stolmine
       if (!(smooth >= 0.0f)) smooth = 0.0f;
       else if (smooth > 1.0f) smooth = 1.0f;
 
-      // Overlap (grain overlap): layer the last N CA generations. 0 = current
-      // generation only (hard swap); up = more generations blend/morph. Window
-      // depth ovD generations; only `activeGen` are summed.
+      // Overlap (grain overlap): layer the last activeGen generations, each read
+      // at a DIFFERENT phase offset so their sharp edges DON'T align and average
+      // (that averaging is what made it a lowpass) -> a decorrelated mashup.
+      // EQUAL-POWER sum (weights decay by age; normalize by 1/sqrt(sum w^2), the
+      // correct law for decorrelated content -- avoids the linear-crossfade dip).
       float overlapN = mOverlap.value();
       if (!(overlapN >= 0.0f)) overlapN = 0.0f;
       else if (overlapN > 1.0f) overlapN = 1.0f;
-      const float ovInvD = 1.0f / (1.0f + overlapN * (float)(kVivaryGenHist - 1));
       int activeGen = 1 + (int)(overlapN * (float)(kVivaryGenHist - 1) + 0.999f);
       if (activeGen < 1) activeGen = 1;
       else if (activeGen > kVivaryGenHist) activeGen = kVivaryGenHist;
+      const float ovDelta = overlapN * 0.5f;   // per-grain phase spread (decorrelate)
+      float ovW[kVivaryGenHist];
+      float ovW2 = 0.0f;
+      for (int m = 0; m < activeGen; m++)
+      {
+        ovW[m] = 1.0f / (1.0f + (float)m);      // newest loudest, older add texture
+        ovW2 += ovW[m] * ovW[m];
+      }
+      const float ovInvNorm = 1.0f / sqrtf(ovW2);   // equal-power (block rate)
 
       const float phInc = f0 / globalConfig.sampleRate;
 
@@ -313,31 +291,35 @@ namespace stolmine
           }
         }
 
-        // Grain overlap-add: sum the last `activeGen` generations read at the
-        // shared pass-phase, weighted by a decaying window over the overlap
-        // depth (age m weight = max(0, 1 - (m+phase)/D)), normalized. Binary
-        // cells -> +/-1. Then Smooth blends toward the grayscale EMA.
-        // activeGen=1 -> just the current generation.
+        // Grain overlap: each generation grain is read at its own phase offset
+        // (m*ovDelta) so edges decorrelate instead of averaging; equal-power sum.
+        // activeGen=1 -> just the current generation at the read phase.
+        float acc = 0.0f;
+        for (int m = 0; m < activeGen; m++)
+        {
+          float gp = mPhase + (float)m * ovDelta;
+          gp -= (float)(int)gp;                    // frac (mod 1)
+          const float pg = gp * (float)res;
+          int j0 = (int)pg;
+          if (j0 >= res) j0 = res - 1;
+          int j1 = j0 + 1;
+          if (j1 >= res) j1 = 0;
+          const float fr = pg - (float)j0;
+          const uint8_t *row =
+            mGenRing[(mGenHead - m + kVivaryGenHist) & (kVivaryGenHist - 1)];
+          const float a0 = row[j0] ? 1.0f : -1.0f;
+          const float a1 = row[j1] ? 1.0f : -1.0f;
+          acc += ovW[m] * (a0 + fr * (a1 - a0));
+        }
+        const float rawOut = acc * ovInvNorm;
+        // Smooth blends toward the grayscale EMA (at the base read phase).
         const float p = mPhase * (float)res;
         int i0 = (int)p;
         if (i0 >= res) i0 = res - 1;
         int i1 = i0 + 1;
         if (i1 >= res) i1 = 0;
-        const float frac = p - (float)i0;
-        float acc = 0.0f, wsum = 0.0f;
-        for (int m = 0; m < activeGen; m++)
-        {
-          float wt = 1.0f - ((float)m + mPhase) * ovInvD;
-          if (wt < 0.0f) wt = 0.0f;
-          const uint8_t *row =
-            mGenRing[(mGenHead - m + kVivaryGenHist) & (kVivaryGenHist - 1)];
-          const float a0 = row[i0] ? 1.0f : -1.0f;
-          const float a1 = row[i1] ? 1.0f : -1.0f;
-          acc += wt * (a0 + frac * (a1 - a0));
-          wsum += wt;
-        }
-        const float rawOut = acc / (wsum + 1e-9f);
-        const float gray = mGray[i0] + frac * (mGray[i1] - mGray[i0]);
+        const float gfr = p - (float)i0;
+        const float gray = mGray[i0] + gfr * (mGray[i1] - mGray[i0]);
         out[n] = rawOut + smooth * (gray - rawOut);
       }
     }
@@ -356,7 +338,6 @@ namespace stolmine
   private:
     uint8_t mCells[kVivaryMaxCells];
     uint8_t mNext[kVivaryMaxCells];
-    uint8_t mPrev[kVivaryMaxCells];   // previous generation (reversible mode)
     float mGray[kVivaryMaxCells];   // per-cell grayscale EMA (Smooth target)
     uint8_t mGenRing[kVivaryGenHist][kVivaryMaxCells]; // recent generations
     int mGenHead;                   // newest generation index in the ring
