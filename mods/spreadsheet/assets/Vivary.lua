@@ -60,6 +60,7 @@ function Vivary:onLoadGraph(channelCount)
   param("Reset", "reset", 0.0)
   param("Smooth", "smooth", 0.0)
   param("Overlap", "overlap", 0.0)
+  param("Feedback", "feedback", 0.0)
 end
 
 function Vivary:onLoadViews()
@@ -158,9 +159,20 @@ function Vivary:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
+    },
+    feedback = GainBias {
+      button = "fb",
+      description = "Feedback (comb resonance)",
+      branch = self.branches.feedback,
+      gainbias = self.objects.feedback,
+      range = self.objects.feedback,
+      biasMap = normMap(),
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
     }
   }, {
-    expanded = { "tune", "freq", "family", "rule", "res", "evolve", "reset", "smooth", "overlap" },
+    expanded = { "tune", "freq", "family", "rule", "res", "evolve", "reset", "smooth", "overlap", "feedback" },
     collapsed = {}
   }
 end

@@ -29,6 +29,18 @@ namespace stolmine
 {
   static const int kVivaryMaxCells = 256;
   static const int kVivaryGenHist  = 4;   // generations kept for grain overlap
+  static const int kVivaryFbBufLen = 8192; // feedback comb delay buffer (pow2)
+  static const int kVivaryFbMask   = kVivaryFbBufLen - 1;
+
+  // Cubic soft clipper for the feedback loop: identity-slope at 0, bounded to
+  // +/-2/3 -> the comb can't run away and self-limits (adds saturation when
+  // pushed). No trig, all VFP.
+  static inline float vivarySoftClip(float x)
+  {
+    if (x > 1.0f) return 0.66666667f;
+    if (x < -1.0f) return -0.66666667f;
+    return x - x * x * x * 0.33333333f;
+  }
 
   // Curated elementary rules: the sonically interesting (Wolfram class III/IV)
   // rules, DEDUPLICATED by symmetry class (mirror/complement twins removed) and
@@ -87,12 +99,16 @@ namespace stolmine
       addParameter(mSmooth);
       addParameter(mFamily);
       addParameter(mOverlap);
+      addParameter(mFeedback);
 
       memset(mCells, 0, sizeof(mCells));
       memset(mNext, 0, sizeof(mNext));
       memset(mGray, 0, sizeof(mGray));
       memset(mGenRing, 0, sizeof(mGenRing));
       memset(mRuleTable, 0, sizeof(mRuleTable));
+      memset(mFbLine, 0, sizeof(mFbLine));
+      mFbW = 0;
+      mFbLP = 0.0f;
       mGenHead = 0;
       mPhase = 0.0f;
       mPassCount = 0;
@@ -265,6 +281,17 @@ namespace stolmine
       }
       const float ovInvNorm = 1.0f / sqrtf(ovW2);   // equal-power (block rate)
 
+      // Feedback: a pitch-tracked comb resonance. Delay = one wavetable period
+      // (SR/f0), so it reinforces the current texture at pitch -> resonant,
+      // Karplus-like sustained tail. Damped + soft-clipped so it can't run away.
+      float fbN = mFeedback.value();
+      if (!(fbN >= 0.0f)) fbN = 0.0f;
+      else if (fbN > 1.0f) fbN = 1.0f;
+      const float fbAmt = fbN * 0.9f;
+      int fbDelay = (f0 > 1.0f) ? (int)(globalConfig.sampleRate / f0) : kVivaryFbMask;
+      if (fbDelay < 4) fbDelay = 4;
+      else if (fbDelay > kVivaryFbMask) fbDelay = kVivaryFbMask;
+
       const float phInc = f0 / globalConfig.sampleRate;
 
       for (int n = 0; n < FRAMELENGTH; n++)
@@ -320,7 +347,16 @@ namespace stolmine
         if (i1 >= res) i1 = 0;
         const float gfr = p - (float)i0;
         const float gray = mGray[i0] + gfr * (mGray[i1] - mGray[i0]);
-        out[n] = rawOut + smooth * (gray - rawOut);
+        const float dry = rawOut + smooth * (gray - rawOut);
+
+        // Pitch-tracked feedback comb (damped + soft-clipped). At fb=0 the dry
+        // passes clean; up = resonant sustained tail that blooms with pitch/res.
+        const int rd = (mFbW - fbDelay) & kVivaryFbMask;
+        mFbLP += 0.5f * (mFbLine[rd] - mFbLP);        // mild HF damping (Karplus)
+        const float o = dry + fbAmt * mFbLP;
+        mFbLine[mFbW] = vivarySoftClip(o);            // bound the loop
+        mFbW = (mFbW + 1) & kVivaryFbMask;
+        out[n] = o;
       }
     }
 
@@ -332,8 +368,9 @@ namespace stolmine
     od::Parameter mEvolve{"Evolve", 1.0f}; // 0..1 -> static tone .. per-pass noise
     od::Parameter mReset{"Reset", 0.0f};   // 0..1 -> reseed interval (0 = off)
     od::Parameter mSmooth{"Smooth", 0.0f}; // 0..1 -> binary harsh .. grayscale soft
-    od::Parameter mFamily{"Family", 0.0f}; // 0..1 -> binary / 3-state / 4-state
+    od::Parameter mFamily{"Family", 0.0f}; // 0..1 -> chaos / structure / glider
     od::Parameter mOverlap{"Overlap", 0.0f}; // 0..1 -> grain overlap (gen layering)
+    od::Parameter mFeedback{"Feedback", 0.0f}; // 0..1 -> pitch-tracked comb resonance
 
   private:
     uint8_t mCells[kVivaryMaxCells];
@@ -342,6 +379,9 @@ namespace stolmine
     uint8_t mGenRing[kVivaryGenHist][kVivaryMaxCells]; // recent generations
     int mGenHead;                   // newest generation index in the ring
     uint8_t mRuleTable[32];         // radius-1 LUT[8] or radius-2 LUT[32]
+    float mFbLine[kVivaryFbBufLen]; // feedback comb delay
+    int mFbW;                       // feedback write index
+    float mFbLP;                    // feedback one-pole damping state
     float mPhase;
     int mPassCount;
     int mResetCount;
