@@ -59,6 +59,7 @@ function Vivary:onLoadGraph(channelCount)
   param("Evolve", "evolve", 1.0)
   param("Reset", "reset", 0.0)
   param("Smooth", "smooth", 0.0)
+  param("Overlap", "overlap", 0.0)
 end
 
 function Vivary:onLoadViews()
@@ -146,9 +147,20 @@ function Vivary:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
+    },
+    overlap = GainBias {
+      button = "olap",
+      description = "Overlap (grain layering)",
+      branch = self.branches.overlap,
+      gainbias = self.objects.overlap,
+      range = self.objects.overlap,
+      biasMap = normMap(),
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
+      initialBias = 0.0
     }
   }, {
-    expanded = { "tune", "freq", "family", "rule", "res", "evolve", "reset", "smooth" },
+    expanded = { "tune", "freq", "family", "rule", "res", "evolve", "reset", "smooth", "overlap" },
     collapsed = {}
   }
 end
