@@ -80,3 +80,35 @@ report("REDESIGN C (directional ramps, mean-drama)", redC, dramaC)
 d0 = np.mean([ramp(0.6,0.45,1),ramp(0.5,0.4,1),ramp(1-1,0.45,1),
               ramp(0.3,0.45,1),ramp(0.5,0.5,1),ramp(0.6*(1-1),0.12,0.8)])
 print(f"\n  [C] default-patch drama = {d0:.3f} (want low = clean-ish default)")
+
+# ---- REDESIGN D: Weave = interdependence meta-control -----------------------
+# drivers shrink toward the control mean by coupling = 1-Weave (sparse =
+# interrelated, wash = orthogonal). Effects read the drivers. As coupling->1
+# every effect responds to the mean -> move any control, everything shifts.
+def designD(coupling):
+    mean = 0.25*(S+D+B+M)
+    dS = S + coupling*(mean-S); dD = D + coupling*(mean-D)
+    dB = B + coupling*(mean-B); dM = M + coupling*(mean-M)
+    dBr = clip(0.5+dB-dM)
+    acts = {
+        "fold":  ramp(dD, 0.45, 1.0),          # Decay driver
+        "crush": ramp(dS, 0.40, 1.0),          # Size driver
+        "muffle":ramp(dM, 0.45, 1.0),          # Damp driver
+        "drive": ramp(dB, 0.50, 1.0),          # Bass driver
+        "ring":  ramp(0.5*(dB+dM), 0.45, 1.0),  # tonal energy (survives coupling); carrier<-bright
+        "comb":  ramp(mean, 0.40, 0.9),        # general activity
+    }
+    return acts
+
+for cp in (0.0, 0.5, 1.0):
+    acts = designD(cp)
+    A = np.stack(list(acts.values()))
+    C = np.corrcoef(A); off = np.abs(C[np.triu_indices(len(acts),1)])
+    drama = A.mean(0)
+    # decay's influence: corr of each control with drama
+    infl = {c: abs(np.corrcoef(x, drama)[0,1]) for c,x in
+            (("Size",S),("Decay",D),("Bass",B),("Damp",M),("Weave",W))}
+    print(f"\n[D coupling={cp:.1f}] inter-eff |corr| mean {off.mean():.2f} "
+          f"| drama<0.1 {np.mean(drama<0.1):.2f} >0.7 {np.mean(drama>0.7):.2f}")
+    print("   control->drama |corr|: " +
+          " ".join(f"{k}:{v:.2f}" for k,v in infl.items()))

@@ -430,32 +430,40 @@ namespace stolmine
       }
       const float bodyMix = (1.0f - warpN) * kFdnBodyDepth;
 
-      // ---- Wardrobe: ORTHOGONAL aggregate mapping (verified spread) ----
-      // Each effect is driven by a distinct control via a directional ramp
-      // (calm end = off), so the six effects decorrelate (measured |corr| 0.08
-      // vs 0.95 for the old ferocity-gated design) and "drama" spreads evenly
-      // across the control space with a reachable clean corner. No global gate:
-      // at the calm settings every effect is at identity -> clean.
+      // ---- Wardrobe: Weave-coupled aggregate mapping -----------------------
+      // Weave is a META control for INTERDEPENDENCE: the effect "drivers" shrink
+      // toward their shared mean by coupling = 1 - Weave. Weave=1 (wash) ->
+      // coupling 0 -> each effect reads its own control (orthogonal, cleaner);
+      // Weave=0 (sparse) -> coupling 1 -> every effect reads the mean, so moving
+      // any control shifts everything (the interrelated feeling). Verified in
+      // planning/fdn-reverb-wardrobe-inventory.py: inter-effect |corr| sweeps
+      // 0.25 -> 0.99, control influence stays balanced (Decay no longer
+      // dominates the timbral mapping; its RT60 role is separate).
       const float mass = 0.5f * (sizeN + decayN);
-      const float ferocity = decayN * (1.0f - warpN);
-      float bright = 0.5f + bassN - dampN;
-      if (bright < 0.0f) bright = 0.0f; else if (bright > 1.0f) bright = 1.0f;
+      const float coupling = 1.0f - warpN;
+      const float ctlMean = 0.25f * (sizeN + decayN + bassN + dampN);
+      const float dSize  = sizeN  + coupling * (ctlMean - sizeN);
+      const float dDecay = decayN + coupling * (ctlMean - decayN);
+      const float dBass  = bassN  + coupling * (ctlMean - bassN);
+      const float dDamp  = dampN  + coupling * (ctlMean - dampN);
+      float dBright = 0.5f + dBass - dDamp;
+      if (dBright < 0.0f) dBright = 0.0f; else if (dBright > 1.0f) dBright = 1.0f;
 
-      const float cFold   = fdnRamp(decayN, 0.45f, 1.0f / 0.55f);       // Decay
-      const float cCrush  = fdnRamp(sizeN, 0.40f, 1.0f / 0.60f);        // Size
-      const float cRing   = fdnRamp(1.0f - warpN, 0.45f, 1.0f / 0.55f); // Weave (sparse)
-      const float cMuffle = fdnRamp(dampN, 0.45f, 1.0f / 0.55f);        // Damp
-      const float cDrive  = fdnRamp(bassN, 0.50f, 1.0f / 0.50f);        // Bass
-      const float cComb   = fdnRamp(ferocity, 0.12f, 1.0f / 0.68f);     // long+sparse
+      const float cFold   = fdnRamp(dDecay, 0.45f, 1.0f / 0.55f);
+      const float cCrush  = fdnRamp(dSize, 0.40f, 1.0f / 0.60f);
+      const float cMuffle = fdnRamp(dDamp, 0.45f, 1.0f / 0.55f);
+      const float cDrive  = fdnRamp(dBass, 0.50f, 1.0f / 0.50f);
+      const float cRing   = fdnRamp(0.5f * (dBass + dDamp), 0.45f, 1.0f / 0.55f);
+      const float cComb   = fdnRamp(ctlMean, 0.40f, 1.0f / 0.50f);
 
-      const float foldDrive = 1.0f + cFold * 4.0f;
+      const float foldDrive = 1.0f + cFold * 2.5f;   // tamed (Size+Decay heaviness)
       // Bitcrush/decimate -- AGGRESSIVE: rate down to ~0.03 (SR/33 ~ 1.4 kHz)
       // and step up to 0.4 (~2-3 bit).
       const float crushRate = 1.0f - cCrush * 0.97f;
       const float crushStep = 0.002f + cCrush * 0.4f;
       const float invCrushStep = 1.0f / crushStep;
       const float rmEps =
-        6.2831853f * (kFdnRmHzMin + bright * (kFdnRmHzMax - kFdnRmHzMin)) * invSR;
+        6.2831853f * (kFdnRmHzMin + dBright * (kFdnRmHzMax - kFdnRmHzMin)) * invSR;
       const float rmAmt = cRing * 0.8f;
       const float muffleK = 1.0f - cMuffle * 0.9f;   // 1 = open, 0.1 = muffled
       const float driveAmt = cDrive;
