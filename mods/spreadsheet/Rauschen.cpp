@@ -200,11 +200,12 @@ namespace stolmine
       else                { caFamily = 2; caRuleN = (px - 0.7f) * 3.33333f; } // gliders
       if (caRuleN > 1.0f) caRuleN = 1.0f;
 
-      const float nRes = caVNoise(px, py, s.caSeed + 0u);
-      const float nEvo = caVNoise(px, py, s.caSeed + 101u);
-      const float nRst = caVNoise(px, py, s.caSeed + 202u);
-      const float nOlp = caVNoise(px, py, s.caSeed + 303u);
-      const float nFb  = caVNoise(px, py, s.caSeed + 404u);
+      const float nRes  = caVNoise(px, py, s.caSeed + 0u);
+      const float nEvo  = caVNoise(px, py, s.caSeed + 101u);
+      const float nRst  = caVNoise(px, py, s.caSeed + 202u);
+      const float nOlp  = caVNoise(px, py, s.caSeed + 303u);
+      const float nFb   = caVNoise(px, py, s.caSeed + 404u);
+      const float nFreq = caVNoise(px, py, s.caSeed + 505u);
 
       const float caResN = nRes * nRes;                          // low-weighted, high islands
       const float caEvoN = 1.0f - (1.0f - nEvo) * (1.0f - nEvo); // high-weighted, low islands
@@ -215,9 +216,15 @@ namespace stolmine
       if (caFbGate < 0.0f) caFbGate = 0.0f; else if (caFbGate > 1.0f) caFbGate = 1.0f;
       const float caFbN = caFbGate * (0.4f + 0.6f * nFb);        // per-instance amount
 
-      float caF0 = 55.0f * powf(2.0f, voctPitch);                // V/Oct-pitched fundamental
-      if (caF0 < 1.0f) caF0 = 1.0f;
-      else if (caF0 > sr * 0.49f) caF0 = sr * 0.49f;
+      // Frequency is emergent too (Rauschen has no V/Oct here): it is a function
+      // of the same per-instance X/Y field, weighted LOW with upward excursions
+      // along Y. caF0 = 50 * 2^(2.4*nFreq + 3.6*Y^2): the field term spreads pitch
+      // per instance/position; the Y^2 term lifts it as Y climbs. Constants tuned
+      // (planning scratch freqtune.py mirroring caVNoise) so ~50% of cases land
+      // below 220Hz, low-Y median ~124Hz, high-Y median ~684Hz reaching ~1.3kHz.
+      float caF0 = 50.0f * powf(2.0f, 2.4f * nFreq + 3.6f * py * py);
+      if (caF0 < 20.0f) caF0 = 20.0f;
+      else if (caF0 > sr * 0.45f) caF0 = sr * 0.45f;
 
       s.caEngine.setup(caFamily, caRuleN, caResN, caEvoN, caRstN,
                        caOlpN, caFbN, caF0, sr);
