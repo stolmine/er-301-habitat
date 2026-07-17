@@ -136,6 +136,20 @@ namespace stolmine
   static const float kFdnRefeedCeil = 0.25f;  // max refeed level at Spectral=1
   static const float kFdnSpectralOn = 0.001f; // below this the bank is bypassed
 
+  // Bright tilt on the band sum, attached to ABSOLUTE frequency (sqrt(fc/900),
+  // +3 dB/oct-ish) so the refed energy is pulled UP off the low-mid mud that a
+  // flat static refeed locks onto. Precomputed at the base centers; the block-
+  // rate focus motion multiplies in the sweep's contribution (tiltGlobal).
+  static const float kFdnBandTiltBase[kFdnBands] = {
+    0.333f, 0.456f, 0.624f, 0.852f, 1.166f, 1.594f, 2.180f, 2.981f
+  };
+  // "Spectral focus" motion: a slow magic-circle LFO sweeps ALL band centers
+  // together over +/- depth octaves so the resonant hold glides across the
+  // spectrum instead of locking to one pitch.
+  static const float kFdnFocusRateHz  = 0.11f;  // slow sweep (~9 s period)
+  static const float kFdnFocusDepthOct = 1.0f;  // +/- 1 octave
+  static const float kFdnPrewarpMax    = 0.55f; // cap tan-approx arg (validity)
+
   // Cheap tan approximation for the TPT-SVF prewarp g = tan(pi*fc/SR), valid
   // over the band range (arg < ~0.6 rad): x + x^3/3 + 2x^5/15. Avoids runtime
   // tanf/sinf (feedback_package_trig_lut) and is block-rate anyway.
@@ -191,6 +205,8 @@ namespace stolmine
       memset(mBassLp, 0, sizeof(mBassLp));
       memset(mSvf1, 0, sizeof(mSvf1));
       memset(mSvf2, 0, sizeof(mSvf2));
+      mFocusX = 1.0f;   // magic-circle LFO start (phase 0)
+      mFocusY = 0.0f;
       for (int a = 0; a < 4; a++) mDiffIdx[a] = 0;
       for (int i = 0; i < kFdnLines; i++)
       {
@@ -334,15 +350,30 @@ namespace stolmine
       // a1 = 1/(1 + g*(g + 1/Q)); a2 = g*a1; a3 = g*a2. Band gains are flat in
       // P3.1 -- the contour/tilt curve and the movable focus arrive in P3.4.
       float svfA1[kFdnBands], svfA2[kFdnBands], svfA3[kFdnBands];
+      float bandGain[kFdnBands];
       if (spectralActive)
       {
+        // Advance the slow spectral-focus LFO (magic-circle, block rate) and
+        // sweep all band centers together by focusMult = 2^(depth*lfo) octaves
+        // so the resonant hold glides instead of locking. The bright tilt is on
+        // absolute frequency, so as the bank sweeps up it brightens (tiltGlobal
+        // = sqrt(focusMult)), keeping energy off the low-mid mud.
+        const float epsF =
+          6.2831853f * kFdnFocusRateHz * (float)FRAMELENGTH * invSR;
+        mFocusX += epsF * mFocusY;
+        mFocusY -= epsF * mFocusX;
+        const float focusMult = powf(2.0f, kFdnFocusDepthOct * mFocusX);
+        const float tiltGlobal = sqrtf(focusMult);
         for (int b = 0; b < kFdnBands; b++)
         {
-          const float g = fdnTanApprox(3.14159265f * kFdnBandHz[b] * invSR);
+          float arg = 3.14159265f * kFdnBandHz[b] * focusMult * invSR;
+          if (arg > kFdnPrewarpMax) arg = kFdnPrewarpMax;   // keep tan-approx valid
+          const float g = fdnTanApprox(arg);
           const float a1 = 1.0f / (1.0f + g * (g + kFdnBandDamp));
           svfA1[b] = a1;
           svfA2[b] = g * a1;
           svfA3[b] = g * svfA2[b];
+          bandGain[b] = kFdnBandTiltBase[b] * tiltGlobal;
         }
       }
 
@@ -410,7 +441,7 @@ namespace stolmine
             const float v2 = mSvf2[b] + svfA2[b] * mSvf1[b] + svfA3[b] * v3;
             mSvf1[b] = 2.0f * v1 - mSvf1[b];
             mSvf2[b] = 2.0f * v2 - mSvf2[b];
-            spectralOut += v1;   // flat band gain in P3.1 (contour = P3.4)
+            spectralOut += bandGain[b] * v1;   // bright tilt on the swept centers
           }
           refeedInject = refeedLevel * fdnSoftGov(spectralOut);
         }
@@ -491,6 +522,7 @@ namespace stolmine
     float mLfoY[kFdnLines];    // per-line magic-circle LFO state (y)
     float mSvf1[kFdnBands];    // spectral-bank SVF state (ic1eq) per band
     float mSvf2[kFdnBands];    // spectral-bank SVF state (ic2eq) per band
+    float mFocusX, mFocusY;    // magic-circle LFO for the spectral-focus sweep
     bool mPrimed;              // base delays primed to target on first block
     int mWrite;
     float mDcX1, mDcY1;
