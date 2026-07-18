@@ -146,6 +146,21 @@ single-peak) is set by the A-vs-B cutoff relationship and resonance.
   cross-coupled** - model needs a small (~6%) inverse cutoff cross-term even in
   single-source mode.
 
+### SELF-OSC mechanism (2026-07-18, full-state logged in states.tsv)
+At A ccw / B cw / res cw / clk both / alias lo (monitor B): input-off RMS -16 dBFS,
+a **~32 Hz-spaced comb** (34/65/105 + 337..468) - spacing ~= Cutoff A (the LOW
+channel's frequency). Mapping:
+- **Res threshold ~4 o'clock, SHARP**: res cw -16 dBFS (strong osc), res 3 oc
+  -82 dBFS (dead). Feedback gain must cross a threshold.
+- **Cutoff A: MULTIPLE osc windows** (osc at ccw, fizzles by 9 oc, RETURNS at noon).
+  A clock-RATIO resonance condition, not just "A low" - the XOR beat aligns with the
+  resonance at certain f_A/f_B ratios. Comb spacing tracks Cutoff A.
+- **Needs clk=both + high divergence + res>~4oc.** Converged or low-res -> no osc.
+- **Model mechanism**: XOR clock-beat comb (low-freq, spaced ~f_A) amplified by the
+  resonance feedback once res crosses the gain threshold. Build the XOR beat feeding
+  a near-unity resonance and the multi-window osc should emerge (POC TODO: push q to
+  the instability threshold at max res + feed the XOR beat into the resonant path).
+
 ### Distortion (input amps) - CHARACTERIZED (LP out, cutoff cw, res down)
 - The **Gain knob is an input VCA**: off at ccw (silence), and its taper
   **compresses near the top** (3 oc -> cw only +2 dB). At the loopback send level
