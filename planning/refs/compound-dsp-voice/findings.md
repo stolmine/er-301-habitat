@@ -64,6 +64,14 @@ Analysis: `measure.py` (ESS Farina deconvolution, validated against the known LP
   in "both" mode XOR/combine them and drive the SC clock with the result -> comb
   filtering that sweeps from dense (large downward divergence) to single-peak
   (convergence/upward). A ring-mod/comb generator, not simple detune.
+- **DUAL-CLOCK SELF-OSCILLATION (corner discovery, contradicts spec).** At
+  **A ccw / B cw / res cw / alias LO / clk both** (divergent clocks, max res) the
+  module **self-oscillates with NO input**: -16 dBFS out, a **~74 Hz-spaced comb**
+  of tones (74, 340, 414, 487 Hz). The spec's "does not self-oscillate" holds only
+  for the resonance control on a single clock; the **XOR clock interaction at max
+  res enables a self-oscillating comb**. A signature/aggressive corner - must be
+  in the model (dual-clock + high res -> comb oscillator). Full extent (which
+  corners osc, freq vs settings) mapped in the corner grid.
 - **Caveat**: time-varying system; the ess deconvolution shows the effective
   (averaged) response. Sustained-tone probes (DC4) needed for the true sideband
   spectrum. TODO detail: resonance (DC2), gain/drive intermod (DC3), input
