@@ -122,6 +122,30 @@ single-peak) is set by the A-vs-B cutoff relationship and resonance.
   resonance near ~4.8 kHz), NOT the resonance peak (it does not grow with res).
   Investigate: does it move with cutoff? (If fixed -> clock-related.)
 
+### CLOCK LAW (measured 2026-07-18, hot send, single-A)
+- **N ~= 25 (FIXED); clock = cutoff x 25.** Evidence: at 9 oc the resonance is ~30 Hz
+  and the alias images fall at ~762 Hz harmonics (762/1524/2286/3048) -> 30 x 25 = 750.
+  So the cutoff knob sets the clock frequency (via a fixed divide ratio), NOT a
+  variable N. Corrects the earlier "clock = 2x cliff" reading.
+- The ~5 kHz **cliff is a fixed OUTPUT anti-alias filter**, not clock/2.
+- **Cutoff-vs-knob**: steep exponential ~30 Hz (low) -> 636 Hz (noon) -> ~4.7 kHz
+  (3 oc), **saturating past 3 oc** (cw = 3 oc ~4.7 kHz). Low-knob exact values are
+  aliasing-confounded (unreliable below ~200 Hz) but the structure is solid.
+- So aliasing emerges naturally: low cutoff -> low clock (<1 kHz) -> harmonics fold
+  into band (the grit); high cutoff -> clock >10 kHz, out of the way. **POC fix:
+  N 8 -> 25.**
+
+### Influence tests (2026-07-18)
+- **Mode does NOT retune the clock.** Clean back-to-back at 3 oc (only mode flipped,
+  cutoff untouched): HP 4922 Hz vs hidden 4907 Hz = -0.3% (noise). An earlier +4%
+  reading was pure cutoff-knob-reset drift. So **clock is independent of mode**
+  (whatever "mode touches all outputs" is, it is not a frequency retune).
+- **B's cutoff bleeds into A's clock ~6-7%, even at clk-src A** (B not the source).
+  Reversible: B ccw -> A 4907/4948 Hz; B cw -> A 4618 Hz (-6%), snaps back. Higher B
+  cutoff -> LOWER A resonance (inverse). **The two clocks are permanently weakly
+  cross-coupled** - model needs a small (~6%) inverse cutoff cross-term even in
+  single-source mode.
+
 ### Distortion (input amps) - CHARACTERIZED (LP out, cutoff cw, res down)
 - The **Gain knob is an input VCA**: off at ccw (silence), and its taper
   **compresses near the top** (3 oc -> cw only +2 dB). At the loopback send level
