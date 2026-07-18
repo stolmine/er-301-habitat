@@ -152,9 +152,13 @@ a **~32 Hz-spaced comb** (34/65/105 + 337..468) - spacing ~= Cutoff A (the LOW
 channel's frequency). Mapping:
 - **Res threshold ~4 o'clock, SHARP**: res cw -16 dBFS (strong osc), res 3 oc
   -82 dBFS (dead). Feedback gain must cross a threshold.
-- **Cutoff A: MULTIPLE osc windows** (osc at ccw, fizzles by 9 oc, RETURNS at noon).
-  A clock-RATIO resonance condition, not just "A low" - the XOR beat aligns with the
-  resonance at certain f_A/f_B ratios. Comb spacing tracks Cutoff A.
+- **Cutoff A: MULTIPLE osc windows** (osc at ccw, fizzles by 9 oc, RETURNS strong at
+  noon RMS -14). The **osc carrier TRACKS A's CLOCK**: A=noon cutoff 636 x 25 = 15.9 kHz
+  ~= the measured ~15 kHz carrier; A=ccw carrier ~340 Hz. The **comb spacing stays
+  ~constant ~32 Hz** (a fixed sideband beat), NOT tracking Cutoff A (corrects earlier).
+  So the self-osc is the **CLOCK FEEDING THROUGH and self-sustaining** at high res -
+  carrier = A's clock (hence multiple windows as it sweeps), sidebands ~32 Hz from the
+  dual-clock beat.
 - **Needs clk=both + high divergence + res>~4oc.** Converged or low-res -> no osc.
 - **Model mechanism**: XOR clock-beat comb (low-freq, spaced ~f_A) amplified by the
   resonance feedback once res crosses the gain threshold. Build the XOR beat feeding
