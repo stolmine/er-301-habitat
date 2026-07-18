@@ -13,7 +13,8 @@ hot-send clock measurement; the goal is the emergent qualities, not the numbers.
 import numpy as np
 
 FS = 48000
-N_RATIO = 8.0          # switched-cap clock = cutoff * N (coarse; sets aliasing character)
+N_RATIO = 25.0         # switched-cap clock = cutoff * N (MEASURED 2026-07-18: N~25 fixed)
+XCOUPLE = 0.06         # measured: each cutoff pulls the OTHER clock down ~6% (inverse)
 FEEDTHRU = 0.03        # SC clock feedthrough into the filter (-> resonant osc emerges)
 
 
@@ -62,7 +63,10 @@ def render(x, cutA=0.5, cutB=0.5, res=0.2, gain=1.0, clksrc=0, mode=1, alias=0,
            N=N_RATIO, ft=FEEDTHRU):
     """clksrc: 0=A, 1=B, 2=both(XOR). mode: 0 lp,1 bp,2 hp,3 notch,4 ap. alias:0 lo,1 hi."""
     n = len(x)
-    fca, fcb = cutoff_hz(cutA), cutoff_hz(cutB)
+    fca0, fcb0 = cutoff_hz(cutA), cutoff_hz(cutB)
+    # measured inverse cross-coupling: the other channel's cutoff pulls this clock down
+    fca = fca0 * (1.0 - XCOUPLE * cutB)
+    fcb = fcb0 * (1.0 - XCOUPLE * cutA)
     fclkA = min(fca * N, FS * 0.49)
     fclkB = min(fcb * N, FS * 0.49)
     sqA, sqB = _clock(fclkA, n), _clock(fclkB, n, phase0=0.31)  # B offset -> XOR non-degenerate
