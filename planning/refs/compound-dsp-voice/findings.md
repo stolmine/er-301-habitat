@@ -38,10 +38,17 @@ Analysis: `measure.py` (ESS Farina deconvolution, validated against the known LP
   **Gain B is the effective between-filters drive** there. On the normal/parallel
   path, the two are independent.
 
-### Clock source (A/B/both, shared)
-- **Dormant at baseline** (single-A, res down, both cutoffs matched): clk-A vs
-  clk-both identical to <0.5 dB. Its real action needs **resonance up, cutoffs
-  offset, and monitoring B** (user hypothesis) -> deferred to Phase X.
+### Clock source (A/B/both, shared) - MECHANISM CONFIRMED
+- **CLK SRC selects which channel's clock tunes the filters.** Shown by monitoring
+  B with offset cutoffs (A noon ~3.4 kHz, B 3 oc ~4.8 kHz) and resonance up:
+  - **clk-A**: B's resonant peak @ **3.4 kHz** (A's clock drives B).
+  - **clk-B**: B's peak @ **4.8 kHz** (B's own clock).
+  - **clk-both**: B's peak ~4.5 kHz (near its own) with a broad resonance **smear**
+    (ess deconvolution shows time-variance = slow clock drift wandering the peak).
+    A sustained 1 kHz tone through B comes out **clean** (sidebands >70 dB down) ->
+    clk-both is a **clock-blend, NOT fast AM/XOR modulation** of the signal.
+- **Dormant at matched cutoffs + res down** (baseline): clk-A vs clk-both identical.
+  Needs offset cutoffs + res up to show (the user's hypothesis, confirmed).
 
 ### Cutoff (per channel; switched-cap clock)
 - Tuning range **~30 Hz to ~5 kHz**, roughly exponential, **saturating past
