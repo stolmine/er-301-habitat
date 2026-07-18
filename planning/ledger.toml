@@ -1515,7 +1515,9 @@ blocks, solo/bypass each, establish routing, subtract non-soloable stages via nu
 reassemble). Inputs pending from user: manual + panel photos/graphics -> drop in
 planning/refs/compound-dsp-voice/. Architecture TBD from those; functional unit name TBD
 once the signal flow is mapped. Confirm MIDI reaches all params (else some sweeps go
-manual)."""
+manual).
+
+2026-07-17 DUT identified + capture matrix built. Target = dual switched-capacitor multimode filter (13HP; two filters A/B, believed identical; per-channel clock-set cutoff w/ cross-channel CLK SRC A/B/both; shared VC resonance; independent gain that overdrives, distortion character MODE-DEPENDENT; LP+BP dedicated outs + switchable multi out HP/AP/Notch/hidden-4th; Aliasing LO/HI, strongest at low cutoff; does NOT self-oscillate; A audio + A cutoff-CV-sum normal to B). Signal flow from panel render + modulargrid spec + user (no factory manual found). Full plan: planning/refs/compound-dsp-voice/capture-matrix.md (~120 captures, 3 phases: 0A single-filter A, 0B A/B match/drift, 1 interactions/series/clock). Level chain locked in calibration.md. NEXT: patch module in, run THD-floor-with-DUT (capture 0), then 0A-TF to reveal all 6 modes incl the hidden one. Shipped unit gets generic functional name."""
 
 [[item]]
 id = "multimode-drum-voice-profile"
