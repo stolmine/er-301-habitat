@@ -3,147 +3,185 @@
 Profiling target (hardware under test, implementation reference): **Industrial
 Music Electronics / The Harvestman 1873 "Bionic Lester"**, a 13 HP dual
 switched-capacitor multimode filter. The shipped habitat unit gets a generic
-functional name (see `feedback_no_third_party_branding`); the source is named
-here only as the DUT for the reverse-engineering trail.
+functional name (`feedback_no_third_party_branding`); the source is named here
+only as the DUT for the reverse-engineering trail.
 
-Refs: modulargrid.net/e/industrial-music-electronics-bionic-lester ; panel
-render `panel-render.png`. No factory manual located; signal flow below is from
-the panel, the modulargrid spec, and the user's description. Testing resolves the
-gaps.
+Refs: modulargrid.net/e/industrial-music-electronics-bionic-lester ; panel render
+`panel-render.png`. No factory manual located; signal flow from panel, spec, and
+the user. Testing resolves the gaps.
 
 ## Architecture
 
-Two switched-capacitor filters (**A** and **B**), believed identical circuits.
-Cutoff is set by a per-channel **clock**; the clock can be cross-routed. Input
-amps are scaled to overdrive, and the **distortion character changes with mode**.
-Aliasing (a switched-capacitor artifact) is a deliberate feature, strongest at
-**low** cutoff, and depends on resonance + aliasing-mode + filter-mode. The
-module **does not self-oscillate** on the onboard resonance.
+Two switched-capacitor filters **A** and **B**, believed identical. Cutoff is set
+per channel by a **clock**; the clock can be cross-routed (**CLK SRC**). Input
+amps overdrive; **distortion character changes with mode**. Aliasing (switched-cap
+artifact) is a deliberate feature, strongest at **low** cutoff. **Does not
+self-oscillate.** **The two filters interact heavily at all settings** (shared
+clock / resonance / aliasing / mode + normalling), so behavior must be sampled
+across the shared configuration space, not extrapolated from one filter in
+isolation.
 
-### Controls
-- **Cutoff A**, **Cutoff B** - independent (per-channel clock frequency). CV in each (`Fc A`, `Fc B`).
-- **Resonance** - shared, voltage-controllable.
-- **A Gain**, **B Gain** - independent input drive; overdrives at extremes.
-- **Filter mode** (per channel) - selects the multi-output state.
-- **CLK SRC** - A / B / both (cross-channel clock routing).
-- **Aliasing** - LO / HI, shared.
+### Shared discrete toggles (affect BOTH channels together)
+- **Filter mode** = the multi-output mode; both channels' switchable outputs
+  **always correspond**: **HP / AP / Notch / hidden** (4). **LP and BP are hard
+  outputs** (always live, independent of the toggle - but may still shift with
+  aliasing / clk).
+- **Aliasing**: **LO / HI** (2).
+- **CLK SRC**: **A / B / both** (3).
 
-### I/O (confirm jack count at patch time)
-- **IN A**, **IN B** - audio inputs. **A audio normals to B in** (nothing at B in -> B gets A).
-- Per channel: **LP out (12 dB/oct)**, **BP out**, **multi out** (HP / AP / Notch / hidden).
-- CV: **Fc A**, **Fc B** (**A cutoff+CV sum normals to B's Fc input**), resonance CV.
-- Clock I/O for CLK SRC routing (form TBD).
+=> **discrete configuration space = 4 x 2 x 3 = 24 configs.**
 
-### The 6 "modes"
-LP and BP are dedicated jacks (always live). The **multi output** switches
-**HP / AP / Notch / hidden** (the hidden = the undocumented 4th multi-state).
-So a single capture with LP+BP+multi tapped yields three responses at once;
-cycle the multi-out to reach HP/AP/N/hidden.
+### Per-channel continuous
+- **Cutoff A**, **Cutoff B** (per-channel clock freq; CV each).
+- **Gain A**, **Gain B** (independent drive; overdrives).
+
+### Shared continuous
+- **Resonance** (voltage-controllable).
+
+### Normalling
+- **A audio -> B input** (nothing at B in -> B gets A).
+- **A cutoff (knob + CV sum) -> B's Fc CV input.**
+
+### Routing (by patching)
+`single-A` (feed A, tap A) | `single-B` | `series` (A out -> B in) | `parallel`
+(A normalled to both).
 
 ## Open questions the testing resolves
-1. Are A and B the same circuit, or is there analog drift? (Phase 0B)
-2. What is the hidden mode? (0A-TF, 0A-HID)
-3. How does CLK SRC A/B/both interrelate the channels - AM, XOR, clock intermod? (1-CLK)
-4. What does Aliasing LO vs HI do? (0A-ALIAS, 1-CLK)
-5. How does series behave across mode pairs? (1-SERIES)
-6. How does distortion vary with mode and drive? (0A-GAIN)
-7. Exact normalling behavior (audio + cutoff CV)? (1-NORM)
+1. A vs B: same circuit or analog drift?
+2. What is the hidden mode?
+3. CLK SRC A/B/both interrelation mechanism (AM / XOR / clock intermod)?
+4. Aliasing LO vs HI effect (and its cutoff/res/mode dependence)?
+5. How mode-dependent is the distortion?
+6. How do the two cutoffs interact (esp. clk=both)?
+7. Series behavior across mode pairs; normalling behavior.
 
 ## Conventions
 
-**Knob positions** (5, like the three-sisters corpus): `ccw` `9` `12` `3` `cw`.
-**Baseline / hold-here settings** unless the set sweeps them: cutoff `12`,
-resonance `9` (clean), gain `gcl` (clean, below overdrive), aliasing `lo`,
-CLK SRC = own channel, series/parallel = single channel.
+**Knob positions** (5): `ccw` `9` `12` `3` `cw`. **Baseline** (hold here unless
+swept): cutoffs `12`, resonance `9` (clean), gains `gcl` (clean).
 
-**Excitations** (generated by `gen_excitation.py`, to be added; levels per
-`calibration.md` - send at the locked hot level):
-- `ess` - exponential sine sweep 20 Hz->20 kHz, 8 s (transfer function; Farina
-  deconvolution also separates harmonic-distortion orders into their own IRs).
-- `burst` - 1 ms Hann noise burst (resonance ringdown / Q).
-- `s1k`, `s110` - steady 1 kHz / 110 Hz sines at operating level (harmonic distortion).
-- `shf` - 2->20 kHz tone sweep (expose switched-cap aliasing fold-back).
-- `lvl` - the calibration level ladder `cal_1k_rms-30..-06` (distortion vs input level).
+**Tapping - stereo by default.** We tap **two outputs per take** (L and R of the
+euro->line converter) and split them in analysis. Standard pairing: **L = the
+config's multi out, R = a hard out (LP or BP)**; use `lp+bp` when both hard outs
+are what we want. This roughly halves the transfer-function / survey captures.
+Fall back to a single mono tap only when one output is all that matters.
+Caveat: level-match the two converter legs once (a mono tone into each, trim to
+equal RMS) so per-channel levels are comparable - or, for pure transfer-function
+sets, rely on the fact that deconvolution normalizes each channel anyway;
+distortion sets (absolute level matters) need the legs matched.
+The shipped unit's I/O is designed for the 301, not a jack-for-jack copy, so we
+only need to know which topology to tap per take.
 
-**File naming**: `bl_<set>_<ch>_<out>_<cut>_<res>_<gain>_<alias>[_k<clk>]_<exc>.wav`
-- `ch`: `a` | `b` | `ab` (series A->B) | `par` (parallel, one source both)
-- `out`: `lp` | `bp` | `hp` | `ap` | `no` | `hid` (which response; for multi-tap sweeps, name by the multi-out state)
-- `cut`/`res`/`gain`: `ccw|9|12|3|cw` (gain clean = `gcl`)
-- `alias`: `lo` | `hi`
-- `clk`: `a|b|ab` (omit for single-channel own-clock)
+**Excitations** (`gen_excitation.py`; sent at the locked level, `calibration.md`):
+`ess` sweep (transfer fn + Farina harmonic orders), `burst` (ringdown),
+`shf` 2->20 kHz (aliasing fold-back), `s1k`/`s110` (distortion probes),
+`lvl` ladder `cal_1k_rms-30..-06` (distortion vs input level, from `gen_tones.sh`).
+
+**Naming**: `bl_<phase>_<route>_<mode><alias><clk>_<tap>_<knobs>_<exc>.wav`
+- `mode`: `hp|ap|no|hid`  `alias`: `lo|hi`  `clk`: `a|b|x` (x = both)
+- `tap`: `lp|bp|m` (mono), or stereo pair `m+lp` / `m+bp` / `lp+bp` (L+R)
+- `route`: `A|B|ser|par`
+- `knobs`: `base`, or the non-baseline positions e.g. `cA9cB3rcw g A cw` -> `cA9_cB3_rcw_gAcw`
 - `exc`: `ess|burst|s1k|s110|shf|lvl`
 
-Example: `bl_0a-tf_a_hid_12_9_gcl_lo_ess.wav`
+Example: `bl_C_A_nolo a_m_base_ess.wav` -> config Notch/LO/clkA, single-A, tap multi, baseline, ess.
 
 ---
 
-## PHASE 0A - Filter A characterization (the foundation)
+## The combinatorial reality
 
-| Set | Config | Sweeps | Exc | Count | Reveals |
+Full Cartesian (24 configs x 5 knobs x 5 positions x 3 taps x routes x excitations)
+is thousands. We do NOT sweep everything everywhere. Strategy: a **front-loaded
+config survey** to see which of the 24 configs are distinct, then **nest the knob
+sweeps only where they earn it**, plus targeted distortion/aliasing/interaction
+sets. Capture order prunes before the expensive nested work.
+
+## PHASE C - Config survey (backbone; do first)
+
+Single-A route, baseline knobs, `ess`, **stereo tap**. Map the frequency-shape of
+every config.
+
+| Sub | Configs | Tap (L+R) | Count | Reveals |
+|---|---|---|---|---|
+| C-survey | all 24 (mode x alias x clk) | m + lp | 24 | multi shape per config (**hidden mode**, clk/alias effect) AND LP-vs-config for free on R |
+| C-bp | 6 (alias x clk), mode=N | lp + bp | 6 | BP vs alias/clk (BP is mode-independent core out) |
+
+Subtotal ~30 (stereo folds the old LP/BP-vs-mode checks into C-survey's R channel).
+**Read these before proceeding** - RMS/peak/rough-freq per take, then FFT. Prune
+configs that duplicate; flag the characterful ones for Phase K.
+
+## PHASE K - Knob laws (nested in chosen configs)
+
+Reference config = `N / lo / clk-a`, single-A. Full sweeps here; then repeat the
+starred sweeps in each config Phase C flagged distinct (est. 4-6 configs).
+
+| Set | Sweep | Tap | Exc | Count/config | Notes |
 |---|---|---|---|---|---|
-| 0A-TF | A, cut12 res9 gcl lo; multi = HP,AP,N,hid | 4 multi-states (LP+BP tapped each) | ess | 4 | all 6 response shapes; **hidden mode** |
-| 0A-CUT | A, LP+BP+multi(N); res9 gcl lo | cutoff ccw,9,12,3,cw | ess | 5 | cutoff knob -> corner freq; low-cut aliasing onset |
-| 0A-RES | A, BP+LP; cut12 gcl lo | res ccw,9,12,3,cw | ess | 5 | Q vs resonance |
-| 0A-RES-rd | A, BP; cut12 gcl lo; res 3,cw | 2 | burst | 2 | ringdown Q; confirm no self-osc |
-| 0A-GAIN-LP | A LP; cut12 res9 lo | gain gcl,9,12,3,cw | s1k | 5 | LP distortion vs drive |
-| 0A-GAIN-BP | A BP; cut12 res9 lo | gain gcl,9,12,3,cw | s1k | 5 | BP distortion vs drive |
-| 0A-GAIN-HID | A hid; cut12 res9 lo | gain gcl,9,12,3,cw | s1k | 5 | hidden-mode distortion |
-| 0A-GAIN-lvl | A {lp,bp,hid} gain cw; cut12 res9 lo | input ladder rms-30..-06 | lvl | 15 | distortion vs input level (per mode) |
-| 0A-GAIN-ess | A {lp,bp} gain gcl,cw; cut12 res9 lo | 4 | ess | 4 | harmonic-order IRs (Farina) clean vs driven |
-| 0A-ALIAS | A {lp,bp}; cut {ccw,9}; res {9,3}; alias {lo,hi}; gcl | 2out x2cut x2res x2alias | ess | 16 | aliasing behavior at low cutoff |
-| 0A-ALIAS-hf | A lp; cut ccw; res9; alias lo,hi; gcl | 2 | shf | 2 | alias fold-back products |
-| 0A-HID | A hid; res9 gcl lo | cutoff ccw,9,12,3,cw + res 3,cw | ess | 7 | hidden mode full character |
+| K-cutA * | cutoff A ccw..cw (5) | m | ess | 5 | cutoff->corner law |
+| K-cutB | cutoff B ccw..cw (5) | m | ess | 5 | (matters most clk=b/x) |
+| K-res * | resonance ccw..cw (5) | bp | ess | 5 | Q law |
+| K-res-rd | res 3,cw (2) | bp | burst | 2 | ringdown; confirm no self-osc |
+| K-hid | cutoff+res in hidden mode | m | ess | ~7 | hidden-mode character |
 
-Phase 0A subtotal: ~75 captures.
+Reference config full: ~24. Each additional flagged config (starred sets):
+~10. With ~5 flagged configs: ~24 + 5x10 = ~74.
 
-## PHASE 0B - Filter B matching / drift
+## PHASE D - Distortion (mode-dependent)
 
-| Set | Config | Count | Reveals |
-|---|---|---|---|
-| 0B-TF | B, mirror of 0A-TF (4 ess, all 6 responses) | 4 | A/B same circuit? |
-| 0B-CUT | B, cutoff ccw/12/cw, LP, ess | 3 | B cutoff range vs A |
-| 0B-RES | B, res 12/cw, BP, ess | 2 | B Q vs A |
-| 0B-GAIN | B, LP gain gcl/cw, s1k | 2 | B distortion vs A |
+Gain drives the onboard overdrive; character changes with mode. Cut12 res9,
+single-A unless noted.
 
-Phase 0B subtotal: ~11. If B tracks A within analog tolerance, model one filter
-and note the drift; if it diverges, characterize B fully (promote to a 0A-scale pass).
+| Set | Config coverage | Sweep | Tap | Exc | Count |
+|---|---|---|---|---|---|
+| D-gain | each mode {lp,bp,hp,ap,no,hid} x alias{lo,hi}, clk=a | gain A gcl..cw (5) | tapped mode | s1k | 6x2x5 = 60 |
+| D-lvl | modes {lp,bp,hid}, gain cw, alias lo | input ladder (5) | tapped | lvl | 15 |
+| D-ess | modes {lp,bp}, gain gcl,cw, alias lo | 2x2 | tapped | ess | 4 |
 
-## PHASE 1 - Interactions (the "very interesting in series" territory)
+Subtotal ~79. D-gain is large; if alias has no distortion effect (check first at
+one mode), drop to clk=a alias=lo only -> 6x5 = 30.
 
-| Set | Config | Count | Reveals |
-|---|---|---|---|
-| 1-SERIES | A->B series; mode pairs LP-LP, LP-HP, BP-BP, HP-LP, N-BP, hid-LP, LP-hid, BP-hid, AP-AP; both cut12 res9 gcl lo; ess | ~9 | series response shaping |
-| 1-SERIES-gain | A->B series; LP-LP, BP-BP, hid-LP driven (gain 3/cw both); s1k + ess | ~6 | stacked/interacting distortion |
-| 1-CLK | both active (series LP-LP), cutoffs offset (A12 / B3); CLK SRC a,b,ab; s1k + ess | ~6 | **clock interrelation mechanism** |
-| 1-CLK-alias | CLK SRC ab; alias lo,hi; cutoffs offset; s1k + shf | ~4 | clock x aliasing interaction |
-| 1-NORM | patch A only; sweep A cutoff (ccw,12,cw); capture A + B outs; ess | ~4 | audio + cutoff-CV normalling (B tracks A) |
-| 1-PAR | parallel (A normal to both), LP A + LP B summed vs separate; cut offset; ess | ~3 | parallel/normalled behavior |
+## PHASE X - Interactions (both filters in play)
 
-Phase 1 subtotal: ~32.
+| Set | Config | Sweep/pairs | Route | Exc | Count |
+|---|---|---|---|---|---|
+| X-cutAB | clk {a,b,x}, mode N, alias lo | cutA x cutB grid (3x3 offsets) | series | ess | 27 |
+| X-clk | mode N alias lo, cutoffs offset (A12 B3) | clk a,b,x | series | s1k+ess | 6 |
+| X-series | clk a, alias lo, baseline | mode pairs (LP-LP,LP-HP,BP-BP,HP-LP,N-BP,hid-LP,LP-hid,BP-hid) | series | ess | 8 |
+| X-series-od | clk a | 3 pairs driven (gain 3/cw) | series | s1k+ess | 6 |
+| X-norm | mode N alias lo, patch A only | cutA ccw,12,cw; tap A and B | single | ess | 6 |
+| X-alias-cut | mode N, alias{lo,hi}, clk a | cutoff ccw,9 (low) x2 | single | ess+shf | 8 |
+
+Subtotal ~61. X-cutAB (the two-cutoff interference, esp clk=both) and X-clk are the
+heart of the "heavy interaction" the module is prized for.
+
+## PHASE B - A/B match / drift
+
+Mirror Phase C reference config + a few knob spot-checks on B; compare to A.
+~12. If B tracks A within tolerance, model one filter + note drift; else promote B.
 
 ## Totals and order
 
-Roughly **~120 captures** across the three phases - extensive, as expected for a
-compound, clock-based, mode-dependent-distortion module.
+Rough **~180 captures** with stereo tapping (was ~270 mono) if thorough - large,
+matching a compound, clock-based, heavily-interacting, mode-dependent module.
+Stereo pairs the multi out with a hard out on every transfer-function / survey /
+knob take, so most sets that wanted two outputs now cost one capture. Tiers let
+you stop early:
 
-**Capture order:**
-0. **THD-floor-with-DUT**: filter A, LP, clean gain, cut12 res9 lo, `s1k` - run
-   `thd.py` on the return. Establishes the module's own residual distortion floor
-   at clean settings (part of what we model) and confirms the loop is sound with
-   the module inserted. First real capture.
-1. **0A-TF** - the shape of all six modes, including the hidden one. Highest value.
-2. **0A-CUT, 0A-RES** - the core control laws.
-3. **0A-GAIN*** - the distortion (the characterful part; mode-dependent).
-4. **0A-ALIAS** - the other characterful part.
-5. **0B** - decide one-model-or-two early (it gates how much B work remains).
-6. **PHASE 1** - once single-filter models exist, the interactions.
+0. **THD-floor-with-DUT**: single-A, LP, clean gain, cut12 res9, N/lo/clk-a, `s1k`
+   -> `thd.py`. Confirms the loop with the module in; module's own clean-settings
+   distortion floor. First capture.
+1. **PHASE C** (config survey) - the backbone. Prune here: it tells us how many of
+   the 24 configs are genuinely distinct, which decides how much of K/D/X we owe.
+2. **PHASE K** in the reference config + flagged configs.
+3. **PHASE D** distortion.
+4. **PHASE X** interactions (the payoff sets).
+5. **PHASE B** A/B, and re-scope once single-filter models exist.
 
-Reassess after 0A-TF: the hidden mode and the actual output-jack topology may
-reshape later sets. Capture-time stats (peak/RMS/crest/rough-freq per take, like
-the three-sisters corpus) get read before FFT for cheap early structural reads.
+Reassess after Phase C: the hidden mode, the real clk/alias effect, and how many
+configs collapse together will reshape K/D/X counts (likely downward).
 
 ## Analysis note
 
 Read distortion harmonics at their exact bins (2k, 3k, 4k...) to dodge the
-documented interference (50/120/240 Hz hum, ~5.2 kHz whine - see
-`calibration.md`). ESS deconvolution rejects that stationary interference anyway.
+documented interference (50/120/240 Hz hum, ~5.2 kHz whine - `calibration.md`).
+ESS deconvolution rejects that stationary interference anyway.
