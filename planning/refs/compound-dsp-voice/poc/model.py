@@ -59,6 +59,25 @@ def _svf_loop(x, clk, ticks, g, q, ft, mode, alias):
     return out
 
 
+def _clock_osc(clk, fcar, res):
+    """Clock-domain self-oscillation (measured 2026-07-18): a resonant feedback
+    path at the CLOCK carrier frequency, fed by the (XOR) clock signal, whose
+    damping -> ~0 at high resonance so it self-sustains. Carrier = A's clock (so it
+    moves through windows as cutoff sweeps); the XOR clock's beat emerges as the
+    ~fixed sideband spacing. Bounded by soft saturation. Gated to clk=both + high
+    res by the caller (the circuit coupling we can't derive, but freq/sidebands emerge)."""
+    n = len(clk); out = np.zeros(n)
+    g = 2.0 * np.sin(np.pi * min(fcar, FS * 0.42) / FS)
+    q = max(-0.006, (1.0 - res) * 0.45)      # res->1 : q->~0 (instability threshold)
+    lp = bp = 0.0
+    for i in range(n):
+        hp = clk[i] - lp - q * bp
+        bp += g * hp; bp = 1.2 * np.tanh(bp * 0.8333)
+        lp += g * bp; lp = 1.2 * np.tanh(lp * 0.8333)
+        out[i] = bp
+    return out
+
+
 def render(x, cutA=0.5, cutB=0.5, res=0.2, gain=1.0, clksrc=0, mode=1, alias=0,
            N=N_RATIO, ft=FEEDTHRU):
     """clksrc: 0=A, 1=B, 2=both(XOR). mode: 0 lp,1 bp,2 hp,3 notch,4 ap. alias:0 lo,1 hi."""
@@ -83,4 +102,10 @@ def render(x, cutA=0.5, cutB=0.5, res=0.2, gain=1.0, clksrc=0, mode=1, alias=0,
     q = max(0.004, 1.0 / (1.0 + res * 40.0))
     xin = _softclip(gain * x).astype(np.float64)
     y = _svf_loop(xin, clk.astype(np.float64), ticks, g, q, ft, mode, alias)
+    # clock-domain self-oscillation (measured mechanism): needs clk=both + high res
+    # + DIVERGENT clocks. Converged XOR is a clean 2x tone (no interference) -> no osc.
+    diverge = abs(cutA - cutB)
+    if clksrc == 2 and res > 0.8 and diverge > 0.3:
+        co = _clock_osc(clk.astype(np.float64), fca * N, res)
+        y = y + 0.6 * co * min(1.0, (diverge - 0.3) / 0.4)   # scale by divergence
     return y
