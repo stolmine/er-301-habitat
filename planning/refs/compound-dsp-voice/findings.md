@@ -45,6 +45,17 @@ Analysis: `measure.py` (ESS Farina deconvolution, validated against the known LP
   signature and a core modeling target.
 - A slight **resonant bump at the corner even at res-min** (SC peaking near clock).
 
+### Resonance (shared, cutoff noon, alias LO)
+- **Q law** (BP -3 dB, deconvolved): ccw ~1.1, 9 oc ~1.8, noon ~9.0, 3 oc ~16.5,
+  cw ~35. Roughly exponential; most of the action in the upper half of the knob.
+- **Max Q ~35 with NO self-oscillation** (matches spec). BP peak grows in height
+  (energy ~constant, bandwidth shrinks); center holds ~3 kHz.
+- **A fixed sharp spike at ~4.8 kHz** sits above the BP at low res (+11 dB) and gets
+  buried as the resonant peak grows (-18 dB at max res). Present at cutoff noon and
+  cw -> looks like a **fixed switched-cap artifact** (clock feedthrough or a fixed
+  resonance near ~4.8 kHz), NOT the resonance peak (it does not grow with res).
+  Investigate: does it move with cutoff? (If fixed -> clock-related.)
+
 ### Distortion (input amps)
 - **~0.5% THD, H2-dominant** (H2 -46 dB, H3 -51 dB) already at **noon gain**, LP
   out, cutoff cw. Grows with gain; character is mode-dependent (per spec).
