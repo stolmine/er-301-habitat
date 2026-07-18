@@ -40,14 +40,18 @@ wait 2>/dev/null
 if [ ! -s "$OUT" ]; then echo "CAPTURE FAILED (empty file)" >&2; exit 1; fi
 
 echo "-> $OUT"
-# capture-time stats: read before any FFT (three-sisters "headline" discipline)
-STATS=$(sox "$OUT" -n stats 2>&1)
-echo "$STATS" | grep -E "Pk lev dB|RMS lev dB|Crest factor|Pk count" \
-  | sed 's/^/  /'
-ROUGH=$(sox "$OUT" -n stat 2>&1 | awk '/Rough/{print $3}')
-echo "  Rough freq (overall): ${ROUGH} Hz"
-CLIP=$(echo "$STATS" | awk '/Pk count/{print $5+$6}')
-[ "${CLIP:-0}" != "0" ] && echo "  *** WARNING: clipping (Pk count L+R = $CLIP) ***"
+# Stats on the STEADY MID-REGION (skips the pre-roll silence + tail, which would
+# otherwise dilute RMS). Read before any FFT (three-sisters "headline" discipline).
+DUR=$(sox --i -D "$OUT")
+MS=$(awk "BEGIN{printf \"%.2f\", $DUR*0.35}")
+MD=$(awk "BEGIN{printf \"%.2f\", $DUR*0.45}")
+STATS=$(sox "$OUT" -n trim "$MS" "$MD" stats 2>&1)
+echo "$STATS" | grep -E "Pk lev dB|RMS lev dB|Crest factor" | sed 's/^/  /'
+ROUGH=$(sox "$OUT" -n trim "$MS" "$MD" stat 2>&1 | awk '/Rough/{print $3}')
+echo "  Rough freq (mid): ${ROUGH} Hz  (meaningful for tones, not sweeps)"
+# Real clip check: peak at/near 0 dBFS (Pk count alone just means "samples at the
+# peak level", which is normal below full scale).
+echo "$STATS" | awk '/Pk lev dB/{if($5>-0.3||$6>-0.3) print "  *** CLIP: Pk "$5"/"$6" dBFS ***"}'
 
 # manifest: name, exc, L/R RMS dB, L/R peak dB, rough freq
 LR=$(echo "$STATS" | awk '/RMS lev dB/{r=$5" "$6} /Pk lev dB/{p=$5" "$6} END{print r, p}')
