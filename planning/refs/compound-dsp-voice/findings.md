@@ -56,10 +56,27 @@ Analysis: `measure.py` (ESS Farina deconvolution, validated against the known LP
   resonance near ~4.8 kHz), NOT the resonance peak (it does not grow with res).
   Investigate: does it move with cutoff? (If fixed -> clock-related.)
 
-### Distortion (input amps)
-- **~0.5% THD, H2-dominant** (H2 -46 dB, H3 -51 dB) already at **noon gain**, LP
-  out, cutoff cw. Grows with gain; character is mode-dependent (per spec).
-  Full map in Phase D.
+### Distortion (input amps) - CHARACTERIZED (LP out, cutoff cw, res down)
+- The **Gain knob is an input VCA**: off at ccw (silence), and its taper
+  **compresses near the top** (3 oc -> cw only +2 dB). At the loopback send level
+  (301 VCA x5) the module stays clean (THD ~0.15-0.21%) across the WHOLE gain
+  range - it does not reach clipping. Overdrive needs a **hot drive** into IN A.
+- Driven hard (301 VCA ~x20, gain cw), swept input level -> the clean->clip curve:
+
+  | send RMS | out RMS | THD | note |
+  |---|---|---|---|
+  | -30..-18 | -40..-28 | 0.15-0.28% | clean (floor) |
+  | -12 | -22.7 | **1.8%** | soft knee (all harmonics rise together) |
+  | -06 | -20.0 | **22%** | hard clip, H3 dominant |
+  | -04 | -19.7 | 27% | H3 dominant |
+
+- **Output saturates ~-20 dBFS** (in-chain): linear 1:1 up to the knee, then hard
+  compression. Soft knee ~6 dB below clip. Hard clip is **odd-harmonic dominant
+  (H3, H5)** = symmetric clipping; crest factor 1.62 -> 1.47 (squaring toward a
+  square wave). A saturating nonlinearity with a soft knee.
+- TODO: distortion **mode-dependence** (spec says it changes with mode) - measure
+  the overdrive on AP (raw, flat) and other outputs; and asymmetry vs symmetry per
+  mode.
 
 ## Measurement caveats / refinements needed
 - **Low-cutoff outputs are very quiet** (near the -78 dBFS floor). Use a **hotter
