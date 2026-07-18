@@ -29,6 +29,15 @@ Analysis: `measure.py` (ESS Farina deconvolution, validated against the known LP
 - **LO = HF-rich / bright** (more aliasing-prone content up to the ceiling).
 - Aliasing does **not** move the SC ceiling (that is set by cutoff/clock).
 
+### Gain staging / normalling (tested)
+- **Gain A is A's own input amp** (per-filter), not a between-filters stage.
+  Dropping Gain A noon->ccw left B's output unchanged (-33.2 vs -33.1 dBFS) when
+  B is fed via the A->B audio normal. So the **normal taps the raw IN A signal
+  PRE-Gain-A**; each filter has its own input gain.
+- Implication for **series** (A out -> B in patched): B's input = A's output, so
+  **Gain B is the effective between-filters drive** there. On the normal/parallel
+  path, the two are independent.
+
 ### Clock source (A/B/both, shared)
 - **Dormant at baseline** (single-A, res down, both cutoffs matched): clk-A vs
   clk-both identical to <0.5 dB. Its real action needs **resonance up, cutoffs
