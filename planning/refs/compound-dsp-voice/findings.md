@@ -74,8 +74,31 @@ Analysis: `measure.py` (ESS Farina deconvolution, validated against the known LP
   corners osc, freq vs settings) mapped in the corner grid.
 - **Caveat**: time-varying system; the ess deconvolution shows the effective
   (averaged) response. Sustained-tone probes (DC4) needed for the true sideband
-  spectrum. TODO detail: resonance (DC2), gain/drive intermod (DC3), input
-  freq/volume (DC4).
+  spectrum. TODO detail: gain/drive intermod (DC3), input freq/volume (DC4).
+
+#### CLK=both 16-corner map (Cutoff A/B x Res x Alias, monitor B)
+Clean rule structure emerged (each cell measured, none inferred):
+
+| Cutoff A | Cutoff B | Res | behavior |
+|---|---|---|---|
+| ccw | ccw | any | quiet, low-freq, no osc (both clocks min; HI louder than LO) |
+| ccw | cw | ccw | clock-XOR comb (~196/392 Hz), no osc, LP louder |
+| ccw | cw | **cw** | **SELF-OSC low comb** - LO [74,340,414,487], HI [52,106,146,294] |
+| cw | ccw | ccw | single peak ~4.7k / small comb, no osc |
+| cw | ccw | **cw** | **SELF-OSC** - LO clean **~13.5 kHz (clock)**, HI dirty ~1.8k comb + ultra-HF aliases |
+| cw | cw | ccw | single peak ~4.7k (converged), no osc |
+| cw | cw | cw | comb (~659 Hz), borderline ringing, no sustained osc |
+
+**Rules for the model:**
+1. **Self-oscillation iff cutoffs DIVERGENT (one min, one max) AND res high.**
+   Converged cutoffs never osc, even at max res (reconciles the spec).
+2. **Osc frequency depends on divergence DIRECTION**: A-low/B-high -> LOW comb
+   (~74 Hz beat); A-high/B-low -> HIGH clock tone (~13.5 kHz, clean).
+3. **Alias reshapes the osc timbre** (LO clean vs HI dirty/lower + ultra-HF aliases).
+4. **Low res, divergent** -> clock-XOR comb filter (no osc), spacing ~ f_B.
+5. **Converged** (A=B) -> single blended peak (~2x at high, quiet at low).
+So "both" = a clock-XOR comb/oscillator whose regime (comb / osc-low / osc-high /
+single-peak) is set by the A-vs-B cutoff relationship and resonance.
 
 ### Cutoff (per channel; switched-cap clock)
 - Tuning range **~30 Hz to ~5 kHz**, roughly exponential, **saturating past
