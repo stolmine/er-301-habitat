@@ -50,6 +50,25 @@ Analysis: `measure.py` (ESS Farina deconvolution, validated against the known LP
 - **Dormant at matched cutoffs + res down** (baseline): clk-A vs clk-both identical.
   Needs offset cutoffs + res up to show (the user's hypothesis, confirmed).
 
+#### CLK=both dual-clock detail (instrumentation, monitoring B, A=noon fixed)
+- **The "both" mode appears to XOR the two clock oscillators** and feed the result
+  as the SC clock. Evidence (Cutoff-B divergence sweep, res 3 oc):
+  - **f_B << f_A** (B ccw): B-BP becomes a **dense ~800 Hz-spaced COMB** of
+    resonances (crest 6.5) - XOR sidebands (carrier f_A, spacing ~f_B) folded in-band.
+  - **f_B rising** (B 9 oc): comb spreads -> single blended peak ~1.7 kHz.
+  - **f_B = f_A** (converged): single peak at ~**4.8 kHz ≈ 2× f_A** (XOR of two equal
+    square waves -> 2x). crest 3.9.
+  - **f_B >= f_A** (B 3 oc, cw): single peak ~4.8 kHz (sidebands spread wide).
+  - Comb spikiness (crest) tracks divergence: 6.5 -> 4.9 -> 3.9.
+- **Model implication**: two clock oscillators (f_A, f_B from the two cutoffs);
+  in "both" mode XOR/combine them and drive the SC clock with the result -> comb
+  filtering that sweeps from dense (large downward divergence) to single-peak
+  (convergence/upward). A ring-mod/comb generator, not simple detune.
+- **Caveat**: time-varying system; the ess deconvolution shows the effective
+  (averaged) response. Sustained-tone probes (DC4) needed for the true sideband
+  spectrum. TODO detail: resonance (DC2), gain/drive intermod (DC3), input
+  freq/volume (DC4).
+
 ### Cutoff (per channel; switched-cap clock)
 - Tuning range **~30 Hz to ~5 kHz**, roughly exponential, **saturating past
   3 o'clock** (3 oc ~= cw, corner ~4.8 kHz).
