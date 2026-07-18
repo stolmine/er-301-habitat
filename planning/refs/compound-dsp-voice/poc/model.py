@@ -26,8 +26,8 @@ def _softclip(x):      # odd-dominant symmetric clip (the measured distortion sh
     return np.where(x > 1, 0.6667, np.where(x < -1, -0.6667, x - x**3 / 3.0))
 
 
-def _clock(fclk, n):   # bipolar square wave at fclk, sampled at FS
-    ph = (np.arange(n) * (fclk / FS)) % 1.0
+def _clock(fclk, n, phase0=0.0):   # bipolar square at fclk, sampled at FS
+    ph = (np.arange(n) * (fclk / FS) + phase0) % 1.0
     return np.where(ph < 0.5, 1.0, -1.0)
 
 
@@ -65,7 +65,7 @@ def render(x, cutA=0.5, cutB=0.5, res=0.2, gain=1.0, clksrc=0, mode=1, alias=0,
     fca, fcb = cutoff_hz(cutA), cutoff_hz(cutB)
     fclkA = min(fca * N, FS * 0.49)
     fclkB = min(fcb * N, FS * 0.49)
-    sqA, sqB = _clock(fclkA, n), _clock(fclkB, n)
+    sqA, sqB = _clock(fclkA, n), _clock(fclkB, n, phase0=0.31)  # B offset -> XOR non-degenerate
     if clksrc == 0: clk = sqA
     elif clksrc == 1: clk = sqB
     else: clk = np.where((sqA > 0) ^ (sqB > 0), 1.0, -1.0)   # XOR of the two clocks
