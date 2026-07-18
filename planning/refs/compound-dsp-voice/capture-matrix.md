@@ -58,7 +58,9 @@ isolation.
 ## Conventions
 
 **Knob positions** (5): `ccw` `9` `12` `3` `cw`. **Baseline** (hold here unless
-swept): cutoffs `12`, resonance `9` (clean), gains `gcl` (clean).
+swept): cutoffs `12`, resonance `ccw` (fully down - purest mode shapes, no
+resonant peak; also the most repeatable knob position; resonance is swept
+separately in Phase K), gains `gcl`/noon (clean).
 
 **Tapping - stereo by default.** We tap **two outputs per take** (L and R of the
 euro->line converter) and split them in analysis. Standard pairing: **L = the
