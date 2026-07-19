@@ -21,10 +21,10 @@ function Ferrum:init(args)
 end
 
 -- Controls match the Trinity FM voice basics.
-local PARAMS = { "pitch", "character", "shape", "grit", "sweep", "time", "hold", "decay", "level" }
-local PARAMNAME = { pitch = "Pitch", character = "Character", shape = "Shape", grit = "Grit",
+local PARAMS = { "character", "shape", "grit", "sweep", "time", "hold", "decay", "level" }
+local PARAMNAME = { character = "Character", shape = "Shape", grit = "Grit",
                     sweep = "Sweep", time = "Time", hold = "Hold", decay = "Decay", level = "Level" }
-local DEFAULT = { pitch = 0.4, character = 0.5, shape = 0.45, grit = 0.0,
+local DEFAULT = { character = 0.5, shape = 0.45, grit = 0.0,
                   sweep = 0.3, time = 0.3, hold = 0.1, decay = 0.4, level = 0.8 }
 
 function Ferrum:onLoadGraph(channelCount)
@@ -40,6 +40,11 @@ function Ferrum:onLoadGraph(channelCount)
   connect(tune, "Out", tuneRange, "In")
   connect(tune, "Out", op, "V/Oct")
   self:addMonoBranch("tune", tune, "In", tune, "Out")
+
+  local f0 = self:addObject("f0", app.ParameterAdapter())
+  f0:hardSet("Bias", 55.0)
+  tie(op, "Fundamental", f0, "Out")
+  self:addMonoBranch("f0", f0, "In", f0, "Out")
 
   for _, k in ipairs(PARAMS) do
     local o = self:addObject(k, app.ParameterAdapter())
@@ -68,6 +73,17 @@ function Ferrum:onLoadViews()
       branch = self.branches.tune,
       offset = self.objects.tune,
       range = self.objects.tuneRange
+    },
+    f0 = GainBias {
+      button = "f0",
+      description = "Fundamental",
+      branch = self.branches.f0,
+      gainbias = self.objects.f0,
+      range = self.objects.f0,
+      biasMap = Encoder.getMap("oscFreq"),
+      biasUnits = app.unitHertz,
+      biasPrecision = 1,
+      initialBias = 55.0
     }
   }
   for _, k in ipairs(PARAMS) do
@@ -83,7 +99,7 @@ function Ferrum:onLoadViews()
     }
   end
   return views, {
-    expanded = { "trig", "tune", "pitch", "character", "shape", "grit", "sweep", "time", "hold", "decay", "level" },
+    expanded = { "trig", "tune", "f0", "character", "shape", "grit", "sweep", "time", "hold", "decay", "level" },
     collapsed = {}
   }
 end

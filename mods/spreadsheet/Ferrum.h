@@ -34,7 +34,7 @@ namespace stolmine
 
     // Controls match the Trinity FM voice basics (Character = mod depth -> feedback,
     // Shape = FM ratio), not broken-out index/ratio.
-    od::Parameter mPitch{"Pitch", 0.4f};       // base tuning: ~12 Hz .. 650 Hz (~5.75 oct)
+    od::Parameter mF0{"Fundamental", 55.0f};   // direct fundamental Hz (+ V/oct)
     od::Parameter mCharacter{"Character", 0.5f}; // FM mod depth -> operator feedback at top
     od::Parameter mShape{"Shape", 0.45f};      // continuous FM ratio (~1 .. 7.5)
     od::Parameter mGrit{"Grit", 0.0f};         // feedback boost -> noise

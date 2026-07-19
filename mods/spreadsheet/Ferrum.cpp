@@ -31,6 +31,7 @@ namespace stolmine
   {
     float cph = 0, mph = 0, prevC = 0;   // carrier phase, modulator phase, feedback
     float pitchEnv = 0, ampEnv = 0;
+    float brightEnv = 0, noiseEnv = 0, lp = 0;  // freq-dependent decay: bright env -> LP
     int holdLeft = 0;
     float prevTrig = 0;
     // latched at trigger (drum pitch/ratio/sweep are set at the hit):
@@ -43,7 +44,7 @@ namespace stolmine
     addInput(mTrigger);
     addInput(mVOct);
     addOutput(mOut);
-    addParameter(mPitch);
+    addParameter(mF0);
     addParameter(mCharacter);
     addParameter(mShape);
     addParameter(mGrit);
@@ -73,7 +74,7 @@ namespace stolmine
     float decay = CLAMP(0.0f, 1.0f, mDecay.value());
     float hold = CLAMP(0.0f, 1.0f, mHold.value());
     float timeK = CLAMP(0.0f, 1.0f, mTime.value());
-    float pitchP = CLAMP(0.0f, 1.0f, mPitch.value());
+    float f0 = CLAMP(8.0f, 8000.0f, mF0.value());
     float shapeP = CLAMP(0.0f, 1.0f, mShape.value());
     float sweepP = CLAMP(0.0f, 1.0f, mSweep.value());
 
@@ -87,6 +88,8 @@ namespace stolmine
     float noiseBlend = grit > 0.55f ? (grit - 0.55f) / 0.45f : 0.0f;
     float tauD = 0.003f * powf(87.0f, decay);            // amp decay 3 ms .. ~260 ms+
     float ampCoeff = expf(-1.0f / (tauD * sr));
+    float brightCoeff = expf(-1.0f / (tauD * 0.35f * sr));  // brightness env ~3x faster
+    float noiseCoeff = expf(-1.0f / (tauD * sr));           // noise its own env
     int holdSamples = (int)(hold * 0.8f * sr);           // 0 .. 800 ms
     float tauP = 0.002f + timeK * 0.35f;                 // pitch-env 2 ms .. 350 ms
     float pitchCoeff = expf(-1.0f / (tauP * sr));
@@ -96,15 +99,14 @@ namespace stolmine
       float tv = trig[i];
       if (tv > 0.5f && I.prevTrig <= 0.5f)   // rising edge -> new hit
       {
-        // ~12 Hz .. ~650 Hz over ~5.75 oct + V/oct. Low floor matches the measured
-        // Trinity reach (~10-20 Hz fundamental at the bottom notes).
-        I.baseHz = 12.0f * powf(2.0f, pitchP * 5.75f + voct[i]);
+        I.baseHz = f0 * powf(2.0f, voct[i]);   // direct fundamental Hz, V/oct-transposed
         // Shape = CONTINUOUS FM ratio (measured: ratio ramps smoothly ~1 -> ~7.3),
         // not quantized. Non-integer ratios give the inharmonic/metallic sweep.
         I.ratio = 1.0f + shapeP * 6.5f;
         I.sweepDepth = sweepP * 24.0f;
         I.pitchCoeff = pitchCoeff;
         I.pitchEnv = 1.0f; I.ampEnv = 1.0f; I.holdLeft = holdSamples;
+        I.brightEnv = 1.0f; I.noiseEnv = 1.0f; I.lp = 0.0f;
         I.cph = 0.0f; I.mph = 0.0f; I.prevC = 0.0f; I.velAmp = 1.0f;
       }
       I.prevTrig = tv;
@@ -121,14 +123,22 @@ namespace stolmine
       I.cph += f / sr;  I.cph -= floorf(I.cph);
       I.mph += mf / sr; I.mph -= floorf(I.mph);
 
-      // Grit: crossfade to broadband noise past ~0.55 (the noise-impact oscillator)
-      if (noiseBlend > 0.0f)
-        carrier = carrier * (1.0f - noiseBlend) + noise(I.rng) * noiseBlend;
-
-      // amp envelope: instant attack, Hold plateau, exp Decay
+      // amp + brightness + noise envelopes
       if (I.holdLeft > 0) I.holdLeft--; else I.ampEnv *= ampCoeff;
+      I.brightEnv *= brightCoeff;
+      I.noiseEnv *= noiseCoeff;
 
-      out[i] = carrier * I.ampEnv * I.velAmp * level;
+      // decay-tracking lowpass on the enveloped tone: cutoff falls with the brightness
+      // env (high partials/sidebands decay faster -> the sound darkens over the hit).
+      float tone = carrier * I.ampEnv;
+      float fc = f * (1.2f + 20.0f * I.brightEnv);
+      float g = 6.2832f * fc / sr; if (g > 1.0f) g = 1.0f;
+      I.lp += g * (tone - I.lp);
+
+      // Grit noise POST-lowpass with its own env (noise-impact oscillator, past ~0.55)
+      float y = I.lp * (1.0f - noiseBlend) + noise(I.rng) * noiseBlend * I.noiseEnv;
+
+      out[i] = y * I.velAmp * level;
     }
   }
 

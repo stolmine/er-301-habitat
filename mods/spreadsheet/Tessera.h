@@ -32,7 +32,7 @@ namespace stolmine
     od::Inlet mVOct{"V/Oct"};
     od::Outlet mOut{"Out"};
 
-    od::Parameter mPitch{"Pitch", 0.4f};        // ~40 Hz .. ~900 Hz + V/oct
+    od::Parameter mF0{"Fundamental", 60.0f};     // direct fundamental Hz (+ V/oct)
     od::Parameter mCharacter{"Character", 0.2f}; // triangle -> sine -> fold
     od::Parameter mShape{"Shape", 0.0f};         // 2nd oscillator overlay
     od::Parameter mGrit{"Grit", 0.0f};           // noise blend + env shortening

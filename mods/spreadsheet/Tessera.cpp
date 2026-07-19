@@ -29,6 +29,9 @@ namespace stolmine
   {
     float ph1 = 0, ph2 = 0;
     float pitchEnv = 0, ampEnv = 0, ampEnv2 = 0;
+    float brightEnv = 0;   // faster-decaying brightness env -> LP cutoff (freq-dep decay)
+    float noiseEnv = 0;    // noise its own (longer) env -> Grit inverse-coupling snap
+    float lp = 0;          // decay-tracking lowpass state
     int holdLeft = 0;
     float prevTrig = 0;
     float baseHz = 110, sweepDepth = 0, pitchCoeff = 0.999f;
@@ -40,7 +43,7 @@ namespace stolmine
     addInput(mTrigger);
     addInput(mVOct);
     addOutput(mOut);
-    addParameter(mPitch);
+    addParameter(mF0);
     addParameter(mCharacter);
     addParameter(mShape);
     addParameter(mGrit);
@@ -71,14 +74,23 @@ namespace stolmine
     float decay = CLAMP(0.0f, 1.0f, mDecay.value());
     float hold = CLAMP(0.0f, 1.0f, mHold.value());
     float timeK = CLAMP(0.0f, 1.0f, mTime.value());
-    float pitchP = CLAMP(0.0f, 1.0f, mPitch.value());
+    float f0 = CLAMP(8.0f, 8000.0f, mF0.value());
     float sweepP = CLAMP(0.0f, 1.0f, mSweep.value());
 
+    float tauBody = 0.003f * powf(87.0f, decay);          // base body decay time
     // amp decay shortens past ~0.75 grit (measured 885 -> ~260 ms) -> 808 snap
     float gritShorten = grit > 0.75f ? 1.0f - (grit - 0.75f) / 0.25f * 0.7f : 1.0f;
-    float tauD = 0.003f * powf(87.0f, decay) * gritShorten;
+    float tauD = tauBody * gritShorten;
     float ampCoeff = expf(-1.0f / (tauD * sr));
-    float ampCoeff2 = expf(-1.0f / (tauD * 0.6f * sr));   // 2nd osc: dampened (faster) decay
+    // Modal spread (measured): the 2nd oscillator RINGS LONGER than the body, and
+    // longer with Shape -> partials decay at very different rates (bell/woodblock).
+    float ampCoeff2 = expf(-1.0f / (tauBody * (1.0f + shape * 3.0f) * sr));
+    // Brightness env decays ~3x faster than the body -> high partials die first
+    // (freq-dependent decay). Drives the decay-tracking lowpass.
+    float brightCoeff = expf(-1.0f / (tauD * 0.35f * sr));
+    // Noise gets its own (un-shortened) env -> at high Grit it outlasts the snapped
+    // tone -> the measured inverse brightness coupling.
+    float noiseCoeff = expf(-1.0f / (tauBody * sr));
     int holdSamples = (int)(hold * 0.8f * sr);
     float tauP = 0.002f + timeK * 0.35f;
     float pitchCoeff = expf(-1.0f / (tauP * sr));
@@ -87,18 +99,19 @@ namespace stolmine
     float foldMix = character > 0.5f ? (character - 0.5f) * 2.0f : 0.0f;  // fold ramp
     float foldDrive = 1.0f + foldMix * 3.0f;
     float noiseMix = grit * 0.9f;                          // keep some osc even at max
-    float ratio2 = 1.0f + shape * 0.5f;                   // 2nd osc interval (unison..1.5x)
+    float ratio2 = 1.0f + shape * 1.5f;                   // 2nd osc interval (unison..2.5x, inharmonic)
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float tv = trig[i];
       if (tv > 0.5f && I.prevTrig <= 0.5f)   // rising edge -> new hit
       {
-        I.baseHz = 40.0f * powf(2.0f, pitchP * 4.5f + voct[i]);  // ~40 Hz .. ~900 Hz
+        I.baseHz = f0 * powf(2.0f, voct[i]);   // direct fundamental Hz, V/oct-transposed
         I.sweepDepth = sweepP * 24.0f;
         I.pitchCoeff = pitchCoeff;
-        I.pitchEnv = 1.0f; I.ampEnv = 1.0f; I.ampEnv2 = 1.0f; I.holdLeft = holdSamples;
-        I.ph1 = 0.0f; I.ph2 = 0.0f;
+        I.pitchEnv = 1.0f; I.ampEnv = 1.0f; I.ampEnv2 = 1.0f;
+        I.brightEnv = 1.0f; I.noiseEnv = 1.0f; I.holdLeft = holdSamples;
+        I.ph1 = 0.0f; I.ph2 = 0.0f; I.lp = 0.0f;
       }
       I.prevTrig = tv;
 
@@ -122,14 +135,25 @@ namespace stolmine
       I.ph1 += f / sr;             I.ph1 -= floorf(I.ph1);
       I.ph2 += f * ratio2 / sr;    I.ph2 -= floorf(I.ph2);
 
-      // amp envelopes: instant attack, Hold plateau, exp Decay (2nd osc dampened)
+      // amp envelopes: instant attack, Hold plateau, exp Decay; 2nd osc rings longer
+      // (modal), brightness + noise envelopes advance too
       if (I.holdLeft > 0) I.holdLeft--; else { I.ampEnv *= ampCoeff; }
       I.ampEnv2 *= ampCoeff2;
+      I.brightEnv *= brightCoeff;
+      I.noiseEnv *= noiseCoeff;
 
-      float osc = w1 * I.ampEnv + shape * sn2 * I.ampEnv2;
+      float tone = w1 * I.ampEnv + shape * sn2 * I.ampEnv2;
 
-      // Grit: blend enveloped noise in (keeps some osc), ramps toward "just noise"
-      float y = osc * (1.0f - noiseMix) + noise(I.rng) * noiseMix * I.ampEnv;
+      // decay-tracking lowpass: cutoff falls with the brightness env (bright attack ->
+      // dark tail = high partials decay faster). Cutoff scales with the fundamental.
+      float fc = f * (1.2f + 20.0f * I.brightEnv);
+      float g = 6.2832f * fc / sr; if (g > 1.0f) g = 1.0f;
+      I.lp += g * (tone - I.lp);
+      float toneLP = I.lp;
+
+      // Grit noise added POST-lowpass with its own env -> at high grit the bright noise
+      // outlasts the darkened/snapped tone (measured inverse coupling).
+      float y = toneLP * (1.0f - noiseMix) + noise(I.rng) * noiseMix * I.noiseEnv;
 
       out[i] = y * level;
     }
