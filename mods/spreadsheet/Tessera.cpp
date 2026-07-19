@@ -30,11 +30,29 @@ namespace stolmine
   // mode (h,k): f = fc*(h + k*r)
   static const float kH[NM] = {1, 1, 1, 3, 1, 3, 1, 5, 3, 5, 7, 3};
   static const float kK[NM] = {0, 1, -1, 1, 2, 2, -2, 2, 0, 0, 0, -1};
-  // base amplitude at L0=ln(242ms), and its slope per ln(tau) (decay reshapes the mix)
-  static const float kAmpBase[NM] = {1.00f, 0.53f, 0.22f, 0.17f, 0.11f, 0.09f,
-                                     0.07f, 0.045f, 0.0f, 0.0f, 0.0f, 0.0f};
-  static const float kAmpSlope[NM] = {0.0f, 0.056f, 0.063f, 0.040f, 0.035f, 0.024f,
-                                      0.015f, 0.006f, 0.0f, 0.0f, 0.0f, 0.0f};
+  // Per-mode amplitude, least-squares fitted against all 1143 hardware captures
+  // (fit_amps.py). amp = c0 + c1*dL + c2*foldN + c3*r + c4*lf + c5*g, where
+  //   dL = ln(tauC)-ln(242ms), foldN = pitch-trimmed fold, r = osc2 detune,
+  //   lf = ln(fc/246.5), g = grit/127.
+  // The strong negative r terms on the sub modes (h=1,k=-1/-2) are the measured
+  // "sub dies as osc2 detunes away" behaviour a fixed table could not represent.
+  // features: [1, dL, foldN, r, lf, g]. A 9-feature variant with r*r/|h+k*r| fit the
+  // stored amps better (R^2 0.59->0.77 on the sub) but rendered WORSE (83%->81% grid
+  // match) - overfit: extreme coefficients extrapolate into the amplitude clamps.
+  static const float kAmpFit[NM][6] = {
+    {0.9896f,  0.0070f,  0.0055f,  0.0062f, -0.0121f, -0.0792f},  // h=1 k=+0 carrier
+    {0.7050f,  0.0291f, -0.0540f, -0.0913f, -0.0570f, -0.0307f},  // h=1 k=+1 osc2
+    {0.7935f,  0.0277f, -0.1577f, -1.3352f, -0.0091f, -0.0286f},  // h=1 k=-1 sub
+    {0.2088f,  0.0251f,  0.1630f,  0.0141f, -0.0347f,  0.0450f},  // h=3 k=+1
+    {0.3876f, -0.0014f,  0.2280f, -0.1182f, -0.0597f,  0.0165f},  // h=1 k=+2
+    {0.1923f,  0.0130f,  0.1098f, -0.0632f, -0.0428f,  0.1504f},  // h=3 k=+2
+    {0.8361f,  0.0098f,  0.1300f, -1.9770f,  0.0217f,  0.2388f},  // h=1 k=-2 sub
+    {0.1107f, -0.0036f,  0.0488f, -0.0136f,  0.0175f,  0.3865f},  // h=5 k=+2
+    {0.1667f,  0.0504f,  0.2011f,  0.1799f, -0.0446f,  0.0166f},  // h=3 k=+0
+    {0.1486f,  0.0272f, -0.0418f,  0.0488f, -0.0014f,  0.2627f},  // h=5 k=+0
+    {0.1559f,  0.0023f, -0.0553f, -0.0391f,  0.0055f,  0.4403f},  // h=7 k=+0
+    {0.1542f, -0.0047f, -0.1143f,  0.3891f, -0.0221f,  0.0759f},  // h=3 k=-1
+  };
   // tone modes ring long, sidebands short
   static const float kTauR[NM] = {1.00f, 0.94f, 0.35f, 0.35f, 0.35f, 0.34f,
                                   0.20f, 0.17f, 0.95f, 0.95f, 0.93f, 0.35f};
@@ -174,6 +192,8 @@ namespace stolmine
       {
         float fc = f0 * powf(2.0f, voct[i]);
         float foldN = fold * powf(fc / 246.5f, -0.163f);   // fold falls with pitch
+        float lf = logf(fc / 246.5f);                      // pitch feature
+        float gN = ccGrit / 127.0f;                        // grit feature
         // sine-dip only exists when osc2 is inactive (core-only regime)
         float sineDip = 0.0f;
         if (ccChar < 64.0f) sineDip = ccChar / 64.0f;
@@ -183,20 +203,12 @@ namespace stolmine
         {
           float f = fc * (kH[m] + kK[m] * r);
           I.mfreq[m] = f;
-          float a;
-          if (m == 8)                      // core h3 + fold
-            a = (r > 0.1f) ? (0.05f + 0.49f * foldN)
-                           : (0.24f - 0.07f * sineDip + 0.22f * foldN);
-          else if (m == 9) a = 0.06f + 0.13f * foldN;
-          else if (m == 10) a = 0.08f * foldN;
-          else if (m == 11) a = 0.20f * foldN;
-          else
-          {
-            a = kAmpBase[m] + kAmpSlope[m] * dL;          // decay reshapes the mix
-            float cap = 2.0f * kAmpBase[m];
-            if (a > cap) a = cap;
-          }
+          const float *c = kAmpFit[m];
+          float a = c[0] + c[1] * dL + c[2] * foldN + c[3] * r + c[4] * lf + c[5] * gN;
+          // core h3 keeps its measured sine-dip when osc2 is inactive
+          if (m == 8 && r <= 0.1f) a += 0.07f * (1.0f - sineDip) - 0.07f;
           if (a < 0.0f) a = 0.0f;
+          if (a > 1.5f) a = 1.5f;
           if (f <= 15.0f || f >= nyq) a = 0.0f;           // drop out-of-range modes
           // measured-amp -> initial-amp correction (see winAvg)
           float tmS = tauEff * kTauR[m] * 0.001f;
