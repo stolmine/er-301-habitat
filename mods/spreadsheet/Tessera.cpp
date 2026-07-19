@@ -54,6 +54,18 @@ namespace stolmine
   static inline uint32_t lcg(uint32_t &s) { s = s * 1103515245u + 12345u; return s; }
   static inline float noise(uint32_t &s) { return (float)((lcg(s) >> 9) & 0xFFFF) / 32768.0f - 1.0f; }
 
+  // The measured amp table holds EXTRACTOR-measured amplitudes, which for short-tau
+  // modes are already partly decayed over the ~110 ms analysis window. Convert a
+  // measured amp back to the true initial amp: W(tau) = (tau/T)(1-e^-T/tau) is the
+  // window-average of the decay; initial = measured * W(tau_carrier)/W(tau_mode).
+  // Without this the sub/sideband modes render ~2x too quiet (measured across the grid).
+  static inline float winAvg(float tau_s)
+  {
+    const float Tw = 0.11f;
+    if (tau_s < 1e-4f) return 1e-4f;
+    return (tau_s / Tw) * (1.0f - expf(-Tw / tau_s));
+  }
+
   // measured HF tau ceiling: no cap below ~600 Hz, ~500 ms @950 Hz, ~60 ms @1.4 kHz+
   static inline float hfCeilMs(float f)
   {
@@ -186,6 +198,12 @@ namespace stolmine
           }
           if (a < 0.0f) a = 0.0f;
           if (f <= 15.0f || f >= nyq) a = 0.0f;           // drop out-of-range modes
+          // measured-amp -> initial-amp correction (see winAvg)
+          float tmS = tauEff * kTauR[m] * 0.001f;
+          float ceilS = hfCeilMs(f) * 0.001f;
+          if (tmS > ceilS) tmS = ceilS;
+          if (tmS < 0.002f) tmS = 0.002f;
+          a *= winAvg(tauEff * 0.001f) / winAvg(tmS);
           I.env[m] = a;
           // Varied (not aligned) start phases: all-aligned created an artificial
           // broadband click. Varying them matches the measured sub-mode amplitude
