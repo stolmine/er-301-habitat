@@ -9,13 +9,35 @@
 
 namespace stolmine
 {
-
-  // Additive MODAL engine (2026-07-19): a bank of decaying sinusoids, each mode with
-  // its OWN frequency / amplitude / decay rate. This is the only way to get the
-  // hardware's frequency-dependent (modal) decay - high partials ring shorter than
-  // low ones (measured tau_n ~ tau0 * harm^-alpha, two-regime: gentle for the low
-  // "tone" modes, steep for the high "attack" modes). See findings-dynamics.md.
+  // ---------------------------------------------------------------------------
+  // Modal engine fitted to the Trinity BLOCK mode-structure campaign (1143 hardware
+  // captures: fine 1-D throws for all 8 controls + all 28 2-D pair matrices).
+  // Analysis: ~/repos/trinity-midi-harness/analysis-modemap.md
+  //
+  // KEY STRUCTURAL FINDING: the hardware spectrum is NOT stretched odd harmonics. Every
+  // capture factorizes as f(h,k) = fc*(h + k*r): a core oscillator (odd harmonics h) cross-
+  // modulated by a 2nd oscillator at fc*(1+r), giving uniformly-spaced intermod sidebands.
+  // ~30% of sideband amplitude sits BELOW fc (the k=-1,-2 "sub" modes) - that is the
+  // hardware's body/punch, which a stretched-harmonic model cannot produce at all.
+  //
+  // Two decay classes (measured): "tone" modes (carrier / osc2 / folded core harmonics)
+  // ring at tauRatio ~0.93-1.0; ALL sidebands are short (~0.35, weak ones 0.15-0.2).
+  // That class split IS the measured brightness-decay mechanism.
+  // All control interdependencies reduce to analytic forms (no 2-D tables needed).
+  // ---------------------------------------------------------------------------
   static const int NM = 12;
+
+  // mode (h,k): f = fc*(h + k*r)
+  static const float kH[NM] = {1, 1, 1, 3, 1, 3, 1, 5, 3, 5, 7, 3};
+  static const float kK[NM] = {0, 1, -1, 1, 2, 2, -2, 2, 0, 0, 0, -1};
+  // base amplitude at L0=ln(242ms), and its slope per ln(tau) (decay reshapes the mix)
+  static const float kAmpBase[NM] = {1.00f, 0.53f, 0.22f, 0.17f, 0.11f, 0.09f,
+                                     0.07f, 0.045f, 0.0f, 0.0f, 0.0f, 0.0f};
+  static const float kAmpSlope[NM] = {0.0f, 0.056f, 0.063f, 0.040f, 0.035f, 0.024f,
+                                      0.015f, 0.006f, 0.0f, 0.0f, 0.0f, 0.0f};
+  // tone modes ring long, sidebands short
+  static const float kTauR[NM] = {1.00f, 0.94f, 0.35f, 0.35f, 0.35f, 0.34f,
+                                  0.20f, 0.17f, 0.95f, 0.95f, 0.93f, 0.35f};
 
   static inline float sineLUT(float phase)   // phase in [0,1) -> sin(2*pi*phase)
   {
@@ -32,19 +54,29 @@ namespace stolmine
   static inline uint32_t lcg(uint32_t &s) { s = s * 1103515245u + 12345u; return s; }
   static inline float noise(uint32_t &s) { return (float)((lcg(s) >> 9) & 0xFFFF) / 32768.0f - 1.0f; }
 
+  // measured HF tau ceiling: no cap below ~600 Hz, ~500 ms @950 Hz, ~60 ms @1.4 kHz+
+  static inline float hfCeilMs(float f)
+  {
+    if (f <= 600.0f) return 1.0e9f;
+    if (f >= 1400.0f) return 60.0f;
+    if (f <= 950.0f)
+    {
+      float t = (logf(f) - logf(600.0f)) / (logf(950.0f) - logf(600.0f));
+      return 3000.0f * powf(500.0f / 3000.0f, t);
+    }
+    float t = (logf(f) - logf(950.0f)) / (logf(1400.0f) - logf(950.0f));
+    return 500.0f * powf(60.0f / 500.0f, t);
+  }
+
   struct Tessera::Internal
   {
-    float phase[NM];   // per-mode phase
-    float env[NM];     // per-mode amplitude envelope (its own decay)
-    float ratio[NM];   // per-mode frequency ratio (latched at trigger)
-    float pitchEnv = 0;
-    float noiseEnv = 0;
-    float noiseLp = 0;   // band-limits the grit noise (measured: not white)
+    float phase[NM], env[NM], mfreq[NM], mdecay[NM];
+    float pitchEnv = 0, pitchCoeff = 0.999f, startMult = 1;
+    float noiseEnv = 0, noiseCoeff = 0, noiseLp = 0, burst = 0, burstCoeff = 0;
     int holdLeft = 0;
     float prevTrig = 0;
-    float baseHz = 110, sweepDepth = 0, pitchCoeff = 0.999f;
     uint32_t rng = 0x51ee7u;
-    Internal() { for (int m = 0; m < NM; m++) { phase[m] = 0; env[m] = 0; ratio[m] = 2 * m + 1; } }
+    Internal() { for (int m = 0; m < NM; m++) { phase[m] = 0; env[m] = 0; mfreq[m] = 0; mdecay[m] = 0; } }
   };
 
   Tessera::Tessera()
@@ -75,91 +107,124 @@ namespace stolmine
     float *out = mOut.buffer();
     Internal &I = *mpInternal;
     float sr = globalConfig.sampleRate;
+    float nyq = sr * 0.45f;
 
-    float character = CLAMP(0.0f, 1.0f, mCharacter.value());
-    float shape = CLAMP(0.0f, 1.0f, mShape.value());
-    float grit = CLAMP(0.0f, 1.0f, mGrit.value());
+    // knobs 0..1 -> the hardware's CC 0..127 throw (all laws fitted in CC domain)
+    float ccChar = CLAMP(0.0f, 1.0f, mCharacter.value()) * 127.0f;
+    float ccShape = CLAMP(0.0f, 1.0f, mShape.value()) * 127.0f;
+    float ccGrit = CLAMP(0.0f, 1.0f, mGrit.value()) * 127.0f;
+    float ccSweep = CLAMP(0.0f, 1.0f, mSweep.value()) * 127.0f;
+    float ccTime = CLAMP(0.0f, 1.0f, mTime.value()) * 127.0f;
+    float ccHold = CLAMP(0.0f, 1.0f, mHold.value()) * 127.0f;
+    float ccDecay = CLAMP(0.0f, 1.0f, mDecay.value()) * 127.0f;
     float level = CLAMP(0.0f, 1.0f, mLevel.value());
-    float decay = CLAMP(0.0f, 1.0f, mDecay.value());
-    float hold = CLAMP(0.0f, 1.0f, mHold.value());
-    float timeK = CLAMP(0.0f, 1.0f, mTime.value());
     float f0 = CLAMP(8.0f, 8000.0f, mF0.value());
-    float sweepP = CLAMP(0.0f, 1.0f, mSweep.value());
 
-    float tau0 = 0.02f * powf(40.0f, decay);   // fundamental ring 20 ms .. 0.8 s
-    // Grit shortens the whole bank past ~0.75 (measured 808-snare snap)
-    float gritShorten = grit > 0.75f ? 1.0f - (grit - 0.75f) / 0.25f * 0.7f : 1.0f;
-    tau0 *= gritShorten;
-    float noiseCoeff = expf(-1.0f / (0.02f * powf(40.0f, decay) * sr));  // noise own env
-    int holdSamples = (int)(hold * 0.8f * sr);
-    float tauP = 0.002f + timeK * 0.35f;
-    float pitchCoeff = expf(-1.0f / (tauP * sr));
-
-    // Character = waveshape harmonic richness (V-shape: triangle harmonics at 0 ->
-    // sine at 0.5 -> fold harmonics at 1). Shape boosts the higher "modal" partials.
-    float rich = fabsf(character - 0.5f) * 2.0f;
-    float roll = character < 0.5f ? 1.0f : 0.6f;   // gentler rolloff -> brighter (match HW)
-    float highGain = (0.2f + shape * 0.7f + rich * 0.5f) * 0.5f;
-    // grit noise band-limit: ~4 kHz one-pole (measured max-grit centroid ~3.6 kHz, not
-    // white). Proper coefficient (1-exp) - the 2*pi*fc/sr approximation breaks at high fc.
-    float noiseLpG = 1.0f - expf(-6.2832f * 4000.0f / sr);
-
-    // per-mode envelope decay coefficients (block rate). Two-regime damping law (tuned
-    // to the measured taus: the low "tone" modes ring together, high modes die fast ->
-    // gives the measured brightness-decay ~2.3-2.4).
-    float decayCoeff[NM];
-    float amp[NM];
-    for (int m = 0; m < NM; m++)
+    // Shape -> osc2 detune ratio (measured linear, pitch-tracked)
+    float r = CLAMP(0.0f, 2.0f, 0.0189f * (ccShape - 9.2f));
+    // Character -> fold amount: dead zone to CC 78, then linear (when osc2 active)
+    float fold = CLAMP(0.0f, 1.0f, (ccChar - 78.0f) / 42.0f);
+    // Decay -> carrier tau (quadratic-in-log law, ~10 ms .. 3 s)
+    float tauC = expf(2.447f + 0.0576f * ccDecay - 0.000115f * ccDecay * ccDecay);  // ms
+    // Grit -> tau ceiling (harmonic sum), measured regimes
+    float tauEff = tauC;
+    if (ccGrit > 70.0f)
     {
-      float harm = 2.0f * m + 1.0f;
-      float alpha = (harm <= 7.0f) ? 0.4f : 1.2f;
-      float taun = tau0 * powf(harm, -alpha);
-      if (taun < 0.002f) taun = 0.002f;
-      decayCoeff[m] = expf(-1.0f / (taun * sr));
-      float rl = (harm <= 7.0f) ? roll : 1.4f;   // high modes roll off steeply (attack only)
-      amp[m] = (m == 0) ? 1.0f : highGain / powf(harm, rl);
+      float t = CLAMP(0.0f, 1.0f, (ccGrit - 70.0f) / 40.0f);
+      float tauG = 250.0f * powf(60.0f / 250.0f, t);
+      tauEff = 1.0f / (1.0f / tauC + 1.0f / tauG);
     }
+    float L = logf(tauC);            // spectral-reshaping driver (pre-ceiling)
+    float dL = L - 5.489f;           // L0 = ln(242 ms)
+
+    // Grit noise path (4 measured regimes)
+    float noiseMix = 0.0f;
+    if (ccGrit >= 115.0f) noiseMix = 0.75f;
+    else if (ccGrit > 110.0f) noiseMix = 0.35f + (ccGrit - 110.0f) / 5.0f * 0.40f;
+    else if (ccGrit > 25.0f) noiseMix = CLAMP(0.0f, 0.35f, 0.0074f * (ccGrit - 18.0f));
+    float noiseTau = tauEff < 150.0f ? tauEff : 150.0f;
+    if (ccGrit > 110.0f) noiseTau = 60.0f;
+
+    // Sweep -> start pitch multiplier (linear in OCTAVES); Time -> pitch-env tau (exp)
+    float startMult = 1.12f * powf(2.0f, ccSweep / 22.5f);
+    float tauP = 0.002f * expf(0.042f * ccTime);
+    float pitchCoeff = expf(-1.0f / (tauP * sr));
+    // Hold -> plateau (exponential), clamp 4 s
+    float holdSec = 0.001f * powf(2.0f, ccHold / 8.6f);
+    if (holdSec > 4.0f) holdSec = 4.0f;
+    int holdSamples = (int)(holdSec * sr);
+    float noiseLpG = 1.0f - expf(-6.2832f * 4000.0f / sr);
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float tv = trig[i];
       if (tv > 0.5f && I.prevTrig <= 0.5f)   // rising edge -> new hit
       {
-        I.baseHz = f0 * powf(2.0f, voct[i]);
-        I.sweepDepth = sweepP * 10.0f;   // moderated (24 crushed the low-end vs HW throw)
-        I.pitchCoeff = pitchCoeff;
-        I.pitchEnv = 1.0f; I.noiseEnv = 1.0f; I.holdLeft = holdSamples;
+        float fc = f0 * powf(2.0f, voct[i]);
+        float foldN = fold * powf(fc / 246.5f, -0.163f);   // fold falls with pitch
+        // sine-dip only exists when osc2 is inactive (core-only regime)
+        float sineDip = 0.0f;
+        if (ccChar < 64.0f) sineDip = ccChar / 64.0f;
+        else if (ccChar < 85.0f) sineDip = 1.0f - (ccChar - 64.0f) / 21.0f;
+
         for (int m = 0; m < NM; m++)
         {
-          // odd-harmonic modes, stretched (inharmonic) by Shape -> the modal spread
-          I.ratio[m] = (2.0f * m + 1.0f) * (1.0f + shape * 0.05f * m);
-          // start at quarter phase (cosine) so all modes contribute energy at t=0 -
-          // an instant broadband impact (punch), not a fade-in from sin(0)=0.
-          I.phase[m] = 0.25f;
-          I.env[m] = amp[m];
+          float f = fc * (kH[m] + kK[m] * r);
+          I.mfreq[m] = f;
+          float a;
+          if (m == 8)                      // core h3 + fold
+            a = (r > 0.1f) ? (0.05f + 0.49f * foldN)
+                           : (0.24f - 0.07f * sineDip + 0.22f * foldN);
+          else if (m == 9) a = 0.06f + 0.13f * foldN;
+          else if (m == 10) a = 0.08f * foldN;
+          else if (m == 11) a = 0.20f * foldN;
+          else
+          {
+            a = kAmpBase[m] + kAmpSlope[m] * dL;          // decay reshapes the mix
+            float cap = 2.0f * kAmpBase[m];
+            if (a > cap) a = cap;
+          }
+          if (a < 0.0f) a = 0.0f;
+          if (f <= 15.0f || f >= nyq) a = 0.0f;           // drop out-of-range modes
+          I.env[m] = a;
+          I.phase[m] = 0.25f;                              // quarter phase -> instant impact
+          float tm = tauEff * kTauR[m];
+          float ceil = hfCeilMs(f);
+          if (tm > ceil) tm = ceil;
+          if (tm < 2.0f) tm = 2.0f;
+          I.mdecay[m] = expf(-1.0f / (tm * 0.001f * sr));
         }
+        I.startMult = startMult;
+        I.pitchCoeff = pitchCoeff;
+        I.pitchEnv = 1.0f;
+        I.holdLeft = holdSamples;
+        I.noiseEnv = 1.0f;
+        I.noiseCoeff = expf(-1.0f / (noiseTau * 0.001f * sr));
+        // regime-4 attack burst (measured punch 9.8 / atk_frac 0.41 at grit >= ~115)
+        I.burst = (ccGrit >= 115.0f) ? 8.0f : 0.0f;
+        I.burstCoeff = expf(-1.0f / (0.005f * sr));
       }
       I.prevTrig = tv;
 
       I.pitchEnv *= I.pitchCoeff;
-      I.noiseEnv *= noiseCoeff;
-      float sweepMul = 1.0f + I.sweepDepth * I.pitchEnv;
+      float pmul = 1.0f + (I.startMult - 1.0f) * I.pitchEnv;
+      bool held = I.holdLeft > 0;
 
       float y = 0.0f;
-      bool held = I.holdLeft > 0;
       for (int m = 0; m < NM; m++)
       {
-        float fm = I.baseHz * I.ratio[m] * sweepMul;
+        float fm = I.mfreq[m] * pmul;
         I.phase[m] += fm / sr; I.phase[m] -= floorf(I.phase[m]);
-        if (!held) I.env[m] *= decayCoeff[m];
+        if (!held) I.env[m] *= I.mdecay[m];
         y += I.env[m] * sineLUT(I.phase[m]);
       }
       if (held) I.holdLeft--;
 
-      // Grit noise: band-limited (one-pole LP) with its own env (post, keeps some tone)
-      float noiseMix = grit * 0.9f;
+      // noise body (own env) + grit attack burst
+      I.noiseEnv *= I.noiseCoeff;
+      I.burst *= I.burstCoeff;
       I.noiseLp += noiseLpG * (noise(I.rng) - I.noiseLp);
-      y = y * (1.0f - noiseMix * 0.5f) + I.noiseLp * noiseMix * I.noiseEnv;
+      y = y * (1.0f - noiseMix * 0.5f) + I.noiseLp * (noiseMix * I.noiseEnv + I.burst * 0.12f);
 
       out[i] = y * level;
     }
