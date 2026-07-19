@@ -1,5 +1,5 @@
 PKGNAME ?= spreadsheet
-PKGVERSION ?= 2.8.3.31
+PKGVERSION ?= 2.8.3.32
 
 include scripts/env.mk
 

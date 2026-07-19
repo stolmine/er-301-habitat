@@ -60,6 +60,9 @@
 // Vivary: 1D cellular-automata granular noise texture (POC).
 // See planning/ca-wavetable-noise-design.md.
 #include "Vivary.h"
+// Vitrail: dual switched-capacitor character filter (POC v5 port).
+// See planning/vitrail-unit.md.
+#include "Vitrail.h"
 #define SWIGLUA
 %}
 
@@ -111,3 +114,4 @@
 %include "FabricGraphic.h"
 %include "FDNTank.h"
 %include "Vivary.h"
+%include "Vitrail.h"

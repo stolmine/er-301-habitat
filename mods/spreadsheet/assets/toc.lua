@@ -25,6 +25,7 @@ return {
     { title = "Mirror",       moduleName = "Mirror",              category = "Spreadsheet", keywords = "oscillator, alias, fold, sync, complex, voice, generator, source, mirror" },
     { title = "Fabula",       moduleName = "Fabula",              category = "Spreadsheet", keywords = "reverb, room, hall, dattorro, algorithmic, tank, allpass, space, freeze, fabula" },
     { title = "Plenum",       moduleName = "Plenum",              category = "Spreadsheet", keywords = "reverb, fdn, feedback, delay, network, hall, householder, space, plenum" },
-    { title = "Vivary",       moduleName = "Vivary",              category = "Spreadsheet", keywords = "noise, source, cellular, automata, wavetable, texture, generative, rule, vivary" }
+    { title = "Vivary",       moduleName = "Vivary",              category = "Spreadsheet", keywords = "noise, source, cellular, automata, wavetable, texture, generative, rule, vivary" },
+    { title = "Vitrail",      moduleName = "Vitrail",             category = "Spreadsheet", keywords = "filter, switched capacitor, comb, aliasing, resonant, self-oscillation, character, clock, vitrail" }
   }
 }
