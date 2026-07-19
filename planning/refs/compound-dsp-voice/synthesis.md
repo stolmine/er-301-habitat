@@ -3,6 +3,8 @@
 DUT: Industrial Music Electronics "Bionic Lester" dual switched-capacitor filter.
 This is the handoff from profiling to the eventual 301 unit. Full detail:
 `findings.md`; capture harness: this directory; level chain: `calibration.md`.
+**Honest coverage/confidence ledger (read before trusting the model or scoping the
+unit): `coverage-and-gaps.md`.**
 
 ## Modeling philosophy (read first)
 
