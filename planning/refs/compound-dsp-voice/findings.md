@@ -162,9 +162,14 @@ single-peak) is set by the A-vs-B cutoff relationship and resonance.
   outputs, at the clock/oscillation** - confirms the user's "mode touches all outputs"
   hypothesis. Contrast: the passive low-res resonance barely moved with mode (0.3%),
   so **mode couples into the CLOCK/oscillation, prominent only in the clock-dominated
-  (self-osc/high-res) regime**, not the passive cutoff. MODEL FIX: mode must affect the
-  clock/self-osc, not just output selection. (Follow-up to disambiguate clock-RATE vs
-  feedback: alias-image shift vs mode at low cutoff / single clock.)
+  (self-osc/high-res) regime**, not the passive cutoff.
+- **DISAMBIGUATED (alias-image test, 9 oc / single clk A)**: the alias images (= clock
+  harmonics) **HOLD** between HP and hidden (4434 vs 4437 Hz, -3 Hz) -> the **clock RATE
+  is UNCHANGED** by mode. So mode is a **shared FILTER-FEEDBACK reconfiguration** (SVF
+  topology), upstream of the output taps: it retunes the self-osc frequency (feedback
+  picks the oscillating mode -> the ~5 kHz shift) and reshapes ALL outputs, but leaves
+  the clock rate + passive cutoff alone. **MODEL: mode is an SVF feedback-topology
+  parameter, NOT a clock parameter.** (This corrects the "mode -> clock" phrasing above.)
 
 ### SELF-OSC mechanism (2026-07-18, full-state logged in states.tsv)
 At A ccw / B cw / res cw / clk both / alias lo (monitor B): input-off RMS -16 dBFS,
