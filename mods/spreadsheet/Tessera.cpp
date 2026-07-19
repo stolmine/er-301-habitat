@@ -187,7 +187,11 @@ namespace stolmine
           if (a < 0.0f) a = 0.0f;
           if (f <= 15.0f || f >= nyq) a = 0.0f;           // drop out-of-range modes
           I.env[m] = a;
-          I.phase[m] = 0.25f;                              // quarter phase -> instant impact
+          // Varied (not aligned) start phases: all-aligned created an artificial
+          // broadband click. Varying them matches the measured sub-mode amplitude
+          // (0.23 vs HW 0.216) and punch (1.5 vs HW 1.3) while keeping the impact.
+          I.phase[m] = 0.25f + 0.37f * (float)m;
+          I.phase[m] -= floorf(I.phase[m]);
           float tm = tauEff * kTauR[m];
           float ceil = hfCeilMs(f);
           if (tm > ceil) tm = ceil;
