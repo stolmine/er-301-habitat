@@ -1569,4 +1569,6 @@ CutA/CutB/Res/Gain (audio-rate inlets), Mode(6 tap+MODE_Q)/ClkSrc(A/B/Both)/Alia
 options, one mode-tapped Out. Emergent zoo NOT hard-coded. Honest gaps carried in from
 coverage-and-gaps.md (dual-core modeled-not-measured; no null-test; distortion-by-mode /
 routing / CV untested). Milestones: (1) DSP+minimal unit in emu, (2) am335x harden, (3)
-character fit vs measured curves, (4) UI/viz."""
+character fit vs measured curves, (4) UI/viz.
+
+2026-07-18 MILESTONE 1 DONE: DSP object (Vitrail.h/.cpp) + Lua unit (assets/Vitrail.lua) + registration (swig/toc) + version 2.8.3.32. Full POC v5 port. C++ validated numerically to reproduce the emergent zoo: self-osc gating (single quiet, both-converged/divergent OSC), res-onset 0.8-0.9, comb tracks fB (cutB.03->911Hz). Both arches build clean, 0 NEON :64/:128 hints, no-tree-vectorize pragma applied. Installed to emu. Controls: cutA/cutB/res/gain faders + Mode/ClkSrc/Alias menu options. C++ demo montage sent. NEXT (milestone 2): load/verify in emu; am335x hardware sanity; then harden (fast-tanh, branchless mode tap, per-block cutoff/exp, float-vs-double eval). Milestone 3: fit distortion knee + alias shape to measured curves. Milestone 4: UI/viz."""
