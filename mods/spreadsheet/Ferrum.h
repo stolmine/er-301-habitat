@@ -32,14 +32,16 @@ namespace stolmine
     od::Inlet mVOct{"V/Oct"};
     od::Outlet mOut{"Out"};
 
-    od::Parameter mPitch{"Pitch", 0.3f};   // base tuning (0..1 -> exp Hz)
-    od::Parameter mRatio{"Ratio", 0.15f};  // FM ratio, quantized to integer steps
-    od::Parameter mIndex{"Index", 0.5f};   // mod depth -> feedback at top
-    od::Parameter mGrit{"Grit", 0.0f};     // feedback boost -> noise
-    od::Parameter mSweep{"Sweep", 0.3f};   // pitch-env depth
-    od::Parameter mTime{"Time", 0.3f};     // pitch-env rate
-    od::Parameter mHold{"Hold", 0.1f};     // amp-env hold plateau
-    od::Parameter mDecay{"Decay", 0.4f};   // amp-env decay
+    // Controls match the Trinity FM voice basics (Character = mod depth -> feedback,
+    // Shape = FM ratio), not broken-out index/ratio.
+    od::Parameter mPitch{"Pitch", 0.2f};       // base tuning: ~40 Hz .. 640 Hz (4 oct)
+    od::Parameter mCharacter{"Character", 0.5f}; // FM mod depth -> operator feedback at top
+    od::Parameter mShape{"Shape", 0.45f};      // FM ratio, quantized to integer steps
+    od::Parameter mGrit{"Grit", 0.0f};         // feedback boost -> noise
+    od::Parameter mSweep{"Sweep", 0.3f};       // pitch-env depth
+    od::Parameter mTime{"Time", 0.3f};         // pitch-env rate
+    od::Parameter mHold{"Hold", 0.1f};         // amp-env hold plateau
+    od::Parameter mDecay{"Decay", 0.4f};       // amp-env decay
     od::Parameter mLevel{"Level", 0.8f};
 #endif
 

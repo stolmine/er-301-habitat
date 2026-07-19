@@ -47,8 +47,8 @@ namespace stolmine
     addInput(mVOct);
     addOutput(mOut);
     addParameter(mPitch);
-    addParameter(mRatio);
-    addParameter(mIndex);
+    addParameter(mCharacter);
+    addParameter(mShape);
     addParameter(mGrit);
     addParameter(mSweep);
     addParameter(mTime);
@@ -70,21 +70,23 @@ namespace stolmine
     Internal &I = *mpInternal;
     float sr = globalConfig.sampleRate;
 
-    float index = CLAMP(0.0f, 1.0f, mIndex.value());
+    float character = CLAMP(0.0f, 1.0f, mCharacter.value());
     float grit = CLAMP(0.0f, 1.0f, mGrit.value());
     float level = CLAMP(0.0f, 1.0f, mLevel.value());
     float decay = CLAMP(0.0f, 1.0f, mDecay.value());
     float hold = CLAMP(0.0f, 1.0f, mHold.value());
     float timeK = CLAMP(0.0f, 1.0f, mTime.value());
     float pitchP = CLAMP(0.0f, 1.0f, mPitch.value());
-    float ratioP = CLAMP(0.0f, 1.0f, mRatio.value());
+    float shapeP = CLAMP(0.0f, 1.0f, mShape.value());
     float sweepP = CLAMP(0.0f, 1.0f, mSweep.value());
 
-    // block-rate derived coefficients (live params)
-    float modDepth = index * 2.0f;                       // FM index (cycles)
-    float fbIndex = index > 0.7f ? (index - 0.7f) / 0.3f * 0.5f : 0.0f;  // feedback regime
+    // block-rate derived coefficients (live params). Character = FM mod depth with a
+    // floor (some brightness even at 0) that ramps into operator feedback at the top -
+    // tuned to the measured Trinity Character sweep (centroid 390 -> 2958).
+    float modDepth = 0.5f + character * 3.0f;            // FM index (cycles)
+    float fbChar = character > 0.7f ? (character - 0.7f) / 0.3f * 0.3f : 0.0f;  // feedback regime
     float fbGrit = (grit < 0.7f ? grit : 0.7f) / 0.7f * 0.45f;
-    float fb = fbIndex + fbGrit;
+    float fb = fbChar + fbGrit;
     float noiseBlend = grit > 0.55f ? (grit - 0.55f) / 0.45f : 0.0f;
     float tauD = 0.003f * powf(87.0f, decay);            // amp decay 3 ms .. ~260 ms+
     float ampCoeff = expf(-1.0f / (tauD * sr));
@@ -97,8 +99,9 @@ namespace stolmine
       float tv = trig[i];
       if (tv > 0.5f && I.prevTrig <= 0.5f)   // rising edge -> new hit
       {
-        I.baseHz = 30.0f * powf(2.0f, pitchP * 6.0f + voct[i]);  // ~30 Hz .. 2 kHz, +V/oct
-        int ri = (int)(ratioP * 7.999f);
+        // ~40 Hz .. 640 Hz over 4 oct + V/oct (matches Trinity carrier ~41 Hz at note 48)
+        I.baseHz = 40.0f * powf(2.0f, pitchP * 4.0f + voct[i]);
+        int ri = (int)(shapeP * 7.999f);
         I.ratio = kRatios[ri];
         I.sweepDepth = sweepP * 24.0f;
         I.pitchCoeff = pitchCoeff;

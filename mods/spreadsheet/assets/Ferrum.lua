@@ -20,10 +20,11 @@ function Ferrum:init(args)
   Unit.init(self, args)
 end
 
-local PARAMS = { "pitch", "ratio", "index", "grit", "sweep", "time", "hold", "decay", "level" }
-local PARAMNAME = { pitch = "Pitch", ratio = "Ratio", index = "Index", grit = "Grit",
+-- Controls match the Trinity FM voice basics.
+local PARAMS = { "pitch", "character", "shape", "grit", "sweep", "time", "hold", "decay", "level" }
+local PARAMNAME = { pitch = "Pitch", character = "Character", shape = "Shape", grit = "Grit",
                     sweep = "Sweep", time = "Time", hold = "Hold", decay = "Decay", level = "Level" }
-local DEFAULT = { pitch = 0.3, ratio = 0.15, index = 0.5, grit = 0.0,
+local DEFAULT = { pitch = 0.2, character = 0.5, shape = 0.45, grit = 0.0,
                   sweep = 0.3, time = 0.3, hold = 0.1, decay = 0.4, level = 0.8 }
 
 function Ferrum:onLoadGraph(channelCount)
@@ -82,7 +83,7 @@ function Ferrum:onLoadViews()
     }
   end
   return views, {
-    expanded = { "trig", "tune", "pitch", "ratio", "index", "grit", "sweep", "time", "hold", "decay", "level" },
+    expanded = { "trig", "tune", "pitch", "character", "shape", "grit", "sweep", "time", "hold", "decay", "level" },
     collapsed = {}
   }
 end
