@@ -76,7 +76,7 @@ SETTINGS = [
     ("resonant",        dict(cutA=.5, res=.88, gain=1, clksrc=0, mode=1, alias=0)),
     ("low-cut alias",   dict(cutA=.20, res=.45, gain=1, clksrc=0, mode=1, alias=0)),
     ("overdrive",       dict(cutA=.5, res=.30, gain=6, clksrc=0, mode=1, alias=0)),
-    ("dual-clk comb",   dict(cutA=.6, cutB=.15, res=.35, gain=1.5, clksrc=2, mode=1, alias=0)),
+    ("dual-clk comb",   dict(cutA=.45, cutB=.06, res=.35, gain=1.5, clksrc=2, mode=1, alias=0)),
     ("dual-clk selfosc",dict(cutA=.2, cutB=.9, res=.96, gain=1.5, clksrc=2, mode=1, alias=0)),
 ]
 

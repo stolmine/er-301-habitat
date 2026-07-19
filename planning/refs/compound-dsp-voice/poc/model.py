@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
 """Systemic POC of the dual switched-capacitor filter (Bionic Lester).
 
-Emergent-by-construction: we build the MECHANISMS (a switched-cap clock, an XOR
-clock-mux, resonance-as-real-feedback, a saturating input, clock feedthrough) and
-let the character (aliasing, clock combs, self-oscillation) fall out. Nothing about
-the comb spacings / osc pitches / 16-corner map is hard-coded - they emerge from
-the clock interaction. See ../synthesis.md.
+Emergent-by-construction: we build the MECHANISMS (two switched-cap cores, each a
+real clock; resonance-as-real-feedback; a saturating input; clock feedthrough) and
+let the character (aliasing, clock combs, self-oscillation, breathing) fall out.
+Nothing about the comb spacings / osc pitches / 16-corner map is hard-coded.
 
-NOT bit-exact. The clock law (cutoff->clock freq, ratio N) is coarse pending the
-hot-send clock measurement; the goal is the emergent qualities, not the numbers.
+v5 architecture (2026-07-18): "clk src = both" is TWO cores cascaded, EACH clocked
+by its OWN clock (A at f_A, B at f_B). This is what makes the comb spacing TRACK the
+low clock (a core clocked at f_B S&H-images the signal into an f_B comb), the 2x
+peak emerge at convergence (two identical cores stack), and the self-oscillation +
+breathing emerge at divergence+high-res (each core oscillates at its own drifting
+clock, the two beat). No gated/bolted-on oscillator - it all comes from the cascade.
+
+NOT bit-exact. The clock law (cutoff->clock, ratio N) is coarse pending the hot-send
+clock measurement; the goal is the emergent qualities, not the numbers. See
+../synthesis.md.
 """
 import numpy as np
 from scipy.signal import lfilter
 
 FS = 48000
-DRIFT = 0.05           # analog clock drift depth (+/-5%) -> beat wanders -> breathing
+DRIFT = 0.05           # analog clock drift depth (+/-5%) -> beats wander -> breathing
 N_RATIO = 25.0         # switched-cap clock = cutoff * N (MEASURED 2026-07-18: N~25 fixed)
 XCOUPLE = 0.06         # measured: each cutoff pulls the OTHER clock down ~6% (inverse)
-FEEDTHRU = 0.03        # SC clock feedthrough into the filter (-> resonant osc emerges)
+FEEDTHRU = 0.03        # SC clock feedthrough into each core (-> resonant osc emerges)
 
 
 def cutoff_hz(knob):   # knob 0..1 -> cutoff Hz (exp, saturates past ~0.8, like the hw)
@@ -35,75 +42,89 @@ def _slow_drift(n, depth, seed, rate=0.99975):   # slow (~2 Hz) smooth analog wa
     return d / (d.std() + 1e-9) * depth
 
 
-def _clock(fclk, n, phase0=0.0, drift=None):   # bipolar square; drift = per-sample freq wander
-    inc = fclk / FS
-    if drift is not None:
-        ph = (np.cumsum(inc * (1.0 + drift)) + phase0) % 1.0
-    else:
-        ph = (np.arange(n) * inc + phase0) % 1.0
-    return np.where(ph < 0.5, 1.0, -1.0)
+# mode -> shared SVF-feedback reconfiguration (measured: mode reshapes EVERY output,
+# and shifts the self-osc). Applied identically to both cores (shared wiring).
+MODE_Q = {0: 1.0, 1: 1.0, 2: 0.7, 3: 1.3, 4: 1.1, 5: 0.9}   # 2=hp,3=notch,4=ap,5=hidden
 
 
-def _svf_loop(x, clk, ticks, g, q, ft, mode, alias):
-    """SVF running at the SC clock: updates only on clock ticks (S&H + ZOH), so
-    aliasing/imaging fall out at low clock; resonance feedback + clock feedthrough
-    make it ring/oscillate. Pure-python inner loop (no numba)."""
+def _sc_core(x, fclk, drift, q, g, ft, mode, phase0=0.0):
+    """One switched-capacitor core: a state-variable filter whose state advances ONLY
+    on this core's clock ticks (sample-and-hold + zero-order hold). Because it only
+    updates at the clock, its images/aliasing/comb fall out at the clock rate; the
+    clock feedthrough seeds ringing; the resonance feedback makes it oscillate when
+    driven unstable. The clock DRIFTS (analog wander) so beats between cores breathe."""
     n = len(x); out = np.empty(n)
-    lp = bp = hp = held = yp = 0.0
+    lp = bp = hp = held = 0.0
+    ph = phase0
+    inc = fclk / FS
     for i in range(n):
-        if ticks[i]:
-            xin = x[i] + ft * clk[i]            # clock feedthrough (seeds oscillation)
+        ph += inc * (1.0 + drift[i])
+        if ph >= 1.0:
+            ph -= 1.0
+            sq = 1.0 if ph < 0.5 else -1.0
+            xin = x[i] + ft * sq                 # clock feedthrough seeds oscillation
             hp = xin - lp - q * bp
             bp += g * hp
-            bp = 1.5 * np.tanh(bp * 0.6667)     # soft feedback limiter -> bounded self-osc
+            bp = 1.5 * np.tanh(bp * 0.6667)      # bounded self-osc
             lp += g * bp
             lp = 1.5 * np.tanh(lp * 0.6667)
-            if mode == 0: held = lp
+            if mode == 0:   held = lp
             elif mode == 1: held = bp
             elif mode == 2: held = hp
-            elif mode == 3: held = lp + hp          # notch
-            else: held = lp - q * bp + hp           # allpass-ish
-        y = held
-        if alias:                                   # HI = mild anti-alias smoothing
-            y = 0.6 * y + 0.4 * yp
-        yp = y
-        out[i] = y
+            elif mode == 3: held = lp + hp           # notch
+            elif mode == 4: held = lp - q * bp + hp  # allpass-ish
+            else:           held = hp + 0.3 * lp     # hidden (bright notch)
+        out[i] = held
     return out
 
 
-# mode -> shared SVF-feedback reconfiguration (measured: HP self-osc ~2x hidden,
-# and mode reshapes all outputs). fcar = self-osc carrier scale; q = damping scale.
-MODE_FCAR = {0: 1.0, 1: 1.0, 2: 3.6, 3: 2.2, 4: 2.8, 5: 1.0}   # 2=hp,3=notch,4=ap,5=hidden
-MODE_Q    = {0: 1.0, 1: 1.0, 2: 0.7, 3: 1.3, 4: 1.1, 5: 0.9}
+def _tap(mode, lp, bp, hp, q):
+    if mode == 0:   return lp
+    elif mode == 1: return bp
+    elif mode == 2: return hp
+    elif mode == 3: return lp + hp           # notch
+    elif mode == 4: return lp - q * bp + hp  # allpass-ish
+    return hp + 0.3 * lp                      # hidden (bright notch)
 
 
-def _clock_osc(clk, fcar, res):
-    """Clock-domain self-oscillation with the CLOCK<->FILTER CLOSED LOOP (measured
-    2026-07-18: the osc BREATHES - comb morphs continuously, carrier wanders +/-26%).
-    A resonant path at the clock carrier, fed by the XOR clock, whose center frequency
-    is SELF-MODULATED by a slow envelope of its own output -> the loop drifts/breathes
-    (chaotic) instead of sitting still. Bounded by soft saturation. Carrier = A's clock
-    (windows); XOR beat -> sidebands; self-FM -> the breathing."""
-    n = len(clk); out = np.zeros(n)
-    fbase = min(fcar, FS * 0.40)
-    q = max(-0.006, (1.0 - res) * 0.45)      # res->1 : q->~0 (instability threshold)
-    lp = bp = env = env2 = 0.0
+def _dual_core(x, fA, fB, dA, dB, q, g, ft, mode, kfb):
+    """Both clocks: two SC cores cascaded (A->B) with a SHARED resonance loop (B's
+    output fed back into A, gain kfb). The cascade gives the f_B comb; the shared loop
+    is what SELF-OSCILLATES - and only exists when BOTH cores run, so single-clock
+    never self-oscs (matches the module). Divergent clocks -> two pitches in the loop
+    -> beating/breathing; converged -> one pitch -> clean. All emergent."""
+    n = len(x); out = np.empty(n)
+    lpA = bpA = hpA = heldA = 0.0; phA = 0.0;  incA = fA / FS
+    lpB = bpB = hpB = heldB = 0.0; phB = 0.31; incB = fB / FS
+    fbk = 0.0
     for i in range(n):
-        # two nested slow envelopes at different rates -> non-settling chaotic drift
-        fmod = fbase * (1.0 + 0.12 * env - 0.08 * env * env2)   # mild self-FM (drift is primary)
-        g = 2.0 * np.sin(np.pi * min(max(fmod, 20.0), FS * 0.46) / FS)
-        hp = clk[i] - lp - q * bp
-        bp += g * hp; bp = 1.2 * np.tanh(bp * 0.8333)
-        lp += g * bp; lp = 1.2 * np.tanh(lp * 0.8333)
-        out[i] = bp
-        env += 0.00010 * (5.0 * bp * bp - env)                 # fast-ish energy env
-        env2 += 0.000018 * (env - env2)                        # slower env of the env
+        phA += incA * (1.0 + dA[i])
+        if phA >= 1.0:
+            phA -= 1.0
+            sqA = 1.0 if phA < 0.5 else -1.0
+            xin = x[i] + ft * sqA + kfb * fbk           # shared resonance feedback
+            hpA = xin - lpA - q * bpA
+            bpA += g * hpA; bpA = 1.5 * np.tanh(bpA * 0.6667)
+            lpA += g * bpA; lpA = 1.5 * np.tanh(lpA * 0.6667)
+            heldA = _tap(mode, lpA, bpA, hpA, q)
+        phB += incB * (1.0 + dB[i])
+        if phB >= 1.0:
+            phB -= 1.0
+            sqB = 1.0 if phB < 0.5 else -1.0
+            xin = heldA + ft * sqB
+            hpB = xin - lpB - q * bpB
+            bpB += g * hpB; bpB = 1.5 * np.tanh(bpB * 0.6667)
+            lpB += g * bpB; lpB = 1.5 * np.tanh(lpB * 0.6667)
+            heldB = _tap(mode, lpB, bpB, hpB, q)
+        fbk = heldB
+        out[i] = heldB
     return out
 
 
 def render(x, cutA=0.5, cutB=0.5, res=0.2, gain=1.0, clksrc=0, mode=1, alias=0,
            N=N_RATIO, ft=FEEDTHRU):
-    """clksrc: 0=A, 1=B, 2=both(XOR). mode: 0 lp,1 bp,2 hp,3 notch,4 ap. alias:0 lo,1 hi."""
+    """clksrc: 0=A, 1=B, 2=both(two cores cascaded, each own clock).
+    mode: 0 lp,1 bp,2 hp,3 notch,4 ap,5 hidden.  alias: 0 lo, 1 hi (HF smoothing)."""
     n = len(x)
     fca0, fcb0 = cutoff_hz(cutA), cutoff_hz(cutB)
     # measured inverse cross-coupling: the other channel's cutoff pulls this clock down
@@ -111,27 +132,22 @@ def render(x, cutA=0.5, cutB=0.5, res=0.2, gain=1.0, clksrc=0, mode=1, alias=0,
     fcb = fcb0 * (1.0 - XCOUPLE * cutA)
     fclkA = min(fca * N, FS * 0.49)
     fclkB = min(fcb * N, FS * 0.49)
-    # two INDEPENDENTLY DRIFTING analog clocks -> their beat wanders -> the self-osc
-    # comb morphs/breathes (measured); B phase-offset keeps XOR non-degenerate.
-    dA, dB = _slow_drift(n, DRIFT, 1), _slow_drift(n, DRIFT, 2)
-    sqA, sqB = _clock(fclkA, n, drift=dA), _clock(fclkB, n, phase0=0.31, drift=dB)
-    if clksrc == 0: clk = sqA
-    elif clksrc == 1: clk = sqB
-    else: clk = np.where((sqA > 0) ^ (sqB > 0), 1.0, -1.0)   # XOR of the two clocks
-    ticks = np.zeros(n, bool)
-    hi = clk > 0
-    ticks[1:] = hi[1:] & (~hi[:-1]); ticks[0] = hi[0]
+    dA = _slow_drift(n, DRIFT, 1)
+    dB = _slow_drift(n, DRIFT, 2)
     g = 2.0 * np.sin(np.pi / N)                     # SVF coeff -> cutoff = fclk/N
-    # res 0..1 -> damping (Q ~1..40); mode scales it (shared feedback reconfig ->
-    # reshapes every output, measured 2026-07-18).
     q = max(0.004, 1.0 / (1.0 + res * 40.0)) * MODE_Q.get(mode, 1.0)
     xin = _softclip(gain * x).astype(np.float64)
-    y = _svf_loop(xin, clk.astype(np.float64), ticks, g, q, ft, mode, alias)
-    # clock-domain self-oscillation (measured mechanism): needs clk=both + high res
-    # + DIVERGENT clocks. Converged XOR is a clean 2x tone (no interference) -> no osc.
-    diverge = abs(cutA - cutB)
-    if clksrc == 2 and res > 0.8 and diverge > 0.3:
-        # mode scales the self-osc carrier (feedback picks the oscillating mode)
-        co = _clock_osc(clk.astype(np.float64), fca * N * MODE_FCAR.get(mode, 1.0), res)
-        y = y + 0.6 * co * min(1.0, (diverge - 0.3) / 0.4)   # scale by divergence
+    if clksrc == 0:
+        y = _sc_core(xin, fclkA, dA, q, g, ft, mode)
+    elif clksrc == 1:
+        y = _sc_core(xin, fclkB, dB, q, g, ft, mode, phase0=0.31)
+    else:
+        # BOTH: two cascaded cores, each on its own drifting clock, plus a shared
+        # resonance loop. Comb tracks the low clock; convergence stacks to the 2x
+        # peak; the shared loop self-oscillates at high res (breathes at divergence,
+        # clean at convergence). Self-osc onset: kfb engages only past res~0.7.
+        kfb = max(0.0, (res - 0.7) / 0.3) * 0.95
+        y = _dual_core(xin, fclkA, fclkB, dA, dB, q, g, ft, mode, kfb)
+    if alias:                                       # HI = mild anti-alias smoothing
+        y = lfilter([0.6, 0.4], [1.0], y)
     return y
