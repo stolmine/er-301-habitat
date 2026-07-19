@@ -29,8 +29,6 @@ namespace stolmine
   static const double DRIFT = 0.05;     // analog clock drift depth (+/-5%)
   static const double DRIFT_SMOOTH = 0.00005; // per-sample smoothing -> ~Hz-scale wander
   static const double LOG2_166 = 7.3813971;  // log2(5000/30) - cutoff exponent scale
-  static const double AP_A = 0.6;       // Bloom: Schroeder allpass coefficient
-  static const int AP_D = 293;          // Bloom: allpass delay (prime, ~6 ms @ 48k)
   static const double SAT_D = 0.6667;   // spiral saturator density -> bounds +/-1.5
   // Soft-knee energy governor: raises damping only when the resonance runs hot,
   // taming the >0.7 resonant-peak scream while leaving the moderate self-osc and
@@ -61,14 +59,16 @@ namespace stolmine
     return ldexp(p, (int)xi);
   }
 
-  // clock Hz from a [0,1] cutoff knob + V/oct transposition, in ONE fastExp2:
-  // 30 Hz .. 5 kHz exp (saturating past 0.8), then * 2^voct.
-  static inline double clockHz(double k, double voct)
+  // clock Hz from a [0,1] cutoff knob: 30 Hz .. 5 kHz exp (saturating past 0.8).
+  static inline double clockHz(double k)
   {
     if (k < 0.0) k = 0.0; else if (k > 1.0) k = 1.0;
     double e = k / 0.8; if (e > 1.0) e = 1.0;
-    return 30.0 * fastExp2(LOG2_166 * e + voct);
+    return 30.0 * fastExp2(LOG2_166 * e);
   }
+
+  // Routing type index {0=LP,1=BP,2=HP,3=AP,4=Notch} -> tapSel mode (1..5).
+  static const int kTypeMode[5] = {1, 2, 3, 5, 4};
 
   static inline double softclip(double x)   // odd-dominant symmetric clip
   {
@@ -132,10 +132,8 @@ namespace stolmine
     double phA = 0.0, lpA = 0.0, bpA = 0.0, hpA = 0.0, heldA = 0.0, envA = 0.0;
     // core B (phase offset keeps the two clocks non-degenerate)
     double phB = 0.31, lpB = 0.0, bpB = 0.0, hpB = 0.0, heldB = 0.0, envB = 0.0;
-    double fbk = 0.0;        // shared resonance loop (B out -> A in)
+    double fbk = 0.0;        // shared resonance loop (output -> filter inputs)
     double aliasPrev = 0.0;  // alias-HI HF smoothing state
-    double apbuf[AP_D] = {}; // Bloom: Schroeder allpass delay line
-    int apidx = 0;
     // clock drift
     uint32_t rng = 0x1234567u;
     double driftA = 0.0, driftB = 0.0, driftTgtA = 0.0, driftTgtB = 0.0;
@@ -148,11 +146,9 @@ namespace stolmine
     addInput(mCutB);
     addInput(mRes);
     addInput(mGain);
-    addInput(mVOct);
-    addInput(mBloom);
     addOutput(mOut);
-    addOption(mMode);
-    addOption(mClkSrc);
+    addParameter(mRouting);
+    addParameter(mClkSrc);
     addOption(mAlias);
     mpInternal = new Internal();
   }
@@ -169,19 +165,24 @@ namespace stolmine
     float *cutBb = mCutB.buffer();
     float *resb = mRes.buffer();
     float *gainb = mGain.buffer();
-    float *voctb = mVOct.buffer();
-    float *bloomb = mBloom.buffer();
     float *out = mOut.buffer();
     Internal &I = *mpInternal;
 
-    int mode = CLAMP(1, 6, (int)(mMode.value() + 0.5f));
-    int clk = CLAMP(1, 3, (int)(mClkSrc.value() + 0.5f));
+    int routing = CLAMP(0, 49, (int)(mRouting.value() + 0.5f));
+    int clk = CLAMP(0, 2, (int)(mClkSrc.value() + 0.5f));
     int alias = CLAMP(1, 2, (int)(mAlias.value() + 0.5f));
+
+    // decode routing: [0,25) series a>b, [25,50) parallel a+b; within, idx = a*5+b.
+    bool parallel = routing >= 25;
+    int r = parallel ? routing - 25 : routing;
+    int typeA = kTypeMode[(r / 5) % 5];
+    int typeB = kTypeMode[r % 5];
+    double qScaleA = kModeQ[typeA - 1];
+    double qScaleB = kModeQ[typeB - 1];
 
     double sr = globalConfig.sampleRate;
     double nyq = sr * 0.49;
     double g = 2.0 * sin(M_PI / N_RATIO);
-    double modeQ = kModeQ[mode - 1];
 
     // new slow drift targets once per block (heavily smoothed per-sample -> ~Hz wander)
     I.driftTgtA = DRIFT * lcgBipolar(I.rng);
@@ -193,58 +194,49 @@ namespace stolmine
       double kB = cutBb[i];
       double res = CLAMP(0.0f, 1.0f, resb[i]);
       double drive = gainb[i];
-      double voct = (double)voctb[i];       // V/oct transposes BOTH clocks together
 
-      // clock Hz (cutoff exp + V/oct) with measured inverse cross-coupling
-      double fca = clockHz(kA, voct) * (1.0 - XCOUPLE * CLAMP(0.0, 1.0, kB));
-      double fcb = clockHz(kB, voct) * (1.0 - XCOUPLE * CLAMP(0.0, 1.0, kA));
+      // clock Hz with measured inverse cross-coupling
+      double fca = clockHz(kA) * (1.0 - XCOUPLE * CLAMP(0.0, 1.0, kB));
+      double fcb = clockHz(kB) * (1.0 - XCOUPLE * CLAMP(0.0, 1.0, kA));
 
       I.driftA += DRIFT_SMOOTH * (I.driftTgtA - I.driftA);
       I.driftB += DRIFT_SMOOTH * (I.driftTgtB - I.driftB);
 
       double fclkA = fca * N_RATIO * (1.0 + I.driftA); if (fclkA > nyq) fclkA = nyq;
       double fclkB = fcb * N_RATIO * (1.0 + I.driftB); if (fclkB > nyq) fclkB = nyq;
-      double incA = fclkA / sr;
-      double incB = fclkB / sr;
 
-      double q = fmax(0.004, 1.0 / (1.0 + res * 40.0)) * modeQ;
+      // Clock Src tunes each filter (both filters always run): 0=A both use clk A,
+      // 1=B both use clk B, 2=Both -> A on clk A / B on clk B (divergent -> comb,
+      // self-osc, breathing). Only Both diverges, so only Both self-oscs (faithful).
+      double incA = (clk == 1 ? fclkB : fclkA) / sr;
+      double incB = (clk == 0 ? fclkA : fclkB) / sr;
+
+      double qBase = fmax(0.004, 1.0 / (1.0 + res * 40.0));
       double x = softclip(drive * (double)in[i]);
 
+      // shared resonance loop (output -> filter inputs): self-osc only in Both mode
+      // (divergent clocks) past res~0.7. Single-clock (converged) never self-oscs.
+      double kfb = (clk == 2 && res > 0.7) ? (res - 0.7) / 0.3 * 0.95 : 0.0;
+      double fb = I.fbk;
+
+      double a = coreStep(I.phA, incA, I.lpA, I.bpA, I.hpA, I.heldA, I.envA,
+                          x + kfb * fb, qBase * qScaleA, g, FEEDTHRU, typeA);
       double y;
-      if (clk == 1)
+      if (parallel)
       {
-        y = coreStep(I.phA, incA, I.lpA, I.bpA, I.hpA, I.heldA, I.envA, x, q, g, FEEDTHRU, mode);
-      }
-      else if (clk == 2)
-      {
-        y = coreStep(I.phB, incB, I.lpB, I.bpB, I.hpB, I.heldB, I.envB, x, q, g, FEEDTHRU, mode);
+        // A and B both filter the input; sum. (Clock Src still sets each clock.)
+        double b = coreStep(I.phB, incB, I.lpB, I.bpB, I.hpB, I.heldB, I.envB,
+                            x + kfb * fb, qBase * qScaleB, g, FEEDTHRU, typeB);
+        y = 0.5 * (a + b);
       }
       else
       {
-        // Both: two cores cascaded (each own clock) + a shared resonance loop.
-        // Comb tracks the low clock; convergence stacks to the 2x peak; the loop
-        // self-oscillates past res~0.7 (only exists with both cores -> single-clock
-        // never self-oscs); divergent clocks -> two pitches beat -> breathing.
-        double kfb = res > 0.7 ? (res - 0.7) / 0.3 * 0.95 : 0.0;
-        // Bloom: smear the feedback through a Schroeder allpass -> the self-osc
-        // blooms/disperses instead of ringing as a sharp tone (apf_phase_resonance).
-        double fb = I.fbk;
-        double bloom = CLAMP(0.0f, 1.0f, bloomb[i]);
-        if (bloom > 0.001)
-        {
-          double d = I.apbuf[I.apidx];
-          double ap = -AP_A * fb + d;
-          I.apbuf[I.apidx] = fb + AP_A * ap;
-          if (++I.apidx >= AP_D) I.apidx = 0;
-          fb = fb + bloom * (ap - fb);
-        }
-        double a = coreStep(I.phA, incA, I.lpA, I.bpA, I.hpA, I.heldA, I.envA,
-                            x + kfb * fb, q, g, FEEDTHRU, mode);
+        // Series: A's tap feeds B.
         double b = coreStep(I.phB, incB, I.lpB, I.bpB, I.hpB, I.heldB, I.envB,
-                            a, q, g, FEEDTHRU, mode);
-        I.fbk = b;
+                            a, qBase * qScaleB, g, FEEDTHRU, typeB);
         y = b;
       }
+      I.fbk = y;
 
       if (alias == 2) // HI = mild anti-alias HF smoothing
       {

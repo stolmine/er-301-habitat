@@ -27,14 +27,16 @@ namespace stolmine
     od::Inlet mCutB{"Cutoff B"};   // [0,1] -> clock B (the interference/comb partner)
     od::Inlet mRes{"Resonance"};   // [0,1] -> Q law + shared-loop gain (self-osc)
     od::Inlet mGain{"Gain"};       // input drive into the softclip
-    od::Inlet mVOct{"V/Oct"};      // transposes BOTH clocks (playable osc / tuned combs)
-    od::Inlet mBloom{"Bloom"};     // [0,1] allpass smear in the shared resonance loop
-    od::Outlet mOut{"Out"};        // mode-tapped output
+    od::Outlet mOut{"Out"};        // routed output
 
-    // Discrete toggles (values 1..N, never 0 per feedback_option_vs_parameter).
-    od::Option mMode{"Mode", 2};       // 1=LP 2=BP 3=HP 4=Notch 5=AP 6=Hidden
-    od::Option mClkSrc{"Clock Src", 1}; // 1=A 2=B 3=Both
-    od::Option mAlias{"Aliasing", 1};   // 1=LO 2=HI
+    // Two filters are ALWAYS in the path. Routing picks each filter's tap type and
+    // whether they cascade (A>B) or sum (A+B); Clock Src picks which clock tunes them.
+    // ModeSelector-driven Parameters (right tool for >2 values, feedback_option_vs_parameter).
+    //   Routing 0..49: [0,25) series a>b, [25,50) parallel a+b; within, idx=a*5+b,
+    //                  type a,b in {0=LP,1=BP,2=HP,3=AP,4=Notch}.
+    od::Parameter mRouting{"Routing", 0.0f};
+    od::Parameter mClkSrc{"Clock Src", 0.0f};  // 0=A 1=B 2=Both
+    od::Option mAlias{"Aliasing", 1};          // 1=LO 2=HI
 #endif
 
   private:
