@@ -155,6 +155,17 @@ single-peak) is set by the A-vs-B cutoff relationship and resonance.
   ("bolted on", user's word). **MODEL FIX: modulate the clock frequency by the filter
   state (a feedback term) so the carrier drifts/breathes, not a static injected tone.**
 
+### MODE -> CLOCK coupling (2026-07-18, self-osc regime)
+- Mode shifts the self-osc **centroid ~5 kHz** (hidden ~4.7 kHz -> HP ~9.7 kHz),
+  **IDENTICALLY on BP and LP** (independent hard outputs; same-excitation silence5,
+  A=ccw corner). Both moving by the same 5 kHz => the coupling is **upstream of the
+  outputs, at the clock/oscillation** - confirms the user's "mode touches all outputs"
+  hypothesis. Contrast: the passive low-res resonance barely moved with mode (0.3%),
+  so **mode couples into the CLOCK/oscillation, prominent only in the clock-dominated
+  (self-osc/high-res) regime**, not the passive cutoff. MODEL FIX: mode must affect the
+  clock/self-osc, not just output selection. (Follow-up to disambiguate clock-RATE vs
+  feedback: alias-image shift vs mode at low cutoff / single clock.)
+
 ### SELF-OSC mechanism (2026-07-18, full-state logged in states.tsv)
 At A ccw / B cw / res cw / clk both / alias lo (monitor B): input-off RMS -16 dBFS,
 a **~32 Hz-spaced comb** (34/65/105 + 337..468) - spacing ~= Cutoff A (the LOW
