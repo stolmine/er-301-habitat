@@ -1552,3 +1552,21 @@ param sweeps) + panel graphics -> planning/refs/multimode-drum-voice/. Generic p
 functional names at build time (feedback_no_third_party_branding). Watch for sample-ROM
 modes (capture-plus-model) vs true synthesis modes, and per-hit variation to model
 statistically."""
+
+[[item]]
+id = "vitrail-unit"
+title = "Vitrail - dual switched-capacitor character filter unit"
+status = "wip"
+stamped = "2026-07-18T22:20:28-05:00"
+area = "dsp"
+touches = ["mods/spreadsheet/Vitrail.*", "mods/spreadsheet/assets/Vitrail.lua", "planning/vitrail-unit.md"]
+verify = { kind = "manual", ref = "6 POC v5 behaviors audible in emu (aliasing/comb/2x/self-osc/breathing/mode); both arches build; am335x hardware sanity" }
+note = """Build plan: planning/vitrail-unit.md. Systemic port of poc/model.py v5 (two SC
+cores, own drifting clocks, shared resonance loop) into a spreadsheet unit. Decisions
+(2026-07-18): target am335x but build full-fidelity first then harden; full dual-core
+from the start; package spreadsheet 2.8.3.31->.32; name Vitrail (no branding). Controls:
+CutA/CutB/Res/Gain (audio-rate inlets), Mode(6 tap+MODE_Q)/ClkSrc(A/B/Both)/Alias(LO/HI)
+options, one mode-tapped Out. Emergent zoo NOT hard-coded. Honest gaps carried in from
+coverage-and-gaps.md (dual-core modeled-not-measured; no null-test; distortion-by-mode /
+routing / CV untested). Milestones: (1) DSP+minimal unit in emu, (2) am335x harden, (3)
+character fit vs measured curves, (4) UI/viz."""
