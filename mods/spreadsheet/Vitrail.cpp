@@ -10,14 +10,15 @@
 // pragma opts this file out.
 #pragma GCC optimize("no-tree-vectorize")
 
-// NOTE (am335x hardening, milestone 2): this is the FULL-FIDELITY first pass per
-// planning/vitrail-unit.md (build it right, then harden). Before hardware:
+// NOTE (am335x hardening, milestone 2): remaining hot-path levers before/after
+// hardware (per planning/vitrail-unit.md, build it right then harden):
 //   - replace per-sample powf (cutoffHz) with a fast exp2 approx / block-rate update
-//   - replace tanh with a rational fast-saturate
 //   - hoist the block-constant `mode` switch out of the per-sample loop (branchless
 //     tap select) per feedback_runtime_branched_dsp_dispatch
 //   - evaluate float vs double for the SVF state (feedback_cortex_a8_no_double)
 //   - confirm file-level -fno-tree-vectorize + objdump has no NEON :64/:128 hints
+// DONE: tanh -> spiralFastSaturate (Taylor poly, ~20x cheaper than libm on A8;
+//   feedback_spiral_feedback_governor) + soft-knee energy governor for the scream.
 
 namespace stolmine
 {
@@ -27,6 +28,13 @@ namespace stolmine
   static const double FEEDTHRU = 0.03;  // clock feedthrough into each core
   static const double DRIFT = 0.05;     // analog clock drift depth (+/-5%)
   static const double DRIFT_SMOOTH = 0.00005; // per-sample smoothing -> ~Hz-scale wander
+  static const double SAT_D = 0.6667;   // spiral saturator density -> bounds +/-1.5
+  // Soft-knee energy governor: raises damping only when the resonance runs hot,
+  // taming the >0.7 resonant-peak scream while leaving the moderate self-osc and
+  // comb (both below the knee) untouched. See feedback_spiral_feedback_governor.
+  static const double GOV_AMT = 4.0;
+  static const double GOV_KNEE = 0.25;
+  static const double GOV_ENV = 0.02;   // per-tick envelope smoothing on |bp|
 
   // mode -> shared SVF-feedback scale (MODE_Q); index = mode-1.
   // 1=LP 2=BP 3=HP 4=Notch 5=AP 6=Hidden
@@ -52,6 +60,17 @@ namespace stolmine
     return x - x * x * x * (1.0 / 3.0);
   }
 
+  // spiralFastSaturate (inlined from house/atoms/Spiral.h): Taylor-sin saturator,
+  // output bounded to +/-1/d, ~20x cheaper than libm tanh on Cortex-A8 (no DP NEON).
+  static inline double spiralSat(double x, double d)
+  {
+    double a = fabs(x) * d;
+    if (a > 1.5707963267948966) a = 1.5707963267948966;
+    double x2 = a * a;
+    double s = a * (1.0 + x2 * (-0.16666666666666666 + x2 * 0.008333333333333333));
+    return (x > 0.0) ? (s / d) : -(s / d);
+  }
+
   static inline double tapSel(int mode, double lp, double bp, double hp, double q)
   {
     switch (mode)
@@ -70,8 +89,8 @@ namespace stolmine
   // out at the clock rate and the clock feedthrough seeds ringing. `held` persists
   // between ticks (the ZOH).
   static inline double coreStep(double &ph, double inc, double &lp, double &bp,
-                                double &hp, double &held, double xin, double q,
-                                double g, double ft, int mode)
+                                double &hp, double &held, double &env, double xin,
+                                double q, double g, double ft, int mode)
   {
     ph += inc;
     if (ph >= 1.0)
@@ -79,10 +98,13 @@ namespace stolmine
       ph -= 1.0;
       double sq = (ph < 0.5) ? 1.0 : -1.0;
       double in2 = xin + ft * sq;
-      hp = in2 - lp - q * bp;
-      bp += g * hp; bp = 1.5 * tanh(bp * 0.66667);
-      lp += g * bp; lp = 1.5 * tanh(lp * 0.66667);
-      held = tapSel(mode, lp, bp, hp, q);
+      // soft-knee energy governor: extra damping only when this core runs hot.
+      double qEff = q + (env > GOV_KNEE ? (env - GOV_KNEE) * GOV_AMT : 0.0);
+      hp = in2 - lp - qEff * bp;
+      bp += g * hp; bp = spiralSat(bp, SAT_D);
+      lp += g * bp; lp = spiralSat(lp, SAT_D);
+      held = tapSel(mode, lp, bp, hp, qEff);
+      env += GOV_ENV * (fabs(bp) - env);
     }
     return held;
   }
@@ -90,9 +112,9 @@ namespace stolmine
   struct Vitrail::Internal
   {
     // core A
-    double phA = 0.0, lpA = 0.0, bpA = 0.0, hpA = 0.0, heldA = 0.0;
+    double phA = 0.0, lpA = 0.0, bpA = 0.0, hpA = 0.0, heldA = 0.0, envA = 0.0;
     // core B (phase offset keeps the two clocks non-degenerate)
-    double phB = 0.31, lpB = 0.0, bpB = 0.0, hpB = 0.0, heldB = 0.0;
+    double phB = 0.31, lpB = 0.0, bpB = 0.0, hpB = 0.0, heldB = 0.0, envB = 0.0;
     double fbk = 0.0;        // shared resonance loop (B out -> A in)
     double aliasPrev = 0.0;  // alias-HI HF smoothing state
     // clock drift
@@ -167,11 +189,11 @@ namespace stolmine
       double y;
       if (clk == 1)
       {
-        y = coreStep(I.phA, incA, I.lpA, I.bpA, I.hpA, I.heldA, x, q, g, FEEDTHRU, mode);
+        y = coreStep(I.phA, incA, I.lpA, I.bpA, I.hpA, I.heldA, I.envA, x, q, g, FEEDTHRU, mode);
       }
       else if (clk == 2)
       {
-        y = coreStep(I.phB, incB, I.lpB, I.bpB, I.hpB, I.heldB, x, q, g, FEEDTHRU, mode);
+        y = coreStep(I.phB, incB, I.lpB, I.bpB, I.hpB, I.heldB, I.envB, x, q, g, FEEDTHRU, mode);
       }
       else
       {
@@ -180,9 +202,9 @@ namespace stolmine
         // self-oscillates past res~0.7 (only exists with both cores -> single-clock
         // never self-oscs); divergent clocks -> two pitches beat -> breathing.
         double kfb = res > 0.7 ? (res - 0.7) / 0.3 * 0.95 : 0.0;
-        double a = coreStep(I.phA, incA, I.lpA, I.bpA, I.hpA, I.heldA,
+        double a = coreStep(I.phA, incA, I.lpA, I.bpA, I.hpA, I.heldA, I.envA,
                             x + kfb * I.fbk, q, g, FEEDTHRU, mode);
-        double b = coreStep(I.phB, incB, I.lpB, I.bpB, I.hpB, I.heldB,
+        double b = coreStep(I.phB, incB, I.lpB, I.bpB, I.hpB, I.heldB, I.envB,
                             a, q, g, FEEDTHRU, mode);
         I.fbk = b;
         y = b;

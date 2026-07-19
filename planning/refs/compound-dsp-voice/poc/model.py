@@ -25,6 +25,10 @@ DRIFT = 0.05           # analog clock drift depth (+/-5%) -> beats wander -> bre
 N_RATIO = 25.0         # switched-cap clock = cutoff * N (MEASURED 2026-07-18: N~25 fixed)
 XCOUPLE = 0.06         # measured: each cutoff pulls the OTHER clock down ~6% (inverse)
 FEEDTHRU = 0.03        # SC clock feedthrough into each core (-> resonant osc emerges)
+SAT_D = 0.6667         # spiral saturator density -> bounds +/-1.5 (replaces 1.5*tanh)
+GOV_AMT = 4.0          # soft-knee energy governor: extra damping when a core runs hot
+GOV_KNEE = 0.25        # knee above the self-osc/comb level -> tames only the scream
+GOV_ENV = 0.02         # per-tick |bp| envelope smoothing
 
 
 def cutoff_hz(knob):   # knob 0..1 -> cutoff Hz (exp, saturates past ~0.8, like the hw)
@@ -34,6 +38,13 @@ def cutoff_hz(knob):   # knob 0..1 -> cutoff Hz (exp, saturates past ~0.8, like 
 
 def _softclip(x):      # odd-dominant symmetric clip (the measured distortion shape)
     return np.where(x > 1, 0.6667, np.where(x < -1, -0.6667, x - x**3 / 3.0))
+
+
+def _spiral(x, d=SAT_D):   # Taylor-sin saturator (house/atoms/Spiral.h); bounds +/-1/d
+    a = min(abs(x) * d, 1.5707963267948966)
+    a2 = a * a
+    s = a * (1.0 + a2 * (-1.0 / 6.0 + a2 * (1.0 / 120.0)))
+    return (s / d) if x > 0.0 else -(s / d)
 
 
 def _slow_drift(n, depth, seed, rate=0.99975):   # slow (~2 Hz) smooth analog wander
@@ -54,7 +65,7 @@ def _sc_core(x, fclk, drift, q, g, ft, mode, phase0=0.0):
     clock feedthrough seeds ringing; the resonance feedback makes it oscillate when
     driven unstable. The clock DRIFTS (analog wander) so beats between cores breathe."""
     n = len(x); out = np.empty(n)
-    lp = bp = hp = held = 0.0
+    lp = bp = hp = held = env = 0.0
     ph = phase0
     inc = fclk / FS
     for i in range(n):
@@ -63,16 +74,18 @@ def _sc_core(x, fclk, drift, q, g, ft, mode, phase0=0.0):
             ph -= 1.0
             sq = 1.0 if ph < 0.5 else -1.0
             xin = x[i] + ft * sq                 # clock feedthrough seeds oscillation
-            hp = xin - lp - q * bp
+            qe = q + (env - GOV_KNEE) * GOV_AMT if env > GOV_KNEE else q
+            hp = xin - lp - qe * bp
             bp += g * hp
-            bp = 1.5 * np.tanh(bp * 0.6667)      # bounded self-osc
+            bp = _spiral(bp)                     # bounded self-osc (spiral saturator)
             lp += g * bp
-            lp = 1.5 * np.tanh(lp * 0.6667)
+            lp = _spiral(lp)
+            env += GOV_ENV * (abs(bp) - env)
             if mode == 0:   held = lp
             elif mode == 1: held = bp
             elif mode == 2: held = hp
             elif mode == 3: held = lp + hp           # notch
-            elif mode == 4: held = lp - q * bp + hp  # allpass-ish
+            elif mode == 4: held = lp - qe * bp + hp  # allpass-ish
             else:           held = hp + 0.3 * lp     # hidden (bright notch)
         out[i] = held
     return out
@@ -94,8 +107,8 @@ def _dual_core(x, fA, fB, dA, dB, q, g, ft, mode, kfb):
     never self-oscs (matches the module). Divergent clocks -> two pitches in the loop
     -> beating/breathing; converged -> one pitch -> clean. All emergent."""
     n = len(x); out = np.empty(n)
-    lpA = bpA = hpA = heldA = 0.0; phA = 0.0;  incA = fA / FS
-    lpB = bpB = hpB = heldB = 0.0; phB = 0.31; incB = fB / FS
+    lpA = bpA = hpA = heldA = envA = 0.0; phA = 0.0;  incA = fA / FS
+    lpB = bpB = hpB = heldB = envB = 0.0; phB = 0.31; incB = fB / FS
     fbk = 0.0
     for i in range(n):
         phA += incA * (1.0 + dA[i])
@@ -103,19 +116,23 @@ def _dual_core(x, fA, fB, dA, dB, q, g, ft, mode, kfb):
             phA -= 1.0
             sqA = 1.0 if phA < 0.5 else -1.0
             xin = x[i] + ft * sqA + kfb * fbk           # shared resonance feedback
-            hpA = xin - lpA - q * bpA
-            bpA += g * hpA; bpA = 1.5 * np.tanh(bpA * 0.6667)
-            lpA += g * bpA; lpA = 1.5 * np.tanh(lpA * 0.6667)
-            heldA = _tap(mode, lpA, bpA, hpA, q)
+            qeA = q + (envA - GOV_KNEE) * GOV_AMT if envA > GOV_KNEE else q
+            hpA = xin - lpA - qeA * bpA
+            bpA += g * hpA; bpA = _spiral(bpA)
+            lpA += g * bpA; lpA = _spiral(lpA)
+            envA += GOV_ENV * (abs(bpA) - envA)
+            heldA = _tap(mode, lpA, bpA, hpA, qeA)
         phB += incB * (1.0 + dB[i])
         if phB >= 1.0:
             phB -= 1.0
             sqB = 1.0 if phB < 0.5 else -1.0
             xin = heldA + ft * sqB
-            hpB = xin - lpB - q * bpB
-            bpB += g * hpB; bpB = 1.5 * np.tanh(bpB * 0.6667)
-            lpB += g * bpB; lpB = 1.5 * np.tanh(lpB * 0.6667)
-            heldB = _tap(mode, lpB, bpB, hpB, q)
+            qeB = q + (envB - GOV_KNEE) * GOV_AMT if envB > GOV_KNEE else q
+            hpB = xin - lpB - qeB * bpB
+            bpB += g * hpB; bpB = _spiral(bpB)
+            lpB += g * bpB; lpB = _spiral(lpB)
+            envB += GOV_ENV * (abs(bpB) - envB)
+            heldB = _tap(mode, lpB, bpB, hpB, qeB)
         fbk = heldB
         out[i] = heldB
     return out
