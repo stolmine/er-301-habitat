@@ -1593,4 +1593,6 @@ subprocess captures 0 samples, use pw-record). MEASURED 2026-07-19: 2-op FM conf
 ET); Shape=FM ratio (spacing rises then plateaus ~163Hz); Character=index (monotonic
 brightening 3->29 sidebands, feedback regime at top). NEXT: Grit(feedback+noise), pitch
 env (Sweep/Time), amp env (Decay/Hold), fine ratio law, absolute tuning, velocity. Then
-build emergent FM drum unit in spreadsheet (Ngoma/Alembic/DrumVoice family)."""
+build emergent FM drum unit in spreadsheet (Ngoma/Alembic/DrumVoice family).
+
+2026-07-19b END-TO-END AUTONOMOUS PASS COMPLETE. All profiling done (grit=feedback->noise past ~0.55; pitch env sweep=depth/time=rate exp; amp env hold plateau + exp decay; Shape=QUANTIZED integer FM ratio; velocity=level). Built FERRUM unit (Ferrum.h/.cpp/.lua, spreadsheet 2.8.3.36): emergent 2-op FM drum voice - carrier+modulator, quantized ratio, index->feedback regime, grit->noise crossfade, pitch env, hold+decay AHD amp env; sine LUT (0 sinf/cosf), both arches, 0 NEON hints. A/B validation: pitch-swept FM matches hardware closely (descending harmonic curves near-identical); base hit structurally correct, slightly less bright/sustained (index/decay tuning = polish pass). Generic name (no branding). NEXT (polish): tighten index/decay ranges + brightness vs captures; velocity CV; output stage (clipper/EQ); optional viz. Method proven reliable for MIDI-driven end-to-end autonomy."""
