@@ -63,6 +63,9 @@
 // Vitrail: dual switched-capacitor character filter (POC v5 port).
 // See planning/vitrail-unit.md.
 #include "Vitrail.h"
+// Ferrum: 2-op FM drum voice, built from profiled Modbap Trinity NEON/FM
+// (~/repos/trinity-midi-harness/findings.md).
+#include "Ferrum.h"
 #define SWIGLUA
 %}
 
@@ -115,3 +118,4 @@
 %include "FDNTank.h"
 %include "Vivary.h"
 %include "Vitrail.h"
+%include "Ferrum.h"
