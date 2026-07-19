@@ -1576,3 +1576,21 @@ character fit vs measured curves, (4) UI/viz.
 2026-07-19 User feedback (~30% mono, likes texture, wants departures). DONE: (1) spiral saturator + soft-knee energy governor - tames >0.7 resonant scream (peak 1.02 clipping -> 0.65) leaving self-osc/comb below the knee; tanh->spiralFastSaturate also a CPU win (0 tanh). (2) DEPARTURES: direct clock control (V/Oct inlet transposes BOTH clocks, exact 2^v by construction - playable/tuned; self-osc-as-osc is windowed per hw multiple-osc-windows, comb/filter transposition smooth) + Bloom (Schroeder allpass smear in shared loop, apf_phase_resonance). (3) CPU: fastExp2 replaces per-sample powf (0 pow calls) keeping audio-rate cutoff FM. spreadsheet 2.8.3.33, both arches, 0 NEON hints. NEXT: more CPU (float eval on non-recursive parts, block-rate where safe) to cut the 30%; optional departures (clock ratio lock, drift-depth knob); milestone 3 character fit vs measured curves.
 
 2026-07-19b Routing restructure per user. CUT Bloom + V/oct (uninteresting / less dramatic than cutoff-over-clock). Architecture now: TWO filters ALWAYS in the path (faithful - profiling showed clk-src just picks which clock tunes both filters). Routing = one ModeSelector: 25 series (A>B) + 25 parallel (A+B) over types LP/BP/HP/AP/Notch (idx a*5+b, series<25). Clock Src = top-level ModeSelector A/B/Both (0=A both use clkA, 1=B both clkB, 2=Both A->clkA B->clkB divergent). Mode/ClkSrc now Parameters (ModeSelector) not Options; Aliasing stays menu Option. spreadsheet 2.8.3.34, both arches, 0 NEON/pow/tanh. OPEN Q: two resonant filters in series self-osc at max res in ALL clk modes now (A -23dB, B -34, Both -15) not just Both - natural consequence of always-two-filters; awaiting user call to keep or damp. NEXT: CPU pass (float eval) for the 30%; milestone 3 character fit."""
+
+[[item]]
+id = "trinity-fm-unit"
+title = "Profile Modbap Trinity FM voice + build ER-301 FM drum unit"
+status = "wip"
+stamped = "2026-07-19T11:32:31-05:00"
+area = "dsp"
+touches = ["mods/spreadsheet/*"]
+verify = { kind = "manual", ref = "unit hits A/B against Trinity capture set; 2-op FM laws (ratio/index/pitch/envelopes) reproduced" }
+note = """Harness at ~/repos/trinity-midi-harness (trinity.py mido+pw-record; findings.md).
+Target = Trinity NEON/FM algorithm = 2-op FM drum voice. Autonomous (fully MIDI-driven:
+notes ch1 trigger+pitch, CCs for params; capture M4 Line5 via pw-record - parecord from
+subprocess captures 0 samples, use pw-record). MEASURED 2026-07-19: 2-op FM confirmed
+(evenly-spaced sidebands); pitch 2x/oct chromatic (note48~165Hz fundamental, ~oct below
+ET); Shape=FM ratio (spacing rises then plateaus ~163Hz); Character=index (monotonic
+brightening 3->29 sidebands, feedback regime at top). NEXT: Grit(feedback+noise), pitch
+env (Sweep/Time), amp env (Decay/Hold), fine ratio law, absolute tuning, velocity. Then
+build emergent FM drum unit in spreadsheet (Ngoma/Alembic/DrumVoice family)."""
