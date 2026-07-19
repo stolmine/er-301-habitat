@@ -21,7 +21,7 @@ end)()
 
 -- Routing: every filter-type pair, series (A>B) then parallel (A+B). Index order
 -- MUST match Vitrail.cpp: [0,25) series, [25,50) parallel; within, idx = a*5+b.
-local ftypes = { "LP", "BP", "HP", "AP", "Notch" }
+local ftypes = { "LP", "BP", "HP", "AP", "N" }
 local routingNames = {}
 do
   local idx = 0
