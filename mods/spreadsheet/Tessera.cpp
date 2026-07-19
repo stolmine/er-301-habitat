@@ -126,14 +126,16 @@ namespace stolmine
       if (tv > 0.5f && I.prevTrig <= 0.5f)   // rising edge -> new hit
       {
         I.baseHz = f0 * powf(2.0f, voct[i]);
-        I.sweepDepth = sweepP * 24.0f;
+        I.sweepDepth = sweepP * 10.0f;   // moderated (24 crushed the low-end vs HW throw)
         I.pitchCoeff = pitchCoeff;
         I.pitchEnv = 1.0f; I.noiseEnv = 1.0f; I.holdLeft = holdSamples;
         for (int m = 0; m < NM; m++)
         {
           // odd-harmonic modes, stretched (inharmonic) by Shape -> the modal spread
           I.ratio[m] = (2.0f * m + 1.0f) * (1.0f + shape * 0.05f * m);
-          I.phase[m] = 0.0f;
+          // start at quarter phase (cosine) so all modes contribute energy at t=0 -
+          // an instant broadband impact (punch), not a fade-in from sin(0)=0.
+          I.phase[m] = 0.25f;
           I.env[m] = amp[m];
         }
       }
