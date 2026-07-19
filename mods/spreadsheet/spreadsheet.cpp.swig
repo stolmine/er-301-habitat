@@ -66,6 +66,8 @@
 // Ferrum: 2-op FM drum voice, built from profiled Modbap Trinity NEON/FM
 // (~/repos/trinity-midi-harness/findings.md).
 #include "Ferrum.h"
+// Tessera: analog BLOCK drum voice from profiled Trinity BLOCK.
+#include "Tessera.h"
 #define SWIGLUA
 %}
 
@@ -119,3 +121,4 @@
 %include "Vivary.h"
 %include "Vitrail.h"
 %include "Ferrum.h"
+%include "Tessera.h"
