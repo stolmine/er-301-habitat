@@ -146,6 +146,15 @@ single-peak) is set by the A-vs-B cutoff relationship and resonance.
   cross-coupled** - model needs a small (~6%) inverse cutoff cross-term even in
   single-source mode.
 
+### SELF-OSC BREATHES (2026-07-18) - clock<->filter closed loop
+- 15 s pure-osc capture: adjacent-frame spectral correlation **0.78** (static tone=1.0)
+  -> the comb **morphs continuously**. Carrier wanders **60-260 Hz (+/-26%)**, amplitude
+  swings **~7 dB**, chaotic on a ~0.5-1 s timescale. Spectrograms: breathing_*.png.
+- This is the clock coupled BACK into the filter (closed loop), i.e. the filter state
+  modulates the clock -> chaotic drift. Our POC self-osc is a fixed additive tone
+  ("bolted on", user's word). **MODEL FIX: modulate the clock frequency by the filter
+  state (a feedback term) so the carrier drifts/breathes, not a static injected tone.**
+
 ### SELF-OSC mechanism (2026-07-18, full-state logged in states.tsv)
 At A ccw / B cw / res cw / clk both / alias lo (monitor B): input-off RMS -16 dBFS,
 a **~32 Hz-spaced comb** (34/65/105 + 337..468) - spacing ~= Cutoff A (the LOW

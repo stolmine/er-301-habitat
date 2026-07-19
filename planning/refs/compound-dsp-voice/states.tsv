@@ -3,3 +3,4 @@ bl_SO_B_A0-Bcw-rcw-both	ccw	cw	cw	12	12	hid	both	lo	A	A	Bbp+Blp	x12	ess.wav
 bl_SO_B_A9-Bcw-rcw-both	9	cw	cw	12	12	hid	both	lo	A	A	Bbp+Blp	x12	ess.wav	
 bl_SO_B_A0-Bcw-r3-both	ccw	cw	3	12	12	hid	both	lo	A	A	Bbp+Blp	x12	ess.wav	
 bl_SO_B_An-Bcw-rcw-both	12	cw	cw	12	12	hid	both	lo	A	A	Bbp+Blp	x12	ess.wav	
+bl_BR_B_An-Bcw-rcw-both	12	cw	cw	12	12	hid	both	lo	A	A	Bbp+Blp	x12	silence15.wav	
