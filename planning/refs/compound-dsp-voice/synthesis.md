@@ -105,15 +105,42 @@ That is the definition of success here.
 - **DC3/DC4**: gain and input freq/volume through the dual-clock regimes.
 - **Distortion mode-dependence** and low-cutoff hot-send re-takes.
 
-## Model architecture sketch (systemic-first)
-- Two SC-emulated (multirate) filter cores, identical, each with a real clock
-  oscillator whose rate = f(cutoff-knob) [literal law].
-- A **clock-mux** stage: A / B / XOR(A,B) drives each core's clock [systemic].
-- Resonance = shared feedback coefficient [literal law] applied as real feedback
-  [systemic] -> self-osc emerges.
-- A **mode** parameter that reconfigures the core [literal, once mapped].
-- A saturating input amp per filter [literal nonlinearity] with the gain law.
-- Aliasing = a clock/anti-alias parameter [literal] into the SC model.
-- Validate the whole thing against the COMPLETE capture set via the null test;
-  success = the emergent behaviors (aliasing, combs, self-osc, corner map) match
-  without any of them being explicitly programmed.
+## Model architecture sketch (systemic-first) - REVISED by POC v5 (2026-07-18)
+
+Key architectural finding: **"clk src = both" is NOT one filter on a combined
+(XOR) clock - it is TWO SC cores cascaded, each running on its OWN clock, sharing a
+resonance loop.** The XOR-single-filter model produced a fixed ~50 Hz artifact comb
+that did not track any control; the dual-core model makes the comb spacing TRACK the
+low clock (a core clocked at f_B S&H-images the signal into an f_B comb) and unifies
+every dual-clock behavior. Verified in poc/model.py.
+
+- Two SC-emulated (multirate) cores, identical, each with a real clock oscillator
+  whose rate = cutoff-knob * N (N~25 measured) [literal law]. Each clock DRIFTS
+  slowly (+/-5%, ~2 Hz) [systemic] -> analog wander.
+- **Clock routing** [systemic]:
+  - single (A or B): signal through one core -> filtering + that core's own-clock
+    aliasing/imaging; NO self-osc.
+  - both: signal cascaded A->B, each on its own clock, PLUS a shared resonance loop
+    (B out -> A in, gain rising past res~0.7).
+- Emergent from the dual-core wiring (NONE hard-coded), all confirmed in v5:
+  - **comb** at low res + divergent clocks, spacing TRACKS the low clock f_B.
+  - **2x peak** at convergence (two identical cores stack; +6 dB vs single).
+  - **self-oscillation** at high res via the shared loop - exists ONLY with both
+    cores, so single-clock never self-oscs (matches the module). Onset res~0.8-0.9.
+  - **breathing**: divergent clocks -> two pitches beat in the loop + drift ->
+    the osc wanders/morphs (spectral adjacent-frame corr ~0.70; hw ~0.78). Converged
+    -> one pitch -> clean.
+  - **mode** shifts the self-osc timbre AND reshapes every output by picking the tap
+    + scaling feedback (no MODE_FCAR lookup - it falls out of the SVF config).
+- Resonance = shared feedback coefficient [literal law: Q~1..40] -> the loop gain.
+- A saturating input amp per core [literal nonlinearity] with the gain law.
+- Aliasing = a clock/anti-alias smoothing parameter [literal] into the SC model.
+- Validate against the COMPLETE capture set; success = the emergent zoo (aliasing,
+  combs, self-osc, breathing, corner map) matches without being programmed.
+
+### Still to pin (POC known-gaps)
+- Comb-spacing detector fumbles at wide spacings (measurement, not model); confirm
+  f_B tracking across the full cutB range with the hot-send clock data.
+- Converged self-osc currently louder than divergent - re-check against hardware
+  (may want a divergence dependence on loop gain).
+- Exact clock law (N, cutoff curve) still coarse pending the hot-send measurement.
