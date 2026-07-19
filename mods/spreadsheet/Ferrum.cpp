@@ -11,9 +11,6 @@
 namespace stolmine
 {
 
-  // Shape = quantized integer FM ratio (measured: ratio snaps between harmonics).
-  static const float kRatios[8] = {1, 2, 3, 4, 5, 6, 7, 8};
-
   // Full-period sine from the half-sine LUT: phase in [0,1) -> sin(2*pi*phase).
   static inline float sineLUT(float phase)
   {
@@ -99,10 +96,12 @@ namespace stolmine
       float tv = trig[i];
       if (tv > 0.5f && I.prevTrig <= 0.5f)   // rising edge -> new hit
       {
-        // ~40 Hz .. 640 Hz over 4 oct + V/oct (matches Trinity carrier ~41 Hz at note 48)
-        I.baseHz = 40.0f * powf(2.0f, pitchP * 4.0f + voct[i]);
-        int ri = (int)(shapeP * 7.999f);
-        I.ratio = kRatios[ri];
+        // ~12 Hz .. ~650 Hz over ~5.75 oct + V/oct. Low floor matches the measured
+        // Trinity reach (~10-20 Hz fundamental at the bottom notes).
+        I.baseHz = 12.0f * powf(2.0f, pitchP * 5.75f + voct[i]);
+        // Shape = CONTINUOUS FM ratio (measured: ratio ramps smoothly ~1 -> ~7.3),
+        // not quantized. Non-integer ratios give the inharmonic/metallic sweep.
+        I.ratio = 1.0f + shapeP * 6.5f;
         I.sweepDepth = sweepP * 24.0f;
         I.pitchCoeff = pitchCoeff;
         I.pitchEnv = 1.0f; I.ampEnv = 1.0f; I.holdLeft = holdSamples;

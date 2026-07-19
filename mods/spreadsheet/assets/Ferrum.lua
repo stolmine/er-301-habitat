@@ -24,7 +24,7 @@ end
 local PARAMS = { "pitch", "character", "shape", "grit", "sweep", "time", "hold", "decay", "level" }
 local PARAMNAME = { pitch = "Pitch", character = "Character", shape = "Shape", grit = "Grit",
                     sweep = "Sweep", time = "Time", hold = "Hold", decay = "Decay", level = "Level" }
-local DEFAULT = { pitch = 0.2, character = 0.5, shape = 0.45, grit = 0.0,
+local DEFAULT = { pitch = 0.4, character = 0.5, shape = 0.45, grit = 0.0,
                   sweep = 0.3, time = 0.3, hold = 0.1, decay = 0.4, level = 0.8 }
 
 function Ferrum:onLoadGraph(channelCount)
