@@ -10,6 +10,13 @@
 namespace stolmine
 {
 
+  // Additive MODAL engine (2026-07-19): a bank of decaying sinusoids, each mode with
+  // its OWN frequency / amplitude / decay rate. This is the only way to get the
+  // hardware's frequency-dependent (modal) decay - high partials ring shorter than
+  // low ones (measured tau_n ~ tau0 * harm^-alpha, two-regime: gentle for the low
+  // "tone" modes, steep for the high "attack" modes). See findings-dynamics.md.
+  static const int NM = 12;
+
   static inline float sineLUT(float phase)   // phase in [0,1) -> sin(2*pi*phase)
   {
     phase -= floorf(phase);
@@ -27,15 +34,17 @@ namespace stolmine
 
   struct Tessera::Internal
   {
-    float ph1 = 0, ph2 = 0;
-    float pitchEnv = 0, ampEnv = 0, ampEnv2 = 0;
-    float brightEnv = 0;   // faster-decaying brightness env -> LP cutoff (freq-dep decay)
-    float noiseEnv = 0;    // noise its own (longer) env -> Grit inverse-coupling snap
-    float lp = 0;          // decay-tracking lowpass state
+    float phase[NM];   // per-mode phase
+    float env[NM];     // per-mode amplitude envelope (its own decay)
+    float ratio[NM];   // per-mode frequency ratio (latched at trigger)
+    float pitchEnv = 0;
+    float noiseEnv = 0;
+    float noiseLp = 0;   // band-limits the grit noise (measured: not white)
     int holdLeft = 0;
     float prevTrig = 0;
     float baseHz = 110, sweepDepth = 0, pitchCoeff = 0.999f;
     uint32_t rng = 0x51ee7u;
+    Internal() { for (int m = 0; m < NM; m++) { phase[m] = 0; env[m] = 0; ratio[m] = 2 * m + 1; } }
   };
 
   Tessera::Tessera()
@@ -57,7 +66,7 @@ namespace stolmine
 
   Tessera::~Tessera() { delete mpInternal; }
 
-  float Tessera::getEnvLevel() { return mpInternal->ampEnv; }
+  float Tessera::getEnvLevel() { return mpInternal->env[0]; }
 
   void Tessera::process()
   {
@@ -77,83 +86,78 @@ namespace stolmine
     float f0 = CLAMP(8.0f, 8000.0f, mF0.value());
     float sweepP = CLAMP(0.0f, 1.0f, mSweep.value());
 
-    float tauBody = 0.003f * powf(87.0f, decay);          // base body decay time
-    // amp decay shortens past ~0.75 grit (measured 885 -> ~260 ms) -> 808 snap
+    float tau0 = 0.02f * powf(40.0f, decay);   // fundamental ring 20 ms .. 0.8 s
+    // Grit shortens the whole bank past ~0.75 (measured 808-snare snap)
     float gritShorten = grit > 0.75f ? 1.0f - (grit - 0.75f) / 0.25f * 0.7f : 1.0f;
-    float tauD = tauBody * gritShorten;
-    float ampCoeff = expf(-1.0f / (tauD * sr));
-    // Modal spread (measured): the 2nd oscillator RINGS LONGER than the body, and
-    // longer with Shape -> partials decay at very different rates (bell/woodblock).
-    float ampCoeff2 = expf(-1.0f / (tauBody * (1.0f + shape * 3.0f) * sr));
-    // Brightness env decays ~3x faster than the body -> high partials die first
-    // (freq-dependent decay). Drives the decay-tracking lowpass.
-    float brightCoeff = expf(-1.0f / (tauD * 0.35f * sr));
-    // Noise gets its own (un-shortened) env -> at high Grit it outlasts the snapped
-    // tone -> the measured inverse brightness coupling.
-    float noiseCoeff = expf(-1.0f / (tauBody * sr));
+    tau0 *= gritShorten;
+    float noiseCoeff = expf(-1.0f / (0.02f * powf(40.0f, decay) * sr));  // noise own env
     int holdSamples = (int)(hold * 0.8f * sr);
     float tauP = 0.002f + timeK * 0.35f;
     float pitchCoeff = expf(-1.0f / (tauP * sr));
 
-    float toSine = CLAMP(0.0f, 1.0f, character * 2.0f);   // 0=triangle, >=0.5-knob=sine
-    float foldMix = character > 0.5f ? (character - 0.5f) * 2.0f : 0.0f;  // fold ramp
-    float foldDrive = 1.0f + foldMix * 3.0f;
-    float noiseMix = grit * 0.9f;                          // keep some osc even at max
-    float ratio2 = 1.0f + shape * 1.5f;                   // 2nd osc interval (unison..2.5x, inharmonic)
+    // Character = waveshape harmonic richness (V-shape: triangle harmonics at 0 ->
+    // sine at 0.5 -> fold harmonics at 1). Shape boosts the higher "modal" partials.
+    float rich = fabsf(character - 0.5f) * 2.0f;
+    float roll = character < 0.5f ? 1.0f : 0.6f;   // gentler rolloff -> brighter (match HW)
+    float highGain = (0.2f + shape * 0.7f + rich * 0.5f) * 0.5f;
+    // grit noise band-limit: ~4 kHz one-pole (measured max-grit centroid ~3.6 kHz, not
+    // white). Proper coefficient (1-exp) - the 2*pi*fc/sr approximation breaks at high fc.
+    float noiseLpG = 1.0f - expf(-6.2832f * 4000.0f / sr);
+
+    // per-mode envelope decay coefficients (block rate). Two-regime damping law (tuned
+    // to the measured taus: the low "tone" modes ring together, high modes die fast ->
+    // gives the measured brightness-decay ~2.3-2.4).
+    float decayCoeff[NM];
+    float amp[NM];
+    for (int m = 0; m < NM; m++)
+    {
+      float harm = 2.0f * m + 1.0f;
+      float alpha = (harm <= 7.0f) ? 0.4f : 1.2f;
+      float taun = tau0 * powf(harm, -alpha);
+      if (taun < 0.002f) taun = 0.002f;
+      decayCoeff[m] = expf(-1.0f / (taun * sr));
+      float rl = (harm <= 7.0f) ? roll : 1.4f;   // high modes roll off steeply (attack only)
+      amp[m] = (m == 0) ? 1.0f : highGain / powf(harm, rl);
+    }
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float tv = trig[i];
       if (tv > 0.5f && I.prevTrig <= 0.5f)   // rising edge -> new hit
       {
-        I.baseHz = f0 * powf(2.0f, voct[i]);   // direct fundamental Hz, V/oct-transposed
+        I.baseHz = f0 * powf(2.0f, voct[i]);
         I.sweepDepth = sweepP * 24.0f;
         I.pitchCoeff = pitchCoeff;
-        I.pitchEnv = 1.0f; I.ampEnv = 1.0f; I.ampEnv2 = 1.0f;
-        I.brightEnv = 1.0f; I.noiseEnv = 1.0f; I.holdLeft = holdSamples;
-        I.ph1 = 0.0f; I.ph2 = 0.0f; I.lp = 0.0f;
+        I.pitchEnv = 1.0f; I.noiseEnv = 1.0f; I.holdLeft = holdSamples;
+        for (int m = 0; m < NM; m++)
+        {
+          // odd-harmonic modes, stretched (inharmonic) by Shape -> the modal spread
+          I.ratio[m] = (2.0f * m + 1.0f) * (1.0f + shape * 0.05f * m);
+          I.phase[m] = 0.0f;
+          I.env[m] = amp[m];
+        }
       }
       I.prevTrig = tv;
 
-      float f = I.baseHz * (1.0f + I.sweepDepth * I.pitchEnv);
       I.pitchEnv *= I.pitchCoeff;
-
-      // core waveshape: triangle -> sine -> folded triangle (Character)
-      float p = I.ph1 - floorf(I.ph1);
-      float tri = 4.0f * fabsf(p - 0.5f) - 1.0f;
-      float sn = sineLUT(I.ph1);
-      float triSine = tri + (sn - tri) * toSine;
-      float w1 = triSine;
-      if (foldMix > 0.0f)
-      {
-        float folded = sineLUT(triSine * foldDrive * 0.25f);   // wavefold re-adds harmonics
-        w1 = triSine + (folded - triSine) * foldMix;
-      }
-
-      float sn2 = sineLUT(I.ph2);   // 2nd oscillator overlay (Shape)
-
-      I.ph1 += f / sr;             I.ph1 -= floorf(I.ph1);
-      I.ph2 += f * ratio2 / sr;    I.ph2 -= floorf(I.ph2);
-
-      // amp envelopes: instant attack, Hold plateau, exp Decay; 2nd osc rings longer
-      // (modal), brightness + noise envelopes advance too
-      if (I.holdLeft > 0) I.holdLeft--; else { I.ampEnv *= ampCoeff; }
-      I.ampEnv2 *= ampCoeff2;
-      I.brightEnv *= brightCoeff;
       I.noiseEnv *= noiseCoeff;
+      float sweepMul = 1.0f + I.sweepDepth * I.pitchEnv;
 
-      float tone = w1 * I.ampEnv + shape * sn2 * I.ampEnv2;
+      float y = 0.0f;
+      bool held = I.holdLeft > 0;
+      for (int m = 0; m < NM; m++)
+      {
+        float fm = I.baseHz * I.ratio[m] * sweepMul;
+        I.phase[m] += fm / sr; I.phase[m] -= floorf(I.phase[m]);
+        if (!held) I.env[m] *= decayCoeff[m];
+        y += I.env[m] * sineLUT(I.phase[m]);
+      }
+      if (held) I.holdLeft--;
 
-      // decay-tracking lowpass: cutoff falls with the brightness env (bright attack ->
-      // dark tail = high partials decay faster). Cutoff scales with the fundamental.
-      float fc = f * (1.2f + 20.0f * I.brightEnv);
-      float g = 6.2832f * fc / sr; if (g > 1.0f) g = 1.0f;
-      I.lp += g * (tone - I.lp);
-      float toneLP = I.lp;
-
-      // Grit noise added POST-lowpass with its own env -> at high grit the bright noise
-      // outlasts the darkened/snapped tone (measured inverse coupling).
-      float y = toneLP * (1.0f - noiseMix) + noise(I.rng) * noiseMix * I.noiseEnv;
+      // Grit noise: band-limited (one-pole LP) with its own env (post, keeps some tone)
+      float noiseMix = grit * 0.9f;
+      I.noiseLp += noiseLpG * (noise(I.rng) - I.noiseLp);
+      y = y * (1.0f - noiseMix * 0.5f) + I.noiseLp * noiseMix * I.noiseEnv;
 
       out[i] = y * level;
     }
