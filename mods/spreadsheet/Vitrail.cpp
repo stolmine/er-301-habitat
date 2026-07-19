@@ -28,6 +28,9 @@ namespace stolmine
   static const double FEEDTHRU = 0.03;  // clock feedthrough into each core
   static const double DRIFT = 0.05;     // analog clock drift depth (+/-5%)
   static const double DRIFT_SMOOTH = 0.00005; // per-sample smoothing -> ~Hz-scale wander
+  static const double LOG2_166 = 7.3813971;  // log2(5000/30) - cutoff exponent scale
+  static const double AP_A = 0.6;       // Bloom: Schroeder allpass coefficient
+  static const int AP_D = 293;          // Bloom: allpass delay (prime, ~6 ms @ 48k)
   static const double SAT_D = 0.6667;   // spiral saturator density -> bounds +/-1.5
   // Soft-knee energy governor: raises damping only when the resonance runs hot,
   // taming the >0.7 resonant-peak scream while leaving the moderate self-osc and
@@ -46,11 +49,25 @@ namespace stolmine
     return (double)((lcgNext(s) >> 8) & 0xFFFF) / 32767.5 - 1.0;
   }
 
-  static inline double cutoffHz(double k)
+  // Fast 2^x (polynomial mantissa + ldexp exponent) - replaces per-sample powf so
+  // audio-rate cutoff FM AND V/oct transposition stay sample-accurate but cheap on
+  // Cortex-A8 (no libm pow/exp per sample). Max error ~0.03% over the used range.
+  static inline double fastExp2(double x)
+  {
+    if (x < -60.0) x = -60.0; else if (x > 60.0) x = 60.0;
+    double xi = floor(x);
+    double f = x - xi;
+    double p = 1.0 + f * (0.6931472 + f * (0.2402265 + f * (0.0555041 + f * 0.0096181)));
+    return ldexp(p, (int)xi);
+  }
+
+  // clock Hz from a [0,1] cutoff knob + V/oct transposition, in ONE fastExp2:
+  // 30 Hz .. 5 kHz exp (saturating past 0.8), then * 2^voct.
+  static inline double clockHz(double k, double voct)
   {
     if (k < 0.0) k = 0.0; else if (k > 1.0) k = 1.0;
     double e = k / 0.8; if (e > 1.0) e = 1.0;
-    return 30.0 * pow(166.6667, e);       // 30 Hz .. 5 kHz, saturating past 0.8
+    return 30.0 * fastExp2(LOG2_166 * e + voct);
   }
 
   static inline double softclip(double x)   // odd-dominant symmetric clip
@@ -117,6 +134,8 @@ namespace stolmine
     double phB = 0.31, lpB = 0.0, bpB = 0.0, hpB = 0.0, heldB = 0.0, envB = 0.0;
     double fbk = 0.0;        // shared resonance loop (B out -> A in)
     double aliasPrev = 0.0;  // alias-HI HF smoothing state
+    double apbuf[AP_D] = {}; // Bloom: Schroeder allpass delay line
+    int apidx = 0;
     // clock drift
     uint32_t rng = 0x1234567u;
     double driftA = 0.0, driftB = 0.0, driftTgtA = 0.0, driftTgtB = 0.0;
@@ -129,6 +148,8 @@ namespace stolmine
     addInput(mCutB);
     addInput(mRes);
     addInput(mGain);
+    addInput(mVOct);
+    addInput(mBloom);
     addOutput(mOut);
     addOption(mMode);
     addOption(mClkSrc);
@@ -148,6 +169,8 @@ namespace stolmine
     float *cutBb = mCutB.buffer();
     float *resb = mRes.buffer();
     float *gainb = mGain.buffer();
+    float *voctb = mVOct.buffer();
+    float *bloomb = mBloom.buffer();
     float *out = mOut.buffer();
     Internal &I = *mpInternal;
 
@@ -170,10 +193,11 @@ namespace stolmine
       double kB = cutBb[i];
       double res = CLAMP(0.0f, 1.0f, resb[i]);
       double drive = gainb[i];
+      double voct = (double)voctb[i];       // V/oct transposes BOTH clocks together
 
-      // measured inverse cross-coupling (each cutoff pulls the other clock down)
-      double fca = cutoffHz(kA) * (1.0 - XCOUPLE * CLAMP(0.0, 1.0, kB));
-      double fcb = cutoffHz(kB) * (1.0 - XCOUPLE * CLAMP(0.0, 1.0, kA));
+      // clock Hz (cutoff exp + V/oct) with measured inverse cross-coupling
+      double fca = clockHz(kA, voct) * (1.0 - XCOUPLE * CLAMP(0.0, 1.0, kB));
+      double fcb = clockHz(kB, voct) * (1.0 - XCOUPLE * CLAMP(0.0, 1.0, kA));
 
       I.driftA += DRIFT_SMOOTH * (I.driftTgtA - I.driftA);
       I.driftB += DRIFT_SMOOTH * (I.driftTgtB - I.driftB);
@@ -202,8 +226,20 @@ namespace stolmine
         // self-oscillates past res~0.7 (only exists with both cores -> single-clock
         // never self-oscs); divergent clocks -> two pitches beat -> breathing.
         double kfb = res > 0.7 ? (res - 0.7) / 0.3 * 0.95 : 0.0;
+        // Bloom: smear the feedback through a Schroeder allpass -> the self-osc
+        // blooms/disperses instead of ringing as a sharp tone (apf_phase_resonance).
+        double fb = I.fbk;
+        double bloom = CLAMP(0.0f, 1.0f, bloomb[i]);
+        if (bloom > 0.001)
+        {
+          double d = I.apbuf[I.apidx];
+          double ap = -AP_A * fb + d;
+          I.apbuf[I.apidx] = fb + AP_A * ap;
+          if (++I.apidx >= AP_D) I.apidx = 0;
+          fb = fb + bloom * (ap - fb);
+        }
         double a = coreStep(I.phA, incA, I.lpA, I.bpA, I.hpA, I.heldA, I.envA,
-                            x + kfb * I.fbk, q, g, FEEDTHRU, mode);
+                            x + kfb * fb, q, g, FEEDTHRU, mode);
         double b = coreStep(I.phB, incB, I.lpB, I.bpB, I.hpB, I.heldB, I.envB,
                             a, q, g, FEEDTHRU, mode);
         I.fbk = b;

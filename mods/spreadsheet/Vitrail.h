@@ -27,6 +27,8 @@ namespace stolmine
     od::Inlet mCutB{"Cutoff B"};   // [0,1] -> clock B (the interference/comb partner)
     od::Inlet mRes{"Resonance"};   // [0,1] -> Q law + shared-loop gain (self-osc)
     od::Inlet mGain{"Gain"};       // input drive into the softclip
+    od::Inlet mVOct{"V/Oct"};      // transposes BOTH clocks (playable osc / tuned combs)
+    od::Inlet mBloom{"Bloom"};     // [0,1] allpass smear in the shared resonance loop
     od::Outlet mOut{"Out"};        // mode-tapped output
 
     // Discrete toggles (values 1..N, never 0 per feedback_option_vs_parameter).

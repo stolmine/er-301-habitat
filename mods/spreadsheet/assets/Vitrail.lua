@@ -7,6 +7,7 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Pitch = require "Unit.ViewControl.Pitch"
 local Encoder = require "Encoder"
 local MenuHeader = require "Unit.MenuControl.Header"
 local OptionControl = require "Unit.MenuControl.OptionControl"
@@ -47,6 +48,15 @@ function Vitrail:onLoadGraph(channelCount)
   addFader(self, op, "cutB", "Cutoff B", 0.5)
   addFader(self, op, "res", "Resonance", 0.2)
   addFader(self, op, "gain", "Gain", 1.0)
+  addFader(self, op, "bloom", "Bloom", 0.0)
+
+  -- V/oct: transposes both clocks together -> the self-osc is playable and the
+  -- combs track pitch (direct clock control, Synchrodyne-style).
+  local tune = self:addObject("tune", app.ConstantOffset())
+  local tuneRange = self:addObject("tuneRange", app.MinMax())
+  connect(tune, "Out", tuneRange, "In")
+  connect(tune, "Out", op, "V/Oct")
+  self:addMonoBranch("tune", tune, "In", tune, "Out")
 
   connect(op, "Out", self, "Out1")
   if channelCount > 1 then
@@ -95,9 +105,26 @@ function Vitrail:onLoadViews()
       biasMap = gainMap,
       biasPrecision = 2,
       initialBias = 1.0
+    },
+    tune = Pitch {
+      button = "V/oct",
+      description = "V/oct (both clocks)",
+      branch = self.branches.tune,
+      offset = self.objects.tune,
+      range = self.objects.tuneRange
+    },
+    bloom = GainBias {
+      button = "bloom",
+      description = "Bloom (allpass smear, Both mode)",
+      branch = self.branches.bloom,
+      gainbias = self.objects.bloom,
+      range = self.objects.bloomRange,
+      biasMap = Encoder.getMap("[0,1]"),
+      biasPrecision = 2,
+      initialBias = 0.0
     }
   }, {
-    expanded = { "cutA", "cutB", "res", "gain" },
+    expanded = { "tune", "cutA", "cutB", "res", "bloom", "gain" },
     collapsed = {}
   }
 end
