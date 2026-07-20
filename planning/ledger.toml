@@ -1581,7 +1581,7 @@ character fit vs measured curves, (4) UI/viz.
 id = "trinity-fm-unit"
 title = "Profile Modbap Trinity FM voice + build ER-301 FM drum unit"
 status = "wip"
-stamped = "2026-07-19T11:32:31-05:00"
+stamped = "2026-07-20T16:17:40-05:00"
 area = "dsp"
 touches = ["mods/spreadsheet/*"]
 verify = { kind = "manual", ref = "unit hits A/B against Trinity capture set; 2-op FM laws (ratio/index/pitch/envelopes) reproduced" }
@@ -1621,4 +1621,74 @@ build emergent FM drum unit in spreadsheet (Ngoma/Alembic/DrumVoice family).
 
 2026-07-19n REGRESSION FIT (fit_amps.py): per-mode amplitude least-squares against all 1143 captures, features [1, dL, foldN, r, lf, g]. Key gain: the fit captures the measured "sub mode dies as osc2 detunes" r-dependence (coef -1.34 on h=1,k=-1; -1.98 on k=-2) that the fixed table could not. GRID MATCH PROGRESSION: 76% (agent table) -> 82% (measured-vs-initial window correction) -> 83% (regression fit). Per metric at 83%: carrier_tau 5.3%% (74%% within 15%%), osc2_amp 12.9%% (60%%), punch 10.3%% (68%%), sub_amp 25.6%% (15%%), flat 32.5%% (contaminated by HW capture noise floor). Structural-metric match ~85%%. NEGATIVE RESULT: a 9-feature nonlinear fit (r*r, |h+k*r|) improved training R^2 (0.59->0.77 sub) but rendered WORSE (81%%) - overfit, extreme coefs extrapolate into the amp clamps; reverted to 6-feature. 2.8.3.50. REMAINING to 90%%: sub_amp (25.6%%) resists both linear and nonlinear fits - ~25-40%% of its variance is unexplained by the control features, suggesting a mechanism not yet identified (or extraction noise on a low-amp mode), not a data-coverage problem.
 
-2026-07-19o AUTONOMOUS GAP-CLOSING on Tessera (BLOCK clone). (1) Established the measurement is NOT the limiter: 8 repeated identical captures give sub_amp/carrier_tau/osc2_amp CV 0.1%% - hardware+extractor are deterministic, so all residual is model error. (2) FOUND THE sub_amp BUG: it was a SAMPLING ARTIFACT, not a missing mechanism. Stored ground truth shows sub amp is FLAT in r (0.226/0.243/0.236 at r=0.20/0.39/0.58, assoc dist ~1%%), but 370 of 423 samples sit at r=0.39 (base shape recurs in every matrix), so least-squares fit a phantom -1.2 r-slope that collapsed the sub - the body/punch - up to 5x at mid Shape. Fixed by including the r term ONLY for the 7 modes with a measured r-dependence (data-driven per-mode selection). Note: naive rebalancing over-corrected (single r=0.77 sample got 370x leverage, R^2 went negative) - the per-mode feature selection is the right fix. RESULT: grid match 83%%->85%%, sub_amp 25.6%%->15.3%% (50%% within 15%%, was 15%%), punch 9.7%%. 2.8.3.51. (3) DIAGNOSED the last outlier, flat (32%%): ruled out capture noise floor (-90dBFS, no effect) and sine-LUT distortion (-97dB); real cause is the model rendering ALL 12 modes at every setting while the HW has fewer significant partials -> denser spectrum between peaks. Fix = mode presence/gating term (the amp fit only saw captures where a mode was detected). Structural-metric match excluding flat: ~89%%."""
+2026-07-19o AUTONOMOUS GAP-CLOSING on Tessera (BLOCK clone). (1) Established the measurement is NOT the limiter: 8 repeated identical captures give sub_amp/carrier_tau/osc2_amp CV 0.1%% - hardware+extractor are deterministic, so all residual is model error. (2) FOUND THE sub_amp BUG: it was a SAMPLING ARTIFACT, not a missing mechanism. Stored ground truth shows sub amp is FLAT in r (0.226/0.243/0.236 at r=0.20/0.39/0.58, assoc dist ~1%%), but 370 of 423 samples sit at r=0.39 (base shape recurs in every matrix), so least-squares fit a phantom -1.2 r-slope that collapsed the sub - the body/punch - up to 5x at mid Shape. Fixed by including the r term ONLY for the 7 modes with a measured r-dependence (data-driven per-mode selection). Note: naive rebalancing over-corrected (single r=0.77 sample got 370x leverage, R^2 went negative) - the per-mode feature selection is the right fix. RESULT: grid match 83%%->85%%, sub_amp 25.6%%->15.3%% (50%% within 15%%, was 15%%), punch 9.7%%. 2.8.3.51. (3) DIAGNOSED the last outlier, flat (32%%): ruled out capture noise floor (-90dBFS, no effect) and sine-LUT distortion (-97dB); real cause is the model rendering ALL 12 modes at every setting while the HW has fewer significant partials -> denser spectrum between peaks. Fix = mode presence/gating term (the amp fit only saw captures where a mode was detected). Structural-metric match excluding flat: ~89%%.
+2026-07-20 SESSION: five hardware-state bugs, two model wins, firmware acquired.
+
+INSTRUMENT BUGS FOUND (all invalidated data before they were caught):
+(1) CLIPPER: the validation mirror hard-clipped at the wav RAIL on 100% of renders (median
+unclipped peak 2.649) while the unit had NO saturation - so a share of every match figure up
+to 87% was credit for a bug. The corpus never sent CC77, so Trinity's clipper sat at an
+unknown panel position for all 1143 captures. Characterized it (152 captures,
+findings-clipper.md): corpus operating point recovered as CC48 (0.8% median error over 6
+descriptors); curve is a soft clip y=g*x/sqrt(1+(x/th)^2) on the SUMMED output; Vol is POST
+clipper. Modelling it honestly cost 87->82%.
+(2) VOL reset to the panel knob on a power cycle, splitting a grid across two levels 10 dB apart.
+(3) CYCLE (CC17) came back ON after a power cycle and randomizes parameters EVERY trigger:
+44-77% CV at settings otherwise deterministic to 2-4%. Invalidated a finished 1138-cell campaign.
+(4) TUNING drifted ~7.2 semitones between sessions.
+(5) PITCH IS CC20 - undocumented, never sent, found by bisection. The manual states the MIDI
+note only sets an OFFSET from "the voice pitch set via the pitch knob". Absolute tuning had
+been tracking a physical control the whole time. CC20=34 reproduces the corpus tuning.
+LESSON (now in memory): an unsent CC is not a default, it is whatever the panel is in. Pin
+every CC, and TEST REPEATABILITY BEFORE INTERPRETING ANY MAP.
+
+MEASUREMENT TOOLING:
+- GRIT IS COMMON-MODE NOISE FM, not a noise bed (findings-grit.md, 155 captures). Magnitude
+STFT is blind to this - added noise and a jittered oscillator give the same magnitude skirt.
+Built per-partial instantaneous-frequency tracking + repeat ensembles: 5 identical hits
+correlate 0.999 at Grit 0 and 0.13 at Grit 64 while spectra hold to 0.02%. Jitter is constant
+in Hz across partials spanning 33x in frequency = ONE shared phase modulation on every mode.
+Implemented (2.8.3.55): jitter within -2..-20%, decorrelation tracks hardware.
+- Grit has FOUR REGIMES (dead zone / noise-FM / reduced-depth deterministic / additive noise).
+Independently reproduced later by on_lattice in the timbre map - two unrelated instruments,
+same four regimes.
+- DESCRIPTORS WERE UNVALIDATED and two were wrong (band_decay reported a 53-SECOND decay for
+an empty band; root cause was FFT circular wraparound, found only by printing the envelope
+after three plausible hypotheses failed). descriptors2.py now self-tests against synthetics.
+- ATTACK SHAPE IS UNMEASURABLE on this rig: atk_ms is confounded by envelope beating, onset
+abruptness by the onset detector, and trigger-referencing by 27.9 ms of MIDI latency jitter
+against an 8 ms target. Needs an audio-output trigger sharing the capture clock. Do not tune
+attack against atk_ms.
+
+MODEL WINS (both shipped):
+- OUTPUT LEVEL (2.8.3.56): hardware pins peak at 0.262 (CV 6.8%) across all 1120 map cells
+because its voice always drives the limiter INTO limiting; ours peaked at 0.04 by grit 108 and
+swung 15.8x. A 12x pre-clipper drive pins it the same way: spread 15.8x->2.2x, crest +75->+7%.
+- CHARACTER (2.8.3.57): hardware KILLS the h=1 sideband family and RAISES an h=3/5 family plus
+new modes (3,3)/(5,1); five fitted foldN coefficients had the WRONG SIGN, which is why
+Character "did much less". First attempt (crossfade override) FAILED and was reverted - the
+override makes amplitude a fixed constant at full fold, discarding the fitted grit/decay/
+shape/pitch slopes. Additive delta works: high-character mean |err| 24.6->19.4%.
+
+FIRMWARE ACQUIRED - changes the cost balance. Trinity2_0.bin is plaintext ARM Thumb-2, load
+address 0x24000000, not encrypted (Daisy Seed / STM32H750). Notes at
+~/Downloads/Trinity2_0_Firmware/RE-NOTES.md, deliberately OUT of git. Key finds: the hardware
+oscillator is a PARABOLIC SINE APPROXIMATION (~-64 dB THD) where ours is a LUT (-97 dB), so
+the hardware adds low-order harmonics at every partial - a strong candidate for our persistent
+e_up/e_air deficits. Internal names confirm p_dec_time = panel Time drives the PITCH envelope
+(manual transposed, user was right). TWO UNMODELLED MECHANISMS: a per-channel `filter_N`, and
+`noi_N` distinct from grit. JUDGEMENT: read mechanism from the binary, implement clean-room,
+keep the empirical rig as validation (it caught five hardware bugs a static read never would).
+
+STATE: unit at 2.8.3.57. Clean 4-D map (1138 cells, every CC pinned, fc anchored per-note to
+the measured carrier). True gaps: e_up -6%, e_air -61%, e_hi +26% (overshoot - do NOT tune,
+it is where the missing filter + sine distortion live), crest +8%, on_lattice +29%.
+Ranked docket in ~/repos/trinity-midi-harness/plan-timbre.md. Harness now on GitHub (private,
+stolmine/trinity-midi-harness); 1.2 GB corpus backed up to stol-compute
+/mnt/ssd/music_production/trinity-corpus (verified by count + checksum).
+NEXT: (1) firmware walk - Ghidra at 0x24000000 + Function ID from libDaisy/DaisySP, targets
+the filter, the exact fold/grit laws, attack, and what Cycle randomizes; (2) parabolic sine;
+(3) regime-4 two-band noise decay; (4) grit damping-RATE law (the uniform tau ceiling was
+REFUTED). Also: capture_hit needs try/finally - an orphaned pw-record recorded 17 hours into
+an 11.6 GB file this session.
+"""
