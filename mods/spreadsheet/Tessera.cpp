@@ -284,22 +284,44 @@ namespace stolmine
     float fold = CLAMP(0.0f, 1.0f, (ccChar - 78.0f) / 42.0f);
     // Decay -> carrier tau (quadratic-in-log law, ~10 ms .. 3 s)
     float tauC = expf(2.447f + 0.0576f * ccDecay - 0.000115f * ccDecay * ccDecay);  // ms
-    // Grit -> tau ceiling (harmonic sum), measured regimes
+    // Grit -> decay-time scaling above the 0.75 breakpoint.
+    //
+    // The hardware does NOT impose a tau ceiling on mode decay (that model was refuted
+    // empirically) and does NOT add a damping rate. Above grit 0.75 it scales the
+    // decay-time PARAMETER itself, linearly, reaching exactly zero at grit 1.0.
+    // Breakpoint and slope are exact; the zone is entered only above 0.75.
+    //
+    // The tone collapsing toward silence at max grit is faithful, not a defect: the
+    // noise path carries its own envelope and survives, which is the "just noise"
+    // behaviour at the top of the throw. Independently, this is the same mechanism we
+    // heard and logged as "amp-env shortening past ~0.75 (808 snare)".
+    //
+    // kGritDecFloor keeps tau off zero (expf(-1/0) is a division by zero) and is the
+    // only free parameter here.
+    static const float kGritDecBreak = 0.75f;
+    static const float kGritDecSlope = 4.0f;
+    static const float kGritDecFloor = 1.0f / 3000.0f;   // tauC * this ~ 1 ms at the top
+    float gN = ccGrit / 127.0f;
     float tauEff = tauC;
-    if (ccGrit > 70.0f)
+    if (gN > kGritDecBreak)
     {
-      float t = CLAMP(0.0f, 1.0f, (ccGrit - 70.0f) / 40.0f);
-      float tauG = 250.0f * powf(60.0f / 250.0f, t);
-      tauEff = 1.0f / (1.0f / tauC + 1.0f / tauG);
+      float k = 1.0f - (gN - kGritDecBreak) * kGritDecSlope;
+      tauEff = tauC * (k > kGritDecFloor ? k : kGritDecFloor);
     }
     float L = logf(tauC);            // spectral-reshaping driver (pre-ceiling)
     float dL = L - 5.489f;           // L0 = ln(242 ms)
 
-    // Grit noise path (4 measured regimes)
+    // Grit additive-noise path. The firmware confirms grit is noise-FM (the jitter path
+    // below), and that the genuine mix-out to "just noise" happens ONLY above the 0.75
+    // breakpoint (CC 95.25). The old additive noise bed from CC 25 was compensating for FM
+    // depth the magnitude-fit under-rendered - a fudge, not a mechanism. Removing it below
+    // 95.25 is neutral on the grid and slightly improves e_hi/e_up (the exact broadband
+    // bands the bed was polluting); the measured kGritKappa jitter now carries all grit
+    // character below 0.75, as the mechanism says it should. The top regime is unchanged.
     float noiseMix = 0.0f;
     if (ccGrit >= 115.0f) noiseMix = 0.75f;
     else if (ccGrit > 110.0f) noiseMix = 0.35f + (ccGrit - 110.0f) / 5.0f * 0.40f;
-    else if (ccGrit > 25.0f) noiseMix = CLAMP(0.0f, 0.35f, 0.0074f * (ccGrit - 18.0f));
+    else if (ccGrit > 95.25f) noiseMix = CLAMP(0.0f, 0.35f, 0.0074f * (ccGrit - 18.0f));
     float noiseTau = tauEff < 150.0f ? tauEff : 150.0f;
     if (ccGrit > 110.0f) noiseTau = 60.0f;
 
@@ -323,7 +345,7 @@ namespace stolmine
         float fc = f0 * powf(2.0f, voct[i]);
         float foldN = fold * powf(fc / 246.5f, -0.163f);   // fold falls with pitch
         float lf = logf(fc / 246.5f);                      // pitch feature
-        float gN = ccGrit / 127.0f;                        // grit feature
+        // gN (grit feature) is hoisted to the block scope above
         // sine-dip only exists when osc2 is inactive (core-only regime)
         float sineDip = 0.0f;
         if (ccChar < 64.0f) sineDip = ccChar / 64.0f;
