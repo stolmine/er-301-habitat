@@ -100,6 +100,31 @@ namespace stolmine
     {-1.5053f,  0.3840f, 2.4148f, 0.5393f,  0.0810f, 0.7474f},  // h=3 k=-1
   };
 
+  // ---- Grit = common-mode noise FM (measured: findings-grit.md, 155 captures) ----
+  // Grit does NOT primarily add a noise bed. It frequency-modulates the oscillators with
+  // noise, which is why hardware repeats decorrelate (5 identical hits correlate 0.999 at
+  // Grit 0 and 0.13 at Grit 64) while their spectra stay stable to 0.02%: same spectrum,
+  // new waveform every hit. A magnitude-STFT corpus is blind to this, which is how 1143
+  // captures missed it.
+  //
+  // The deviation is COMMON-MODE: measured absolute jitter is constant (1.4x spread)
+  // across partials spanning 33x in frequency, so it is ONE shared phase modulation
+  // applied to every mode, not per-mode noise and not proportional to frequency. Depth
+  // scales with the fundamental: depth = kappa(grit) * fc.
+  //
+  // kappa at CC 0,8,...,120 from the note-60 sweep. The first three entries are the
+  // 0.10% analysis floor and are therefore zero, matching the measured dead zone.
+  // Note the shape: it PEAKS at CC 56-64 and falls back by CC 88, then the separate
+  // additive-noise regime takes over above CC 115. Four regimes, not one ramp.
+  static const float kGritKappa[16] = {
+    0.0000f, 0.0000f, 0.0000f, 0.0072f, 0.0207f, 0.0352f, 0.0478f, 0.0550f,
+    0.0541f, 0.0372f, 0.0306f, 0.0096f, 0.0100f, 0.0091f, 0.0095f, 0.0196f};
+  // modulator bandwidth: one-pole at 40 Hz reproduces the measured hit-to-hit
+  // decorrelation across the whole throw (model 0.78/0.34/0.16 vs hardware
+  // 0.75/0.37/0.13 at Grit 24/32/64). 1.85 centres the residual depth bias.
+  static const float kGritLpHz = 40.0f;
+  static const float kGritDepthTrim = 1.85f;
+
   static inline float sineLUT(float phase)   // phase in [0,1) -> sin(2*pi*phase)
   {
     phase -= floorf(phase);
@@ -146,6 +171,8 @@ namespace stolmine
     float phase[NM], env[NM], mfreq[NM], mdecay[NM];
     float pitchEnv = 0, pitchCoeff = 0.999f, startMult = 1;
     float noiseEnv = 0, noiseCoeff = 0, noiseLp = 0, burst = 0, burstCoeff = 0;
+    float jitLp = 0, jitHz = 0;          // common-mode FM state + per-hit depth
+    uint32_t jitRng = 0x9e3779b9u;       // own stream: must not perturb the noise bed
     int holdLeft = 0;
     float prevTrig = 0;
     uint32_t rng = 0x51ee7u;
@@ -199,6 +226,10 @@ namespace stolmine
     // Normalized so the default (CC 48) is unity gain: that is the operating point the
     // whole 1143-capture corpus was recorded at, so it is the state every amplitude
     // coefficient in this file was fitted against.
+    float jitCoeff = 1.0f - expf(-6.2832f * kGritLpHz / globalConfig.sampleRate);
+    // noise() is uniform (std 1/sqrt(3)); the one-pole scales variance by a/(2-a).
+    // Normalise both so kappa*fc IS the resulting deviation in Hz.
+    float jitNorm = 1.7320508f * kGritDepthTrim / sqrtf(jitCoeff / (2.0f - jitCoeff));
     const float kAtkMs = 2.0f;
     float atkCoeff = 1.0f - expf(-1.0f / (kAtkMs * 0.001f * globalConfig.sampleRate));
     float clipTh, clipG;
@@ -310,6 +341,12 @@ namespace stolmine
         // regime-4 attack burst (measured punch 9.8 / atk_frac 0.41 at grit >= ~115)
         I.burst = (ccGrit >= 115.0f) ? 8.0f : 0.0f;
         I.burstCoeff = expf(-1.0f / (0.005f * sr));
+        {
+          float u = CLAMP(0.0f, 15.0f, ccGrit / 8.0f);
+          int gi = (int)u; if (gi > 14) gi = 14;
+          float gf = u - (float)gi;
+          I.jitHz = (kGritKappa[gi] + (kGritKappa[gi + 1] - kGritKappa[gi]) * gf) * fc;
+        }
       }
       I.prevTrig = tv;
 
@@ -317,10 +354,14 @@ namespace stolmine
       float pmul = 1.0f + (I.startMult - 1.0f) * I.pitchEnv;
       bool held = I.holdLeft > 0;
 
+      // one shared noise-FM deviation in Hz, added identically to every mode
+      I.jitLp += jitCoeff * (noise(I.jitRng) - I.jitLp);
+      float jitDev = I.jitLp * jitNorm * I.jitHz;
+
       float y = 0.0f;
       for (int m = 0; m < NM; m++)
       {
-        float fm = I.mfreq[m] * pmul;
+        float fm = I.mfreq[m] * pmul + jitDev;
         I.phase[m] += fm / sr; I.phase[m] -= floorf(I.phase[m]);
         if (!held) I.env[m] *= I.mdecay[m];
         y += I.env[m] * sineLUT(I.phase[m]);
