@@ -31,27 +31,26 @@ namespace stolmine
   static const float kH[NM] = {1, 1, 1, 3, 1, 3, 1, 5, 3, 5, 7, 3};
   static const float kK[NM] = {0, 1, -1, 1, 2, 2, -2, 2, 0, 0, 0, -1};
   // Per-mode amplitude, least-squares fitted against all 1143 hardware captures
-  // (fit_amps.py). amp = c0 + c1*dL + c2*foldN + c3*r + c4*lf + c5*g, where
-  //   dL = ln(tauC)-ln(242ms), foldN = pitch-trimmed fold, r = osc2 detune,
-  //   lf = ln(fc/246.5), g = grit/127.
-  // The strong negative r terms on the sub modes (h=1,k=-1/-2) are the measured
-  // "sub dies as osc2 detunes away" behaviour a fixed table could not represent.
-  // features: [1, dL, foldN, r, lf, g]. A 9-feature variant with r*r/|h+k*r| fit the
-  // stored amps better (R^2 0.59->0.77 on the sub) but rendered WORSE (83%->81% grid
-  // match) - overfit: extreme coefficients extrapolate into the amplitude clamps.
+  // (fit_amps.py). amp = c0 + c1*dL + c2*foldN + c3*r + c4*lf + c5*g.
+  // The r term is included ONLY for the modes where the stored data shows a real
+  // r-dependence (3,4,5,7,8,10,11). For the carrier, osc2, both sub modes and (5,0)
+  // the measured amplitude is FLAT in r (e.g. sub = 0.226/0.243/0.236 at r=0.20/0.39/
+  // 0.58) - earlier fits produced a large negative r slope there purely because 370 of
+  // 423 samples sit at r=0.39, and that phantom slope was collapsing the sub (the
+  // body/punch) by up to 5x at mid Shape.
   static const float kAmpFit[NM][6] = {
-    {0.9896f,  0.0070f,  0.0055f,  0.0062f, -0.0121f, -0.0792f},  // h=1 k=+0 carrier
-    {0.7050f,  0.0291f, -0.0540f, -0.0913f, -0.0570f, -0.0307f},  // h=1 k=+1 osc2
-    {0.7935f,  0.0277f, -0.1577f, -1.3352f, -0.0091f, -0.0286f},  // h=1 k=-1 sub
-    {0.2088f,  0.0251f,  0.1630f,  0.0141f, -0.0347f,  0.0450f},  // h=3 k=+1
-    {0.3876f, -0.0014f,  0.2280f, -0.1182f, -0.0597f,  0.0165f},  // h=1 k=+2
-    {0.1923f,  0.0130f,  0.1098f, -0.0632f, -0.0428f,  0.1504f},  // h=3 k=+2
-    {0.8361f,  0.0098f,  0.1300f, -1.9770f,  0.0217f,  0.2388f},  // h=1 k=-2 sub
-    {0.1107f, -0.0036f,  0.0488f, -0.0136f,  0.0175f,  0.3865f},  // h=5 k=+2
-    {0.1667f,  0.0504f,  0.2011f,  0.1799f, -0.0446f,  0.0166f},  // h=3 k=+0
-    {0.1486f,  0.0272f, -0.0418f,  0.0488f, -0.0014f,  0.2627f},  // h=5 k=+0
-    {0.1559f,  0.0023f, -0.0553f, -0.0391f,  0.0055f,  0.4403f},  // h=7 k=+0
-    {0.1542f, -0.0047f, -0.1143f,  0.3891f, -0.0221f,  0.0759f},  // h=3 k=-1
+    { 0.9935f,  0.0070f,  0.0049f,  0.0000f, -0.0122f, -0.0801f},  // h=1 k=+0 carrier
+    { 0.6483f,  0.0306f, -0.0419f,  0.0000f, -0.0482f, -0.0203f},  // h=1 k=+1 osc2
+    { 0.3075f,  0.0240f, -0.1494f,  0.0000f, -0.0278f, -0.0301f},  // h=1 k=-1 sub
+    { 0.2088f,  0.0251f,  0.1630f,  0.0141f, -0.0347f,  0.0450f},  // h=3 k=+1
+    { 0.3876f, -0.0014f,  0.2280f, -0.1182f, -0.0597f,  0.0165f},  // h=1 k=+2
+    { 0.1923f,  0.0130f,  0.1098f, -0.0632f, -0.0428f,  0.1504f},  // h=3 k=+2
+    { 0.2590f, -0.0566f,  0.1656f,  0.0000f, -0.1133f,  0.2749f},  // h=1 k=-2 sub
+    { 0.1107f, -0.0036f,  0.0488f, -0.0136f,  0.0175f,  0.3865f},  // h=5 k=+2
+    { 0.1667f,  0.0504f,  0.2011f,  0.1799f, -0.0446f,  0.0166f},  // h=3 k=+0
+    { 0.1897f,  0.0267f, -0.0601f,  0.0000f,  0.0003f,  0.2468f},  // h=5 k=+0
+    { 0.1559f,  0.0023f, -0.0553f, -0.0391f,  0.0055f,  0.4403f},  // h=7 k=+0
+    { 0.1542f, -0.0047f, -0.1143f,  0.3891f, -0.0221f,  0.0759f},  // h=3 k=-1
   };
   // tone modes ring long, sidebands short
   static const float kTauR[NM] = {1.00f, 0.94f, 0.35f, 0.35f, 0.35f, 0.34f,
