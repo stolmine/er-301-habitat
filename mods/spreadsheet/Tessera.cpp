@@ -56,6 +56,29 @@ namespace stolmine
   static const float kTauR[NM] = {1.00f, 0.94f, 0.35f, 0.35f, 0.35f, 0.34f,
                                   0.20f, 0.17f, 0.95f, 0.95f, 0.93f, 0.35f};
 
+  // PRESENCE GATE (fit_gating.py, logistic on "was this mode detected", trained on
+  // unswept captures only - at high Sweep the pitch has moved off fc so non-detection
+  // is an analysis artifact, not absence).
+  //
+  // Applied ONLY to the h=3/5/7 core harmonics (modes 8-11). Those are genuinely absent
+  // until Character opens the fold - the measured dead-zone below CC 78 - and their gate
+  // coefficients are dominated by foldN (+2.4..+3.2). The amplitude fit gave them
+  // intercepts of 0.15-0.19 because it only ever saw them when present (selection bias),
+  // so without the gate the model renders core harmonics with the fold shut: too much
+  // energy between the peaks (flatness 0.228 vs the hardware's 0.130).
+  // The core modes (carrier/osc2/sub/sidebands) are NOT gated: their non-detections are
+  // masking, not absence, and gating them would wrongly attenuate the fundamental.
+  static const bool kGated[NM] = {false, false, false, false, false, false,
+                                  false, false, true, true, true, true};
+  static const float kGateFit[NM][6] = {
+    {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0},
+    {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0},
+    {-1.6036f, -0.0850f, 2.8771f, 1.1738f,  0.0406f, 0.6956f},  // h=3 k=+0
+    {-2.2754f,  0.2021f, 3.2338f, 1.5403f,  0.0160f, 0.8017f},  // h=5 k=+0
+    {-2.2610f,  0.3351f, 3.0902f, 1.3819f, -0.2955f, 0.0801f},  // h=7 k=+0
+    {-1.5053f,  0.3840f, 2.4148f, 0.5393f,  0.0810f, 0.7474f},  // h=3 k=-1
+  };
+
   static inline float sineLUT(float phase)   // phase in [0,1) -> sin(2*pi*phase)
   {
     phase -= floorf(phase);
@@ -208,6 +231,13 @@ namespace stolmine
           if (m == 8 && r <= 0.1f) a += 0.07f * (1.0f - sineDip) - 0.07f;
           if (a < 0.0f) a = 0.0f;
           if (a > 1.5f) a = 1.5f;
+          if (kGated[m])   // fold-gated core harmonics: soft presence, no clicks on sweeps
+          {
+            const float *gc = kGateFit[m];
+            float z = gc[0] + gc[1] * dL + gc[2] * foldN + gc[3] * r + gc[4] * lf + gc[5] * gN;
+            if (z < -20.0f) z = -20.0f; else if (z > 20.0f) z = 20.0f;
+            a *= 1.0f / (1.0f + expf(-z));
+          }
           if (f <= 15.0f || f >= nyq) a = 0.0f;           // drop out-of-range modes
           // measured-amp -> initial-amp correction (see winAvg)
           float tmS = tauEff * kTauR[m] * 0.001f;
