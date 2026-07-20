@@ -23,7 +23,8 @@ end
 
 local PARAMS = { "character", "shape", "grit", "sweep", "time", "hold", "decay", "level" }
 local PARAMNAME = { character = "Character", shape = "Shape", grit = "Grit",
-                    sweep = "Sweep", time = "Time", hold = "Hold", decay = "Decay", level = "Level" }
+                    sweep = "Sweep", time = "Time", hold = "Hold", decay = "Decay",
+                    clipper = "Clipper", level = "Level" }
 local DEFAULT = { character = 0.2, shape = 0.0, grit = 0.0,
                   sweep = 0.3, time = 0.3, hold = 0.1, decay = 0.4, level = 0.8 }
 
@@ -99,7 +100,7 @@ function Tessera:onLoadViews()
     }
   end
   return views, {
-    expanded = { "trig", "tune", "f0", "character", "shape", "grit", "sweep", "time", "hold", "decay", "level" },
+    expanded = { "trig", "tune", "f0", "character", "shape", "grit", "sweep", "time", "hold", "decay", "clipper", "level" },
     collapsed = {}
   }
 end

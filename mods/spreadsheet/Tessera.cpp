@@ -56,6 +56,27 @@ namespace stolmine
   static const float kTauR[NM] = {1.00f, 0.94f, 0.35f, 0.35f, 0.35f, 0.34f,
                                   0.20f, 0.17f, 0.95f, 0.95f, 0.93f, 0.35f};
 
+  // ---- Trinity output stage (measured: findings-clipper.md, 152 hardware captures) ----
+  // A soft clip on the SUMMED output, proven acting on the sum rather than per-partial
+  // (hardware output peak stays pinned at 0.203-0.206 across every timbre while crest
+  // collapses 11.1 -> 3.0). Level-invariant to ~4% across a 5-point velocity sweep, so a
+  // memoryless curve is the right model:  y = g * x / sqrt(1 + (x/th)^2).
+  //
+  // Transparent below CC ~12; threshold falls 0.221 -> 0.070 across CC 16-40; above CC 40
+  // the threshold is fixed and the knob is pure drive, with makeup gain asymptoting ~4.03.
+  //
+  // th is tabulated in HARDWARE capture units; kSMH converts to this model's units
+  // (model base peak 2.6143 <-> hardware unclipped base peak 0.2030). That conversion
+  // matters because a saturator is nonlinear: unlike every earlier fit, absolute scale
+  // is not free here.
+  static const float kSMH = 0.2030f / 2.6143f;
+  static const float kClipTh[16] = {9e9f, 9e9f, 0.221f, 0.145f, 0.095f, 0.070f, 0.070f,
+                                    0.070f, 0.070f, 0.070f, 0.070f, 0.070f, 0.070f,
+                                    0.070f, 0.070f, 0.070f};
+  static const float kClipG[16] = {1.000f, 1.000f, 1.538f, 2.150f, 2.648f, 3.037f, 3.329f,
+                                   3.546f, 3.701f, 3.810f, 3.888f, 3.940f, 3.976f, 4.001f,
+                                   4.021f, 4.034f};
+
   // PRESENCE GATE (fit_gating.py, logistic on "was this mode detected", trained on
   // unswept captures only - at high Sweep the pitch has moved off fc so non-detection
   // is an analysis artifact, not absence).
@@ -144,6 +165,7 @@ namespace stolmine
     addParameter(mTime);
     addParameter(mHold);
     addParameter(mDecay);
+    addParameter(mClipper);
     addParameter(mLevel);
     mpInternal = new Internal();
   }
@@ -169,8 +191,25 @@ namespace stolmine
     float ccTime = CLAMP(0.0f, 1.0f, mTime.value()) * 127.0f;
     float ccHold = CLAMP(0.0f, 1.0f, mHold.value()) * 127.0f;
     float ccDecay = CLAMP(0.0f, 1.0f, mDecay.value()) * 127.0f;
+    float ccClip = CLAMP(0.0f, 1.0f, mClipper.value()) * 127.0f;
     float level = CLAMP(0.0f, 1.0f, mLevel.value());
     float f0 = CLAMP(8.0f, 8000.0f, mF0.value());
+
+    // Clipper -> (threshold, makeup gain), linear interp over the measured table.
+    // Normalized so the default (CC 48) is unity gain: that is the operating point the
+    // whole 1143-capture corpus was recorded at, so it is the state every amplitude
+    // coefficient in this file was fitted against.
+    const float kAtkMs = 2.0f;
+    float atkCoeff = 1.0f - expf(-1.0f / (kAtkMs * 0.001f * globalConfig.sampleRate));
+    float clipTh, clipG;
+    {
+      float u = CLAMP(0.0f, 15.0f, ccClip / 8.0f);
+      int ci = (int)u;
+      if (ci > 14) ci = 14;
+      float cf = u - (float)ci;
+      clipTh = (kClipTh[ci] + (kClipTh[ci + 1] - kClipTh[ci]) * cf) / kSMH;
+      clipG = (kClipG[ci] + (kClipG[ci + 1] - kClipG[ci]) * cf) / 3.329f;
+    }
 
     // Shape -> osc2 detune ratio (measured linear, pitch-tracked)
     float r = CLAMP(0.0f, 2.0f, 0.0189f * (ccShape - 9.2f));
@@ -212,6 +251,8 @@ namespace stolmine
       float tv = trig[i];
       if (tv > 0.5f && I.prevTrig <= 0.5f)   // rising edge -> new hit
       {
+        mAtkEnv = 0.0f;   // restart the attack ramp, else every hit after the first
+                          // starts fully open and the onset click comes back
         float fc = f0 * powf(2.0f, voct[i]);
         float foldN = fold * powf(fc / 246.5f, -0.163f);   // fold falls with pitch
         float lf = logf(fc / 246.5f);                      // pitch feature
@@ -241,8 +282,11 @@ namespace stolmine
           if (f <= 15.0f || f >= nyq) a = 0.0f;           // drop out-of-range modes
           // measured-amp -> initial-amp correction (see winAvg)
           float tmS = tauEff * kTauR[m] * 0.001f;
-          float ceilS = hfCeilMs(f) * 0.001f;
-          if (tmS > ceilS) tmS = ceilS;
+          if (kTauR[m] < 0.5f)   // ceiling applies to sidebands only, not tone modes
+          {
+            float ceilS = hfCeilMs(f) * 0.001f;
+            if (tmS > ceilS) tmS = ceilS;
+          }
           if (tmS < 0.002f) tmS = 0.002f;
           a *= winAvg(tauEff * 0.001f) / winAvg(tmS);
           I.env[m] = a;
@@ -252,7 +296,7 @@ namespace stolmine
           I.phase[m] = 0.25f + 0.37f * (float)m;
           I.phase[m] -= floorf(I.phase[m]);
           float tm = tauEff * kTauR[m];
-          float ceil = hfCeilMs(f);
+          float ceil = (kTauR[m] < 0.5f) ? hfCeilMs(f) : 1e9f;
           if (tm > ceil) tm = ceil;
           if (tm < 2.0f) tm = 2.0f;
           I.mdecay[m] = expf(-1.0f / (tm * 0.001f * sr));
@@ -289,7 +333,14 @@ namespace stolmine
       I.noiseLp += noiseLpG * (noise(I.rng) - I.noiseLp);
       y = y * (1.0f - noiseMix * 0.5f) + I.noiseLp * (noiseMix * I.noiseEnv + I.burst * 0.12f);
 
-      out[i] = y * level;
+      mAtkEnv += (1.0f - mAtkEnv) * atkCoeff;
+      y *= mAtkEnv;
+      float ct = y / clipTh;
+      // __builtin_sqrtf maps straight to VFP vsqrt.f32. Plain sqrtf() left GCC emitting
+      // an out-of-line `bl sqrtf` fallback in the per-sample loop, which is both slow on
+      // Cortex-A8 and an AAPCS call barrier inside the audio path. 1+ct*ct is provably
+      // >= 1, so the fallback is dead weight.
+      out[i] = clipG * y / __builtin_sqrtf(1.0f + ct * ct) * level;
     }
   }
 

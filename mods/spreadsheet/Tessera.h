@@ -40,6 +40,8 @@ namespace stolmine
     od::Parameter mTime{"Time", 0.3f};           // pitch-env rate
     od::Parameter mHold{"Hold", 0.1f};           // amp-env hold plateau
     od::Parameter mDecay{"Decay", 0.4f};         // amp-env decay
+    float mAtkEnv = 0.0f;   // attack ramp state, reset on trigger
+    od::Parameter mClipper{"Clipper", 0.378f};  // 48/127 = the corpus operating point
     od::Parameter mLevel{"Level", 0.8f};
 #endif
 

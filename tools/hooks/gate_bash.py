@@ -36,11 +36,22 @@ def main():
     # Only gate the repo the ledger actually governs. Sessions rooted here routinely
     # touch sibling repos (e.g. the Trinity profiling harness) that have no scripts/dev
     # and no ledger, where this would be a false positive with no legitimate path out.
+    cwd = data.get("cwd") or os.getcwd()
+    # Honour a leading `cd <dir>` in the command itself: the session cwd stays at the
+    # habitat root even when the command operates on a sibling repo.
+    m = re.match(r"\s*cd\s+(\"[^\"]+\"|'[^']+'|\S+)\s*&&", cmd)
+    if m:
+        target = m.group(1).strip("\"'")
+        target = os.path.expanduser(target)
+        if not os.path.isabs(target):
+            target = os.path.join(cwd, target)
+        if os.path.isdir(target):
+            cwd = target
     try:
         root = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=2,
-            cwd=(data.get("cwd") or os.getcwd()),
+            cwd=cwd,
         ).stdout.strip()
     except Exception:
         return 0  # fail-open, per this hook's design
