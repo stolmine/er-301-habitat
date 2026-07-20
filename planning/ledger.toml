@@ -1691,4 +1691,61 @@ the filter, the exact fold/grit laws, attack, and what Cycle randomizes; (2) par
 (3) regime-4 two-band noise decay; (4) grit damping-RATE law (the uniform tau ceiling was
 REFUTED). Also: capture_hit needs try/finally - an orphaned pw-record recorded 17 hours into
 an 11.6 GB file this session.
+
+2026-07-20 FIRMWARE WALK. Ghidra 12.1.2 headless imports the image cleanly at 0x24000000
+(vector table validates the base); pyghidra harness + full decompiled corpus on disk at
+~/Downloads/Trinity2_0_Firmware/re/ (503 functions, 74.4% coverage, NOT in git). Engine map
+solved from the render dispatcher FUN_24011950 and pinned independently by the manual's CC18
+table: BLOCK=2400b1d8 (Tessera's target), HEAP=2400baa4, NEON=2400c774 (Ferrum's), ARCADE=
+2400cde8, ORB=24001370, CLANG=24003d38.
+
+SETTLED: (1) Grit is noise-FM confirmed at INSTRUCTION level - one shared xorshift PRNG drawn
+twice per call, scaled by exactly 2^-23 to symmetric [-1,1), injected into the PHASE
+accumulator (vstr destination confirmed), never amplitude; depth ~ fc falls out of the
+arithmetic because the noise term shares the pitch term's 1/period scaling. Our phase-domain
+measurement was right. (2) Grit's four regimes confirmed with EXACT thresholds 0.1/0.5/0.75
+(CC 12.7/63.5/95.25) - the campaign could only bracket these to +-8 CC over ~1400 captures.
+(3) NEW: above 0.75 grit ALSO scales dec_time by (1-(grit-0.75)*4), exactly zero at grit=1.0 =
+the empirically-recorded "amp-env shortening past ~0.75 (808 snare)", now with the exact law;
+so tau-ceiling vs damping-rate is NEITHER, grit scales the decay-time parameter itself.
+(4) NO ATTACK RAMP - envelope jumps to 1.0 in one instruction, the ramp path is dead code
+(rate constant exactly 0.0), found independently by two analyses. Our 2ms attack is not the
+hardware's mechanism; smooth_enable_N survives as the suspect (no code reads that flag anywhere
+in the DSP corpus). (5) Audible decay is a CUBED LINEAR RAMP, not exponential. (6) FUN_2402f198
+is a table-based exp(); pitch 440*2^((note-69)/12); note_0 at +0x754. (7) Cycle CC17 buckets
+floor(cc*3/128): Off 0-42, RR 43-85, Random 86-127 (manual off by one, as on CC18's top
+boundary); our cycle=0/ALGO_BLOCK=10/TYPE_NEON=53 all land correctly, but the Cycle field is
+per-channel at 0x50 stride and we only pin channel 0.
+
+TWO SUSPECTS ELIMINATED, both were on the ranked docket. Parabolic sine belongs to ORB+CLANG
+only (the two algos fw 2.0 added); BLOCK and NEON use lookup tables - implementing it would
+have injected harmonics the modelled hardware does not produce, scoring better while being
+less correct. filter_N is just the EQ knob CC74, a post-clipper 2-pole TPT SVF (Q=0.8 fixed);
+our clean map pins eq=64 which lands inside a hard dead-zone branch writing a literal bypass
+constant (21096 Hz = 440*2^((136-69)/12)) without ever running the cutoff math - provably
+neutral, and the wrong sign anyway. So e_hi +26% now has NO identified mechanism and the
+"do not tune e_hi" embargo's premise is gone (still not safe to tune - open question, not a
+waiting game).
+
+RESOLVED BLOCKER: Ghidra's prototype for FUN_2400b1d8 is wrong - param_N mismatched to physical
+registers, and the call site loads SEVEN float scalars, not five (Ghidra) or six (both prior
+traces). Mapping from objdump: s0 freq/phase-inc, s1 UNDETERMINED, s2 Shape, s3 Grit, s4
+dec_time, s5 pitch-env output, s6 note. Three analyses had each attributed the 0.1/0.5/0.75
+cascade to a different knob; it is Grit, settled by data flow into both phase accumulators.
+VOIDED by that: the Character claims (dead zone ending CC64, flat CC96-127) were readings of
+Grit. CHARACTER NOW HAS NO IDENTIFIED REGISTER - a real new gap; our fitted CC78 stands.
+
+NEW CONFOUND: the original 1143-capture corpus (modemap.py) never sends CC74, so the EQ knob
+sat at an unknown physical position for all of it - same class of error as the unsent clipper
+CC. The per-mode amplitude table was regression-fitted against that corpus, so it may carry an
+arbitrary EQ curve. The filter's dead zone is only ~CC57-70; outside it a real LP/HP applies.
+
+PROCESS NOTE: two claims were relayed between agents as established without being checked and
+both were wrong (note_0 at +0x708 - it is the pitch-env output, real field is +0x754; and a
+"56-entry name table at 0x24016fcc" that holds 13 pointers before turning into instruction
+bytes). Caught by the arbitration pass. The failure was in the relay, not the original analysis.
+
+NEXT: clean-room + am335x-optimized implementation of the settled mechanisms (grit regimes,
+grit->dec_time law, cubed-ramp decay, no attack ramp), then Character's register, s1, and
+e_hi's mechanism.
 """
