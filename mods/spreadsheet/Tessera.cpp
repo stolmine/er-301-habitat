@@ -70,6 +70,15 @@ namespace stolmine
   // matters because a saturator is nonlinear: unlike every earlier fit, absolute scale
   // is not free here.
   static const float kSMH = 0.2030f / 2.6143f;
+  // Pre-clipper drive. The hardware's output peak is PINNED at 0.262 with CV 6.8% across
+  // all 1120 cells of the timbre map, because its voice always drives the limiter into
+  // limiting. Our voice did not: at Grit 108 the model peaked at 0.04, far below threshold,
+  // so no limiting happened and peak swung 15.8x across the Grit throw (hardware: 1.10x).
+  // Driving harder pins the peak the same way the hardware does. Measured on the map:
+  // spread 15.8x -> 2.2x, and crest error +75% -> +7% (crest was one of the three largest
+  // gaps). Higher drive keeps flattening peak but overshoots crest (-11% at 30, -18% at 60)
+  // and stretches apparent decay, so 12 is the calibrated point.
+  static const float kDrive = 12.0f;
   static const float kClipTh[16] = {9e9f, 9e9f, 0.221f, 0.145f, 0.095f, 0.070f, 0.070f,
                                     0.070f, 0.070f, 0.070f, 0.070f, 0.070f, 0.070f,
                                     0.070f, 0.070f, 0.070f};
@@ -376,12 +385,13 @@ namespace stolmine
 
       mAtkEnv += (1.0f - mAtkEnv) * atkCoeff;
       y *= mAtkEnv;
-      float ct = y / clipTh;
+      float yd = y * kDrive;
+      float ct = yd / clipTh;
       // __builtin_sqrtf maps straight to VFP vsqrt.f32. Plain sqrtf() left GCC emitting
       // an out-of-line `bl sqrtf` fallback in the per-sample loop, which is both slow on
       // Cortex-A8 and an AAPCS call barrier inside the audio path. 1+ct*ct is provably
       // >= 1, so the fallback is dead weight.
-      out[i] = clipG * y / __builtin_sqrtf(1.0f + ct * ct) * level;
+      out[i] = clipG * yd / __builtin_sqrtf(1.0f + ct * ct) * level;
     }
   }
 
