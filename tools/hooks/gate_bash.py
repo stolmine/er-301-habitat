@@ -9,7 +9,9 @@ FAIL-OPEN by design: any parse/logic error exits 0 (allow), so a bug in this
 hook can never brick the Bash tool.
 """
 import json
+import os
 import re
+import subprocess
 import sys
 
 # (regex on the command, the scripts/dev subcommand to use instead)
@@ -29,6 +31,20 @@ def main():
     # The blessed path is always allowed (it legitimately calls git internally,
     # in a subprocess this hook never sees).
     if "scripts/dev" in cmd:
+        return 0
+
+    # Only gate the repo the ledger actually governs. Sessions rooted here routinely
+    # touch sibling repos (e.g. the Trinity profiling harness) that have no scripts/dev
+    # and no ledger, where this would be a false positive with no legitimate path out.
+    try:
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=2,
+            cwd=(data.get("cwd") or os.getcwd()),
+        ).stdout.strip()
+    except Exception:
+        return 0  # fail-open, per this hook's design
+    if os.path.basename(root) != "er-301-habitat":
         return 0
 
     for rx, sub in BLOCKED:
