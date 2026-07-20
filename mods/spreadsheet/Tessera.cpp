@@ -25,11 +25,13 @@ namespace stolmine
   // That class split IS the measured brightness-decay mechanism.
   // All control interdependencies reduce to analytic forms (no 2-D tables needed).
   // ---------------------------------------------------------------------------
-  static const int NM = 12;
+  static const int NM = 14;
 
   // mode (h,k): f = fc*(h + k*r)
-  static const float kH[NM] = {1, 1, 1, 3, 1, 3, 1, 5, 3, 5, 7, 3};
-  static const float kK[NM] = {0, 1, -1, 1, 2, 2, -2, 2, 0, 0, 0, -1};
+  // 12 core modes plus two that exist only once Character opens the fold: measured on the
+  // 4-D map, (3,3) rises 0.000 -> 0.229 and (5,1) 0.000 -> 0.122 from ch0 to ch127.
+  static const float kH[NM] = {1, 1, 1, 3, 1, 3, 1, 5, 3, 5, 7, 3, 3, 5};
+  static const float kK[NM] = {0, 1, -1, 1, 2, 2, -2, 2, 0, 0, 0, -1, 3, 1};
   // Per-mode amplitude, least-squares fitted against all 1143 hardware captures
   // (fit_amps.py). amp = c0 + c1*dL + c2*foldN + c3*r + c4*lf + c5*g.
   // The r term is included ONLY for the modes where the stored data shows a real
@@ -41,20 +43,44 @@ namespace stolmine
   static const float kAmpFit[NM][6] = {
     { 0.9935f,  0.0070f,  0.0049f,  0.0000f, -0.0122f, -0.0801f},  // h=1 k=+0 carrier
     { 0.6483f,  0.0306f, -0.0419f,  0.0000f, -0.0482f, -0.0203f},  // h=1 k=+1 osc2
-    { 0.3075f,  0.0240f, -0.1494f,  0.0000f, -0.0278f, -0.0301f},  // h=1 k=-1 sub
-    { 0.2088f,  0.0251f,  0.1630f,  0.0141f, -0.0347f,  0.0450f},  // h=3 k=+1
-    { 0.3876f, -0.0014f,  0.2280f, -0.1182f, -0.0597f,  0.0165f},  // h=1 k=+2
-    { 0.1923f,  0.0130f,  0.1098f, -0.0632f, -0.0428f,  0.1504f},  // h=3 k=+2
-    { 0.2590f, -0.0566f,  0.1656f,  0.0000f, -0.1133f,  0.2749f},  // h=1 k=-2 sub
+    { 0.3075f,  0.0240f, 0.0000f,  0.0000f, -0.0278f, -0.0301f},  // h=1 k=-1 sub
+    { 0.2088f,  0.0251f,  0.0000f,  0.0141f, -0.0347f,  0.0450f},  // h=3 k=+1
+    { 0.3876f, -0.0014f,  0.0000f, -0.1182f, -0.0597f,  0.0165f},  // h=1 k=+2
+    { 0.1923f,  0.0130f,  0.0000f, -0.0632f, -0.0428f,  0.1504f},  // h=3 k=+2
+    { 0.2590f, -0.0566f,  0.0000f,  0.0000f, -0.1133f,  0.2749f},  // h=1 k=-2 sub
     { 0.1107f, -0.0036f,  0.0488f, -0.0136f,  0.0175f,  0.3865f},  // h=5 k=+2
     { 0.1667f,  0.0504f,  0.2011f,  0.1799f, -0.0446f,  0.0166f},  // h=3 k=+0
     { 0.1897f,  0.0267f, -0.0601f,  0.0000f,  0.0003f,  0.2468f},  // h=5 k=+0
     { 0.1559f,  0.0023f, -0.0553f, -0.0391f,  0.0055f,  0.4403f},  // h=7 k=+0
     { 0.1542f, -0.0047f, -0.1143f,  0.3891f, -0.0221f,  0.0759f},  // h=3 k=-1
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=3 k=+3 fold-only
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=5 k=+1 fold-only
   };
+
+  // ---- Character is a spectrum SWAP, not an additive fold (measured, 4-D map, grit 0/40,
+  // all shapes and notes, median per-mode amplitude relative to the carrier, ch0 -> ch127):
+  //   KILLED: (1,-1) 0.233->0  (3,1) 0.177->0  (1,2) 0.094->0  (3,2) 0.070->0
+  //           (1,-2) 0.538->0.154
+  //   RAISED: (3,0) 0.050->0.472   (3,-1) 0.020->0.192   (5,0) 0->0.099
+  //   NEW:    (3,3) 0->0.229       (5,1) 0->0.122
+  // Five fitted foldN coefficients had the WRONG SIGN - they boosted what the hardware
+  // kills - which is why Character "did much less" on the model than on the hardware.
+  //
+  // The raise is ADDITIVE, not a crossfade override. An override (a = a*(1-fold) + target
+  // *fold) makes the amplitude a fixed constant at full fold, discarding the fitted c1..c5
+  // dependence on decay, shape, pitch and GRIT - which blew up e_hi/e_sub/crest at high
+  // grit when tried. Adding a fold-scaled delta keeps those measured slopes alive.
+  // Applied in the RAW fold, not pitch-trimmed foldN: the hardware's Character effect is
+  // pitch-flat across four octaves, while the -0.163 trim collapsed the model's response
+  // ~2.8x from n36 to n84 - worst exactly where woodblocks and snares live.
+  static const float kFoldKill[NM] = {1.00f, 1.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.29f,
+                                      1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f};
+  static const float kFoldRaise[NM] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                       0.2768f, 0.0053f, 0.0f, 0.2453f, 0.5725f, 0.3050f};
   // tone modes ring long, sidebands short
   static const float kTauR[NM] = {1.00f, 0.94f, 0.35f, 0.35f, 0.35f, 0.34f,
-                                  0.20f, 0.17f, 0.95f, 0.95f, 0.93f, 0.35f};
+                                  0.20f, 0.17f, 0.95f, 0.95f, 0.93f, 0.35f,
+                                  0.89f, 0.60f};
 
   // ---- Trinity output stage (measured: findings-clipper.md, 152 hardware captures) ----
   // A soft clip on the SUMMED output, proven acting on the sum rather than per-partial
@@ -99,7 +125,7 @@ namespace stolmine
   // The core modes (carrier/osc2/sub/sidebands) are NOT gated: their non-detections are
   // masking, not absence, and gating them would wrongly attenuate the fundamental.
   static const bool kGated[NM] = {false, false, false, false, false, false,
-                                  false, false, true, true, true, true};
+                                  false, false, true, true, true, true, false, false};
   static const float kGateFit[NM][6] = {
     {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0},
     {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0},
@@ -107,6 +133,7 @@ namespace stolmine
     {-2.2754f,  0.2021f, 3.2338f, 1.5403f,  0.0160f, 0.8017f},  // h=5 k=+0
     {-2.2610f,  0.3351f, 3.0902f, 1.3819f, -0.2955f, 0.0801f},  // h=7 k=+0
     {-1.5053f,  0.3840f, 2.4148f, 0.5393f,  0.0810f, 0.7474f},  // h=3 k=-1
+    {0,0,0,0,0,0}, {0,0,0,0,0,0},
   };
 
   // ---- Grit = common-mode noise FM (measured: findings-grit.md, 155 captures) ----
@@ -319,6 +346,9 @@ namespace stolmine
             if (z < -20.0f) z = -20.0f; else if (z > 20.0f) z = 20.0f;
             a *= 1.0f / (1.0f + expf(-z));
           }
+
+          if (kFoldRaise[m] > 0.0f) a += fold * kFoldRaise[m];
+          else if (kFoldKill[m] < 1.0f) a *= 1.0f - fold * (1.0f - kFoldKill[m]);
           if (f <= 15.0f || f >= nyq) a = 0.0f;           // drop out-of-range modes
           // measured-amp -> initial-amp correction (see winAvg)
           float tmS = tauEff * kTauR[m] * 0.001f;
