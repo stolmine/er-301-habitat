@@ -111,6 +111,9 @@ function Moire:onLoadViews()
       biasPrecision = 2,
       initialBias   = 0.5
     }
+  }, {
+    expanded  = { "tune", "f0", "spread", "level" },
+    collapsed = {}
   }
 end
 
