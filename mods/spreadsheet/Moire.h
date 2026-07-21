@@ -26,6 +26,7 @@ namespace stolmine
 
     od::Inlet mVOct{"V/Oct"};
     od::Inlet mSpread{"Spread"};   // r - the star; audio-rate, 0..2
+    od::Inlet mDrift{"Drift"};     // per-partial life: independent slow pitch drift, audio-rate
     od::Outlet mOut{"Out"};
 
     od::Parameter mF0{"Fundamental", 110.0f};   // base pitch Hz (+ V/oct)

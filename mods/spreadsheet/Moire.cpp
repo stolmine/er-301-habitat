@@ -3,6 +3,7 @@
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
+#include <cstdint>
 
 // no-tree-vectorize is load-bearing on am335x (feedback_disable_tree_vectorize_am335x).
 #pragma GCC optimize("no-tree-vectorize")
@@ -25,6 +26,16 @@ namespace stolmine
     0.20f, 0.30f, 0.50f, 0.30f, 0.20f,   // h=3 family
     0.12f, 0.20f, 0.30f, 0.20f, 0.12f};  // h=5 family
 
+  // Per-partial noise for the Drift "life" layer. The Trinity RE proved noise-FM is what
+  // makes the hardware feel alive (grit = common-mode noise-FM); Moire diverges - each
+  // partial gets its OWN slow drift, so the lattice shimmers and the beating evolves
+  // instead of repeating. xorshift -> [-1,1).
+  static inline float noise(uint32_t &s)
+  {
+    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+    return (float)(int32_t)s * 4.6566129e-10f;   // /2^31
+  }
+
   static inline float sineLUT(float phase)   // phase in [0,1) -> sin(2*pi*phase)
   {
     phase -= floorf(phase);
@@ -40,13 +51,24 @@ namespace stolmine
   struct Moire::Internal
   {
     float phase[NM];
-    Internal() { for (int m = 0; m < NM; m++) phase[m] = 0.0f; }
+    float driftLp[NM];          // per-partial lowpassed drift (slow random walk)
+    uint32_t rng[NM];           // per-partial independent noise stream
+    Internal()
+    {
+      for (int m = 0; m < NM; m++)
+      {
+        phase[m] = 0.0f;
+        driftLp[m] = 0.0f;
+        rng[m] = 0x9e3779b9u + 0x6d2b79f5u * (uint32_t)(m + 1);   // distinct seeds
+      }
+    }
   };
 
   Moire::Moire()
   {
     addInput(mVOct);
     addInput(mSpread);
+    addInput(mDrift);
     addOutput(mOut);
     addParameter(mF0);
     addParameter(mLevel);
@@ -59,6 +81,7 @@ namespace stolmine
   {
     float *voct = mVOct.buffer();
     float *spread = mSpread.buffer();
+    float *drift = mDrift.buffer();
     float *out = mOut.buffer();
 
     Internal &I = *mpInternal;
@@ -68,16 +91,27 @@ namespace stolmine
     float f0 = CLAMP(8.0f, 8000.0f, mF0.value());
     float level = mLevel.value();
     const float kNorm = 0.25f;
+    // Drift lowpass: ~5 Hz random-walk rate per partial. kDriftCents caps the pitch wobble
+    // at Drift=1 (0.04 = ~+/- a semitone), enough to keep the beating alive without vibrato.
+    const float kDriftHz = 5.0f;
+    float driftCoeff = 1.0f - expf(-6.2832f * kDriftHz / sr);
+    // Lowpassing white noise shrinks its amplitude (~sqrt(coeff/2)); normalise so driftLp
+    // swings ~+/-1, else the pitch wander is ~0.07% (inaudible). Same fix as Tessera's grit.
+    float driftNorm = 1.0f / __builtin_sqrtf(driftCoeff / (2.0f - driftCoeff));
+    const float kDriftCents = 0.04f;
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float fc = f0 * powf(2.0f, voct[i]);
       float r = CLAMP(0.0f, 2.0f, spread[i]);
+      float dr = CLAMP(0.0f, 1.0f, drift[i]) * kDriftCents;
 
       float y = 0.0f;
       for (int m = 0; m < NM; m++)
       {
-        float f = fc * ((float)kH[m] + (float)kK[m] * r);
+        // per-partial slow independent drift -> evolving beating (the "life" layer)
+        I.driftLp[m] += driftCoeff * (noise(I.rng[m]) - I.driftLp[m]);
+        float f = fc * ((float)kH[m] + (float)kK[m] * r) * (1.0f + I.driftLp[m] * driftNorm * dr);
         float fa = f < 0.0f ? -f : f;
         if (fa >= 20.0f && fa < nyq)
           y += kAmp[m] * sineLUT(I.phase[m]);

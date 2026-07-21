@@ -62,6 +62,15 @@ function Moire:onLoadGraph(channelCount)
   connect(spread, "Out", op, "Spread")
   self:addMonoBranch("spread", spread, "In", spread, "Out")
 
+  -- Drift (per-partial life) - audio-rate modulatable inlet, 0..1.
+  local drift = self:addObject("drift", app.GainBias())
+  drift:hardSet("Gain", 1.0)
+  drift:hardSet("Bias", 0.2)
+  local driftRange = self:addObject("driftRange", app.MinMax())
+  connect(drift, "Out", driftRange, "In")
+  connect(drift, "Out", op, "Drift")
+  self:addMonoBranch("drift", drift, "In", drift, "Out")
+
   -- Level.
   local level = self:addObject("level", app.ParameterAdapter())
   level:hardSet("Bias", 0.5)
@@ -101,6 +110,16 @@ function Moire:onLoadViews()
       biasPrecision = 3,
       initialBias   = 0.0
     },
+    drift = GainBias {
+      button        = "drift",
+      description   = "Drift (per-partial life)",
+      branch        = self.branches.drift,
+      gainbias      = self.objects.drift,
+      range         = self.objects.driftRange,
+      biasMap       = levelMap,
+      biasPrecision = 2,
+      initialBias   = 0.2
+    },
     level = GainBias {
       button        = "level",
       description   = "Level",
@@ -112,7 +131,7 @@ function Moire:onLoadViews()
       initialBias   = 0.5
     }
   }, {
-    expanded  = { "tune", "f0", "spread", "level" },
+    expanded  = { "tune", "f0", "spread", "drift", "level" },
     collapsed = {}
   }
 end
