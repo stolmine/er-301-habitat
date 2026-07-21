@@ -50,8 +50,8 @@ namespace stolmine
     { 0.2590f, -0.0566f,  0.0000f,  0.0000f, -0.1133f,  0.2749f},  // h=1 k=-2 sub
     { 0.1107f, -0.0036f,  0.0488f, -0.0136f,  0.0175f,  0.3865f},  // h=5 k=+2
     { 0.1667f,  0.0504f,  0.2011f,  0.1799f, -0.0446f,  0.0166f},  // h=3 k=+0
-    { 0.1897f,  0.0267f, -0.0601f,  0.0000f,  0.0003f,  0.2468f},  // h=5 k=+0
-    { 0.1559f,  0.0023f, -0.0553f, -0.0391f,  0.0055f,  0.4403f},  // h=7 k=+0
+    { 0.0500f,  0.0267f, -0.0601f,  0.0000f,  0.0003f,  0.2468f},  // h=5 k=+0 (base 0.19->0.05: HW h5~0 at low Character)
+    { 0.0000f,  0.0023f, -0.0553f, -0.0391f,  0.0055f,  0.4403f},  // h=7 k=+0 (base 0.16->0: HW has no h7 until the fold opens)
     { 0.1542f, -0.0047f, -0.1143f,  0.3891f, -0.0221f,  0.0759f},  // h=3 k=-1
     { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=3 k=+3 fold-only
     { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=5 k=+1 fold-only
@@ -75,8 +75,11 @@ namespace stolmine
   // ~2.8x from n36 to n84 - worst exactly where woodblocks and snares live.
   static const float kFoldKill[NM] = {1.00f, 1.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.29f,
                                       1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f};
+  // m8 (3,0) and m11 (3,-1) carry the measured h3 boost that IS Character's signature effect
+  // (HW h3 0.25->0.47 as the fold opens). Refit stronger (0.28->0.45, 0.25->0.40) so the boost
+  // actually lands; the aggregate-error minimum wanted them near zero, which neutered Character.
   static const float kFoldRaise[NM] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                       0.2768f, 0.0053f, 0.0f, 0.2453f, 0.5725f, 0.3050f};
+                                       0.4500f, 0.0053f, 0.0f, 0.4000f, 0.5725f, 0.3050f};
   // tone modes ring long, sidebands short
   static const float kTauR[NM] = {1.00f, 0.94f, 0.35f, 0.35f, 0.35f, 0.34f,
                                   0.20f, 0.17f, 0.95f, 0.95f, 0.93f, 0.35f,
@@ -396,7 +399,12 @@ namespace stolmine
             // Character sweep this lifts h3 (0.34->0.43, HW 0.47) and h7 (0.08->0.13, HW 0.12)
             // toward hardware; higher shapes (r>0.1) are unaffected. Grid-neutral.
             float rGate = (kK[m] != 0) ? CLAMP(0.0f, 1.0f, r / 0.10f) : 1.0f;
-            a += fold * kFoldRaise[m] * rGate;
+            // Character x Shape is 2-D: a constant h3 raise nails one shape and overshoots the
+            // other (HW h3 at max Character is ~0.47 at shape 0 but the mode pile-up would push
+            // it to ~0.9 at high shape). The h3-family raise falls off with r to hold ~0.5-0.6
+            // across the throw. Fitted slope 0.8, floored at 0.2.
+            float r3g = (m == 8 || m == 11) ? CLAMP(0.2f, 1.0f, 1.0f - 0.8f * r) : 1.0f;
+            a += fold * kFoldRaise[m] * rGate * r3g;
           }
           else if (kFoldKill[m] < 1.0f) a *= 1.0f - fold * (1.0f - kFoldKill[m]);
           if (f <= 15.0f || f >= nyq) a = 0.0f;           // drop out-of-range modes
