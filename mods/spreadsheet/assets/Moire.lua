@@ -52,9 +52,13 @@ function Moire:onLoadGraph(channelCount)
   tie(op, "Fundamental", f0, "Out")
   self:addMonoBranch("f0", f0, "In", f0, "Out")
 
-  -- Spread (r) - audio-rate: knob = Offset bias, CV patches into In.
-  local spread = self:addObject("spread", app.ConstantOffset())
-  spread:hardSet("Offset", 0.0)
+  -- Spread (r) - audio-rate modulatable inlet driven by a GainBias fader (Vitrail addFader
+  -- pattern). GainBias output = Bias + Gain*In; the knob sets Bias, CV patches into In.
+  local spread = self:addObject("spread", app.GainBias())
+  spread:hardSet("Gain", 1.0)
+  spread:hardSet("Bias", 0.0)
+  local spreadRange = self:addObject("spreadRange", app.MinMax())
+  connect(spread, "Out", spreadRange, "In")
   connect(spread, "Out", op, "Spread")
   self:addMonoBranch("spread", spread, "In", spread, "Out")
 
@@ -92,7 +96,7 @@ function Moire:onLoadViews()
       description   = "Spread (r)",
       branch        = self.branches.spread,
       gainbias      = self.objects.spread,
-      range         = self.objects.spread,
+      range         = self.objects.spreadRange,
       biasMap       = spreadMap,
       biasPrecision = 3,
       initialBias   = 0.0
