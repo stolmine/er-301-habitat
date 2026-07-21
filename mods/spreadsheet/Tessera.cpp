@@ -387,7 +387,17 @@ namespace stolmine
             a *= 1.0f / (1.0f + expf(-z));
           }
 
-          if (kFoldRaise[m] > 0.0f) a += fold * kFoldRaise[m];
+          if (kFoldRaise[m] > 0.0f)
+          {
+            // Intermod (k!=0) fold modes only exist once osc2 detunes them off the harmonic
+            // (lattice f=fc*(h+k*r)); at r~0 they collapse onto 3f/5f and wrongly brighten,
+            // with phase cancellation that also HID the real h3 boost. Their raise was fit at
+            // higher shapes where they are separate, so gate it by r. On the clean shape-0
+            // Character sweep this lifts h3 (0.34->0.43, HW 0.47) and h7 (0.08->0.13, HW 0.12)
+            // toward hardware; higher shapes (r>0.1) are unaffected. Grid-neutral.
+            float rGate = (kK[m] != 0) ? CLAMP(0.0f, 1.0f, r / 0.10f) : 1.0f;
+            a += fold * kFoldRaise[m] * rGate;
+          }
           else if (kFoldKill[m] < 1.0f) a *= 1.0f - fold * (1.0f - kFoldKill[m]);
           if (f <= 15.0f || f >= nyq) a = 0.0f;           // drop out-of-range modes
           // measured-amp -> initial-amp correction (see winAvg)
