@@ -53,6 +53,7 @@ namespace stolmine
     float phase[NM];
     float driftLp[NM];          // per-partial lowpassed drift (slow random walk)
     uint32_t rng[NM];           // per-partial independent noise stream
+    float yPrev = 0.0f;         // last sample's bounded output (for feedback FM)
     Internal()
     {
       for (int m = 0; m < NM; m++)
@@ -69,6 +70,9 @@ namespace stolmine
     addInput(mVOct);
     addInput(mSpread);
     addInput(mDrift);
+    addInput(mCouple);
+    addInput(mDrive);
+    addInput(mSync);
     addOutput(mOut);
     addParameter(mF0);
     addParameter(mLevel);
@@ -82,6 +86,9 @@ namespace stolmine
     float *voct = mVOct.buffer();
     float *spread = mSpread.buffer();
     float *drift = mDrift.buffer();
+    float *couple = mCouple.buffer();
+    float *drive = mDrive.buffer();
+    float *sync = mSync.buffer();
     float *out = mOut.buffer();
 
     Internal &I = *mpInternal;
@@ -99,28 +106,54 @@ namespace stolmine
     // swings ~+/-1, else the pitch wander is ~0.07% (inaudible). Same fix as Tessera's grit.
     float driftNorm = 1.0f / __builtin_sqrtf(driftCoeff / (2.0f - driftCoeff));
     const float kDriftCents = 0.04f;
+    const float kInvNM = 1.0f / (float)NM;
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float fc = f0 * powf(2.0f, voct[i]);
       float r = CLAMP(0.0f, 2.0f, spread[i]);
       float dr = CLAMP(0.0f, 1.0f, drift[i]) * kDriftCents;
+      float cp = CLAMP(0.0f, 1.0f, couple[i]);
+      float sy = CLAMP(0.0f, 1.0f, sync[i]);
+      float dv = CLAMP(0.0f, 1.0f, drive[i]);
+
+      // Coupled FM: every partial is phase-modulated by the previous sample's summed output
+      // (1-sample feedback = the whole lattice modulating itself). Deviation up to fc.
+      float fmDev = cp * fc * I.yPrev;
 
       float y = 0.0f;
+      bool prevWrapped = false;
       for (int m = 0; m < NM; m++)
       {
         // per-partial slow independent drift -> evolving beating (the "life" layer)
         I.driftLp[m] += driftCoeff * (noise(I.rng[m]) - I.driftLp[m]);
         float f = fc * ((float)kH[m] + (float)kK[m] * r) * (1.0f + I.driftLp[m] * driftNorm * dr);
+
+        // Cascading hard sync: partial m resets when the partial below it wrapped, once the
+        // sync amount reaches this link (cascade grows up the lattice, snapping partials onto
+        // the fundamental's period -> harmonic reinforcement).
+        if (m > 0 && prevWrapped && sy > (float)m * kInvNM)
+          I.phase[m] = 0.0f;
+
+        I.phase[m] += (f + fmDev) * invSr;   // signed advance + coupled FM
+        bool wrapped = false;
+        if (I.phase[m] >= 1.0f || I.phase[m] < 0.0f)
+        {
+          I.phase[m] -= floorf(I.phase[m]);
+          wrapped = true;
+        }
         float fa = f < 0.0f ? -f : f;
         if (fa >= 20.0f && fa < nyq)
           y += kAmp[m] * sineLUT(I.phase[m]);
-        I.phase[m] += f * invSr;          // signed advance (sub-modes reflect through DC)
-        I.phase[m] -= floorf(I.phase[m]);
+        prevWrapped = wrapped;
       }
 
-      // gentle bounded softclip (x/sqrt(1+x^2)); __builtin_sqrtf -> VFP vsqrt.f32.
-      float yd = y * kNorm;
+      // bounded feedback term for next sample's FM (keeps the loop stable)
+      float ys = y * kNorm;
+      I.yPrev = ys / __builtin_sqrtf(1.0f + ys * ys);
+
+      // Drive: pre-output saturation (up to 12x into the softclip = thickness/limiting).
+      float yd = ys * (1.0f + dv * 11.0f);
       out[i] = (yd / __builtin_sqrtf(1.0f + yd * yd)) * level;
     }
   }

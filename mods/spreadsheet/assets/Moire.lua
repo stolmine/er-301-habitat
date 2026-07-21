@@ -71,6 +71,21 @@ function Moire:onLoadGraph(channelCount)
   connect(drift, "Out", op, "Drift")
   self:addMonoBranch("drift", drift, "In", drift, "Out")
 
+  -- Couple (inter-partial feedback FM), Drive (saturation), Sync (cascading hard sync).
+  -- All audio-rate GainBias inlets (Vitrail addFader pattern), 0..1.
+  local function addFader(name, inletName, defaultBias)
+    local o = self:addObject(name, app.GainBias())
+    o:hardSet("Gain", 1.0)
+    o:hardSet("Bias", defaultBias)
+    local rng = self:addObject(name .. "Range", app.MinMax())
+    connect(o, "Out", rng, "In")
+    connect(o, "Out", op, inletName)
+    self:addMonoBranch(name, o, "In", o, "Out")
+  end
+  addFader("couple", "Couple", 0.0)
+  addFader("drive", "Drive", 0.0)
+  addFader("sync", "Sync", 0.0)
+
   -- Level.
   local level = self:addObject("level", app.ParameterAdapter())
   level:hardSet("Bias", 0.5)
@@ -120,6 +135,36 @@ function Moire:onLoadViews()
       biasPrecision = 2,
       initialBias   = 0.2
     },
+    couple = GainBias {
+      button        = "couple",
+      description   = "Couple (inter-partial FM)",
+      branch        = self.branches.couple,
+      gainbias      = self.objects.couple,
+      range         = self.objects.coupleRange,
+      biasMap       = levelMap,
+      biasPrecision = 2,
+      initialBias   = 0.0
+    },
+    drive = GainBias {
+      button        = "drive",
+      description   = "Drive (saturation)",
+      branch        = self.branches.drive,
+      gainbias      = self.objects.drive,
+      range         = self.objects.driveRange,
+      biasMap       = levelMap,
+      biasPrecision = 2,
+      initialBias   = 0.0
+    },
+    sync = GainBias {
+      button        = "sync",
+      description   = "Sync (cascading)",
+      branch        = self.branches.sync,
+      gainbias      = self.objects.sync,
+      range         = self.objects.syncRange,
+      biasMap       = levelMap,
+      biasPrecision = 2,
+      initialBias   = 0.0
+    },
     level = GainBias {
       button        = "level",
       description   = "Level",
@@ -131,7 +176,7 @@ function Moire:onLoadViews()
       initialBias   = 0.5
     }
   }, {
-    expanded  = { "tune", "f0", "spread", "drift", "level" },
+    expanded  = { "tune", "f0", "spread", "drift", "couple", "drive", "sync", "level" },
     collapsed = {}
   }
 end
