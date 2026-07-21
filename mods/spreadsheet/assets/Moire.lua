@@ -13,7 +13,7 @@ local spreadMap = (function()
   return m
 end)()
 
-local levelMap = (function()
+local unitMap = (function()
   local m = app.LinearDialMap(0, 1)
   m:setSteps(0.1, 0.01, 0.001, 0.001)
   return m
@@ -52,27 +52,7 @@ function Moire:onLoadGraph(channelCount)
   tie(op, "Fundamental", f0, "Out")
   self:addMonoBranch("f0", f0, "In", f0, "Out")
 
-  -- Spread (r) - audio-rate modulatable inlet driven by a GainBias fader (Vitrail addFader
-  -- pattern). GainBias output = Bias + Gain*In; the knob sets Bias, CV patches into In.
-  local spread = self:addObject("spread", app.GainBias())
-  spread:hardSet("Gain", 1.0)
-  spread:hardSet("Bias", 0.0)
-  local spreadRange = self:addObject("spreadRange", app.MinMax())
-  connect(spread, "Out", spreadRange, "In")
-  connect(spread, "Out", op, "Spread")
-  self:addMonoBranch("spread", spread, "In", spread, "Out")
-
-  -- Drift (per-partial life) - audio-rate modulatable inlet, 0..1.
-  local drift = self:addObject("drift", app.GainBias())
-  drift:hardSet("Gain", 1.0)
-  drift:hardSet("Bias", 0.2)
-  local driftRange = self:addObject("driftRange", app.MinMax())
-  connect(drift, "Out", driftRange, "In")
-  connect(drift, "Out", op, "Drift")
-  self:addMonoBranch("drift", drift, "In", drift, "Out")
-
-  -- Couple (inter-partial feedback FM), Drive (saturation), Sync (cascading hard sync).
-  -- All audio-rate GainBias inlets (Vitrail addFader pattern), 0..1.
+  -- Audio-rate modulatable inlets (Vitrail addFader pattern).
   local function addFader(name, inletName, defaultBias)
     local o = self:addObject(name, app.GainBias())
     o:hardSet("Gain", 1.0)
@@ -82,9 +62,12 @@ function Moire:onLoadGraph(channelCount)
     connect(o, "Out", op, inletName)
     self:addMonoBranch(name, o, "In", o, "Out")
   end
+  addFader("spread", "Spread", 0.0)
+  addFader("body", "Body", 0.6)
+  addFader("air", "Air", 0.4)
   addFader("couple", "Couple", 0.0)
-  addFader("drive", "Drive", 0.0)
-  addFader("sync", "Sync", 0.0)
+  addFader("drift", "Drift", 0.2)
+  addFader("lock", "Lock", 0.0)
 
   -- Level.
   local level = self:addObject("level", app.ParameterAdapter())
@@ -96,87 +79,55 @@ function Moire:onLoadGraph(channelCount)
 end
 
 function Moire:onLoadViews()
+  local function fader(button, description, name, biasMap, initial)
+    return GainBias {
+      button = button,
+      description = description,
+      branch = self.branches[name],
+      gainbias = self.objects[name],
+      range = self.objects[name .. "Range"],
+      biasMap = biasMap,
+      biasPrecision = 2,
+      initialBias = initial
+    }
+  end
   return {
     tune = Pitch {
-      button      = "V/oct",
-      branch      = self.branches.tune,
+      button = "V/oct",
+      branch = self.branches.tune,
       description = "V/oct",
-      offset      = self.objects.tune,
-      range       = self.objects.tuneRange
+      offset = self.objects.tune,
+      range = self.objects.tuneRange
     },
     f0 = GainBias {
-      button        = "freq",
-      description   = "Fundamental",
-      branch        = self.branches.f0,
-      gainbias      = self.objects.f0,
-      range         = self.objects.f0,
-      biasMap       = Encoder.getMap("oscFreq"),
-      biasUnits     = app.unitHertz,
+      button = "freq",
+      description = "Fundamental",
+      branch = self.branches.f0,
+      gainbias = self.objects.f0,
+      range = self.objects.f0,
+      biasMap = Encoder.getMap("oscFreq"),
+      biasUnits = app.unitHertz,
       biasPrecision = 1,
-      initialBias   = 110.0
+      initialBias = 110.0
     },
-    spread = GainBias {
-      button        = "spread",
-      description   = "Spread (r)",
-      branch        = self.branches.spread,
-      gainbias      = self.objects.spread,
-      range         = self.objects.spreadRange,
-      biasMap       = spreadMap,
-      biasPrecision = 3,
-      initialBias   = 0.0
-    },
-    drift = GainBias {
-      button        = "drift",
-      description   = "Drift (per-partial life)",
-      branch        = self.branches.drift,
-      gainbias      = self.objects.drift,
-      range         = self.objects.driftRange,
-      biasMap       = levelMap,
-      biasPrecision = 2,
-      initialBias   = 0.2
-    },
-    couple = GainBias {
-      button        = "couple",
-      description   = "Couple (structured FM)",
-      branch        = self.branches.couple,
-      gainbias      = self.objects.couple,
-      range         = self.objects.coupleRange,
-      biasMap       = levelMap,
-      biasPrecision = 2,
-      initialBias   = 0.0
-    },
-    drive = GainBias {
-      button        = "drive",
-      description   = "Drive (glue)",
-      branch        = self.branches.drive,
-      gainbias      = self.objects.drive,
-      range         = self.objects.driveRange,
-      biasMap       = levelMap,
-      biasPrecision = 2,
-      initialBias   = 0.0
-    },
-    sync = GainBias {
-      button        = "lock",
-      description   = "Lock (crystalline)",
-      branch        = self.branches.sync,
-      gainbias      = self.objects.sync,
-      range         = self.objects.syncRange,
-      biasMap       = levelMap,
-      biasPrecision = 2,
-      initialBias   = 0.0
-    },
+    spread = fader("spread", "Spread (r)", "spread", spreadMap, 0.0),
+    body = fader("body", "Body (Q)", "body", unitMap, 0.6),
+    air = fader("air", "Air (excite)", "air", unitMap, 0.4),
+    couple = fader("couple", "Couple (network)", "couple", unitMap, 0.0),
+    drift = fader("drift", "Drift", "drift", unitMap, 0.2),
+    lock = fader("lock", "Lock (crystalline)", "lock", unitMap, 0.0),
     level = GainBias {
-      button        = "level",
-      description   = "Level",
-      branch        = self.branches.level,
-      gainbias      = self.objects.level,
-      range         = self.objects.level,
-      biasMap       = levelMap,
+      button = "level",
+      description = "Level",
+      branch = self.branches.level,
+      gainbias = self.objects.level,
+      range = self.objects.level,
+      biasMap = unitMap,
       biasPrecision = 2,
-      initialBias   = 0.5
+      initialBias = 0.5
     }
   }, {
-    expanded  = { "tune", "f0", "spread", "drift", "couple", "drive", "sync", "level" },
+    expanded = { "tune", "f0", "spread", "body", "air", "couple", "drift", "lock", "level" },
     collapsed = {}
   }
 end

@@ -5,16 +5,14 @@
 namespace stolmine
 {
 
-  // Moire - the moving intermod-lattice voice (v0, bare-bones oscillator/drone).
+  // Moire - a modulated, coupled RESONANT network (moving intermod lattice, resonator core).
   //
-  // The Trinity RE proved BLOCK's spectrum is an intermod lattice f(h,k)=fc*(h+k*r):
-  // a core oscillator's harmonics h cross-modulated by a 2nd oscillator detuned by r.
-  // The hardware sets r statically (Shape). Moire exposes r as a playable, audio-rate
-  // control, so the whole lattice MOVES - partials slide through each other, sub-modes
-  // (k<0, below fc) swell and vanish. Not a clone: no fitted table, fold, grit, or env.
-  //
-  // v0 = 15-partial odd-harmonic lattice (h in {1,3,5}, k in {-2..+2}), continuous.
-  // See planning/moire-voice.md.
+  // The Trinity RE proved BLOCK's spectrum is an intermod lattice f(h,k)=fc*(h+k*r). Moire
+  // exposes r as a playable, audio-rate control so the lattice MOVES - but the partials are
+  // not sine oscillators, they are 2-pole RESONATORS tuned to the lattice frequencies, driven
+  // by noise and by each other. That gives body (resonance), weight that accumulates in the
+  // bank, and emergent behaviour from the coupling that a sine bank cannot. Not Rings: Rings'
+  // modes are fixed and independent; here they MOVE (r/drift/lock) and DRIVE each other (couple).
   class Moire : public od::Object
   {
   public:
@@ -25,11 +23,12 @@ namespace stolmine
     virtual void process();
 
     od::Inlet mVOct{"V/Oct"};
-    od::Inlet mSpread{"Spread"};   // r - the star; audio-rate, 0..2
-    od::Inlet mDrift{"Drift"};     // per-partial life: independent slow pitch drift, audio-rate
-    od::Inlet mCouple{"Couple"};   // inter-partial feedback FM depth, 0..1
-    od::Inlet mDrive{"Drive"};     // pre-output saturation depth, 0..1
-    od::Inlet mSync{"Sync"};       // cascading hard sync amount, 0..1
+    od::Inlet mSpread{"Spread"};   // r - the lattice detune; audio-rate, 0..2
+    od::Inlet mBody{"Body"};       // resonator Q: breathy (0) -> sharp ring (1)
+    od::Inlet mAir{"Air"};         // noise excitation level
+    od::Inlet mCouple{"Couple"};   // resonator cross-feedback (the network/matrix seed)
+    od::Inlet mDrift{"Drift"};     // per-resonator slow frequency wander (life)
+    od::Inlet mLock{"Lock"};       // snap resonant frequencies toward the harmonic grid
     od::Outlet mOut{"Out"};
 
     od::Parameter mF0{"Fundamental", 110.0f};   // base pitch Hz (+ V/oct)

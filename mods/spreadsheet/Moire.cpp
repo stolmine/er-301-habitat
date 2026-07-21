@@ -1,5 +1,4 @@
 #include "Moire.h"
-#include "DrumVoiceSineLUT.h"   // static half-sine LUT (no runtime trig on am335x)
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
@@ -10,70 +9,51 @@
 
 namespace stolmine
 {
-  // The moving intermod lattice: f(h,k) = fc*(h + k*r). v0 fixes a 15-partial odd-harmonic
-  // set; r (Spread) is the playable, audio-rate detune that moves the whole field.
-  //
-  // At r=0 the k-siblings collapse onto their harmonic (phases start aligned -> a clean odd-
-  // harmonic tone). As r opens they fan into sidebands and beat; the sub-modes (k<0) dip
-  // toward DC and reflect back up in |frequency|.
+  // The moving intermod lattice f(h,k)=fc*(h+k*r) now sets the RESONANT frequencies of a bank
+  // of 2-pole bandpass resonators (TPT/Zavalishin SVF). Driven by shared noise + network
+  // feedback, they ring: body and weight come from resonance, not from summed sines.
   static const int NM = 15;
   static const int kH[NM] = {1, 1, 1, 1, 1,  3, 3, 3, 3, 3,  5, 5, 5, 5, 5};
   static const int kK[NM] = {-2, -1, 0, 1, 2,  -2, -1, 0, 1, 2,  -2, -1, 0, 1, 2};
-  // Simple rolloff (carrier loudest, falling with h and |k|). NOT the Trinity fit - this is
-  // where the original voice diverges. Tune by ear.
+  // per-resonator output gain (carrier loudest, falling with h and |k|)
   static const float kAmp[NM] = {
-    0.30f, 0.50f, 1.00f, 0.50f, 0.30f,   // h=1 family
-    0.20f, 0.30f, 0.50f, 0.30f, 0.20f,   // h=3 family
-    0.12f, 0.20f, 0.30f, 0.20f, 0.12f};  // h=5 family
+    0.30f, 0.50f, 1.00f, 0.50f, 0.30f,
+    0.20f, 0.30f, 0.50f, 0.30f, 0.20f,
+    0.12f, 0.20f, 0.30f, 0.20f, 0.12f};
 
-  // Interaction topology. The partials are a NETWORK with roles, not a uniform bank. The
-  // carrier (m0) stays clean as the reference; the rest interleave COUPLE / LOCK so the two
-  // effects target complementary partials and spread across the spectrum (staggered pattern).
-  //   COUPLE (1): phase-modulated by a specific partner partial (structured FM, not global).
-  //   LOCK   (2): frequency snapped toward the nearest harmonic of fc (crystalline, alias-free).
-  static const int kRole[NM] = {0, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2};
-  // Progressive disclosure: within each group, partials fade in ONE AT A TIME as the control
-  // rises past their threshold (the coupled/locked COUNT grows; it is not a global depth).
-  static const float kActT[NM] = {
-    0.000f, 0.000f, 0.000f, 0.143f, 0.143f, 0.286f, 0.286f, 0.429f,
-    0.429f, 0.571f, 0.571f, 0.714f, 0.714f, 0.857f, 0.857f};
-
-  // Per-partial noise for the Drift "life" layer. The Trinity RE proved noise-FM is what
-  // makes the hardware feel alive (grit = common-mode noise-FM); Moire diverges - each
-  // partial gets its OWN slow drift, so the lattice shimmers and the beating evolves
-  // instead of repeating. xorshift -> [-1,1).
+  // xorshift -> [-1,1); one shared exciter stream + per-resonator drift streams.
   static inline float noise(uint32_t &s)
   {
     s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-    return (float)(int32_t)s * 4.6566129e-10f;   // /2^31
+    return (float)(int32_t)s * 4.6566129e-10f;
   }
 
-  static inline float sineLUT(float phase)   // phase in [0,1) -> sin(2*pi*phase)
+  // tan(pi*f/fs) for the SVF prewarp, cheap poly (no libm), good to ~fs/6; clamped above.
+  static inline float tanApprox(float w)
   {
-    phase -= floorf(phase);
-    bool neg = phase >= 0.5f;
-    float ph = neg ? (phase - 0.5f) : phase;
-    float idx = ph * 512.0f;
-    int i = (int)idx;
-    float fr = idx - (float)i;
-    float s = kDrumVoiceSineLUT[i] + fr * (kDrumVoiceSineLUT[i + 1] - kDrumVoiceSineLUT[i]);
-    return neg ? -s : s;
+    if (w > 1.3f) w = 1.3f;
+    float w2 = w * w;
+    return w * (1.0f + w2 * (0.33333f + w2 * 0.13333f));
   }
+
+  static inline float softclip(float x) { return x / __builtin_sqrtf(1.0f + x * x); }
 
   struct Moire::Internal
   {
-    float phase[NM];
-    float driftLp[NM];          // per-partial lowpassed drift (slow random walk)
-    float sinePrev[NM];         // each partial's last sine output (structured FM modulators)
-    uint32_t rng[NM];           // per-partial independent noise stream
+    float ic1[NM], ic2[NM];     // SVF integrator states (band/low)
+    float bp[NM];               // last bandpass output (for coupling feedback)
+    float driftLp[NM];
+    uint32_t rng[NM];
+    uint32_t exRng = 0x1234567u; // shared exciter noise
+    float fbPrev = 0.0f;        // bounded network feedback from last sample
     Internal()
     {
       for (int m = 0; m < NM; m++)
       {
-        phase[m] = 0.0f;
+        ic1[m] = ic2[m] = 0.0f;
+        bp[m] = 0.0f;
         driftLp[m] = 0.0f;
-        sinePrev[m] = 0.0f;
-        rng[m] = 0x9e3779b9u + 0x6d2b79f5u * (uint32_t)(m + 1);   // distinct seeds
+        rng[m] = 0x9e3779b9u + 0x6d2b79f5u * (uint32_t)(m + 1);
       }
     }
   };
@@ -82,10 +62,11 @@ namespace stolmine
   {
     addInput(mVOct);
     addInput(mSpread);
-    addInput(mDrift);
+    addInput(mBody);
+    addInput(mAir);
     addInput(mCouple);
-    addInput(mDrive);
-    addInput(mSync);
+    addInput(mDrift);
+    addInput(mLock);
     addOutput(mOut);
     addParameter(mF0);
     addParameter(mLevel);
@@ -98,82 +79,83 @@ namespace stolmine
   {
     float *voct = mVOct.buffer();
     float *spread = mSpread.buffer();
-    float *drift = mDrift.buffer();
+    float *body = mBody.buffer();
+    float *air = mAir.buffer();
     float *couple = mCouple.buffer();
-    float *drive = mDrive.buffer();
-    float *sync = mSync.buffer();
+    float *drift = mDrift.buffer();
+    float *lock = mLock.buffer();
     float *out = mOut.buffer();
 
     Internal &I = *mpInternal;
     float sr = globalConfig.sampleRate;
-    float invSr = 1.0f / sr;
+    float piOverSr = 3.14159265f / sr;
     float nyq = sr * 0.5f;
     float f0 = CLAMP(8.0f, 8000.0f, mF0.value());
     float level = mLevel.value();
-    const float kNorm = 0.25f;
-    // Drift lowpass: ~5 Hz random-walk rate per partial. kDriftCents caps the pitch wobble
-    // at Drift=1 (0.04 = ~+/- a semitone), enough to keep the beating alive without vibrato.
     const float kDriftHz = 5.0f;
     float driftCoeff = 1.0f - expf(-6.2832f * kDriftHz / sr);
-    // Lowpassing white noise shrinks its amplitude (~sqrt(coeff/2)); normalise so driftLp
-    // swings ~+/-1, else the pitch wander is ~0.07% (inaudible). Same fix as Tessera's grit.
     float driftNorm = 1.0f / __builtin_sqrtf(driftCoeff / (2.0f - driftCoeff));
     const float kDriftCents = 0.04f;
-    const float kFmMax = 0.5f;      // couple FM index (deviation up to 0.5*fc per pair)
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       float fc = f0 * powf(2.0f, voct[i]);
       float r = CLAMP(0.0f, 2.0f, spread[i]);
       float dr = CLAMP(0.0f, 1.0f, drift[i]) * kDriftCents;
+      float bd = CLAMP(0.0f, 1.0f, body[i]);
+      float ar = CLAMP(0.0f, 1.0f, air[i]);
       float cp = CLAMP(0.0f, 1.0f, couple[i]);
-      float sy = CLAMP(0.0f, 1.0f, sync[i]);
-      float dv = CLAMP(0.0f, 1.0f, drive[i]);
+      float lk = CLAMP(0.0f, 1.0f, lock[i]);
+
+      // Body -> SVF damping k = 1/Q. bd 0 = broad/breathy (k~1.4), bd 1 = sharp ring (k~0.02).
+      float k = 1.4f - bd * 1.38f;
+      // A bandpass fed by white noise outputs RMS ~1/sqrt(k), so higher Q would collapse in
+      // level; compensate the other way so turning Body up brings the RING FORWARD. Bounded
+      // by the output softclip.
+      float gainComp = __builtin_sqrtf(0.6f / (k + 0.01f));
+
+      // Shared excitation: noise (Air) + bounded network feedback (Couple).
+      float exNoise = noise(I.exRng) * ar;
+      float exFb = I.fbPrev * cp;
+      float ex = exNoise + exFb;
 
       float y = 0.0f;
+      float bpSum = 0.0f;
       for (int m = 0; m < NM; m++)
       {
-        // per-partial slow independent drift -> evolving beating (the "life" layer)
         I.driftLp[m] += driftCoeff * (noise(I.rng[m]) - I.driftLp[m]);
         float f = fc * ((float)kH[m] + (float)kK[m] * r) * (1.0f + I.driftLp[m] * driftNorm * dr);
-
-        int role = kRole[m];
-        float fmAdd = 0.0f;
-        if (role == 1)
-        {
-          // COUPLE: structured FM by the partner partial below (its last sine output), faded
-          // in progressively so the coupled COUNT grows as the control rises. Not global.
-          float act = CLAMP(0.0f, 1.0f, (cp - kActT[m]) * 7.0f);
-          fmAdd = act * kFmMax * fc * I.sinePrev[m - 1];
-        }
-        else if (role == 2)
-        {
-          // LOCK: snap the frequency toward the nearest harmonic of fc (crystalline, alias-
-          // free), progressively. Pulls the inharmonic lattice back onto structure.
-          float act = CLAMP(0.0f, 1.0f, (sy - kActT[m]) * 7.0f);
-          if (act > 0.0f)
-          {
-            float hn = floorf(f / fc + 0.5f);
-            if (hn < 1.0f) hn = 1.0f;
-            f = f + (hn * fc - f) * act;
-          }
-        }
-
-        I.phase[m] += (f + fmAdd) * invSr;   // signed advance + structured FM
-        I.phase[m] -= floorf(I.phase[m]);
-
-        float s = sineLUT(I.phase[m]);
-        I.sinePrev[m] = s;                   // modulator source for coupled partners
         float fa = f < 0.0f ? -f : f;
-        if (fa >= 20.0f && fa < nyq)
-          y += kAmp[m] * s;
+        // Lock: snap toward nearest harmonic of fc (crystalline reinforcement).
+        if (lk > 0.0f)
+        {
+          float hn = floorf(fa / fc + 0.5f);
+          if (hn < 1.0f) hn = 1.0f;
+          fa = fa + (hn * fc - fa) * lk;
+        }
+        if (fa < 20.0f) fa = 20.0f;
+        if (fa > nyq * 0.98f) fa = nyq * 0.98f;
+
+        // TPT/Cytomic 2-pole SVF, bandpass tap.
+        float g = tanApprox(fa * piOverSr);
+        float a1 = 1.0f / (1.0f + g * (g + k));
+        float a2 = g * a1;
+        float a3 = g * a2;
+        float v3 = ex - I.ic2[m];
+        float v1 = a1 * I.ic1[m] + a2 * v3;
+        float v2 = I.ic2[m] + a2 * I.ic1[m] + a3 * v3;
+        I.ic1[m] = 2.0f * v1 - I.ic1[m];
+        I.ic2[m] = 2.0f * v2 - I.ic2[m];
+        float bpv = v1;                 // bandpass output rings at fa
+        I.bp[m] = bpv;
+        bpSum += bpv;
+        y += kAmp[m] * bpv;
       }
 
-      // Drive: light glue only (up to ~4x into the softclip). Real weight is meant to
-      // accumulate through the resonant filter matrix (next step), not brute saturation.
-      float ys = y * kNorm;
-      float yd = ys * (1.0f + dv * 3.0f);
-      out[i] = (yd / __builtin_sqrtf(1.0f + yd * yd)) * level;
+      // Feed the (bounded) network sum back for next sample's coupling excitation.
+      I.fbPrev = softclip(bpSum * 0.5f);
+
+      out[i] = softclip(y * gainComp) * level;
     }
   }
 
