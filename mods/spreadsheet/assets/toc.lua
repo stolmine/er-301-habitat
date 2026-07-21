@@ -28,6 +28,7 @@ return {
     { title = "Vivary",       moduleName = "Vivary",              category = "Spreadsheet", keywords = "noise, source, cellular, automata, wavetable, texture, generative, rule, vivary" },
     { title = "Vitrail",      moduleName = "Vitrail",             category = "Spreadsheet", keywords = "filter, switched capacitor, comb, aliasing, resonant, self-oscillation, character, clock, vitrail" },
     { title = "Ferrum",       moduleName = "Ferrum",              category = "Spreadsheet", keywords = "drum, fm, percussion, voice, kick, tom, metallic, trinity, neon, ferrum" },
-    { title = "Tessera",      moduleName = "Tessera",             category = "Spreadsheet", keywords = "drum, analog, percussion, voice, kick, snare, triangle, wavefolder, block, tessera" }
+    { title = "Tessera",      moduleName = "Tessera",             category = "Spreadsheet", keywords = "drum, analog, percussion, voice, kick, snare, triangle, wavefolder, block, tessera" },
+    { title = "Moire",        moduleName = "Moire",               category = "Spreadsheet", keywords = "oscillator, additive, lattice, intermod, detune, drone, spread, moire, source, generator" }
   }
 }

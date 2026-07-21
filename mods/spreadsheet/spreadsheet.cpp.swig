@@ -68,6 +68,8 @@
 #include "Ferrum.h"
 // Tessera: analog BLOCK drum voice from profiled Trinity BLOCK.
 #include "Tessera.h"
+// Moire: moving intermod-lattice voice (original, r-animated lattice).
+#include "Moire.h"
 #define SWIGLUA
 %}
 
@@ -122,3 +124,4 @@
 %include "Vitrail.h"
 %include "Ferrum.h"
 %include "Tessera.h"
+%include "Moire.h"
