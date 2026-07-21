@@ -26,6 +26,18 @@ namespace stolmine
     0.20f, 0.30f, 0.50f, 0.30f, 0.20f,   // h=3 family
     0.12f, 0.20f, 0.30f, 0.20f, 0.12f};  // h=5 family
 
+  // Interaction topology. The partials are a NETWORK with roles, not a uniform bank. The
+  // carrier (m0) stays clean as the reference; the rest interleave COUPLE / LOCK so the two
+  // effects target complementary partials and spread across the spectrum (staggered pattern).
+  //   COUPLE (1): phase-modulated by a specific partner partial (structured FM, not global).
+  //   LOCK   (2): frequency snapped toward the nearest harmonic of fc (crystalline, alias-free).
+  static const int kRole[NM] = {0, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2};
+  // Progressive disclosure: within each group, partials fade in ONE AT A TIME as the control
+  // rises past their threshold (the coupled/locked COUNT grows; it is not a global depth).
+  static const float kActT[NM] = {
+    0.000f, 0.000f, 0.000f, 0.143f, 0.143f, 0.286f, 0.286f, 0.429f,
+    0.429f, 0.571f, 0.571f, 0.714f, 0.714f, 0.857f, 0.857f};
+
   // Per-partial noise for the Drift "life" layer. The Trinity RE proved noise-FM is what
   // makes the hardware feel alive (grit = common-mode noise-FM); Moire diverges - each
   // partial gets its OWN slow drift, so the lattice shimmers and the beating evolves
@@ -52,14 +64,15 @@ namespace stolmine
   {
     float phase[NM];
     float driftLp[NM];          // per-partial lowpassed drift (slow random walk)
+    float sinePrev[NM];         // each partial's last sine output (structured FM modulators)
     uint32_t rng[NM];           // per-partial independent noise stream
-    float yPrev = 0.0f;         // last sample's bounded output (for feedback FM)
     Internal()
     {
       for (int m = 0; m < NM; m++)
       {
         phase[m] = 0.0f;
         driftLp[m] = 0.0f;
+        sinePrev[m] = 0.0f;
         rng[m] = 0x9e3779b9u + 0x6d2b79f5u * (uint32_t)(m + 1);   // distinct seeds
       }
     }
@@ -106,7 +119,7 @@ namespace stolmine
     // swings ~+/-1, else the pitch wander is ~0.07% (inaudible). Same fix as Tessera's grit.
     float driftNorm = 1.0f / __builtin_sqrtf(driftCoeff / (2.0f - driftCoeff));
     const float kDriftCents = 0.04f;
-    const float kInvNM = 1.0f / (float)NM;
+    const float kFmMax = 0.5f;      // couple FM index (deviation up to 0.5*fc per pair)
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
@@ -117,43 +130,49 @@ namespace stolmine
       float sy = CLAMP(0.0f, 1.0f, sync[i]);
       float dv = CLAMP(0.0f, 1.0f, drive[i]);
 
-      // Coupled FM: every partial is phase-modulated by the previous sample's summed output
-      // (1-sample feedback = the whole lattice modulating itself). Deviation up to fc.
-      float fmDev = cp * fc * I.yPrev;
-
       float y = 0.0f;
-      bool prevWrapped = false;
       for (int m = 0; m < NM; m++)
       {
         // per-partial slow independent drift -> evolving beating (the "life" layer)
         I.driftLp[m] += driftCoeff * (noise(I.rng[m]) - I.driftLp[m]);
         float f = fc * ((float)kH[m] + (float)kK[m] * r) * (1.0f + I.driftLp[m] * driftNorm * dr);
 
-        // Cascading hard sync: partial m resets when the partial below it wrapped, once the
-        // sync amount reaches this link (cascade grows up the lattice, snapping partials onto
-        // the fundamental's period -> harmonic reinforcement).
-        if (m > 0 && prevWrapped && sy > (float)m * kInvNM)
-          I.phase[m] = 0.0f;
-
-        I.phase[m] += (f + fmDev) * invSr;   // signed advance + coupled FM
-        bool wrapped = false;
-        if (I.phase[m] >= 1.0f || I.phase[m] < 0.0f)
+        int role = kRole[m];
+        float fmAdd = 0.0f;
+        if (role == 1)
         {
-          I.phase[m] -= floorf(I.phase[m]);
-          wrapped = true;
+          // COUPLE: structured FM by the partner partial below (its last sine output), faded
+          // in progressively so the coupled COUNT grows as the control rises. Not global.
+          float act = CLAMP(0.0f, 1.0f, (cp - kActT[m]) * 7.0f);
+          fmAdd = act * kFmMax * fc * I.sinePrev[m - 1];
         }
+        else if (role == 2)
+        {
+          // LOCK: snap the frequency toward the nearest harmonic of fc (crystalline, alias-
+          // free), progressively. Pulls the inharmonic lattice back onto structure.
+          float act = CLAMP(0.0f, 1.0f, (sy - kActT[m]) * 7.0f);
+          if (act > 0.0f)
+          {
+            float hn = floorf(f / fc + 0.5f);
+            if (hn < 1.0f) hn = 1.0f;
+            f = f + (hn * fc - f) * act;
+          }
+        }
+
+        I.phase[m] += (f + fmAdd) * invSr;   // signed advance + structured FM
+        I.phase[m] -= floorf(I.phase[m]);
+
+        float s = sineLUT(I.phase[m]);
+        I.sinePrev[m] = s;                   // modulator source for coupled partners
         float fa = f < 0.0f ? -f : f;
         if (fa >= 20.0f && fa < nyq)
-          y += kAmp[m] * sineLUT(I.phase[m]);
-        prevWrapped = wrapped;
+          y += kAmp[m] * s;
       }
 
-      // bounded feedback term for next sample's FM (keeps the loop stable)
+      // Drive: light glue only (up to ~4x into the softclip). Real weight is meant to
+      // accumulate through the resonant filter matrix (next step), not brute saturation.
       float ys = y * kNorm;
-      I.yPrev = ys / __builtin_sqrtf(1.0f + ys * ys);
-
-      // Drive: pre-output saturation (up to 12x into the softclip = thickness/limiting).
-      float yd = ys * (1.0f + dv * 11.0f);
+      float yd = ys * (1.0f + dv * 3.0f);
       out[i] = (yd / __builtin_sqrtf(1.0f + yd * yd)) * level;
     }
   }

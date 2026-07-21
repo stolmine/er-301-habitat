@@ -137,7 +137,7 @@ function Moire:onLoadViews()
     },
     couple = GainBias {
       button        = "couple",
-      description   = "Couple (inter-partial FM)",
+      description   = "Couple (structured FM)",
       branch        = self.branches.couple,
       gainbias      = self.objects.couple,
       range         = self.objects.coupleRange,
@@ -147,7 +147,7 @@ function Moire:onLoadViews()
     },
     drive = GainBias {
       button        = "drive",
-      description   = "Drive (saturation)",
+      description   = "Drive (glue)",
       branch        = self.branches.drive,
       gainbias      = self.objects.drive,
       range         = self.objects.driveRange,
@@ -156,8 +156,8 @@ function Moire:onLoadViews()
       initialBias   = 0.0
     },
     sync = GainBias {
-      button        = "sync",
-      description   = "Sync (cascading)",
+      button        = "lock",
+      description   = "Lock (crystalline)",
       branch        = self.branches.sync,
       gainbias      = self.objects.sync,
       range         = self.objects.syncRange,
