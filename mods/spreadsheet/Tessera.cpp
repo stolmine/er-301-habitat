@@ -188,6 +188,22 @@ namespace stolmine
     return (tau_s / Tw) * (1.0f - expf(-Tw / tau_s));
   }
 
+  // The hardware amplitude envelope is a CUBED LINEAR RAMP, not an exponential (firmware:
+  // the level jumps to 1.0, then decrements linearly, and the audio path uses level^3).
+  // We render each mode's decay as (ramp)^3 with ramp falling 1 -> 0 over a duration T.
+  // rampDurMs(tau) maps a mode's exponential time-constant (the quantity the mode extractor
+  // and all our fitted decay laws report) to the ramp duration T whose log-linear-fit tau
+  // equals it - so the swap is tau-preserving and the fitted tables stay valid. The fit was
+  // measured against the extractor: T = 9.952*tau^0.8445 (reproduces 100/200/400/800/1600 ms
+  // ramps read back as 15/36/79/167/430 ms tau). The amp correction stays the exponential
+  // winAvg above: the amp table was regression-fit against exp-winAvg-corrected initial amps,
+  // and re-deriving it for the cubed shape (tried) regressed sub_amp without helping decay.
+  static inline float rampDurMs(float tau_ms)
+  {
+    if (tau_ms < 0.1f) tau_ms = 0.1f;
+    return 9.952f * powf(tau_ms, 0.8445f);
+  }
+
   // measured HF tau ceiling: no cap below ~600 Hz, ~500 ms @950 Hz, ~60 ms @1.4 kHz+
   static inline float hfCeilMs(float f)
   {
@@ -205,6 +221,7 @@ namespace stolmine
   struct Tessera::Internal
   {
     float phase[NM], env[NM], mfreq[NM], mdecay[NM];
+    float ramp[NM];              // cubed-ramp decay state (1 -> 0), cubed at output
     float pitchEnv = 0, pitchCoeff = 0.999f, startMult = 1;
     float noiseEnv = 0, noiseCoeff = 0, noiseLp = 0, burst = 0, burstCoeff = 0;
     float jitLp = 0, jitHz = 0;          // common-mode FM state + per-hit depth
@@ -212,7 +229,7 @@ namespace stolmine
     int holdLeft = 0;
     float prevTrig = 0;
     uint32_t rng = 0x51ee7u;
-    Internal() { for (int m = 0; m < NM; m++) { phase[m] = 0; env[m] = 0; mfreq[m] = 0; mdecay[m] = 0; } }
+    Internal() { for (int m = 0; m < NM; m++) { phase[m] = 0; env[m] = 0; mfreq[m] = 0; mdecay[m] = 0; ramp[m] = 0; } }
   };
 
   Tessera::Tessera()
@@ -266,8 +283,11 @@ namespace stolmine
     // noise() is uniform (std 1/sqrt(3)); the one-pole scales variance by a/(2-a).
     // Normalise both so kappa*fc IS the resulting deviation in Hz.
     float jitNorm = 1.7320508f * kGritDepthTrim / sqrtf(jitCoeff / (2.0f - jitCoeff));
-    const float kAtkMs = 2.0f;
-    float atkCoeff = 1.0f - expf(-1.0f / (kAtkMs * 0.001f * globalConfig.sampleRate));
+    // No attack ramp: the firmware envelope jumps to 1.0 in one instruction (its ramp
+    // path is dead code, rate constant exactly 0.0). The old 2 ms one-pole here was also
+    // provably inert on the shipped unit - the 12x pre-clipper drive limits the onset to
+    // the same ceiling with or without it (verified byte-identical on the grid), so it had
+    // done nothing since the drive was adopted. Removed: matches hardware, simpler loop.
     float clipTh, clipG;
     {
       float u = CLAMP(0.0f, 15.0f, ccClip / 8.0f);
@@ -340,8 +360,6 @@ namespace stolmine
       float tv = trig[i];
       if (tv > 0.5f && I.prevTrig <= 0.5f)   // rising edge -> new hit
       {
-        mAtkEnv = 0.0f;   // restart the attack ramp, else every hit after the first
-                          // starts fully open and the onset click comes back
         float fc = f0 * powf(2.0f, voct[i]);
         float foldN = fold * powf(fc / 246.5f, -0.163f);   // fold falls with pitch
         float lf = logf(fc / 246.5f);                      // pitch feature
@@ -381,7 +399,8 @@ namespace stolmine
           }
           if (tmS < 0.002f) tmS = 0.002f;
           a *= winAvg(tauEff * 0.001f) / winAvg(tmS);
-          I.env[m] = a;
+          I.env[m] = a;               // static initial amplitude; the ramp carries the decay
+          I.ramp[m] = 1.0f;
           // Varied (not aligned) start phases: all-aligned created an artificial
           // broadband click. Varying them matches the measured sub-mode amplitude
           // (0.23 vs HW 0.216) and punch (1.5 vs HW 1.3) while keeping the impact.
@@ -391,7 +410,8 @@ namespace stolmine
           float ceil = (kTauR[m] < 0.5f) ? hfCeilMs(f) : 1e9f;
           if (tm > ceil) tm = ceil;
           if (tm < 2.0f) tm = 2.0f;
-          I.mdecay[m] = expf(-1.0f / (tm * 0.001f * sr));
+          float Tramp = rampDurMs(tm) * 0.001f;      // ramp duration (s), tau-preserving
+          I.mdecay[m] = 1.0f / (Tramp * sr);         // per-sample linear ramp decrement
         }
         I.startMult = startMult;
         I.pitchCoeff = pitchCoeff;
@@ -424,8 +444,9 @@ namespace stolmine
       {
         float fm = I.mfreq[m] * pmul + jitDev;
         I.phase[m] += fm / sr; I.phase[m] -= floorf(I.phase[m]);
-        if (!held) I.env[m] *= I.mdecay[m];
-        y += I.env[m] * sineLUT(I.phase[m]);
+        if (!held) { I.ramp[m] -= I.mdecay[m]; if (I.ramp[m] < 0.0f) I.ramp[m] = 0.0f; }
+        float r3 = I.ramp[m] * I.ramp[m] * I.ramp[m];   // cubed linear ramp
+        y += I.env[m] * r3 * sineLUT(I.phase[m]);
       }
       if (held) I.holdLeft--;
 
@@ -435,8 +456,6 @@ namespace stolmine
       I.noiseLp += noiseLpG * (noise(I.rng) - I.noiseLp);
       y = y * (1.0f - noiseMix * 0.5f) + I.noiseLp * (noiseMix * I.noiseEnv + I.burst * 0.12f);
 
-      mAtkEnv += (1.0f - mAtkEnv) * atkCoeff;
-      y *= mAtkEnv;
       float yd = y * kDrive;
       float ct = yd / clipTh;
       // __builtin_sqrtf maps straight to VFP vsqrt.f32. Plain sqrtf() left GCC emitting
