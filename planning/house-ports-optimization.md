@@ -163,3 +163,28 @@ phase-accumulator decorrelation that a single-operating-point check would have m
 - BrightAmbience3: float the tap accumulators; CAVEAT - gather-bound over a 256KB buffer (~L2
   size), may be load-latency-bound not FLOP-bound, so measure the delta specifically.
 - SKIP the character-changing sin->poly swaps (Galactic/BA3) per user: "no character change".
+
+---
+
+## Pass status (2026-07-22) + remaining two
+
+**Shipped, dual-gated (tone 1 LSB + corr 1.0 across full param space, AND f64-op drop confirming
+a real full conversion not a silent half):**
+- Console0Channel 60->16, Console0Buss 63->16, ChromeOxide 368->89 (TickerTape's chain) - 0.1.0.38
+- Lacquer (per-sample float; TapeFat int-core + mCyclePhase-double kept) - 0.1.0.39
+- kWoodRoom 1087->270 (delay float / bez double) - 0.1.0.40
+- WoodenBox 369->149 - 0.1.0.41
+- Verbity 649->123 (cast-trap removal; no timing accumulator) - 0.1.0.42
+Whole-package f64 static 2757 -> 1694.
+
+**Remaining - each needs care, NOT a blanket pass:**
+- **Galactic** - SAME cast-trap removal as Verbity for the FDN, BUT the vibrato is a modulated
+  predelay: `vibM` is a phase ACCUMULATOR and `offsetML/MR = (sin(vibM)+1)*127`, `fracML/MR`
+  drive fractional delay-tap reads. The header explicitly says "precision matters for stable
+  vibrato". So keep `vibM`, the `sin()` (also: SKIP the sin->poly swap per no-character-change),
+  and the offset/frac computation DOUBLE; float only the FDN delay/feedback math. Draw the
+  boundary at the interpolated delay read (double frac x float taps -> boundary cast). Dual-gate
+  including a LONG render (vibrato drift only shows over time) at several Detune/Bigness settings.
+- **BrightAmbience3** - gather-bound over a ~256 KB buffer (~L2 size). MEASURE ON HARDWARE FIRST:
+  if it is load-latency-bound rather than FLOP-bound, the hybrid-float delta may be small and not
+  worth the risk. Defer until the on-device CPU read is available. (Also skip its sin->poly.)
