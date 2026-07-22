@@ -40,6 +40,8 @@ namespace od {
   class Object {
   public:
     virtual ~Object() {}
+    void attach() {}
+    void release() {}
     virtual void process() {}
     void addInput(Inlet &) {}
     void addOutput(Outlet &) {}

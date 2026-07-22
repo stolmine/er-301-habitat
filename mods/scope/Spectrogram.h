@@ -23,11 +23,15 @@ namespace scope_unit
     od::Inlet mInR{"In R"};
     od::Outlet mOutL{"Out L"};
     od::Outlet mOutR{"Out R"};
+    // Resolution/ply: 1 (base 256, single window) .. 6. 2/3 add overlap-averaging on
+    // the 256-pt FFT; 4/6 use a 512-pt FFT (half the bin width) + overlap-averaging.
+    od::Parameter mPly{"Resolution", 1.0f};
 #endif
 
     // SWIG-visible
     float getFFTPeak(int bin);
     float getFFTRms(int bin);
+    int getFFTSize();   // 256 or 512, per the current ply
 
   private:
     struct Internal;
@@ -75,15 +79,17 @@ namespace scope_unit
 
     inline float getPeak(int bin) const
     {
+      int maxBin = mpSpec->getFFTSize() / 2 - 1;   // 127 (256-pt) or 255 (512-pt)
       if (bin < 0) bin = 0;
-      if (bin > 127) bin = 127;
+      if (bin > maxBin) bin = maxBin;
       return mpSpec->getFFTPeak(bin);
     }
 
     inline float getRms(int bin) const
     {
+      int maxBin = mpSpec->getFFTSize() / 2 - 1;
       if (bin < 0) bin = 0;
-      if (bin > 127) bin = 127;
+      if (bin > maxBin) bin = maxBin;
       return mpSpec->getFFTRms(bin);
     }
 
@@ -106,7 +112,7 @@ namespace scope_unit
       float logMin = log2f(20.0f);
       float logMax = log2f(sr * 0.5f);
       float logRange = logMax - logMin;
-      float binHz = sr / 256.0f;
+      float binHz = sr / (float)mpSpec->getFFTSize();   // 256 or 512-pt
 
       int w = mWidth < kMaxWidth ? mWidth : kMaxWidth;
       float h = (float)mHeight;
