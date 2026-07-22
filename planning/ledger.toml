@@ -540,10 +540,11 @@ note = "planning/todo-archive.md '## Alembic'. Comb is a documented Pecto clone 
 [[item]]
 id = "ngoma-hardware-hang"
 title = "Ngoma hangs hardware on load (post-2.5.1 regression) — am335x-specific, bisect pending hardware test"
-status = "blocked"
-stamped = "2026-07-09T20:59:09-05:00"
+status = "done"
+stamped = "2026-07-22T11:04:12-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "with 2.5.5.169 (DrumVoice reverted verbatim to working 0dd8870 against current SDK), test insertion on am335x hardware after a rear-card pull; result splits root cause: still-crashes = shared-infra/ABI, works = 117-119+ Ngoma source" }
+attested = "2026-07-22: user confirms Ngoma no longer hangs on hardware — the regression was fixed some time ago. Ledger status was stale (never flipped when the fix landed). NOT re-verified against a specific commit here; exact fix to be identified during the notes/memory/codebase reconciliation pass (see reconcile-notes-memory-codebase). No longer a blocker for tessera-into-ngoma."
 note = "planning/todo-archive.md '## Ngoma / BLOCKER'. Narrowed to the xform target control (matches 2.5.5.92-.97 trap). Shipped probes .165-.168 (NEON :64 hints, trigger threshold, branchless dispatch) all still repro. Does NOT reproduce on RPi4/aarch64 emu → am335x-specific. Blocked on user hardware test + FIRMWARE_VERSION (parallel-DSP UnitChain layout changes suspected). Last known-good shipped = 2.5.1."
 
 [[item]]
@@ -1878,3 +1879,12 @@ NOT WORTH TOUCHING: CreamCoat (reference hybrid), TickerTape (~1.7%), Lacquer (~
 retrofit already regressed + was reverted at 0.1.0.23 - do not retry).
 USER-DECISION (character-changing): the sin->poly swaps (Galactic/BA3); pow2 delay masks REJECTED
 (tone change)."""
+
+[[item]]
+id = "reconcile-notes-memory-codebase"
+title = "Reconcile all notes/TODOs/ledger/memory against current codebase state (drift sweep)"
+status = "todo"
+stamped = "2026-07-22T11:04:12-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "sweep ledger.toml, planning/*.md, planning/TODO.md, docs/claude-memory/*, and the agent global-memory vault against HEAD; every blocked/wip/todo item reflects reality; stale claims corrected or closed; findings recorded" }
+note = "User, 2026-07-22, prompted by ngoma-hardware-hang being stale-blocked when it was fixed a while ago (now closed). Notes/memory have drifted from the code. Do a deliberate reconciliation pass: (1) ledger items whose status no longer matches reality (esp. blocked/wip); (2) claude-memory entries naming files/flags/versions that have since changed - verify each still exists; (3) planning docs describing abandoned/pivoted directions (Moire pivot, house deprioritization reopened, Vitrail biome demotion, suppressed units); (4) reconcile project_ngoma_codex + reference_house_package (flagged stale) against source. Candidate for a Fable-orchestrated drift sweep like the change-tracking/living-docs research (planning/change-tracking-living-docs.md, Baseline-Diff-Gate). Not urgent, but growing."

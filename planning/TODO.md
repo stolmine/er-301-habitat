@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**155 items** — 41 done, 7 wip, 104 todo, 3 blocked. *Rendered 2026-07-22.*
+**156 items** — 42 done, 7 wip, 105 todo, 2 blocked. *Rendered 2026-07-22.*
 
 ## DSP
 
@@ -55,13 +55,13 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `units-2d-wavetable-osc` | 2D/3D Wavetable Oscillator — X/Y-addressable wavetable with stacked pseudo-3D frame viz | manual · 2026-07-09 |
 |   | `units-spectral-processing` | Spectral Mask + Spectral Gate — sidechain-keyed / crossover per-band spectral processors | manual · 2026-07-09 |
 | ✗ | `kryos-load-hang` | Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware | manual · 2026-07-09 |
-| ✗ | `ngoma-hardware-hang` | Ngoma hangs hardware on load (post-2.5.1 regression) — am335x-specific, bisect pending hardware test | manual · 2026-07-09 |
 | ✓ | `biome-flakes` | Flakes — granular shimmer/freeze feedback looper (C++ rewrite of Shards) | manual *(attested)* · 2026-07-09 |
 | ✓ | `biome-pecto` | Pecto — comb resonator (16 tap patterns, 4 slopes, 4 resonator types, NEON 3-pass, zipper-clean) | manual *(attested)* · 2026-07-09 |
 | ✓ | `fx-tilt-djfilter` | Tilt EQ + DJ Filter shipped (bipolar LP/HP sweep with resonance) | manual *(attested)* · 2026-07-09 |
 | ✓ | `house-aw-reverbs` | House package — 6 faithful Airwindows reverb ports (kWoodRoom…Galactic), hardware-validated | manual *(attested)* · 2026-07-09 |
 | ✓ | `house-rotcoat` | RotCoat (codename) — first original-design reverb: multi-world per-line reduced-rate FDN | manual *(attested)* · 2026-07-09 |
 | ✓ | `network-gain-compensation` | Gain compensation for Network (Fabula's makeup model, tap-weight-energy basis) | manual *(attested)* · 2026-07-15 |
+| ✓ | `ngoma-hardware-hang` | Ngoma hangs hardware on load (post-2.5.1 regression) — am335x-specific, bisect pending hardware test | manual *(attested)* · 2026-07-22 |
 | ✓ | `spreadsheet-canals` | Canals — Three Sisters clone, DSP refresh + 4-input normalling topology; moved biome→spreadsheet | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-filterbank` | Filterbank (FFB/Tomograph) — parallel fixed filter bank, 2-16 bands, Scala scales, radial viz | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-helicase` | Helicase — 2-op FM oscillator (OPL3 waveforms, discontinuity folder, phase-receptivity sync) | manual *(attested)* · 2026-07-09 |
@@ -192,6 +192,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `alembic-serialization` | Alembic Phase 6: serialize sample ref + trained per-node state + user biases | manual · 2026-07-09 |
 |   | `infra-cross-package-dep-audit` | Cross-package dependency audit — no require/%import/#include reaching into another package's tree | manual · 2026-07-09 |
 |   | `rauschen-header-only-migration` | Migrate Rauschen to header-only (COMDAT vtable) - drop Rauschen.cpp | manual · 2026-07-17 |
+|   | `reconcile-notes-memory-codebase` | Reconcile all notes/TODOs/ledger/memory against current codebase state (drift sweep) | manual · 2026-07-22 |
 | ✓ | `infra-ledger-regime` | Ledger + BDG regime stood up (gate, render, hooks, blessed entrypoint) | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-serialization-audit` | Spreadsheet-package serialization + stale-label audit (ParameterAdapter Bias round-trip, updateLabel) | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-vanilla-compat` | Habitat packages load on vanilla ER-301 firmware (non-stolmine) | manual *(attested)* · 2026-07-09 |
