@@ -1788,23 +1788,13 @@ settle before building: does "ply" mean a larger single FFT (512/1024/2048/4096)
 multi-window averaging, or multi-resolution bands stitched together? CPU + latency tradeoff per
 ply on am335x (pffft is NEON-optimised already).
 
-RESOLUTION MODEL (user 2026-07-22): hybrid - overlap-average the lower plies on the base FFT,
-then bump the FFT to 512 + overlap-average for the higher plies. Concretely:
-  - current Spectrogram = 256-pt pffft real FFT (128 bins), Hann over a 256 ring, 1 window,
-    FFT every 4 frames (~12/s), per-bin peak-decay + smoothed-RMS, stereo passthrough.
-  - 2-ply / 3-ply: KEEP 256-pt FFT; add OVERLAP-AVERAGING - shrink the hop below the window and
-    average the last N magnitude spectra (2 and 3). Same bins/latency, smoother/steadier.
-  - 4-ply / 6-ply: DOUBLE FFT to 512-pt (256 bins, half the bin width) + overlap-average (4 and
-    6 windows). Finer frequency resolution + smoothing.
-IMPL: overlap-avg = reduce the fftFrameCount hop below the window length + keep a rolling mean of
-the last N magnitude spectra before the peak/rms step. 512 path needs a 2nd pffft setup (or
-allocate 512 always, use the low half for 256 modes) + the graphic must handle both 128- and
-256-bin widths (binHz sr/256 vs sr/512). CPU: more FFTs/s + bigger FFT; pffft is NEON so likely
-fine, profile am335x.
-OPEN ARCHITECTURE Q: ONE Spectrogram unit with a Resolution/ply Option (2/3/4/6) - cleaner,
-matches the "ply" idiom, needs live bin-count handling in the graphic - vs SEPARATE units like
-the Scope family - simpler each but 4 toc entries + duplicated graphic. Recommend single-unit
-Option. Decide before building."""
+APPROACH (corrected 2026-07-22): NOT increased spectral resolution - separate units that
+adjust the visual PLY-SPAN (display width). Same 256-pt FFT + graphic; a wider canvas draws the
+same log-freq spectrum across more horizontal pixels = more visual detail. SECTION_PLY=42px.
+Family via SpectrogramFactory(plies, title, mnemonic): Spectrogram (2-ply, 84px, unchanged),
+Spectrogram 3/4/6 (126/168/252px). Only C++ change: kMaxWidth 128->256 so the 6-ply width isn't
+truncated (draw-thread stack, safe). The earlier overlap-average/512-FFT interpretation was
+wrong and was reverted. DONE 2026-07-22 (scope 1.2.3, both arches, 0 hints)."""
 
 [[item]]
 id = "fademixer-6-8-plus-mutesolo-fix"

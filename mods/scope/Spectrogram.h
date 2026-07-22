@@ -23,15 +23,11 @@ namespace scope_unit
     od::Inlet mInR{"In R"};
     od::Outlet mOutL{"Out L"};
     od::Outlet mOutR{"Out R"};
-    // Resolution/ply: 1 (base 256, single window) .. 6. 2/3 add overlap-averaging on
-    // the 256-pt FFT; 4/6 use a 512-pt FFT (half the bin width) + overlap-averaging.
-    od::Parameter mPly{"Resolution", 1.0f};
 #endif
 
     // SWIG-visible
     float getFFTPeak(int bin);
     float getFFTRms(int bin);
-    int getFFTSize();   // 256 or 512, per the current ply
 
   private:
     struct Internal;
@@ -63,7 +59,9 @@ namespace scope_unit
   private:
     Spectrogram *mpSpec;
 
-    static const int kMaxWidth = 128;
+    // Wide enough for the 6-ply variant (6 * SECTION_PLY(42) = 252 px). The peakH/rmsH
+    // scratch arrays below are draw-thread stack (not audio), so 256 floats each is fine.
+    static const int kMaxWidth = 256;
 
     static inline float catmullRom(float p0, float p1, float p2, float p3,
                                    float t, float tau)
@@ -79,17 +77,15 @@ namespace scope_unit
 
     inline float getPeak(int bin) const
     {
-      int maxBin = mpSpec->getFFTSize() / 2 - 1;   // 127 (256-pt) or 255 (512-pt)
       if (bin < 0) bin = 0;
-      if (bin > maxBin) bin = maxBin;
+      if (bin > 127) bin = 127;
       return mpSpec->getFFTPeak(bin);
     }
 
     inline float getRms(int bin) const
     {
-      int maxBin = mpSpec->getFFTSize() / 2 - 1;
       if (bin < 0) bin = 0;
-      if (bin > maxBin) bin = maxBin;
+      if (bin > 127) bin = 127;
       return mpSpec->getFFTRms(bin);
     }
 
@@ -112,7 +108,7 @@ namespace scope_unit
       float logMin = log2f(20.0f);
       float logMax = log2f(sr * 0.5f);
       float logRange = logMax - logMin;
-      float binHz = sr / (float)mpSpec->getFFTSize();   // 256 or 512-pt
+      float binHz = sr / 256.0f;
 
       int w = mWidth < kMaxWidth ? mWidth : kMaxWidth;
       float h = (float)mHeight;
