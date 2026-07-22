@@ -10,13 +10,10 @@ return {
     { title = "BrightAmbience3", moduleName = "BrightAmbience3", category = "House", keywords = "reverb, ambience, bright, halo, gated, sparse, prime, brightambience3, brightambience, airwindows" },
     { title = "Verbity", moduleName = "Verbity", category = "House", keywords = "reverb, hall, plate, fdn, thunder, submix, verbity, airwindows" },
     { title = "Galactic", moduleName = "Galactic", category = "House", keywords = "reverb, hall, lush, big, modulated, vibrato, detune, predelay, galactic, airwindows" },
-    { title = "RotCoat", moduleName = "RotCoat", category = "House", keywords = "reverb, rot, tape, cursed, undersample, divisor, world, drift, mulch, rotcoat, original" },
     -- XYZ parked 2026-06-05: too sin-heavy for Cortex-A8.
     -- Header + Lua + plan preserved on disk; revive when rpi
     -- successor lands.
     { title = "TickerTape", moduleName = "TickerTape", category = "House", keywords = "tape, saturate, console, drive, lo-fi, color, character, glue, tickertape" },
     { title = "Lacquer", moduleName = "Lacquer", category = "House", keywords = "lacquer, vinyl, tape, saturate, lo-fi, polished, downsample, oversample, cut, polish, character" },
-    { title = "Filament", moduleName = "Filament", category = "House", keywords = "filter, lowpass, lp, fm, voltage, breathe, bow, vocal, capacitor, filament" },
-    { title = "Carriage", moduleName = "Carriage", category = "House", keywords = "dynamics, transient, compressor, inverse, engagement, point, distance, air, carriage" }
   }
 }
