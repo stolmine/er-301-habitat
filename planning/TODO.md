@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**159 items** — 43 done, 7 wip, 107 todo, 2 blocked. *Rendered 2026-07-22.*
+**160 items** — 43 done, 7 wip, 108 todo, 2 blocked. *Rendered 2026-07-22.*
 
 ## DSP
 
@@ -19,6 +19,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ~ | `vitrail-unit` | Vitrail - dual switched-capacitor character filter unit | manual · 2026-07-18 |
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
 |   | `alembic-userbias-derivations` | Alembic Phases 7-8: per-region user-bias sub-params + Order 2/3 derivations + sample excitation | manual · 2026-07-09 |
+|   | `biome-expo-envelopes` | Biome: simple exponential envelopes - Expo D and Expo AD with expo-variation controls | manual · 2026-07-22 |
 |   | `biome-utility-dsp-units` | biome DSP utility units: simple allpass, dome filter, frequency shifter, bitcrush/downsample | manual · 2026-07-09 |
 |   | `canals-audiorate-and-cpu` | Canals: audio-rate Span-sweep aliasing (halfband decimator) + hardware CPU/NEON pass | manual · 2026-07-09 |
 |   | `canals-response-tuning` | Canals: SPAN/volume/low-band/Q/soft-clip response tuning against hardware capture corpus | manual · 2026-07-09 |

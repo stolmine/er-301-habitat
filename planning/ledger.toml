@@ -1960,3 +1960,20 @@ capture; cf. the Moire coupled-FM experiments and the firmware findings). User's
 CAMPAIGN. Likely wants a fresh Trinity-hardware capture campaign targeting Shape specifically, read
 against the firmware (reference_trinity_firmware_re, ~/repos/trinity-midi-harness,
 ~/Downloads/Trinity2_0_Firmware/re/findings-*.md). Not a port bug - a modeling frontier."""
+
+[[item]]
+id = "biome-expo-envelopes"
+title = "Biome: simple exponential envelopes - Expo D and Expo AD with expo-variation controls"
+status = "todo"
+stamped = "2026-07-22T11:59:18-05:00"
+area = "dsp"
+touches = ["mods/biome/"]
+verify = { kind = "manual", ref = "in emu: gate-triggered Expo D (decay-only) and Expo AD (attack-decay) envelope units in biome; each has a curve/expo-variation control that morphs the segment shape (e.g. linear <-> exponential); both arches build; am335x sanity" }
+note = """User, 2026-07-22. Two SIMPLE exponential envelope units for the biome package:
+- Expo D: decay-only (gate/trig -> jump to peak -> exponential decay to 0).
+- Expo AD: attack-decay (gate/trig -> exponential attack to peak -> exponential decay).
+Each with an EXPO-VARIATION control that shapes the curve (morph the segment contour, e.g.
+linear <-> exponential <-> steeper-exponential; likely one variation control per segment, or a
+shared shape knob - decide at build). Keep them SIMPLE and cheap; trigger/gate in, envelope out,
+time control(s) + the expo-variation control(s). Standard habitat conventions apply
+(mod gain default 0 per [[mod-gain-default-zero]], both-arches build, no branding)."""
