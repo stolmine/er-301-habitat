@@ -1,5 +1,4 @@
 #include "DrumVoice.h"
-#include "DrumVoiceSineLUT.h"   // static half-sine LUT (no runtime trig on am335x)
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
@@ -186,18 +185,6 @@ namespace stolmine
   static const float kGritLpHz = 40.0f;
   static const float kGritDepthTrim = 1.85f;
 
-  static inline float sineLUT(float phase)   // phase in [0,1) -> sin(2*pi*phase)
-  {
-    phase -= floorf(phase);
-    bool neg = phase >= 0.5f;
-    float ph = neg ? (phase - 0.5f) : phase;
-    float idx = ph * 512.0f;
-    int i = (int)idx;
-    float fr = idx - (float)i;
-    float s = kDrumVoiceSineLUT[i] + fr * (kDrumVoiceSineLUT[i + 1] - kDrumVoiceSineLUT[i]);
-    return neg ? -s : s;
-  }
-
   static inline uint32_t lcg(uint32_t &s) { s = s * 1103515245u + 12345u; return s; }
   static inline float noise(uint32_t &s) { return (float)((lcg(s) >> 9) & 0xFFFF) / 32768.0f - 1.0f; }
 
@@ -269,11 +256,15 @@ namespace stolmine
   static inline float fast_fromDb(float db) { return fast_exp2(db * 0.16609640474f); }
 
   // Polynomial sine for triangle-input ([-1,1]) -> sine([-pi/2, pi/2]).
-  // 7th-order odd-power approx, max error ~7e-6 over the input domain.
-  // Retained unused by the P1 scalar port: this is the substitution the P5
-  // NEON pass will use for the modal bank's sineLUT() gather (Cortex-A8 NEON
-  // has no gather load; feedback_neon_no_gather_lut_dsp), following the same
-  // pattern already proven in JF/Visadhara.
+  // 7th-order odd-power approx, max error ~7e-6 over the input domain --
+  // below the retired sineLUT's lerp error. This is the substitution for
+  // the modal bank's per-mode sineLUT() gather: Cortex-A8 NEON has no
+  // gather load (feedback_neon_no_gather_lut_dsp), so a per-lane indexed
+  // LUT read cannot cross-mode vectorize; polynomial substitution is the
+  // proven escape (JF, Visadhara precedent). Used by the scalar (non-ARM)
+  // fallback of the modal kernel in process() -- the NEON path inlines the
+  // identical polynomial on quads (same coefficients, same wrap semantics)
+  // so linux emu and am335x hardware run the same algorithm.
   static inline float polySine(float tri)
   {
     float t2 = tri * tri;
@@ -282,64 +273,19 @@ namespace stolmine
     return tri * (1.5707963f - 0.6459640f * t2 + 0.0796921f * t4 - 0.0046816f * t6);
   }
 
-  // 4-lane phasor advance + polynomial sine. NEON-vectorized on am335x;
-  // scalar fallback on x86/emu. CRITICAL: phases/inc/outSines MUST be
-  // class member arrays (or otherwise heap-allocated) -- stack-locals
-  // trigger GCC `:64` alignment hint under -O3 -ffast-math which traps
-  // on Cortex-A8 (see feedback_neon_intrinsics_drumvoice memory).
-  // Retained unused by the P1 scalar port -- this is the exact kernel shape
-  // (SoA quads, common-mode broadcast, poly sine) the P5 NEON pass applies
-  // to the modal bank's phase[16]/mfreq[16] arrays once they move to Internal.
-  static inline void neonAdvanceSines(float *phases, const float *inc, float *outSines)
-  {
-#ifdef __ARM_NEON
-    float32x4_t ph = vld1q_f32(phases);
-    float32x4_t in = vld1q_f32(inc);
-    ph = vaddq_f32(ph, in);
-    // Wrap to [0,1): subtract floor. inc is non-negative; ph stays in
-    // [0,1); after add ph in [0,2). vcvtq_s32_f32 truncates toward zero
-    // == floor for non-negative values.
-    int32x4_t   ipart = vcvtq_s32_f32(ph);
-    float32x4_t fpart = vcvtq_f32_s32(ipart);
-    ph = vsubq_f32(ph, fpart);
-    // Triangle: tri = 4 * min(p, 1-p) - 1
-    float32x4_t one  = vdupq_n_f32(1.0f);
-    float32x4_t inv  = vsubq_f32(one, ph);
-    float32x4_t mn   = vminq_f32(ph, inv);
-    float32x4_t tris = vsubq_f32(vmulq_n_f32(mn, 4.0f), one);
-    // 7th-order polynomial sine (matches scalar polySine):
-    //   tri * (1.5708 - 0.6460*t^2 + 0.0797*t^4 - 0.00468*t^6)
-    float32x4_t t2 = vmulq_f32(tris, tris);
-    float32x4_t t4 = vmulq_f32(t2, t2);
-    float32x4_t t6 = vmulq_f32(t4, t2);
-    float32x4_t poly = vmlsq_f32(vdupq_n_f32(1.5707963f), t2, vdupq_n_f32(0.6459640f));
-    poly = vmlaq_f32(poly, t4, vdupq_n_f32(0.0796921f));
-    poly = vmlsq_f32(poly, t6, vdupq_n_f32(0.0046816f));
-    float32x4_t sines = vmulq_f32(tris, poly);
-    vst1q_f32(phases, ph);
-    vst1q_f32(outSines, sines);
-#else
-    for (int j = 0; j < 4; j++) {
-      phases[j] += inc[j];
-      phases[j] -= floorf(phases[j]);
-      float p = phases[j];
-      float tri = 4.0f * (p < 0.5f ? p : 1.0f - p) - 1.0f;
-      float t2 = tri * tri;
-      float t4 = t2 * t2;
-      float t6 = t4 * t2;
-      outSines[j] = tri * (1.5707963f - 0.6459640f*t2 + 0.0796921f*t4 - 0.0046816f*t6);
-    }
-#endif
-  }
-
   struct DrumVoice::Internal
   {
     // ---- Tessera modal engine state (verbatim engine; copied field-for-field
     // from Tessera::Internal). Sized [16]: only NM=14 modes are ever written
-    // or read (pad slots [14]/[15] stay zero forever) -- the P5 NEON pass
-    // pads to 4 quads, so the storage shape is already right.
+    // at trigger time; pad slots [14]/[15] are explicitly zeroed on every
+    // trigger (phase/env/mfreq/mfreqSr/mdecay/ramp all 0 -- algebraically
+    // silent: ramp=0 keeps r3=0 regardless of phase/mfreq drift) so the P5
+    // NEON kernel can process all 4 quads unconditionally, no tail loop.
     float phase[16], env[16], mfreq[16], mdecay[16];
     float ramp[16];              // cubed-ramp decay state (1 -> 0), cubed at output
+    // Block-baked per-mode phase increment (mfreq/sr), set at trigger time.
+    // Removes a per-mode-per-sample division from the modal kernel (P5).
+    float mfreqSr[16];
     float pitchEnv = 0, pitchCoeff = 0.999f, startMult = 1;
     float noiseEnv = 0, noiseCoeff = 0, noiseLp = 0, burst = 0, burstCoeff = 0;
     float jitLp = 0, jitHz = 0;          // common-mode FM state + per-hit depth
@@ -369,7 +315,7 @@ namespace stolmine
     float cachedShape = 0.0f;
     float cachedGrit = 0.0f;
 
-    Internal() { for (int m = 0; m < 16; m++) { phase[m] = 0; env[m] = 0; mfreq[m] = 0; mdecay[m] = 0; ramp[m] = 0; } }
+    Internal() { for (int m = 0; m < 16; m++) { phase[m] = 0; env[m] = 0; mfreq[m] = 0; mfreqSr[m] = 0; mdecay[m] = 0; ramp[m] = 0; } }
   };
 
   DrumVoice::DrumVoice()
@@ -414,6 +360,7 @@ namespace stolmine
 
     float sr = globalConfig.sampleRate;
     float nyq = sr * 0.45f;
+    float invSr = 1.0f / sr;   // block-rate; the modal kernel uses this instead of a per-sample /sr
 
     float character = CLAMP(0.0f, 1.0f, mCharacter.value());
     float shape     = CLAMP(0.0f, 1.0f, mShape.value());
@@ -610,6 +557,7 @@ namespace stolmine
         {
           float f = fc * (kH[m] + kK[m] * r);
           s.mfreq[m] = f;
+          s.mfreqSr[m] = f * invSr;   // baked phase-increment-per-sample (P5)
           const float *c = kAmpFit[m];
           float a = c[0] + c[1] * dL + c[2] * foldN + c[3] * r + c[4] * lf + c[5] * gN;
           // core h3 keeps its measured sine-dip when osc2 is inactive
@@ -656,7 +604,15 @@ namespace stolmine
           // Varied (not aligned) start phases: all-aligned created an artificial
           // broadband click. Varying them matches the measured sub-mode amplitude
           // (0.23 vs HW 0.216) and punch (1.5 vs HW 1.3) while keeping the impact.
-          s.phase[m] = 0.25f + 0.37f * (float)m;
+          // P5 CONVENTION OFFSET: the triangle+polySine path renders
+          // -cos(2*pi*p) = sin(2*pi*(p - 0.25)), i.e. it lags the reference
+          // sineLUT (sin(2*pi*p)) by a quarter cycle. A constant phase offset
+          // is invariant under accumulation, so baking +0.25 into the start
+          // phase makes the kernel render sin(2*pi*(logical phase)) for all
+          // time - preserving the LOAD-BEARING inter-mode start-phase
+          // relationships above (found by the P5 parity gate: without this
+          // the clipper sees different mode alignment; NCC 0.05, peak +4.5%).
+          s.phase[m] = 0.25f + 0.37f * (float)m + 0.25f;
           s.phase[m] -= floorf(s.phase[m]);
           float tm = tauEff * kTauR[m];
           float ceil = (kTauR[m] < 0.5f) ? hfCeilMs(f) : 1e9f;
@@ -664,6 +620,19 @@ namespace stolmine
           if (tm < 2.0f) tm = 2.0f;
           float Tramp = rampDurMs(tm) * 0.001f;      // ramp duration (s), tau-preserving
           s.mdecay[m] = 1.0f / (Tramp * sr);         // per-sample linear ramp decrement
+        }
+        // Explicit pad-lane silence (P5): modes [NM..15] are never written by
+        // the loop above; zero them on every trigger so the 4-quad NEON
+        // kernel can process all 16 lanes unconditionally (ramp=0 -> r3=0
+        // regardless of phase/mfreq drift, no tail loop needed).
+        for (int m = NM; m < 16; m++)
+        {
+          s.phase[m] = 0.0f;
+          s.env[m] = 0.0f;
+          s.mfreq[m] = 0.0f;
+          s.mfreqSr[m] = 0.0f;
+          s.mdecay[m] = 0.0f;
+          s.ramp[m] = 0.0f;
         }
         s.startMult = startMult;
         s.pitchCoeff = pitchCoeff;
@@ -708,15 +677,101 @@ namespace stolmine
       s.jitLp += jitCoeff * (noise(s.jitRng) - s.jitLp);
       float jitDev = s.jitLp * jitNorm * s.jitHz;
 
-      float y = 0.0f;
-      for (int m = 0; m < NM; m++)
+      // ---- Modal bank kernel (P5 NEON pass) ----
+      // 14 modes padded to 16 lanes = 4 NEON quads on am335x; identical
+      // scalar fallback on linux/x86 so emu exercises the same algorithm
+      // the hardware runs (same poly-sine coefficients, same negative-safe
+      // floor wrap -- jitDev can transiently drive the phase increment
+      // negative at low fc + high grit, so a forward-only wrap is wrong
+      // here). pmul, jitDevSr, heldMul are per-sample scalars, common-mode
+      // across every lane (the measured grit mechanism is one shared
+      // noise-FM deviation applied identically to every mode -- see the
+      // Grit comment block above -- which is exactly the NEON-friendly
+      // shape: one broadcast per sample, not per-lane state).
+      float jitDevSr = jitDev * invSr;
+      float heldMul = held ? 0.0f : 1.0f;
+      float y;
+#ifdef __ARM_NEON
       {
-        float fm = s.mfreq[m] * pmul + jitDev;
-        s.phase[m] += fm / sr; s.phase[m] -= floorf(s.phase[m]);
-        if (!held) { s.ramp[m] -= s.mdecay[m]; if (s.ramp[m] < 0.0f) s.ramp[m] = 0.0f; }
-        float r3 = s.ramp[m] * s.ramp[m] * s.ramp[m];   // cubed linear ramp
-        y += s.env[m] * r3 * sineLUT(s.phase[m]);
+        float32x4_t pmulV     = vdupq_n_f32(pmul);
+        float32x4_t jitDevSrV = vdupq_n_f32(jitDevSr);
+        float32x4_t heldMulV  = vdupq_n_f32(heldMul);
+        float32x4_t zeroV     = vdupq_n_f32(0.0f);
+        float32x4_t oneV      = vdupq_n_f32(1.0f);
+        float32x4_t acc       = vdupq_n_f32(0.0f);
+
+        for (int q = 0; q < 4; q++)
+        {
+          float *ph = &s.phase[4 * q];
+          float *fr = &s.mfreqSr[4 * q];
+          float *md = &s.mdecay[4 * q];
+          float *rm = &s.ramp[4 * q];
+          float *ev = &s.env[4 * q];
+
+          float32x4_t phase = vld1q_f32(ph);
+          float32x4_t freq  = vld1q_f32(fr);
+          float32x4_t mdec  = vld1q_f32(md);
+          float32x4_t ramp  = vld1q_f32(rm);
+          float32x4_t envv  = vld1q_f32(ev);
+
+          // phase advance: inc = mfreqSr*pmul + jitDevSr (common-mode)
+          float32x4_t inc = vmlaq_f32(jitDevSrV, freq, pmulV);
+          phase = vaddq_f32(phase, inc);
+
+          // negative-safe wrap to [0,1): floor via truncate-toward-zero,
+          // corrected down by 1 where the truncation rounded up (fp > ph
+          // only happens for negative non-integer phase).
+          int32x4_t   ipart = vcvtq_s32_f32(phase);
+          float32x4_t fpart = vcvtq_f32_s32(ipart);
+          uint32x4_t  negMask = vcgtq_f32(fpart, phase);
+          float32x4_t adj = vbslq_f32(negMask, oneV, zeroV);
+          float32x4_t floorP = vsubq_f32(fpart, adj);
+          phase = vsubq_f32(phase, floorP);
+          vst1q_f32(ph, phase);
+
+          // ramp: decrement masked by heldMul (0 while held), clamp >= 0
+          ramp = vsubq_f32(ramp, vmulq_f32(mdec, heldMulV));
+          ramp = vmaxq_f32(ramp, zeroV);
+          vst1q_f32(rm, ramp);
+          float32x4_t r3 = vmulq_f32(vmulq_f32(ramp, ramp), ramp);
+
+          // triangle: tri = 4*min(phase, 1-phase) - 1
+          float32x4_t inv = vsubq_f32(oneV, phase);
+          float32x4_t mn  = vminq_f32(phase, inv);
+          float32x4_t tri = vsubq_f32(vmulq_n_f32(mn, 4.0f), oneV);
+
+          // 7th-order polynomial sine (matches scalar polySine exactly)
+          float32x4_t t2 = vmulq_f32(tri, tri);
+          float32x4_t t4 = vmulq_f32(t2, t2);
+          float32x4_t t6 = vmulq_f32(t4, t2);
+          float32x4_t poly = vmlsq_f32(vdupq_n_f32(1.5707963f), t2, vdupq_n_f32(0.6459640f));
+          poly = vmlaq_f32(poly, t4, vdupq_n_f32(0.0796921f));
+          poly = vmlsq_f32(poly, t6, vdupq_n_f32(0.0046816f));
+          float32x4_t sine = vmulq_f32(tri, poly);
+
+          acc = vmlaq_f32(acc, sine, vmulq_f32(envv, r3));
+        }
+
+        float32x2_t sumPair = vadd_f32(vget_high_f32(acc), vget_low_f32(acc));
+        sumPair = vpadd_f32(sumPair, sumPair);
+        y = vget_lane_f32(sumPair, 0);
       }
+#else
+      {
+        y = 0.0f;
+        for (int m = 0; m < 16; m++)
+        {
+          float inc = s.mfreqSr[m] * pmul + jitDevSr;
+          s.phase[m] += inc;
+          s.phase[m] -= floorf(s.phase[m]);      // negative-safe floor == NEON wrap by construction
+          s.ramp[m] -= s.mdecay[m] * heldMul;
+          if (s.ramp[m] < 0.0f) s.ramp[m] = 0.0f;
+          float r3 = s.ramp[m] * s.ramp[m] * s.ramp[m];   // cubed linear ramp
+          float tri = 4.0f * (s.phase[m] < 0.5f ? s.phase[m] : 1.0f - s.phase[m]) - 1.0f;
+          y += s.env[m] * r3 * polySine(tri);
+        }
+      }
+#endif
       if (held) s.holdLeft--;
 
       // Ngoma addition: linear attack ramp on the modal bank sum ONLY (4.4).
