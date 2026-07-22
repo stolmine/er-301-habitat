@@ -73,5 +73,17 @@ namespace house
     return (x > 0.0) ? (s / densityA) : -(s / densityA);
   }
 
+  // Float overload: identical Taylor poly in float, for hybrid-float per-sample paths that
+  // would otherwise cast to/from double on every call (the non-pipelined VFPv3 cost on
+  // Cortex-A8). Same curve; float precision is ample for a saturator.
+  static inline float spiralFastSaturate(float x, float densityA)
+  {
+    float absX = fabsf(x) * densityA;
+    if (absX > 1.5707963f) absX = 1.5707963f;
+    float x2 = absX * absX;
+    float s = absX * (1.0f + x2 * (-0.16666667f + x2 * 0.0083333333f));
+    return (x > 0.0f) ? (s / densityA) : -(s / densityA);
+  }
+
 } // namespace house
 #endif // !SWIGLUA

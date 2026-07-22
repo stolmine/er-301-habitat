@@ -8,7 +8,7 @@
 // (Chris Johnson, MIT, ~/repos/airwindows/plugins/MacVST/
 // Console0Buss/source/Console0BussProc.cpp lines 95-108).
 // BigFastArcSin: clamped at ±2.8, rational
-//   y = (x * 2.0) / (3.0 - x)  for positive (mirror for negative)
+//   y = (x * 2.0f) / (3.0 - x)  for positive (mirror for negative)
 // Bracketed by two 1-sample-delayed averaging LP filters.
 //
 // DELIBERATE DEVIATION from AW for habitat UX:
@@ -87,59 +87,63 @@ namespace house
       if (panKnob < 0.0) panKnob = 0.0;
       if (panKnob > 1.0) panKnob = 1.0;
       double panOffset = (panKnob - 0.5) * 2.0;
-      double gainL = gainScale;
-      double gainR = gainScale;
-      if (panOffset > 0.0) gainL *= (1.0 - panOffset);
-      if (panOffset < 0.0) gainR *= (1.0 + panOffset);
+      double gainLd = gainScale;
+      double gainRd = gainScale;
+      if (panOffset > 0.0f) gainLd *= (1.0 - panOffset);
+      if (panOffset < 0.0) gainRd *= (1.0 + panOffset);
+      // Bake block-rate gains to float so the per-sample path is pure float (hybrid-float;
+      // hot loop is averaging LPs + a rational curve, float precision ample). Cortex-A8 win.
+      float gainL = (float)gainLd;
+      float gainR = (float)gainRd;
 
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
       {
-        double inputSampleL = *in1;
-        double inputSampleR = *in2;
-        if (fabs(inputSampleL) < 1.18e-23) inputSampleL = 1.18e-17;
-        if (fabs(inputSampleR) < 1.18e-23) inputSampleR = 1.18e-17;
+        float inputSampleL = *in1;
+        float inputSampleR = *in2;
+        if (fabsf(inputSampleL) < 1.18e-23f) inputSampleL = 1.18e-17f;
+        if (fabsf(inputSampleR) < 1.18e-23f) inputSampleR = 1.18e-17f;
 
-        double tempL = inputSampleL;
-        inputSampleL = (inputSampleL + avgAL) * 0.5;
+        float tempL = inputSampleL;
+        inputSampleL = (inputSampleL + avgAL) * 0.5f;
         avgAL = tempL;
-        double tempR = inputSampleR;
-        inputSampleR = (inputSampleR + avgAR) * 0.5;
+        float tempR = inputSampleR;
+        inputSampleR = (inputSampleR + avgAR) * 0.5f;
         avgAR = tempR;
 
         inputSampleL *= gainL;
         inputSampleR *= gainR;
 
         // BigFastArcSin desat curve (verbatim from AW source).
-        if (inputSampleL > 2.8) inputSampleL = 2.8;
-        if (inputSampleL < -2.8) inputSampleL = -2.8;
-        if (inputSampleL > 0.0)
-          inputSampleL = (inputSampleL * 2.0) / (3.0 - inputSampleL);
+        if (inputSampleL > 2.8f) inputSampleL = 2.8f;
+        if (inputSampleL < -2.8f) inputSampleL = -2.8f;
+        if (inputSampleL > 0.0f)
+          inputSampleL = (inputSampleL * 2.0f) / (3.0f - inputSampleL);
         else
-          inputSampleL = -(inputSampleL * -2.0) / (3.0 + inputSampleL);
+          inputSampleL = -(inputSampleL * -2.0f) / (3.0f + inputSampleL);
 
-        if (inputSampleR > 2.8) inputSampleR = 2.8;
-        if (inputSampleR < -2.8) inputSampleR = -2.8;
-        if (inputSampleR > 0.0)
-          inputSampleR = (inputSampleR * 2.0) / (3.0 - inputSampleR);
+        if (inputSampleR > 2.8f) inputSampleR = 2.8f;
+        if (inputSampleR < -2.8f) inputSampleR = -2.8f;
+        if (inputSampleR > 0.0f)
+          inputSampleR = (inputSampleR * 2.0f) / (3.0f - inputSampleR);
         else
-          inputSampleR = -(inputSampleR * -2.0) / (3.0 + inputSampleR);
+          inputSampleR = -(inputSampleR * -2.0f) / (3.0f + inputSampleR);
 
         tempL = inputSampleL;
-        inputSampleL = (inputSampleL + avgBL) * 0.5;
+        inputSampleL = (inputSampleL + avgBL) * 0.5f;
         avgBL = tempL;
         tempR = inputSampleR;
-        inputSampleR = (inputSampleR + avgBR) * 0.5;
+        inputSampleR = (inputSampleR + avgBR) * 0.5f;
         avgBR = tempR;
 
-        *out1 = (float)inputSampleL;
-        *out2 = (float)inputSampleR;
+        *out1 = inputSampleL;
+        *out2 = inputSampleR;
         in1++; in2++; out1++; out2++;
       }
     }
 
   private:
-    double avgAL, avgAR, avgBL, avgBR;
+    float avgAL, avgAR, avgBL, avgBR;
 #endif
   };
 
