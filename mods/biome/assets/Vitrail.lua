@@ -57,7 +57,10 @@ end
 -- Wire an audio-rate modulatable inlet driven by a GainBias fader with its own branch.
 local function addFader(self, op, name, inletName, defaultBias)
   local o = self:addObject(name, app.GainBias())
-  o:hardSet("Gain", 1.0)
+  -- Mod gain defaults to 0: CV modulation is opt-in (habitat convention,
+  -- mod-gain-default-zero). A patched inlet does nothing until the user
+  -- raises this control's gain.
+  o:hardSet("Gain", 0.0)
   o:hardSet("Bias", defaultBias)
   local r = self:addObject(name .. "Range", app.MinMax())
   connect(o, "Out", r, "In")
@@ -96,7 +99,7 @@ function Vitrail:onLoadViews()
   return {
     routing = ModeSelector {
       button = "rout",
-      description = "Routing (A>B series / A+B parallel)",
+      description = "Routing",
       branch = self.branches.routing,
       gainbias = self.objects.routing,
       range = self.objects.routing,
@@ -104,7 +107,12 @@ function Vitrail:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = routingNames
+      modeNames = routingNames,
+      -- 50-item list: discrete accumulate-step encoder, threshold 12
+      -- (~3 detents/step) - deliberately below the habitat 16 standard
+      -- because the list is long. See mod ModeSelector notes.
+      discrete = true,
+      discreteThreshold = 12
     },
     clkSrc = ModeSelector {
       button = "clk",
@@ -116,7 +124,10 @@ function Vitrail:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = clkNames
+      modeNames = clkNames,
+      -- Discrete accumulate-step encoder at the habitat 16 standard.
+      discrete = true,
+      discreteThreshold = 16
     },
     cutA = GainBias {
       button = "cutA",

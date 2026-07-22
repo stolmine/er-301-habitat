@@ -1904,10 +1904,18 @@ note = "User, 2026-07-22, prompted by ngoma-hardware-hang being stale-blocked wh
 [[item]]
 id = "vitrail-ux-fixes"
 title = "Vitrail UX: cutoff-mod-gain default + routing-control encoder tick scaling"
-status = "todo"
-stamped = "2026-07-22T11:56:42-05:00"
+status = "done"
+stamped = "2026-07-22T15:24:21-05:00"
+attested = """2026-07-22 (biome 2.2.1.5): (1) all four Vitrail faders (cutA/cutB/res/gain) now default mod
+gain to 0 via the shared addFader helper - Vitrail is fully compliant with [[mod-gain-default-zero]],
+not just the cutoffs. (2) Ported the opt-in discrete accumulate-step-reset encoder from the
+spreadsheet ModeSelector into biome's ModeSelector (backward-compatible: LatchFilter/Discont don't
+pass discrete, unchanged); Vitrail routing = discrete threshold 12 (~3 detents/step, below the 16
+standard for the 50-item list), clkSrc = threshold 16 (standard). Both arches build, linux pkg
+installed to emu. Remaining: user's quick by-feel confirm in emu (subjective tuning nit - 12 is
+adjustable in steps of ~4 for +/-1 detent)."""
 area = "ui"
-touches = ["mods/biome/Vitrail.lua", "mods/biome/Vitrail.h", "mods/biome/Vitrail.cpp"]
+touches = ["mods/biome/assets/Vitrail.lua", "mods/biome/assets/ModeSelector.lua", "mods/biome/mod.mk"]
 verify = { kind = "manual", ref = "in emu: (1) cutoff-mod gain for A and B defaults to the agreed value; (2) scrolling the filter-routing/Mode list feels right - one step per ~12 accumulated ticks, faster than the 16-tick standard because the list is long" }
 note = """User, 2026-07-22 (two fixes; Vitrail is in biome now, NOT spreadsheet - the vitrail-unit
 item's touches path is stale, see reconcile-notes-memory-codebase).
@@ -1977,3 +1985,20 @@ linear <-> exponential <-> steeper-exponential; likely one variation control per
 shared shape knob - decide at build). Keep them SIMPLE and cheap; trigger/gate in, envelope out,
 time control(s) + the expo-variation control(s). Standard habitat conventions apply
 (mod gain default 0 per [[mod-gain-default-zero]], both-arches build, no branding)."""
+
+[[item]]
+id = "control-descriptions-drop-parentheticals"
+title = "Shorten Lua control descriptions that include parentheticals (they overflow the allotted space)"
+status = "todo"
+stamped = "2026-07-22T15:24:21-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "grep the catalog for control/description strings containing '(' ; each parenthetical either removed or the description restructured so it fits the on-screen space; spot-check a few in emu" }
+note = """User, 2026-07-22. Control descriptions with parenthetical clarifications almost never fit the
+space the UI allots, so the parenthetical gets clipped and reads worse than a bare label. SWEEP:
+grep all packages' Lua for control descriptions containing parentheticals (ViewControl/MenuControl
+`description = \"... (...)\"`) and shorten - drop the parenthetical or restructure. This is the
+existing going-forward rule [[feedback_no_parenthetical_descriptions]] applied retroactively to the
+shipped catalog. Already fixed opportunistically: Vitrail routing 'Routing (A>B series / A+B
+parallel)' -> 'Routing' (2026-07-22, biome 2.2.1.5). Pairs naturally with the
+[[reconcile-notes-memory-codebase]] pass. Watch: some parentheticals carry real info (units,
+value ranges) - restructure those rather than delete."""

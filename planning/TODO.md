@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**160 items** — 43 done, 7 wip, 108 todo, 2 blocked. *Rendered 2026-07-22.*
+**161 items** — 44 done, 7 wip, 108 todo, 2 blocked. *Rendered 2026-07-22.*
 
 ## DSP
 
@@ -122,6 +122,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 | ~ | `anamnesis-viz-opt` | Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf) | manual · 2026-07-11 |
 |   | `alembic-phase9-polish` | Alembic Phase 9: naming/defaults/mnemonic polish + serial stacked-waveform viz | screenshot: confirm final names/defaults/control labels + sphere-viz refinements, plus a stacked/cascading render of mWavetableLUT[64][256] with active reagent-scan frames lit and neighbors dimmed · 2026-07-09 |
+|   | `control-descriptions-drop-parentheticals` | Shorten Lua control descriptions that include parentheticals (they overflow the allotted space) | manual · 2026-07-22 |
 |   | `control-step-standards` | Adopt built-in dial-map standards across habitat; inventory every control vs the framework registry | manual · 2026-07-16 |
 |   | `controls-bias-modrange-audit` | Bias + mod-input range audit across all packages (CV can't reach full param range at 10x gainMap) | manual · 2026-07-09 |
 |   | `controls-discrete-encoder-rollout` | Roll out discrete-encoder ModeSelector mode to other discrete selectors (acceleration-independent) | manual · 2026-07-09 |
@@ -146,12 +147,12 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `ui-filterlist-type-label-stale` | FilterListControl type label doesn't refresh when macros change filter type (Tomograph + Petrichor) | manual · 2026-07-09 |
 |   | `ui-subdisplay-selection-indicator` | Sub-display selection indicator missing on paramMode ply-to-ply navigation (PINNED) | manual · 2026-07-09 |
 |   | `units-artsy-visualizers` | Artsy visualizers / generative sound+visual units (Norns/Paratek-inspired eye candy) | screenshot: build generative visual + audio units: glitchy audio/CV-driven visuals and a pseudo-3D serial-wavetable-frame view · 2026-07-09 |
-|   | `vitrail-ux-fixes` | Vitrail UX: cutoff-mod-gain default + routing-control encoder tick scaling | manual · 2026-07-22 |
 |   | `viz-offscreen-gate-all` | Bring the offscreen-viz gate to all spreadsheet units with a DSP-side visualization | manual · 2026-07-15 |
 | ✗ | `scope-headerless-research` | Scope: research headerless unit display | manual · 2026-07-09 |
 | ✓ | `controls-optioncontrol-hardening` | Controls hardening: OptionControl boolean/indexing fixes, bipolar correctness, passthrough Comparators | manual *(attested)* · 2026-07-09 |
 | ✓ | `scope-spectrogram` | Spectrogram — inline spectrum analyzer (256-pt pffft, peak-hold + RMS gradient, 2-ply) | manual *(attested)* · 2026-07-09 |
 | ✓ | `scope-units` | Scope unit family — inline passthrough scopes with timebase, Y-gain, and voltmeter readout | manual *(attested)* · 2026-07-09 |
+| ✓ | `vitrail-ux-fixes` | Vitrail UX: cutoff-mod-gain default + routing-control encoder tick scaling | manual *(attested)* · 2026-07-22 |
 
 ## Sequencing / timing
 
