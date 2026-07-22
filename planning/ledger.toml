@@ -1980,11 +1980,15 @@ verify = { kind = "manual", ref = "in emu: gate-triggered Expo D (decay-only) an
 note = """User, 2026-07-22. Two SIMPLE exponential envelope units for the biome package:
 - Expo D: decay-only (gate/trig -> jump to peak -> exponential decay to 0).
 - Expo AD: attack-decay (gate/trig -> exponential attack to peak -> exponential decay).
-Each with an EXPO-VARIATION control that shapes the curve (morph the segment contour, e.g.
-linear <-> exponential <-> steeper-exponential; likely one variation control per segment, or a
-shared shape knob - decide at build). Keep them SIMPLE and cheap; trigger/gate in, envelope out,
+Each with an EXPO-VARIATION control that shapes the curve (morph the segment contour,
+linear <-> exponential). Keep them SIMPLE and cheap; trigger/gate in, envelope out,
 time control(s) + the expo-variation control(s). Standard habitat conventions apply
-(mod gain default 0 per [[mod-gain-default-zero]], both-arches build, no branding)."""
+(mod gain default 0 per [[mod-gain-default-zero]], both-arches build, no branding).
+PLAN: planning/biome-expo-envelopes.md (2026-07-22) - signal model (linear phase ->
+variable-curvature shaper), the rational-bend curve function (one divide, no per-sample
+libm - preferred over powf for am335x), control lists, conventions, build steps, and 5
+open questions (AD curve-control count, bipolar curve, Level control, EOC out, retrigger
+behavior)."""
 
 [[item]]
 id = "control-descriptions-drop-parentheticals"
