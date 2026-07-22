@@ -313,7 +313,7 @@ local adapterBiases = {
 
 function DrumVoice:serialize()
   local t = Unit.serialize(self)
-  t.schema = 4 -- schema 4 = xform / randomize removed (.175)
+  t.schema = 5 -- schema 5 = modal engine transplant (measured-laws engine); param keys unchanged, laws changed - old presets load but sound different
   for _, name in ipairs(adapterBiases) do
     local obj = self.objects[name]
     if obj then

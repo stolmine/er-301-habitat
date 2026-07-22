@@ -7,6 +7,14 @@
 namespace stolmine
 {
 
+  // DrumVoice ("Ngoma") - macro drum voice.
+  //
+  // Engine: the modal lattice from Tessera.cpp (measured Trinity BLOCK laws,
+  // ~/repos/trinity-midi-harness/analysis-modemap.md), transplanted verbatim
+  // behind Ngoma's 14-parameter control surface and output chain (variable
+  // clipper, EQ, compressor, level). See planning/ngoma-tessera-integration.md
+  // section 4 for the mapping. Tessera.cpp/.h stay frozen as the reference
+  // model; do not port changes back from here.
   class DrumVoice : public od::Object
   {
   public:
@@ -43,25 +51,8 @@ namespace stolmine
 #endif
 
   private:
-    // NEON working set as class members. Lanes:
-    //   0 = phaseFm (metallic FM, 2.71x ratio)
-    //   1 = phase4  (spacious FM, 2.0x ratio)
-    //   2 = phase5  (sub-sine fundamental)
-    //   3 = reserved
-    float mPhaseBank[4];
-    float mIncBank[4];
-    float mSineBank[4];
-
-    // Second NEON quad for additive partials. Lane 0 = sub-octave;
-    // lanes 1-3 inharmonic membrane modes.
-    float mPartialPhases[4];
-    float mPartialInc[4];
-    float mPartialSines[4];
-
-    // Per-partial decay envelopes (NEON-vectorized decay update).
-    float mPartialEnvs[4];
-    float mPartialDecayCoeffs[4];
-
+    // Modal engine state (phase/env/mfreq/mdecay/ramp[16] etc.) lives in the
+    // heap-allocated Internal below (NEON-legal storage for the P5 pass).
     struct Internal;
     Internal *mpInternal;
   };
