@@ -1972,10 +1972,21 @@ against the firmware (reference_trinity_firmware_re, ~/repos/trinity-midi-harnes
 [[item]]
 id = "biome-expo-envelopes"
 title = "Biome: simple exponential envelopes - Expo D and Expo AD with expo-variation controls"
-status = "todo"
-stamped = "2026-07-22T11:59:18-05:00"
+status = "wip"
+stamped = "2026-07-22T15:50:57-05:00"
+attested = """2026-07-22 (biome 2.2.1.6): implemented per planning/biome-expo-envelopes.md. C++
+ExpoEnvelope.h/.cpp = two no-arg od::Object classes (ExpoD, ExpoAD, namespace stolmine) sharing the
+inline rational-bend shaper x/(1+k(1-x)); k baked per block from a bipolar [-1,1] Curve inlet via
+expf (no per-sample libm); state machine IDLE/ATTACK/DECAY, >0.5f rising-edge trigger, compute-then-
+advance so phase 0 = peak. All controls are audio-rate GainBias inlets with mod gain 0 default
+(Trigger/Attack/Decay/Curve(s)/Level); time on slewTimes map + octaveScaling; bare descriptions.
+SWIG bound, toc entries (Expo D 'ED', Expo AD 'EA'), both arches build, ExpoEnvelope.o NEON-clean (0
+suspect), graphic-virtual lint OK, Lua parses (luac -p), linux pkg installed to emu. REMAINING: emu
+audition (fire triggers, sweep Curve linear<->expo, AD attack+decay, retrigger) + am335x hardware
+sanity. Chosen defaults (open questions resolved): 2 curve controls for AD, bipolar curve, Level
+kept, no EOC out, retrigger restarts (may click on retrigger mid-decay - acceptable v1)."""
 area = "dsp"
-touches = ["mods/biome/"]
+touches = ["mods/biome/ExpoEnvelope.*", "mods/biome/assets/ExpoD.lua", "mods/biome/assets/ExpoAD.lua"]
 verify = { kind = "manual", ref = "in emu: gate-triggered Expo D (decay-only) and Expo AD (attack-decay) envelope units in biome; each has a curve/expo-variation control that morphs the segment shape (e.g. linear <-> exponential); both arches build; am335x sanity" }
 note = """User, 2026-07-22. Two SIMPLE exponential envelope units for the biome package:
 - Expo D: decay-only (gate/trig -> jump to peak -> exponential decay to 0).

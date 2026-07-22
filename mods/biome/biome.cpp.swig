@@ -26,6 +26,7 @@
 #include "ConstantRandom.h"
 // Vitrail: dual switched-capacitor character filter (demoted from spreadsheet).
 #include "Vitrail.h"
+#include "ExpoEnvelope.h"
 #define SWIGLUA
 %}
 
@@ -51,3 +52,4 @@
 %include "Transport.h"
 %include "ConstantRandom.h"
 %include "Vitrail.h"
+%include "ExpoEnvelope.h"
