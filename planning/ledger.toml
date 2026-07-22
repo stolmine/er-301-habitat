@@ -1808,3 +1808,29 @@ so the UI mutes nothing. Fix = add per-channel mute/solo state the DSP honours (
 family (In1..In6 / In1..In8, Fade spans N) rather than separate hand-written units, matching the
 multi-output framework / Scope-family pattern. Do the mute/solo fix first (it defines the
 per-channel gate the wider mixers also need)."""
+
+[[item]]
+id = "house-suppress-customs-optimize-ports"
+title = "House: suppress the original units, keep + optimize (NEON) the ports"
+status = "todo"
+stamped = "2026-07-21T22:52:53-05:00"
+area = "dsp"
+touches = ["mods/house/*"]
+verify = { kind = "manual", ref = "suppressed customs gone from picker but still compiled; ports build both arches with lower Cortex-A8 CPU; A/B unchanged tone" }
+note = """User direction 2026-07-21. Reopens the house package (was 'deprioritized indefinitely'
+2026-06-16 per [[reference_house_package]] - update that memory when this moves). Plan:
+(1) SUPPRESS the original-design units from the picker (remove from mods/house/assets/toc.lua,
+keep atoms + lua in package - same treatment as the spreadsheet suppression 2.8.3.71). Named:
+RotCoat, Filament, Carriage. All three are house originals (RotCoat = first original reverb;
+Filament = Console0-derived character filter; Carriage = original transient dynamics, already
+noted to converge toward bypass, see [[feedback_self_balancing_converges_to_bypass]]).
+(2) KEEP the ports and focus effort there: the 6 AW reverbs (kWoodRoom, WoodenBox, CreamCoat,
+BrightAmbience3, Verbity, Galactic) + the 2 Console0/tape ports (TickerTape, Lacquer).
+(3) OPTIMIZE the ports - NEON where the atom vectorizes + hybrid-float retrofits. Subsumes/links
+[[house-hybrid-float-retrofits]] (kWoodRoom 29%->~12-15%, WoodenBox 14%->~6-8%, mechanical, same
+pattern as CreamCoat). Extend the same pass to the other ports; profile each on Cortex-A8 first
+to target the heaviest. AW reverb atoms are largely gather-bound (like Fabula's Dattorro) so NEON
+may be limited on some - profile before assuming; hybrid-float is the reliable win. See
+[[feedback_aw_atom_port_template]], [[feedback_cortex_a8_no_double_in_hot_loops]].
+NOTE: also decide whether the suppressed originals stay as reference atoms or are eventually
+removed; default = keep compiled (reversible)."""

@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**154 items** — 41 done, 7 wip, 103 todo, 3 blocked. *Rendered 2026-07-21.*
+**155 items** — 41 done, 7 wip, 104 todo, 3 blocked. *Rendered 2026-07-21.*
 
 ## DSP
 
@@ -33,6 +33,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `house-atom-library` | House: AW tone-shaping atom library (first-15) + RotCoat/composition component atoms | manual · 2026-07-09 |
 |   | `house-harness-patterns` | House: harness patterns — Channel-Buss containment, envelope-driver, reduced-rate domain, kWoodRoom atom refactor | manual · 2026-07-09 |
 |   | `house-hybrid-float-retrofits` | House: hybrid-float retrofits for kWoodRoom (29%→~12-15%) and WoodenBox (14%→~6-8%) | manual · 2026-07-09 |
+|   | `house-suppress-customs-optimize-ports` | House: suppress the original units, keep + optimize (NEON) the ports | manual · 2026-07-21 |
 |   | `house-xyz-engine` | XYZ engine — cryptic 3-param original reverb (X morph, Y saturate+undersample, Z meta-routing) | manual · 2026-07-09 |
 |   | `mi-clouds-warps-improvements` | MI: Clouds gain-comp + further NEON (Clouds ShyFFT/SRC, Rings sympathetic/FM); Warps vocoder + drive | manual · 2026-07-09 |
 |   | `mirror-promotion` | Mirror: final habitat name + Voss-McCartney 1/f drift + wavetable frame-inventory audition | manual · 2026-07-09 |
