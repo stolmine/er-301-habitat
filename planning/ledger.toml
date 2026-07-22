@@ -789,7 +789,26 @@ status = "todo"
 stamped = "2026-07-09T20:59:09-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "on each target selector confirm one detent = one step regardless of turn speed, threshold ≈ 4×(detents/option) scaled to option count (full sweep ~30-40 detents, ≥2 detents/option)" }
-note = "planning/todo-archive.md '## Controls Audit'. Shipped on Parfait shaper-type (2.8.1.11 / v2.6.2). spreadsheet targets (share patched ModeSelector): Pecto patternFader(16)/resonator/slope(4), Rauschen algo(11), Filterbank scale, MultitapDelay vol/pan macros + grid/stack. Other packages (copy block into their ModeSelector.lua): Clouds mode(mi), Chime scale(porcelain), Sfera config + Lambda seed(catchall), stolmine duplicates. One build per package."
+note = """planning/todo-archive.md '## Controls Audit'. UNIVERSAL STANDARDIZATION PASS (user 2026-07-22):
+discrete-value scrolling is too touchy across essentially ALL habitat controls; standardize on
+Parfait's saturation-picker tick sensitivity as THE model. Mechanism (Parfait/ModeSelector,
+shipped 2.8.1.11): accumulate the RAW encoder change into encoderSum, step +/-1 only when
+|encoderSum| > threshold (=16), then reset - acceleration-independent, deliberate, not twitchy.
+The obvious approach (scaling the dial-map step) is wrong: it FIGHTS encoder acceleration so fast
+turns still jump. threshold 16 ~= a few detents per step.
+
+DONE so far: Parfait shaper-type; Spectrogram sub-display S1/S2 freq/amp toggles (scope 1.2.6,
+open-coded the accumulate-step-reset in the view's encoder() since it is not a ModeSelector).
+
+SCOPE (every discrete selector, not just ModeSelector-based):
+- ModeSelector-based (share the patched ModeSelector.lua per package): Pecto patternFader(16)/
+  resonator/slope(4), Rauschen algo(11), Filterbank scale, MultitapDelay vol/pan macros +
+  grid/stack; Clouds mode(mi), Chime scale(porcelain), Sfera config + Lambda seed(catchall),
+  stolmine duplicates. One build per package.
+- CUSTOM discrete selectors (open-code the accumulate/threshold-16 in their own encoder handler,
+  like Spectrogram): any sub-display toggle, OptionControl-style pickers, ModeSelector siblings,
+  and any control that steps through discrete values on encoder. Audit each package's ViewControls.
+Standard threshold = 16 unless a control has a strong reason to differ (document it if so)."""
 
 [[item]]
 id = "controls-subdisplay-and-viz"

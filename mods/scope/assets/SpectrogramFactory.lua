@@ -97,6 +97,11 @@ return function(plies, title, mnemonic)
       self.ampIdx = 1   -- 1=log(default), 2=lin, 3=exp
       self.focusedSlot = "freq"
       self.encoderState = Encoder.Coarse
+      -- Discrete-encoder feel modelled on Parfait's saturation picker (ModeSelector):
+      -- accumulate raw encoder ticks and step once per threshold, so acceleration
+      -- doesn't make discrete toggles twitchy. 16 ~= a few detents per step.
+      self.encoderSum = 0
+      self.discreteThreshold = 16
 
       self:applyFreq()
       self:applyAmp()
@@ -159,10 +164,22 @@ return function(plies, title, mnemonic)
     end
 
     function view:encoder(change, shifted)
-      if self.focusedSlot == "amp" then
-        self:bumpAmp(change)
-      else
-        self:bumpFreq(change)
+      -- Accumulate raw ticks; step once per threshold (Parfait ModeSelector model).
+      self.encoderSum = self.encoderSum + change
+      local step = 0
+      if self.encoderSum > self.discreteThreshold then
+        self.encoderSum = 0
+        step = 1
+      elseif self.encoderSum < -self.discreteThreshold then
+        self.encoderSum = 0
+        step = -1
+      end
+      if step ~= 0 then
+        if self.focusedSlot == "amp" then
+          self:bumpAmp(step)
+        else
+          self:bumpFreq(step)
+        end
       end
       return true
     end

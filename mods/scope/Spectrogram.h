@@ -275,11 +275,12 @@ namespace scope_unit
       char dbuf[16];
       snprintf(dbuf, sizeof(dbuf), "%.0fdB", db);
 
-      // Frequency on the upper line, level below - both right-justified in the region.
+      // Frequency on the upper line, level below - both size 10 (the dB was hard to read at
+      // size 8), right-justified so the columns stay put as digits change.
       int fw = (int)strlen(buf) * 6;
       fb.text(WHITE, mWorldLeft + mWidth - fw - 2, mWorldBottom + mHeight - 10, buf, 10);
-      int dw = (int)strlen(dbuf) * 5;
-      fb.text(9, mWorldLeft + mWidth - dw - 2, mWorldBottom, dbuf, 8);   // dimmer gray for the level
+      int dw = (int)strlen(dbuf) * 6;
+      fb.text(11, mWorldLeft + mWidth - dw - 2, mWorldBottom, dbuf, 10);   // level, slightly dimmer
     }
 
   private:
