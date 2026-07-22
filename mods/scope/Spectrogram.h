@@ -23,11 +23,15 @@ namespace scope_unit
     od::Inlet mInR{"In R"};
     od::Outlet mOutL{"Out L"};
     od::Outlet mOutR{"Out R"};
+    // FFT size (256 or 512): the wider ply units use 512 so the extra display width is
+    // backed by twice the bins, not interpolation. Set once by the unit (not CV).
+    od::Parameter mFFTSize{"FFT Size", 256.0f};
 #endif
 
     // SWIG-visible
     float getFFTPeak(int bin);
     float getFFTRms(int bin);
+    int getFFTSize();   // 256 or 512, current
 
   private:
     struct Internal;
@@ -77,15 +81,17 @@ namespace scope_unit
 
     inline float getPeak(int bin) const
     {
+      int maxBin = mpSpec->getFFTSize() / 2 - 1;   // 127 (256) or 255 (512)
       if (bin < 0) bin = 0;
-      if (bin > 127) bin = 127;
+      if (bin > maxBin) bin = maxBin;
       return mpSpec->getFFTPeak(bin);
     }
 
     inline float getRms(int bin) const
     {
+      int maxBin = mpSpec->getFFTSize() / 2 - 1;
       if (bin < 0) bin = 0;
-      if (bin > 127) bin = 127;
+      if (bin > maxBin) bin = maxBin;
       return mpSpec->getFFTRms(bin);
     }
 
@@ -108,7 +114,7 @@ namespace scope_unit
       float logMin = log2f(20.0f);
       float logMax = log2f(sr * 0.5f);
       float logRange = logMax - logMin;
-      float binHz = sr / 256.0f;
+      float binHz = sr / (float)mpSpec->getFFTSize();   // 256 or 512-pt
 
       int w = mWidth < kMaxWidth ? mWidth : kMaxWidth;
       float h = (float)mHeight;

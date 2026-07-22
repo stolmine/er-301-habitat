@@ -1,6 +1,7 @@
--- Shared builder for the Spectrogram family. Same DSP + graphic; the plies argument
--- only sets how many display sections wide the spectrum is drawn across (2/3/4/6 ply).
--- Wider = more horizontal pixels over the same log-frequency range = more visual detail.
+-- Shared builder for the Spectrogram family. The plies argument sets how many display
+-- sections wide the spectrum is drawn (2/3/4/6), AND selects the FFT size so the wider
+-- units are backed by real data: 2/3-ply use a 256-pt FFT (128 bins), 4/6-ply use a
+-- 512-pt FFT (256 bins). Wider canvas + twice the bins = earned resolution, not interp.
 local app = app
 local libscope = require "scope.libscope"
 local Class = require "Base.Class"
@@ -21,6 +22,8 @@ return function(plies, title, mnemonic)
 
   function Spectrogram:onLoadGraph(channelCount)
     local op = self:addObject("op", libscope.Spectrogram())
+    -- Wider units get the finer FFT so the extra display width shows real bins.
+    op:hardSet("FFT Size", plies >= 4 and 512 or 256)
     if channelCount > 1 then
       connect(self, "In1", op, "In L")
       connect(self, "In2", op, "In R")
