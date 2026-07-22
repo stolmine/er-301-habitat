@@ -1833,4 +1833,23 @@ to target the heaviest. AW reverb atoms are largely gather-bound (like Fabula's 
 may be limited on some - profile before assuming; hybrid-float is the reliable win. See
 [[feedback_aw_atom_port_template]], [[feedback_cortex_a8_no_double_in_hot_loops]].
 NOTE: also decide whether the suppressed originals stay as reference atoms or are eventually
-removed; default = keep compiled (reversible)."""
+removed; default = keep compiled (reversible).
+
+RANKED PLAN (Fable agent 2026-07-21, planning/house-ports-optimization.md; claims spot-verified:
+kWoodRoom 83 double/14 float, Verbity 53 (double)-casts/13 float arrays, CreamCoat 22 casts as
+the reference). NEON is NO-GO on every reverb (scattered single-element delay reads = no
+Cortex-A8 gather, the Fabula finding) - the whole pass is hybrid-float, not vectorization.
+Execution order (STEP 0 = on-device re-profile, all numbers are old spot readings/static):
+  1. kWoodRoom hybrid-float (full double -> float; ~29%->12-15%; M/LOW) - proven CreamCoat pattern.
+  2. WoodenBox hybrid-float (full double; ~14%->6-8%; S-M/LOW).
+  3. Verbity float-math (storage already float, 24x (double) cast-traps in the FDN math ->
+     CreamCoat float-math pattern; ~15-20%->10-13% inferred).
+  4. Galactic float-math + [opt] LFO sin->poly (2 sin+2 floor/sample, ~10% of CPU; the poly swap
+     is CHARACTER-CHANGING, user-decision); ~25-30%->mid-teens.
+  5. BrightAmbience3 float tap-accumulators (244-974 (double) convert-adds/sample) - CAVEAT:
+     gather-bound over a 256KB buffer (~entire L2), may be load-latency-bound not FLOP-bound, so
+     measure before/after; its 2x sin/sample poly swap also character-flagged.
+NOT WORTH TOUCHING: CreamCoat (reference hybrid), TickerTape (~1.7%), Lacquer (~2%, and a float
+retrofit already regressed + was reverted at 0.1.0.23 - do not retry).
+USER-DECISION (character-changing): the sin->poly swaps (Galactic/BA3); pow2 delay masks REJECTED
+(tone change)."""
