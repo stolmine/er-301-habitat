@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**156 items** — 42 done, 8 wip, 104 todo, 2 blocked. *Rendered 2026-07-22.*
+**159 items** — 43 done, 7 wip, 107 todo, 2 blocked. *Rendered 2026-07-22.*
 
 ## DSP
 
@@ -15,7 +15,6 @@ check`): a `done` item must have a real test or its named artifact.*
 | ~ | `ca-noise-texture` | Cellular-automata granular noise texture source (Vivary) | manual · 2026-07-16 |
 | ~ | `fabula-am335x` | Fabula reverb am335x port: hybrid-float + pow2-mask + zipper-fix | manual · 2026-07-12 |
 | ~ | `fdn-reverb` | NEON FDN reverb (Householder core + per-line filters + spectral flavor overlay) | manual · 2026-07-16 |
-| ~ | `tessera-into-ngoma` | Port Tessera's Trinity-derived innovations into Ngoma | manual *(attested)* · 2026-07-22 |
 | ~ | `trinity-fm-unit` | Profile Modbap Trinity FM voice + build ER-301 FM drum unit | manual · 2026-07-20 |
 | ~ | `vitrail-unit` | Vitrail - dual switched-capacitor character filter unit | manual · 2026-07-18 |
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
@@ -41,6 +40,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `multimode-drum-voice-profile` | Profile + emulate multi-engine digital drum voice (per mode) | manual · 2026-07-17 |
 |   | `multiout-nlc-chaos` | NLC chaotic modulation sources (clean-room): Sloth, Chua, Hyperchaos, Squid Axon, + lower-pri | manual · 2026-07-09 |
 |   | `ngoma-cpu-optimization` | Ngoma: CPU optimization round 2 (~33% mono Cortex-A8 idle is steep) | manual · 2026-07-09 |
+|   | `ngoma-shape-fm-campaign` | Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping) | manual · 2026-07-22 |
 |   | `ngoma-sound-tuning` | Ngoma: careful sound-tuning pass (param cross-couplings, per-partial decay, mode ratios, sub-octave) | manual · 2026-07-09 |
 |   | `open303-port` | Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit | manual · 2026-07-11 |
 |   | `parfait-shaper-oversampling` | Parfait: per-band shaper oversampling to kill aliasing audible as mix is lowered at high drive | manual · 2026-07-09 |
@@ -73,6 +73,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `spreadsheet-petrichor` | Petrichor (Multitap Delay) — 8-tap Rainmaker-style, per-tap SVF + granular pitch, xform, viz | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-rauschen` | Rauschen — parametric noise, 11 algorithms (White…Lorenz) with SVF morph + phase-space viz | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-visadhara` | Visadhara — clean-room BIA-style drum voice (Skin/Liquid/Metal configs) + Corona viz | manual *(attested)* · 2026-07-09 |
+| ✓ | `tessera-into-ngoma` | Port Tessera's Trinity-derived innovations into Ngoma | manual *(attested)* · 2026-07-22 |
 
 ## Units
 
@@ -133,6 +134,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `larets-stutter-shuffle-viz` | Larets: distinguish stutter vs shuffle viz (both read similar at a glance) | screenshot: confirm stutter telegraphs a boxed fixed-loop window with repeated contour fragments, and shuffle telegraphs rearranged fragment blocks (shifted or source-color-coded) · 2026-07-09 |
 |   | `mirror-step-and-viz` | Mirror: fine/coarse/super step audit on all controls + custom overview-ply viz | screenshot: confirm each fader's coarse/fine/super steps match musical granularity (Hz = octave/cents/sub-Hz; 0..1 = 0.1/0.01/0.001; Mirror knob approaches the Nyquist-flip region smoothly); confirm a custom overview viz (concentric fire wheels / rubber-band sphere / L-vs-R Lissajous) renders · 2026-07-09 |
 |   | `mix-control-standards` | Mix-control standards: equal-power crossfade (decorrelated) + 0.01 coarse step; fix the 0.1-coarse units | manual · 2026-07-16 |
+|   | `mod-gain-default-zero` | Mod gain defaults to 0 on all controls of all units (CV opt-in) - catalog-wide standardization | manual · 2026-07-22 |
 |   | `ngoma-viz-and-docs` | Ngoma: cube viz refinement + documentation refresh | screenshot: confirm cube scaled 0.85x with breathing room, state-driven face-fill textures (Character/Grit/Shape/ampEnv), exaggerated parallax + face-shrink/edge-expand-on-hit; drum-voice.md updated or superseded by the codex reference · 2026-07-09 |
 |   | `peaks-refinements` | Peaks: Tap LFO clock frequency-counter display, PLO continuous phase-increment, step-position viz | manual · 2026-07-09 |
 |   | `pecto-expansion-views` | Pecto: add per-control expansion views so submenu params open as full faders on enter (impasto pattern) | manual · 2026-07-14 |
@@ -143,6 +145,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `ui-filterlist-type-label-stale` | FilterListControl type label doesn't refresh when macros change filter type (Tomograph + Petrichor) | manual · 2026-07-09 |
 |   | `ui-subdisplay-selection-indicator` | Sub-display selection indicator missing on paramMode ply-to-ply navigation (PINNED) | manual · 2026-07-09 |
 |   | `units-artsy-visualizers` | Artsy visualizers / generative sound+visual units (Norns/Paratek-inspired eye candy) | screenshot: build generative visual + audio units: glitchy audio/CV-driven visuals and a pseudo-3D serial-wavetable-frame view · 2026-07-09 |
+|   | `vitrail-ux-fixes` | Vitrail UX: cutoff-mod-gain default + routing-control encoder tick scaling | manual · 2026-07-22 |
 |   | `viz-offscreen-gate-all` | Bring the offscreen-viz gate to all spreadsheet units with a DSP-side visualization | manual · 2026-07-15 |
 | ✗ | `scope-headerless-research` | Scope: research headerless unit display | manual · 2026-07-09 |
 | ✓ | `controls-optioncontrol-hardening` | Controls hardening: OptionControl boolean/indexing fixes, bipolar correctness, passthrough Comparators | manual *(attested)* · 2026-07-09 |

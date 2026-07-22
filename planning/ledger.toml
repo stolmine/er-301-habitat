@@ -1773,17 +1773,20 @@ e_hi's mechanism.
 [[item]]
 id = "tessera-into-ngoma"
 title = "Port Tessera's Trinity-derived innovations into Ngoma"
-status = "wip"
-stamped = "2026-07-22T11:46:07-05:00"
+status = "done"
+stamped = "2026-07-22T11:56:42-05:00"
 attested = """2026-07-22: implementation COMPLETE through P6 (commits addcf41..: P0 housekeeping,
 P1-P3 verbatim scalar transplant at 2.8.3.72 with 38-point descriptor parity vs frozen Tessera
 2.8.3.62 (median NCC 0.99999999976), P4 variable drive/clip at 2.8.3.73 (kDriveMax=12, default
 clipper=1.0 = corpus anchor, sqrt-law kept over tanh by A/B, equal-loudness makeup cubic), P5
 NEON 4-quad kernel at 2.8.3.74 (0 suspect hints; parity gate caught and fixed a quarter-cycle
 sine-convention offset), P6 release-notes stub. Parity harness: trinity-midi-harness/mirror
-(tessera-frozen + ngoma-mirror + parity_tessera_ngoma.py). REMAINING = the manual verify:
-hardware insert/trigger/no-hang smoke test, hardware CPU%, and the by-ear A/B on the rig
-(no device access this session; see the session hardware checklist)."""
+(tessera-frozen + ngoma-mirror + parity_tessera_ngoma.py).
+HARDWARE VERIFIED 2026-07-22 (user): Ngoma runs at ~10% mono on am335x (down from the old ~30%;
+the NEON pass landed), inserts/triggers clean, no hang - user 'incredible'. Port DONE. Two
+follow-ups spun out: Shape does not reproduce the hardware's FM-ish activity even at low clipping
+= its own campaign [[ngoma-shape-fm-campaign]]; the by-ear taste calibrations (grit low-drive
+dynamics, punch depth, makeup cap) remain open polish, not blockers."""
 area = "dsp"
 touches = ["mods/spreadsheet/DrumVoice.*"]
 verify = { kind = "manual", ref = "Ngoma reproduces Tessera's timbral behaviours on the shared parameters; A/B by ear" }
@@ -1897,3 +1900,63 @@ stamped = "2026-07-22T11:04:12-05:00"
 area = "infra"
 verify = { kind = "manual", ref = "sweep ledger.toml, planning/*.md, planning/TODO.md, docs/claude-memory/*, and the agent global-memory vault against HEAD; every blocked/wip/todo item reflects reality; stale claims corrected or closed; findings recorded" }
 note = "User, 2026-07-22, prompted by ngoma-hardware-hang being stale-blocked when it was fixed a while ago (now closed). Notes/memory have drifted from the code. Do a deliberate reconciliation pass: (1) ledger items whose status no longer matches reality (esp. blocked/wip); (2) claude-memory entries naming files/flags/versions that have since changed - verify each still exists; (3) planning docs describing abandoned/pivoted directions (Moire pivot, house deprioritization reopened, Vitrail biome demotion, suppressed units); (4) reconcile project_ngoma_codex + reference_house_package (flagged stale) against source. Candidate for a Fable-orchestrated drift sweep like the change-tracking/living-docs research (planning/change-tracking-living-docs.md, Baseline-Diff-Gate). Not urgent, but growing."
+
+[[item]]
+id = "vitrail-ux-fixes"
+title = "Vitrail UX: cutoff-mod-gain default + routing-control encoder tick scaling"
+status = "todo"
+stamped = "2026-07-22T11:56:42-05:00"
+area = "ui"
+touches = ["mods/biome/Vitrail.lua", "mods/biome/Vitrail.h", "mods/biome/Vitrail.cpp"]
+verify = { kind = "manual", ref = "in emu: (1) cutoff-mod gain for A and B defaults to the agreed value; (2) scrolling the filter-routing/Mode list feels right - one step per ~12 accumulated ticks, faster than the 16-tick standard because the list is long" }
+note = """User, 2026-07-22 (two fixes; Vitrail is in biome now, NOT spreadsheet - the vitrail-unit
+item's touches path is stale, see reconcile-notes-memory-codebase).
+(1) CUTOFF-MOD GAIN DEFAULT: the cutoff modulation gain ships preset at 1.0 for both the A and B
+cutoff controls. RESOLVED (user 2026-07-22): default to 0. This is just Vitrail's instance of the
+habitat-wide rule [[mod-gain-default-zero]] - mod gain defaults to 0 on ALL controls of ALL units
+(CV is opt-in). Do Vitrail's two cutoff controls here; the sweep across the rest of the catalog is
+the universal item.
+(2) FILTER ROUTING CONTROL TICK SCALING: the routing/Mode selector (6 taps + MODE_Q per the
+vitrail-unit build plan) is a long discrete list and scrolling it at the standard threshold is
+tedious. User's call: drop this ONE control to ~12 accumulated ticks/step, deliberately BELOW the
+habitat 16-tick standard, precisely because the list is long. This is a sanctioned per-control
+exception to [[controls-discrete-encoder-rollout]] (which otherwise standardizes on 16); record it
+there too so the audit doesn't 'correct' Vitrail back to 16. Same accumulate-step-reset mechanism,
+just threshold 12."""
+
+[[item]]
+id = "mod-gain-default-zero"
+title = "Mod gain defaults to 0 on all controls of all units (CV opt-in) - catalog-wide standardization"
+status = "todo"
+stamped = "2026-07-22T11:56:42-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "for each habitat unit, every modulatable control (GainBias-style faders with a CV Gain sub) ships with mod gain = 0 by default; patching CV does nothing until the user dials gain up; audit the whole catalog, not just new units" }
+note = """User, 2026-07-22 (arose from the Vitrail cutoff-mod-gain fix [[vitrail-ux-fixes]], generalized
+to the whole catalog). RULE: modulation gain should default to 0 for ALL controls on ALL units, so
+CV modulation is OPT-IN - a patched CV inlet has no effect until the user deliberately raises the
+gain. Today many controls default gain to 1 (full-depth response), which surprises users the moment
+they patch anything in. This is a standardization sweep like [[controls-discrete-encoder-rollout]]:
+audit every unit's GainBias/fader controls (both the C++ default and the Lua initial gain/Bias
+plumbing) and set the mod-gain default to 0. Applies going forward to every NEW unit too. Watch for
+controls where 0 gain would be surprising (none obvious yet - if one turns up, flag it, do not
+silently exempt). Bias/static default is unchanged; only the CV-depth gain default moves to 0."""
+
+[[item]]
+id = "ngoma-shape-fm-campaign"
+title = "Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping)"
+status = "todo"
+stamped = "2026-07-22T11:56:42-05:00"
+area = "dsp"
+touches = ["mods/spreadsheet/DrumVoice.*", "mods/spreadsheet/Tessera.cpp"]
+verify = { kind = "manual", ref = "Shape sweep on Ngoma (and/or frozen Tessera) reproduces the Trinity hardware's interesting FM-like spectral activity through the mid-Shape region, audibly, at low Clipper as well as high" }
+note = """User, 2026-07-22, after the tessera-into-ngoma port shipped and verified on hardware (10% mono).
+Shape remains an UNSOLVED problem carried over from Tessera: even at LOW clipping (where the fixed
+drive no longer flattens dynamics), Ngoma/Tessera do not produce the interesting FM-ish activity the
+Trinity hardware exhibits across the Shape throw. So it is NOT merely the drive regime kneecapping it
+(that was the pre-port hypothesis in [[tessera-into-ngoma]] / planning/ngoma-tessera-integration.md
+2.3) - there is a real mechanism gap. Shape today = lattice detune r (f=fc*(h+k*r)); the hardware's
+Shape evidently does more (candidate: an inter-mode / cross-partial FM the additive lattice does not
+capture; cf. the Moire coupled-FM experiments and the firmware findings). User's call: SEPARATE
+CAMPAIGN. Likely wants a fresh Trinity-hardware capture campaign targeting Shape specifically, read
+against the firmware (reference_trinity_firmware_re, ~/repos/trinity-midi-harness,
+~/Downloads/Trinity2_0_Firmware/re/findings-*.md). Not a port bug - a modeling frontier."""
