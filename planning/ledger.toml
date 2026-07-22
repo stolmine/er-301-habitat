@@ -1749,3 +1749,62 @@ NEXT: clean-room + am335x-optimized implementation of the settled mechanisms (gr
 grit->dec_time law, cubed-ramp decay, no attack ramp), then Character's register, s1, and
 e_hi's mechanism.
 """
+
+[[item]]
+id = "tessera-into-ngoma"
+title = "Port Tessera's Trinity-derived innovations into Ngoma"
+status = "todo"
+stamped = "2026-07-21T22:42:02-05:00"
+area = "dsp"
+touches = ["mods/spreadsheet/DrumVoice.*"]
+verify = { kind = "manual", ref = "Ngoma reproduces Tessera's timbral behaviours on the shared parameters; A/B by ear" }
+note = """Big ask (user, 2026-07-21). Ngoma (DrumVoice) and Tessera address the same basic
+principles and even share parameters, but Tessera carries the firmware-validated Trinity BLOCK
+innovations Ngoma lacks. Bring across, adapting to Ngoma's macro-morph architecture:
+- CUBED LINEAR RAMP decay (not exponential) - the biggest fidelity/feel win; tau-preserving map
+  T=9.952*tau^0.8445 (see Tessera.cpp rampDurMs / findings-envelope.md). No attack ramp.
+- Grit = common-mode noise-FM (measured mechanism, phase-domain), NOT a noise bed; 4 regimes
+  0.1/0.5/0.75 with grit>0.75 scaling dec_time to zero (the 808-snare shortening; exact
+  firmware law). kGritKappa table + jitNorm normalisation.
+- Intermod lattice f(h,k)=fc*(h+k*r) mode structure where it fits the macro voice.
+- Output stage: pre-clipper drive pinning peak + soft clip (findings-clipper.md).
+Ngoma codex: [[project_ngoma_codex]]. Tessera source is the reference impl; the firmware
+findings live in ~/repos/trinity-midi-harness (STATUS.md, findings-*.md) and
+~/Downloads/Trinity2_0_Firmware/re/. Tessera stays in-package (suppressed) as the reference.
+Needs a scoping plan first (which params map, what Ngoma's macro morph does at each corner)."""
+
+[[item]]
+id = "spectrum-ply-versions"
+title = "Spectrum (Spectrogram) 2/3/4/6-ply versions with higher spectral resolution"
+status = "todo"
+stamped = "2026-07-21T22:42:02-05:00"
+area = "dsp"
+touches = ["mods/scope/*"]
+verify = { kind = "manual", ref = "each ply variant shows correspondingly finer spectral resolution; inserts + renders on hardware" }
+note = """Plan (user, 2026-07-21). The scope package's Spectrogram is a single 256-point pffft
+analyzer. Wanted: 2/3/4/6-ply versions that stack analysis for additional spectral resolution
+as required (larger effective FFT / multi-resolution / averaged plies). Design questions to
+settle before building: does "ply" mean a larger single FFT (512/1024/2048/4096), overlapping
+multi-window averaging, or multi-resolution bands stitched together? CPU + latency tradeoff per
+ply on am335x (pffft is NEON-optimised already). Likely a param/arg-driven family like the
+Scope 1x/2x/Stereo set rather than N separate units. Confirm the resolution model with the user
+first."""
+
+[[item]]
+id = "fademixer-6-8-plus-mutesolo-fix"
+title = "FadeMixer 6/8-input versions + fix broken mute/solo"
+status = "todo"
+stamped = "2026-07-21T22:42:02-05:00"
+area = "units"
+touches = ["mods/biome/FadeMixer.*"]
+verify = { kind = "manual", ref = "6- and 8-input mixers crossfade correctly; mute and solo per-channel actually gate audio" }
+note = """User, 2026-07-21. Two parts:
+(1) BUG: the Fade Mixer's mute and solo controls do not function. They live in the BranchMeter
+ViewControls (mods/biome/assets/FadeMixer.lua, require Unit.ViewControl.BranchMeter). Diagnose
+whether BranchMeter's mute/solo is wired to anything in the DSP - FadeMixer.cpp has only
+mFade + mLevel params and In1..In4; there is likely NO per-channel gate/mute in the C++ at all,
+so the UI mutes nothing. Fix = add per-channel mute/solo state the DSP honours (gate each input).
+(2) FEATURE: 6-input and 8-input variants of the 4-input crossfader. Likely an args.channelCount
+family (In1..In6 / In1..In8, Fade spans N) rather than separate hand-written units, matching the
+multi-output framework / Scope-family pattern. Do the mute/solo fix first (it defines the
+per-channel gate the wider mixers also need)."""

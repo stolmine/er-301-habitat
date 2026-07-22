@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**151 items** — 41 done, 7 wip, 100 todo, 3 blocked. *Rendered 2026-07-21.*
+**154 items** — 41 done, 7 wip, 103 todo, 3 blocked. *Rendered 2026-07-21.*
 
 ## DSP
 
@@ -47,8 +47,10 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `petrichor-audio-quality` | Petrichor: audio-quality/feedback overhaul + grid-independent skew + tap-timing analysis | manual · 2026-07-09 |
 |   | `petrichor-stereo-and-crossfeed` | Petrichor/Pecto: shared-buffer stereo optimization + cross-feedback matrix (stretch) | manual · 2026-07-09 |
 |   | `research-audiorate-param-mod` | Research: how firmware native units accept clean audio-rate parameter modulation | manual · 2026-07-09 |
+|   | `spectrum-ply-versions` | Spectrum (Spectrogram) 2/3/4/6-ply versions with higher spectral resolution | manual · 2026-07-21 |
 |   | `station-x-character` | Station X (codescan FIR): improve output character (currently mostly noise-like filtering) | manual · 2026-07-09 |
 |   | `stolmine-original-units` | stolmine originals backlog: X-op FM voice + additional monokit filter models | manual · 2026-07-09 |
+|   | `tessera-into-ngoma` | Port Tessera's Trinity-derived innovations into Ngoma | manual · 2026-07-21 |
 |   | `units-2d-wavetable-osc` | 2D/3D Wavetable Oscillator — X/Y-addressable wavetable with stacked pseudo-3D frame viz | manual · 2026-07-09 |
 |   | `units-spectral-processing` | Spectral Mask + Spectral Gate — sidechain-keyed / crossover per-band spectral processors | manual · 2026-07-09 |
 | ✗ | `kryos-load-hang` | Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware | manual · 2026-07-09 |
@@ -78,6 +80,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `bionic-lester-clone` | Profiling-informed clone of a switched-capacitor dual filter (target: Bionic Lester Mk1) | manual · 2026-07-15 |
 |   | `blanda-scan-mixer` | Blanda — 3-input scan mixer (Morph-4-style continuous bell-scan, not a crossover) | manual · 2026-07-09 |
 |   | `etcher-io-range-and-presets` | Etcher: change I/O ranges to ±1V + add sine/triangle/user presets + hardware deviation verify | manual · 2026-07-09 |
+|   | `fademixer-6-8-plus-mutesolo-fix` | FadeMixer 6/8-input versions + fix broken mute/solo | manual · 2026-07-21 |
 |   | `jf-phase6-ship` | JF Phase 6: polish + ship (trig-LUT audit, CPU profile, test procedures, vanilla-compat, FM consolidation) | manual · 2026-07-09 |
 |   | `larets-effect-breakout` | Break out Larets effects into individual units where the catalog lacks standalone coverage | manual · 2026-07-15 |
 |   | `larets-feature-additions` | Larets: add reset input, random step selection, ring-mod + chorus effects, width + panning effects | manual · 2026-07-15 |

@@ -22,6 +22,7 @@ return {
     { title = "Varishape Voice", moduleName = "VarishapeVoice",       category = "Biome", keywords = "oscillator, voice, synth, varishape, generator" },
     { title = "Varishape Osc",  moduleName = "VarishapeOsc",        category = "Biome", keywords = "oscillator, varishape, polyblep, generator" },
     { title = "Transport",     moduleName = "Transport",            category = "Biome", keywords = "clock, transport, gate, trigger, utility" },
-    { title = "Constant Random", moduleName = "ConstantRandom",  category = "Biome", keywords = "random, noise, cv, utility, modulation, sample and hold, lfo" }
+    { title = "Constant Random", moduleName = "ConstantRandom",  category = "Biome", keywords = "random, noise, cv, utility, modulation, sample and hold, lfo" },
+    { title = "Vitrail",      moduleName = "Vitrail",              category = "Biome", keywords = "filter, switched capacitor, comb, aliasing, resonant, self-oscillation, character, clock, vitrail" }
   }
 }

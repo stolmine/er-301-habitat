@@ -4,11 +4,11 @@
 -- Systemic port of the profiling POC (planning/refs/compound-dsp-voice/): aliasing
 -- grit, clock combs, breathing self-oscillation all emerge from the mechanism.
 local app = app
-local libspreadsheet = require "spreadsheet.libspreadsheet"
+local libbiome = require "biome.libbiome"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
-local ModeSelector = require "spreadsheet.ModeSelector"
+local ModeSelector = require "biome.ModeSelector"
 local Encoder = require "Encoder"
 local MenuHeader = require "Unit.MenuControl.Header"
 local OptionControl = require "Unit.MenuControl.OptionControl"
@@ -76,7 +76,7 @@ local function addModeParam(self, op, name, paramName, defaultBias)
 end
 
 function Vitrail:onLoadGraph(channelCount)
-  local op = self:addObject("op", libspreadsheet.Vitrail())
+  local op = self:addObject("op", libbiome.Vitrail())
   connect(self, "In1", op, "In")
 
   addFader(self, op, "cutA", "Cutoff A", 0.5)
