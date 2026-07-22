@@ -43,7 +43,8 @@ namespace od {
     virtual void process() {}
     void addInput(Inlet &) {}
     void addOutput(Outlet &) {}
-    void addParameter(Parameter &) {}
+    void addParameter(Parameter &p) { mParams.push_back(&p); }
+    std::vector<Parameter*> mParams;   // registration order, for the offline harness
   };
 
 }

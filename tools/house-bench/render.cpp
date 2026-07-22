@@ -15,8 +15,7 @@ int main(int argc, char** argv) {
   int sr = 48000, fr = 128; od::globalConfig.sampleRate = sr; od::globalConfig.frameLength = fr;
   house::CLASS op;
 #ifdef SETPARAMS
-  { const char* pd=getenv("P0"); const char* pc=getenv("P1"); const char* pp=getenv("P2"); const char* pm=getenv("P3");
-    if(pd) op.mDrive.hardSet(atof(pd)); if(pc) op.mCut.hardSet(atof(pc)); if(pp) op.mPolish.hardSet(atof(pp)); if(pm) op.mMix.hardSet(atof(pm)); }
+  for (size_t k=0;k<op.mParams.size();k++){ char e[8]; snprintf(e,8,"P%zu",k); const char* v=getenv(e); if(v) op.mParams[k]->hardSet((float)atof(v)); }
 #endif
   // deterministic test signal: filtered noise + periodic impulses (excites filters + transients)
   int N = sr * 2; std::vector<float> outacc; double rms = 0;
