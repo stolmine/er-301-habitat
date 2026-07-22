@@ -5,14 +5,13 @@
 namespace stolmine
 {
 
-  // Moire - a modulated, coupled RESONANT network (moving intermod lattice, resonator core).
+  // Moire (prototype pivot) - rain on bells / windchimes: a scattering meso-time network.
   //
-  // The Trinity RE proved BLOCK's spectrum is an intermod lattice f(h,k)=fc*(h+k*r). Moire
-  // exposes r as a playable, audio-rate control so the lattice MOVES - but the partials are
-  // not sine oscillators, they are 2-pole RESONATORS tuned to the lattice frequencies, driven
-  // by noise and by each other. That gives body (resonance), weight that accumulates in the
-  // bank, and emergent behaviour from the coupling that a sine bank cannot. Not Rings: Rings'
-  // modes are fixed and independent; here they MOVE (r/drift/lock) and DRIVE each other (couple).
+  // Sparse stochastic strikes (Density = rain) hit a bank of tuned RESONATORS (bells). Each
+  // bell's ring is fed into a shared meso-time delay; taps read it back (tens-to-hundreds of
+  // ms later) and re-strike OTHER bells, so one drop ripples through the network as a cascade
+  // (Bounce). Petrichor's architecture (multitap delay + resonance + feedback) voiced as
+  // rain-struck bells. Bell frequencies still follow the moving lattice f(h,k)=fc*(h+k*r).
   class Moire : public od::Object
   {
   public:
@@ -23,12 +22,13 @@ namespace stolmine
     virtual void process();
 
     od::Inlet mVOct{"V/Oct"};
-    od::Inlet mSpread{"Spread"};   // r - the lattice detune; audio-rate, 0..2
-    od::Inlet mBody{"Body"};       // resonator Q: breathy (0) -> sharp ring (1)
-    od::Inlet mAir{"Air"};         // noise excitation level
-    od::Inlet mCouple{"Couple"};   // resonator cross-feedback (the network/matrix seed)
-    od::Inlet mDrift{"Drift"};     // per-resonator slow frequency wander (life)
-    od::Inlet mLock{"Lock"};       // snap resonant frequencies toward the harmonic grid
+    od::Inlet mSpread{"Spread"};   // r - lattice/bell tuning; audio-rate, 0..2
+    od::Inlet mBody{"Body"};       // bell Q / ring time
+    od::Inlet mDensity{"Density"}; // rain strike rate
+    od::Inlet mBounce{"Bounce"};   // meso-time cascade feedback (drop ripples through network)
+    od::Inlet mTime{"Time"};       // meso-delay window (the space the signal bounces in)
+    od::Inlet mDrift{"Drift"};     // per-bell slow frequency wander
+    od::Inlet mLock{"Lock"};       // snap bell frequencies toward the harmonic grid
     od::Outlet mOut{"Out"};
 
     od::Parameter mF0{"Fundamental", 110.0f};   // base pitch Hz (+ V/oct)

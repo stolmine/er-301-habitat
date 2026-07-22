@@ -63,10 +63,11 @@ function Moire:onLoadGraph(channelCount)
     self:addMonoBranch(name, o, "In", o, "Out")
   end
   addFader("spread", "Spread", 0.0)
-  addFader("body", "Body", 0.6)
-  addFader("air", "Air", 0.4)
-  addFader("couple", "Couple", 0.0)
-  addFader("drift", "Drift", 0.2)
+  addFader("body", "Body", 0.8)
+  addFader("density", "Density", 0.4)
+  addFader("bounce", "Bounce", 0.3)
+  addFader("time", "Time", 0.4)
+  addFader("drift", "Drift", 0.15)
   addFader("lock", "Lock", 0.0)
 
   -- Level.
@@ -110,11 +111,12 @@ function Moire:onLoadViews()
       biasPrecision = 1,
       initialBias = 110.0
     },
-    spread = fader("spread", "Spread (r)", "spread", spreadMap, 0.0),
-    body = fader("body", "Body (Q)", "body", unitMap, 0.6),
-    air = fader("air", "Air (excite)", "air", unitMap, 0.4),
-    couple = fader("couple", "Couple (network)", "couple", unitMap, 0.0),
-    drift = fader("drift", "Drift", "drift", unitMap, 0.2),
+    spread = fader("spread", "Spread (bell tuning)", "spread", spreadMap, 0.0),
+    body = fader("body", "Body (ring time)", "body", unitMap, 0.8),
+    density = fader("density", "Density (rain)", "density", unitMap, 0.4),
+    bounce = fader("bounce", "Bounce (cascade)", "bounce", unitMap, 0.3),
+    time = fader("time", "Time (meso window)", "time", unitMap, 0.4),
+    drift = fader("drift", "Drift", "drift", unitMap, 0.15),
     lock = fader("lock", "Lock (crystalline)", "lock", unitMap, 0.0),
     level = GainBias {
       button = "level",
@@ -127,7 +129,7 @@ function Moire:onLoadViews()
       initialBias = 0.5
     }
   }, {
-    expanded = { "tune", "f0", "spread", "body", "air", "couple", "drift", "lock", "level" },
+    expanded = { "tune", "f0", "spread", "body", "density", "bounce", "time", "drift", "lock", "level" },
     collapsed = {}
   }
 end
