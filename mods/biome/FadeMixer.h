@@ -5,6 +5,10 @@
 namespace stolmine
 {
 
+  // FadeMixer - crossfade across N inputs (4/6/8) with a single Fade control.
+  // Fade sweeps a triangular equal-power window across the ACTIVE inputs; the
+  // active count is set by the Inputs parameter (the Lua unit fixes it to 4/6/8
+  // and wires that many branches). Extra inlets stay silent.
   class FadeMixer : public od::Object
   {
   public:
@@ -17,9 +21,14 @@ namespace stolmine
     od::Inlet mIn2{"In2"};
     od::Inlet mIn3{"In3"};
     od::Inlet mIn4{"In4"};
+    od::Inlet mIn5{"In5"};
+    od::Inlet mIn6{"In6"};
+    od::Inlet mIn7{"In7"};
+    od::Inlet mIn8{"In8"};
     od::Outlet mOutput{"Out"};
-    od::Parameter mFade{"Fade", 0.0f};   // 0-1, position across 4 inputs
-    od::Parameter mLevel{"Level", 1.0f}; // output level
+    od::Parameter mFade{"Fade", 0.0f};     // 0-1, position across the active inputs
+    od::Parameter mLevel{"Level", 1.0f};   // output level
+    od::Parameter mInputs{"Inputs", 4.0f}; // active input count (4/6/8)
 #endif
   };
 

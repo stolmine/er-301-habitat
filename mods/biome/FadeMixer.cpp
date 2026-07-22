@@ -12,9 +12,14 @@ namespace stolmine
     addInput(mIn2);
     addInput(mIn3);
     addInput(mIn4);
+    addInput(mIn5);
+    addInput(mIn6);
+    addInput(mIn7);
+    addInput(mIn8);
     addOutput(mOutput);
     addParameter(mFade);
     addParameter(mLevel);
+    addParameter(mInputs);
   }
 
   FadeMixer::~FadeMixer()
@@ -23,34 +28,35 @@ namespace stolmine
 
   void FadeMixer::process()
   {
-    float *in1 = mIn1.buffer();
-    float *in2 = mIn2.buffer();
-    float *in3 = mIn3.buffer();
-    float *in4 = mIn4.buffer();
+    float *in[8] = {
+      mIn1.buffer(), mIn2.buffer(), mIn3.buffer(), mIn4.buffer(),
+      mIn5.buffer(), mIn6.buffer(), mIn7.buffer(), mIn8.buffer()};
     float *out = mOutput.buffer();
 
     float fade = CLAMP(0.0f, 1.0f, mFade.value());
     float level = CLAMP(0.0f, 4.0f, mLevel.value());
+    int n = (int)(mInputs.value() + 0.5f);
+    if (n < 2) n = 2;
+    if (n > 8) n = 8;
 
-    // Map fade 0-1 across 4 inputs with equal-power crossfade
-    // fade=0: all in1, fade=0.333: all in2, fade=0.667: all in3, fade=1: all in4
-    // Each input has a triangular window centered at its position
-    float pos = fade * 3.0f; // 0-3 across 4 inputs
-
-    float g1 = 1.0f - CLAMP(0.0f, 1.0f, fabsf(pos - 0.0f));
-    float g2 = 1.0f - CLAMP(0.0f, 1.0f, fabsf(pos - 1.0f));
-    float g3 = 1.0f - CLAMP(0.0f, 1.0f, fabsf(pos - 2.0f));
-    float g4 = 1.0f - CLAMP(0.0f, 1.0f, fabsf(pos - 3.0f));
-
-    // Equal-power: sqrt of linear gains
-    g1 = sqrtf(g1);
-    g2 = sqrtf(g2);
-    g3 = sqrtf(g3);
-    g4 = sqrtf(g4);
+    // Fade sweeps a triangular window across the active inputs: fade=0 -> all
+    // input 0, fade=1 -> all input n-1, each input centered at its own slot with
+    // an equal-power (sqrt) triangular gain. Same law as the original 4-input
+    // unit, generalised to n (at n=4 the gains are byte-identical).
+    float pos = fade * (float)(n - 1);
+    float g[8];
+    for (int c = 0; c < n; c++)
+    {
+      float lin = 1.0f - CLAMP(0.0f, 1.0f, fabsf(pos - (float)c));
+      g[c] = sqrtf(lin);
+    }
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
-      out[i] = (in1[i] * g1 + in2[i] * g2 + in3[i] * g3 + in4[i] * g4) * level;
+      float acc = 0.0f;
+      for (int c = 0; c < n; c++)
+        acc += in[c][i] * g[c];
+      out[i] = acc * level;
     }
   }
 
