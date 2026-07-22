@@ -175,6 +175,7 @@ namespace house
       double cojonesScalar = 0.5 + cutKnob * 2.5;      // [0.5, 3.0]
       const double kBodyScalar = 0.3;
       const double kBreathyScalar = 0.2;
+      const float kBodyScalarF = 0.3f, kBreathyScalarF = 0.2f;
 
       // Polish: continuous knob 0..1 → fatness 3..32 (int) AND
       // continuous wet blend 0.2..1.0. Fatness is intrinsically
@@ -223,49 +224,59 @@ namespace house
       // bracket-rate, which is below 48k Nyquist of host. Anti-alias
       // attenuation of frequencies above ~12kHz before sample-drop.
       const double kDecimateAlpha = 0.5;
+      const float kDecimateAlphaF = 0.5f;
+
+      // Bake block-rate params to float for the pure-float per-sample path (hybrid-float;
+      // invFatnessAndScale stays double - it multiplies large int sums in runTapeFat).
+      float driveGainF = (float)driveGain;
+      float cycleStepF = (float)cycleStep;
+      float cojonesScalarF = (float)cojonesScalar;
+      float tapeFatWetF = (float)tapeFatWet, tapeFatDryF = (float)tapeFatDry;
+      float lowBoostF = (float)lowBoost, lowLpAlphaF = (float)lowLpAlpha;
+      float mixF = (float)mix, oneMinusMixF = (float)oneMinusMix;
 
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
       {
-        double inL = *in1;
-        double inR = *in2;
-        if (fabs(inL) < 1.18e-23) inL = 1.18e-17;
-        if (fabs(inR) < 1.18e-23) inR = 1.18e-17;
-        double dryL = inL;
-        double dryR = inR;
+        float inL = *in1;
+        float inR = *in2;
+        if (fabsf(inL) < 1.18e-23f) inL = 1.18e-17f;
+        if (fabsf(inR) < 1.18e-23f) inR = 1.18e-17f;
+        float dryL = inL;
+        float dryR = inR;
 
         // ===== Stage 1: Console0Channel sat (input drive) =====
 
-        double tempL = inL;
-        inL = (inL + mConsoleChAvgAL) * 0.5;
+        float tempL = inL;
+        inL = (inL + mConsoleChAvgAL) * 0.5f;
         mConsoleChAvgAL = tempL;
-        double tempR = inR;
-        inR = (inR + mConsoleChAvgAR) * 0.5;
+        float tempR = inR;
+        inR = (inR + mConsoleChAvgAR) * 0.5f;
         mConsoleChAvgAR = tempR;
 
-        inL *= driveGain;
-        inR *= driveGain;
+        inL *= driveGainF;
+        inR *= driveGainF;
 
         // BigFastSin (polynomial sat, verbatim from AW Console0Channel)
-        if (inL > 1.4137166941154) inL = 1.4137166941154;
-        if (inL < -1.4137166941154) inL = -1.4137166941154;
-        if (inL > 0.0)
-          inL = (inL / 2.0) * (2.8274333882308 - inL);
+        if (inL > 1.4137166941154f) inL = 1.4137166941154f;
+        if (inL < -1.4137166941154f) inL = -1.4137166941154f;
+        if (inL > 0.0f)
+          inL = (inL / 2.0f) * (2.8274333882308f - inL);
         else
-          inL = -(inL / -2.0) * (2.8274333882308 + inL);
+          inL = -(inL / -2.0f) * (2.8274333882308f + inL);
 
-        if (inR > 1.4137166941154) inR = 1.4137166941154;
-        if (inR < -1.4137166941154) inR = -1.4137166941154;
-        if (inR > 0.0)
-          inR = (inR / 2.0) * (2.8274333882308 - inR);
+        if (inR > 1.4137166941154f) inR = 1.4137166941154f;
+        if (inR < -1.4137166941154f) inR = -1.4137166941154f;
+        if (inR > 0.0f)
+          inR = (inR / 2.0f) * (2.8274333882308f - inR);
         else
-          inR = -(inR / -2.0) * (2.8274333882308 + inR);
+          inR = -(inR / -2.0f) * (2.8274333882308f + inR);
 
         tempL = inL;
-        inL = (inL + mConsoleChAvgBL) * 0.5;
+        inL = (inL + mConsoleChAvgBL) * 0.5f;
         mConsoleChAvgBL = tempL;
         tempR = inR;
-        inR = (inR + mConsoleChAvgBR) * 0.5;
+        inR = (inR + mConsoleChAvgBR) * 0.5f;
         mConsoleChAvgBR = tempR;
 
         // ===== Stage 2: Downsample shell with Cojones inside =====
@@ -281,20 +292,21 @@ namespace house
           mCyclePrevL = mCycleOutL;
           mCyclePrevR = mCycleOutR;
 
-          double avgL = (mInAccumCount > 0) ? (mInAccumL / (double)mInAccumCount) : 0.0;
-          double avgR = (mInAccumCount > 0) ? (mInAccumR / (double)mInAccumCount) : 0.0;
-          mInAccumL = 0.0;
-          mInAccumR = 0.0;
+          float avgL = (mInAccumCount > 0) ? (mInAccumL / (float)mInAccumCount) : 0.0f;
+          float avgR = (mInAccumCount > 0) ? (mInAccumR / (float)mInAccumCount) : 0.0f;
+          mInAccumL = 0.0f;
+          mInAccumR = 0.0f;
           mInAccumCount = 0;
 
           mCycleOutL = runCojones(avgL, mStoredL, mDiffL,
-                                  cojonesScalar, kBodyScalar, kBreathyScalar);
+                                  cojonesScalarF, kBodyScalarF, kBreathyScalarF);
           mCycleOutR = runCojones(avgR, mStoredR, mDiffR,
-                                  cojonesScalar, kBodyScalar, kBreathyScalar);
+                                  cojonesScalarF, kBodyScalarF, kBreathyScalarF);
         }
 
-        double shellOutL = mCyclePrevL + (mCycleOutL - mCyclePrevL) * mCyclePhase;
-        double shellOutR = mCyclePrevR + (mCycleOutR - mCyclePrevR) * mCyclePhase;
+        float phaseF = (float)mCyclePhase;
+        float shellOutL = mCyclePrevL + (mCycleOutL - mCyclePrevL) * phaseF;
+        float shellOutR = mCyclePrevR + (mCycleOutR - mCyclePrevR) * phaseF;
 
         // ===== Stage 3: 2x upsample bracket with TapeFat inside =====
         //
@@ -302,83 +314,83 @@ namespace house
         // + current). TapeFat runs at each. Decimation IIR LPF runs at
         // 2x rate; we take the second LPF state as the host-rate output.
 
-        double upSampleAL = (mPrevHostL + shellOutL) * 0.5;
-        double upSampleAR = (mPrevHostR + shellOutR) * 0.5;
-        double upSampleBL = shellOutL;
-        double upSampleBR = shellOutR;
+        float upSampleAL = (mPrevHostL + shellOutL) * 0.5f;
+        float upSampleAR = (mPrevHostR + shellOutR) * 0.5f;
+        float upSampleBL = shellOutL;
+        float upSampleBR = shellOutR;
 
         mPrevHostL = shellOutL;
         mPrevHostR = shellOutR;
 
-        double tapeFatOutAL, tapeFatOutAR;
+        float tapeFatOutAL, tapeFatOutAR;
         runTapeFat(upSampleAL, upSampleAR, fatness, invFatnessAndScale,
-                   tapeFatWet, tapeFatDry, tapeFatOutAL, tapeFatOutAR);
+                   tapeFatWetF, tapeFatDryF, tapeFatOutAL, tapeFatOutAR);
 
-        double tapeFatOutBL, tapeFatOutBR;
+        float tapeFatOutBL, tapeFatOutBR;
         runTapeFat(upSampleBL, upSampleBR, fatness, invFatnessAndScale,
-                   tapeFatWet, tapeFatDry, tapeFatOutBL, tapeFatOutBR);
+                   tapeFatWetF, tapeFatDryF, tapeFatOutBL, tapeFatOutBR);
 
         // Decimation IIR LPF applied to BOTH upsampled outputs sequentially,
         // then sampled at the second position = host rate.
-        mDecimateLPL = mDecimateLPL * (1.0 - kDecimateAlpha)
-                       + tapeFatOutAL * kDecimateAlpha;
-        mDecimateLPL = mDecimateLPL * (1.0 - kDecimateAlpha)
-                       + tapeFatOutBL * kDecimateAlpha;
-        mDecimateLPR = mDecimateLPR * (1.0 - kDecimateAlpha)
-                       + tapeFatOutAR * kDecimateAlpha;
-        mDecimateLPR = mDecimateLPR * (1.0 - kDecimateAlpha)
-                       + tapeFatOutBR * kDecimateAlpha;
-        double bracketOutL = mDecimateLPL;
-        double bracketOutR = mDecimateLPR;
+        mDecimateLPL = mDecimateLPL * (1.0f - kDecimateAlphaF)
+                       + tapeFatOutAL * kDecimateAlphaF;
+        mDecimateLPL = mDecimateLPL * (1.0f - kDecimateAlphaF)
+                       + tapeFatOutBL * kDecimateAlphaF;
+        mDecimateLPR = mDecimateLPR * (1.0f - kDecimateAlphaF)
+                       + tapeFatOutAR * kDecimateAlphaF;
+        mDecimateLPR = mDecimateLPR * (1.0f - kDecimateAlphaF)
+                       + tapeFatOutBR * kDecimateAlphaF;
+        float bracketOutL = mDecimateLPL;
+        float bracketOutR = mDecimateLPR;
 
         // ===== Stage 4: Console0Bus desat (output recovery) =====
 
         tempL = bracketOutL;
-        bracketOutL = (bracketOutL + mConsoleBsAvgAL) * 0.5;
+        bracketOutL = (bracketOutL + mConsoleBsAvgAL) * 0.5f;
         mConsoleBsAvgAL = tempL;
         tempR = bracketOutR;
-        bracketOutR = (bracketOutR + mConsoleBsAvgAR) * 0.5;
+        bracketOutR = (bracketOutR + mConsoleBsAvgAR) * 0.5f;
         mConsoleBsAvgAR = tempR;
 
-        bracketOutL *= driveGain;
-        bracketOutR *= driveGain;
+        bracketOutL *= driveGainF;
+        bracketOutR *= driveGainF;
 
         // BigFastArcSin (rational desat, verbatim from AW Console0Buss)
-        if (bracketOutL > 2.8) bracketOutL = 2.8;
-        if (bracketOutL < -2.8) bracketOutL = -2.8;
-        if (bracketOutL > 0.0)
-          bracketOutL = (bracketOutL * 2.0) / (3.0 - bracketOutL);
+        if (bracketOutL > 2.8f) bracketOutL = 2.8f;
+        if (bracketOutL < -2.8f) bracketOutL = -2.8f;
+        if (bracketOutL > 0.0f)
+          bracketOutL = (bracketOutL * 2.0f) / (3.0f - bracketOutL);
         else
-          bracketOutL = -(bracketOutL * -2.0) / (3.0 + bracketOutL);
+          bracketOutL = -(bracketOutL * -2.0f) / (3.0f + bracketOutL);
 
-        if (bracketOutR > 2.8) bracketOutR = 2.8;
-        if (bracketOutR < -2.8) bracketOutR = -2.8;
-        if (bracketOutR > 0.0)
-          bracketOutR = (bracketOutR * 2.0) / (3.0 - bracketOutR);
+        if (bracketOutR > 2.8f) bracketOutR = 2.8f;
+        if (bracketOutR < -2.8f) bracketOutR = -2.8f;
+        if (bracketOutR > 0.0f)
+          bracketOutR = (bracketOutR * 2.0f) / (3.0f - bracketOutR);
         else
-          bracketOutR = -(bracketOutR * -2.0) / (3.0 + bracketOutR);
+          bracketOutR = -(bracketOutR * -2.0f) / (3.0f + bracketOutR);
 
         tempL = bracketOutL;
-        bracketOutL = (bracketOutL + mConsoleBsAvgBL) * 0.5;
+        bracketOutL = (bracketOutL + mConsoleBsAvgBL) * 0.5f;
         mConsoleBsAvgBL = tempL;
         tempR = bracketOutR;
-        bracketOutR = (bracketOutR + mConsoleBsAvgBR) * 0.5;
+        bracketOutR = (bracketOutR + mConsoleBsAvgBR) * 0.5f;
         mConsoleBsAvgBR = tempR;
 
         // ===== Stage 4b: Low-shelf compensation (Cut-scaled) =====
         // One-pole LP of wet signal, summed back to bump lows.
-        mLowLpL = mLowLpL * (1.0 - lowLpAlpha) + bracketOutL * lowLpAlpha;
-        mLowLpR = mLowLpR * (1.0 - lowLpAlpha) + bracketOutR * lowLpAlpha;
-        bracketOutL += mLowLpL * lowBoost;
-        bracketOutR += mLowLpR * lowBoost;
+        mLowLpL = mLowLpL * (1.0f - lowLpAlphaF) + bracketOutL * lowLpAlphaF;
+        mLowLpR = mLowLpR * (1.0f - lowLpAlphaF) + bracketOutR * lowLpAlphaF;
+        bracketOutL += mLowLpL * lowBoostF;
+        bracketOutR += mLowLpR * lowBoostF;
 
         // ===== Stage 5: ChainMix dry/wet =====
 
-        double outL = bracketOutL * mix + dryL * oneMinusMix;
-        double outR = bracketOutR * mix + dryR * oneMinusMix;
+        float outL = bracketOutL * mixF + dryL * oneMinusMixF;
+        float outR = bracketOutR * mixF + dryR * oneMinusMixF;
 
-        *out1 = (float)outL;
-        *out2 = (float)outR;
+        *out1 = outL;
+        *out2 = outR;
         in1++; in2++; out1++; out2++;
       }
     }
@@ -390,9 +402,9 @@ namespace house
     // breathy) shape which combination of smoothed + disparity + average
     // dominates the output. Math verbatim from AW Cojones source per
     // feedback_identical_means_identical.
-    static inline double runCojones(double inputSample,
-                                    double *stored, double *diff,
-                                    double cojones, double body, double breathy)
+    static inline float runCojones(float inputSample,
+                                    float *stored, float *diff,
+                                    float cojones, float body, float breathy)
     {
       // Shift history
       stored[1] = stored[0];
@@ -405,30 +417,30 @@ namespace house
       diff[0] = stored[0] - stored[1];
 
       // Progressive averages (cumulative sums then normalize by tap count)
-      double avg0 = diff[0] + diff[1];
-      double avg1 = avg0 + diff[2];
-      double avg2 = avg1 + diff[3];
-      double avg3 = avg2 + diff[4];
-      double avg4 = avg3 + diff[5];
-      avg0 /= 2.0;
-      avg1 /= 3.0;
-      avg2 /= 4.0;
-      avg3 /= 5.0;
-      avg4 /= 6.0;
+      float avg0 = diff[0] + diff[1];
+      float avg1 = avg0 + diff[2];
+      float avg2 = avg1 + diff[3];
+      float avg3 = avg2 + diff[4];
+      float avg4 = avg3 + diff[5];
+      avg0 /= 2.0f;
+      avg1 /= 3.0f;
+      avg2 /= 4.0f;
+      avg3 /= 5.0f;
+      avg4 /= 6.0f;
 
       // Find smallest-magnitude trajectory (the "calmest" recent direction)
-      double meanA = diff[0];
-      double meanB = diff[0];
-      if (fabs(avg4) < fabs(meanB)) { meanA = meanB; meanB = avg4; }
-      if (fabs(avg3) < fabs(meanB)) { meanA = meanB; meanB = avg3; }
-      if (fabs(avg2) < fabs(meanB)) { meanA = meanB; meanB = avg2; }
-      if (fabs(avg1) < fabs(meanB)) { meanA = meanB; meanB = avg1; }
-      if (fabs(avg0) < fabs(meanB)) { meanA = meanB; meanB = avg0; }
-      double meanOut = (meanA + meanB) / 2.0;
+      float meanA = diff[0];
+      float meanB = diff[0];
+      if (fabsf(avg4) < fabsf(meanB)) { meanA = meanB; meanB = avg4; }
+      if (fabsf(avg3) < fabsf(meanB)) { meanA = meanB; meanB = avg3; }
+      if (fabsf(avg2) < fabsf(meanB)) { meanA = meanB; meanB = avg2; }
+      if (fabsf(avg1) < fabsf(meanB)) { meanA = meanB; meanB = avg1; }
+      if (fabsf(avg0) < fabsf(meanB)) { meanA = meanB; meanB = avg0; }
+      float meanOut = (meanA + meanB) / 2.0f;
       stored[0] = stored[1] + meanOut;
 
       // Combine the three character signals
-      double output = stored[0] * body;                          // smoothed body
+      float output = stored[0] * body;                          // smoothed body
       output += ((inputSample - stored[0]) - avg1) * cojones;    // disparity / honk
       output += avg1 * breathy;                                  // smoothed breath
       return output;
@@ -451,18 +463,20 @@ namespace house
     // DC bias: AW added +1 in the int domain → +1/8388608 ≈ 1.19e-7
     // after scaling. Preserved as a literal constant (denormal
     // prevention at the LSB level).
-    inline void runTapeFat(double inL, double inR,
+    inline void runTapeFat(float inL, float inR,
                            int fatness, double invFatnessAndScale,
-                           double wet, double dry,
-                           double &outL, double &outR)
+                           float wet, float dry,
+                           float &outL, float &outR)
     {
       if (mGcount < 0 || mGcount > 128) mGcount = 128;
       int count = mGcount;
 
       // Convert input to int (AW fixed-point) and write to both halves
       // of the ping-pong buffer.
-      int intInL = (int)(inL * 8388608.0);
-      int intInR = (int)(inR * 8388608.0);
+      // inL is float; * 2^23 is an exact exponent shift (8388608 == 2^23), so no precision
+      // loss vs the double version before truncation.
+      int intInL = (int)(inL * 8388608.0f);
+      int intInR = (int)(inR * 8388608.0f);
       mPL[count + 128] = mPL[count] = intInL;
       mPR[count + 128] = mPR[count] = intInR;
 
@@ -512,45 +526,46 @@ namespace house
       // 8388608 reciprocal) + one add (DC bias). Replaces AW's int
       // divide AND the /8388608 double divide with one mul.
       static const double kTapeFatDcBias = 1.19209289550781e-7;
+      // Precision-critical: large int sum x tiny reciprocal stays DOUBLE (0.1.0.23 design).
       double floatTotalL = (double)sumtotalL * invFatnessAndScale + kTapeFatDcBias;
       double floatTotalR = (double)sumtotalR * invFatnessAndScale + kTapeFatDcBias;
-      floatTotalL *= wet;
-      floatTotalR *= wet;
+      floatTotalL *= (double)wet;
+      floatTotalR *= (double)wet;
 
-      // Always in "fat" (positive leanfat) direction per Lacquer's
-      // design — blend input with averaged signal.
-      outL = inL * dry + floatTotalL;
-      outR = inR * dry + floatTotalR;
+      // Blend input with averaged signal; cast to float at the boundary (the only double->float
+      // cast in the hot path - a deliberate precision boundary, not the old per-op cast trap).
+      outL = (float)((double)inL * (double)dry + floatTotalL);
+      outR = (float)((double)inR * (double)dry + floatTotalR);
 
       mGcount--;
     }
 
   private:
     // Console0Channel sat state (4 averaging filter prev-samples).
-    double mConsoleChAvgAL, mConsoleChAvgAR, mConsoleChAvgBL, mConsoleChAvgBR;
+    float mConsoleChAvgAL, mConsoleChAvgAR, mConsoleChAvgBL, mConsoleChAvgBR;
 
     // Console0Bus desat state.
-    double mConsoleBsAvgAL, mConsoleBsAvgAR, mConsoleBsAvgBL, mConsoleBsAvgBR;
+    float mConsoleBsAvgAL, mConsoleBsAvgAR, mConsoleBsAvgBL, mConsoleBsAvgBR;
 
     // Downsample shell state.
-    double mCyclePhase;
-    double mCycleOutL, mCycleOutR;
-    double mCyclePrevL, mCyclePrevR;
-    double mInAccumL, mInAccumR;
+    double mCyclePhase;  // TIMING accumulator - MUST be double (float drift shifts cycle-boundary sample positions, decorrelating the downsample shell at low worldRate)
+    float mCycleOutL, mCycleOutR;
+    float mCyclePrevL, mCyclePrevR;
+    float mInAccumL, mInAccumR;
     int mInAccumCount;
 
     // Cojones state per side (2-sample stored history + 6-sample diff history).
-    double mStoredL[2], mStoredR[2];
-    double mDiffL[6], mDiffR[6];
+    float mStoredL[2], mStoredR[2];
+    float mDiffL[6], mDiffR[6];
 
     // 2x upsample bracket state.
-    double mPrevHostL, mPrevHostR;   // previous host-rate input for midpoint interp
-    double mDecimateLPL, mDecimateLPR; // one-pole IIR state for decimation LPF
+    float mPrevHostL, mPrevHostR;   // previous host-rate input for midpoint interp
+    float mDecimateLPL, mDecimateLPR; // one-pole IIR state for decimation LPF
 
     // Low-shelf compensation state (one-pole LP at ~200 Hz for the
     // Cut-scaled low-end bump that compensates linear-interp's
     // mid-bias).
-    double mLowLpL, mLowLpR;
+    float mLowLpL, mLowLpR;
 
     // TapeFat circular delay buffers (ping-pong duplicated — 128 unique
     // entries, mirrored to indices 128..255 for wrap-free indexing).
