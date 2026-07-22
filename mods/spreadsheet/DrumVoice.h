@@ -43,7 +43,7 @@ namespace stolmine
     od::Parameter mAttack{"Attack", 0.0f};
     od::Parameter mHold{"Hold", 0.0f};
     od::Parameter mDecay{"Decay", 0.25f};
-    od::Parameter mClipper{"Clipper", 0.0f};
+    od::Parameter mClipper{"Clipper", 1.0f};  // default = top of throw = the corpus-point heft (P4)
     od::Parameter mEQ{"EQ", 0.0f};
     od::Parameter mLevel{"Level", 0.8f};
     od::Parameter mCompAmt{"CompAmt", 0.0f};

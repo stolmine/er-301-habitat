@@ -122,7 +122,14 @@ namespace stolmine
   // spread 15.8x -> 2.2x, and crest error +75% -> +7% (crest was one of the three largest
   // gaps). Higher drive keeps flattening peak but overshoots crest (-11% at 30, -18% at 60)
   // and stretches apparent decay, so 12 is the calibrated point.
-  static const float kDrive = 12.0f;
+  // P4 (plan 4.3): the 12x became the TOP of the Clipper throw rather than a fixed
+  // constant. driveLinear = 1 + clipper*(kDriveMax-1); at the shipped default
+  // clipper=1.0 the stage is bit-identical to the fixed-12x parity-proven state
+  // (the corpus point / frozen-Tessera heft); backing the knob off progressively
+  // releases the modal bank's real pre-drive dynamics (the Shape/Grit crest
+  // variation the fixed drive was flattening). Threshold and makeup stay pinned
+  // at the CC48 corpus tables - the state every amp coefficient was fitted against.
+  static const float kDriveMax = 12.0f;
   static const float kClipTh[16] = {9e9f, 9e9f, 0.221f, 0.145f, 0.095f, 0.070f, 0.070f,
                                     0.070f, 0.070f, 0.070f, 0.070f, 0.070f, 0.070f,
                                     0.070f, 0.070f, 0.070f};
@@ -417,12 +424,7 @@ namespace stolmine
     float attack    = CLAMP(0.0f, 0.05f, mAttack.value());
     float hold      = CLAMP(0.0f, 0.5f, mHold.value());
     float decay     = CLAMP(0.01f, 2.0f, mDecay.value());
-    // P4 wires mClipper here (variable clipper/drive rework, section 4.3 of
-    // the plan doc). P1 reads it so the parameter round-trips serialization
-    // and CV patching, but the clipper stage below is fixed at the corpus
-    // operating point (ccClip=48) regardless of this value.
     float clipperParam = CLAMP(0.0f, 1.0f, mClipper.value());
-    (void)clipperParam;
     float eq        = CLAMP(-1.0f, 1.0f, mEQ.value());
     float level     = CLAMP(0.0f, 1.0f, mLevel.value());
     float compAmt   = CLAMP(0.0f, 1.0f, mCompAmt.value());
@@ -464,13 +466,10 @@ namespace stolmine
     // Normalise both so kappa*fc IS the resulting deviation in Hz.
     float jitNorm = 1.7320508f * kGritDepthTrim / sqrtf(jitCoeff / (2.0f - jitCoeff));
 
-    // Clipper -> (threshold, makeup gain), linear interp over the measured table.
-    // Normalized so the default (CC 48) is unity gain: that is the operating point the
-    // whole 1143-capture corpus was recorded at, so it is the state every amplitude
-    // coefficient in this file was fitted against.
-    // ADAPTED (P1 TEMPORARY): ccClip is hard-set to the corpus point (48) instead of
-    // being driven by mClipper -- P4 wires the variable-drive rework (plan section 4.3)
-    // in its place.
+    // Clipper threshold/makeup pinned at the corpus point (CC 48): that is the
+    // operating point the whole 1143-capture corpus was recorded at, so it is the
+    // state every amplitude coefficient in this file was fitted against. The
+    // Clipper PARAM now drives the pre-clip DRIVE instead (P4, plan 4.3).
     float clipTh, clipG;
     {
       float ccClip = 48.0f;
@@ -481,6 +480,26 @@ namespace stolmine
       clipTh = (kClipTh[ci] + (kClipTh[ci + 1] - kClipTh[ci]) * cf) / kSMH;
       clipG = (kClipG[ci] + (kClipG[ci + 1] - kClipG[ci]) * cf) / 3.329f;
     }
+    // Variable drive (P4): linear throw 1..kDriveMax; clipper=1.0 (default) is the
+    // parity anchor (bit-identical to the fixed 12x stage). Keep the measured
+    // sqrt-law curve: at top-of-throw it IS the frozen reference by identity, and
+    // stacking a second, unmeasured curve (tanh) under the same knob was rejected
+    // in the P4 A/B (crest collapses harder at equal ct; see the integration log).
+    float driveLinear = 1.0f + clipperParam * (kDriveMax - 1.0f);
+    // Equal-loudness makeup: with the pinned-threshold limiter, RMS drops as drive
+    // backs off (crest rises 2.5 -> 7.7 across the throw - that is the point) but
+    // loudness should not. Cubic in (1 - clipper), least-squares fitted against the
+    // corpus reference hit's measured RMS ratio RMS(1)/RMS(c) at 8 points across
+    // the throw (fit error <= 2.6%, i.e. <= 0.22 dB ripple); exactly 1.0 at the
+    // default (clipper = 1) so the parity anchor stays bit-identical. Extrapolates
+    // to 2.48 at clipper = 0 (measured 3.58; the +8 dB cap is deliberate - full
+    // compensation would pump the low-drive noise floor). Consequence: at low
+    // clipper the peak rises toward ~1.9x pre-level while loudness holds; that is
+    // the released crest, trim Level if routing straight to a DAC.
+    float mk = 1.0f - clipperParam;
+    float makeup = 1.0f + mk * (0.646242f + mk * (-2.083327f + mk * 2.917451f));
+    if (makeup > 2.512f) makeup = 2.512f;   // +8 dB cap
+    float blockClipGain = clipG * makeup;
 
     // Shape -> osc2 detune ratio (measured linear, pitch-tracked)
     float r = CLAMP(0.0f, 2.0f, 0.0189f * (ccShape - 9.2f));
@@ -722,7 +741,7 @@ namespace stolmine
       s.punchEnv *= punchDecayCoeff;
       if (s.punchEnv < 1e-5f) s.punchEnv = 0.0f;
 
-      float yd = y * kDrive;
+      float yd = y * driveLinear;
       float ct = yd / clipTh;
       // __builtin_sqrtf maps straight to VFP vsqrt.f32. Plain sqrtf() left GCC emitting
       // an out-of-line `bl sqrtf` fallback in the per-sample loop, which is both slow on
@@ -730,8 +749,8 @@ namespace stolmine
       // >= 1, so the fallback is dead weight.
       // ADAPTED: Tessera fuses `* level` into this line; Ngoma keeps its existing output
       // chain order (clip -> EQ -> comp -> level), so `level` is deferred to the final
-      // `out[i] = sample * level` below instead.
-      float sample = clipG * yd / __builtin_sqrtf(1.0f + ct * ct);
+      // `out[i] = sample * level` below instead. blockClipGain = clipG * makeup (P4).
+      float sample = blockClipGain * yd / __builtin_sqrtf(1.0f + ct * ct);
 
       // DJ filter (TPT SVF, Cytomic formulation) -- unchanged from pre-transplant DrumVoice.
       if (filterActive)
