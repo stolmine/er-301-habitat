@@ -9,6 +9,9 @@ namespace od {
     void line(int, int, int, int, int) {}
     void pixel(int, int, int) {}
     void clear(int) {}
+    void text(int, int, int, const char*, int) {}
+    void hline(int, int, int, int, int d=0) {}
+    void vline(int, int, int, int, int d=0) {}
   };
   class ReferenceCounted { public: void attach() {} void release() {} };
   class Graphic {

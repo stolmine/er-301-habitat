@@ -4,6 +4,8 @@
 #include <od/graphics/Graphic.h>
 #include <od/config.h>
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
 
 struct PFFFT_Setup;
 
@@ -32,6 +34,8 @@ namespace scope_unit
     float getFFTPeak(int bin);
     float getFFTRms(int bin);
     int getFFTSize();   // 256 or 512, current
+    float getPeakHz();  // frequency of the greatest-energy bin (parabolic-interpolated)
+    float getPeakDb();  // its level in dB
 
   private:
     struct Internal;
@@ -60,8 +64,15 @@ namespace scope_unit
         mpSpec->attach();
     }
 
+    // S1: frequency axis. 0 = log (default, EQ-style), 1 = linear.
+    void setFreqMode(int m) { mFreqMode = (m == 1) ? 1 : 0; }
+    // S2: vertical/amplitude mapping. 0 = log/dB (default), 1 = linear, 2 = expanded.
+    void setAmpMode(int m) { mAmpMode = (m < 0) ? 0 : (m > 2 ? 2 : m); }
+
   private:
     Spectrogram *mpSpec;
+    int mFreqMode = 0;
+    int mAmpMode = 0;
 
     // Wide enough for the 6-ply variant (6 * SECTION_PLY(42) = 252 px). The peakH/rmsH
     // scratch arrays below are draw-thread stack (not audio), so 256 floats each is fine.
@@ -101,6 +112,20 @@ namespace scope_unit
       return (db + 60.0f) / 60.0f;
     }
 
+    // Amplitude -> normalized height, per S2 mode. All clamp to [0,1] at the call site.
+    inline float ampNorm(float mag) const
+    {
+      if (mAmpMode == 1)            // linear magnitude (peaks dominate)
+        return mag * 4.0f;
+      if (mAmpMode == 2)           // expanded: sqrt lifts quiet detail
+      {
+        float v = mag * 4.0f;
+        if (v < 0.0f) v = 0.0f;
+        return sqrtf(v);
+      }
+      return dbNorm(mag);          // log / dB (default)
+    }
+
   public:
     virtual void draw(od::FrameBuffer &fb)
     {
@@ -123,14 +148,25 @@ namespace scope_unit
       float rmsH[kMaxWidth];
       float peakMagMax = 0.0f;
 
+      float nyq = sr * 0.5f;
       for (int px = 0; px < w; px++)
       {
         float t = (float)px / (float)(w > 1 ? w - 1 : 1);
-        float hz = powf(2.0f, logMin + t * logRange);
+        float nextT = (float)(px + 1) / (float)(w > 1 ? w - 1 : 1);
+        // S1: log (equal octaves/pixel) or linear (equal Hz/pixel) frequency axis.
+        float hz, nextHz;
+        if (mFreqMode == 1)
+        {
+          hz = 20.0f + t * (nyq - 20.0f);
+          nextHz = 20.0f + nextT * (nyq - 20.0f);
+        }
+        else
+        {
+          hz = powf(2.0f, logMin + t * logRange);
+          nextHz = powf(2.0f, logMin + nextT * logRange);
+        }
         float binFloat = hz / binHz;
 
-        float nextT = (float)(px + 1) / (float)(w > 1 ? w - 1 : 1);
-        float nextHz = powf(2.0f, logMin + nextT * logRange);
         float binsPerPixel = (nextHz - hz) / binHz;
         float tau = 0.7f - binsPerPixel * 0.08f;
         if (tau < 0.15f) tau = 0.15f;
@@ -149,8 +185,8 @@ namespace scope_unit
         if (peakVal < 0.0f) peakVal = 0.0f;
         if (rmsVal < 0.0f) rmsVal = 0.0f;
 
-        float peakNorm = dbNorm(peakVal);
-        float rmsNorm = dbNorm(rmsVal);
+        float peakNorm = ampNorm(peakVal);
+        float rmsNorm = ampNorm(rmsVal);
         if (peakNorm < 0.0f) peakNorm = 0.0f;
         if (peakNorm > 1.0f) peakNorm = 1.0f;
         if (rmsNorm < 0.0f) rmsNorm = 0.0f;
@@ -198,6 +234,57 @@ namespace scope_unit
         prevPeakY = peakY;
       }
     }
+  };
+
+  // S3 read-only readout: the greatest-energy frequency + its level, drawn in the
+  // sub-display (apes ScopeVoltsReadout's styling). Right-justified so columns stay put.
+  class SpectrogramReadout : public od::Graphic
+  {
+  public:
+    SpectrogramReadout(int left, int bottom, int width, int height)
+        : od::Graphic(left, bottom, width, height), mpSpec(0) {}
+
+    virtual ~SpectrogramReadout()
+    {
+      if (mpSpec) mpSpec->release();
+    }
+
+    void follow(Spectrogram *p)
+    {
+      if (mpSpec) mpSpec->release();
+      mpSpec = p;
+      if (mpSpec) mpSpec->attach();
+    }
+
+#ifndef SWIGLUA
+    virtual void draw(od::FrameBuffer &fb)
+    {
+      od::Graphic::draw(fb);
+      if (!mpSpec)
+        return;
+
+      float hz = mpSpec->getPeakHz();
+      float db = mpSpec->getPeakDb();
+
+      char buf[24];
+      if (hz >= 1000.0f)
+        snprintf(buf, sizeof(buf), "%.2fk", hz / 1000.0f);
+      else
+        snprintf(buf, sizeof(buf), "%.0f", hz);
+
+      char dbuf[16];
+      snprintf(dbuf, sizeof(dbuf), "%.0fdB", db);
+
+      // Frequency on the upper line, level below - both right-justified in the region.
+      int fw = (int)strlen(buf) * 6;
+      fb.text(WHITE, mWorldLeft + mWidth - fw - 2, mWorldBottom + mHeight - 10, buf, 10);
+      int dw = (int)strlen(dbuf) * 5;
+      fb.text(9, mWorldLeft + mWidth - dw - 2, mWorldBottom, dbuf, 8);   // dimmer gray for the level
+    }
+
+  private:
+    Spectrogram *mpSpec;
+#endif
   };
 
 } // namespace scope_unit

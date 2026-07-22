@@ -91,6 +91,47 @@ namespace scope_unit
     return mpInternal->curSize;
   }
 
+  // Greatest-average-energy bin, parabolic-interpolated for sub-bin frequency.
+  static int findPeakBin(const float *rms, int nb, float &fracOut)
+  {
+    int best = 1;                    // skip DC (bin 0)
+    float bestV = 0.0f;
+    for (int k = 1; k < nb; k++)
+      if (rms[k] > bestV) { bestV = rms[k]; best = k; }
+    fracOut = 0.0f;
+    if (best > 0 && best < nb - 1)
+    {
+      float a = rms[best - 1], b = rms[best], c = rms[best + 1];
+      float denom = (a - 2.0f * b + c);
+      if (denom < -1e-12f || denom > 1e-12f)
+      {
+        float d = 0.5f * (a - c) / denom;   // -0.5..0.5 offset
+        if (d > -1.0f && d < 1.0f) fracOut = d;
+      }
+    }
+    return best;
+  }
+
+  float Spectrogram::getPeakHz()
+  {
+    Internal &s = *mpInternal;
+    int nb = s.curSize / 2;
+    float frac;
+    int bin = findPeakBin(s.fftRms, nb, frac);
+    float binHz = (float)globalConfig.sampleRate / (float)s.curSize;
+    return ((float)bin + frac) * binHz;
+  }
+
+  float Spectrogram::getPeakDb()
+  {
+    Internal &s = *mpInternal;
+    int nb = s.curSize / 2;
+    float frac;
+    int bin = findPeakBin(s.fftRms, nb, frac);
+    float mag = s.fftRms[bin];
+    return 20.0f * log10f(mag + 1e-10f);
+  }
+
   void Spectrogram::process()
   {
     Internal &s = *mpInternal;
