@@ -188,3 +188,17 @@ Whole-package f64 static 2757 -> 1694.
 - **BrightAmbience3** - gather-bound over a ~256 KB buffer (~L2 size). MEASURE ON HARDWARE FIRST:
   if it is load-latency-bound rather than FLOP-bound, the hybrid-float delta may be small and not
   worth the risk. Defer until the on-device CPU read is available. (Also skip its sin->poly.)
+
+---
+
+## OUTCOME (2026-07-22): hybrid-float is LOW-VALUE on these reverbs - stop here
+
+Hardware measurement: kWoodRoom dropped only **~1% CPU mono** (settings-dependent) despite the
+f64-op static count dropping 1087->270. The static f64-op count MASSIVELY oversold it: these AW
+reverbs are memory/latency-bound (the gather-bound scattered delay reads dominate the loop), not
+FLOP-bound, so removing the scalar-double math barely helps. Same root cause as the Fabula
+NEON-no-go. LESSON: do not chase f64-op counts on gather-bound delay/reverb DSP - profile on
+hardware first; the FLOP reduction is real but irrelevant when the loop is load-bound.
+
+Decision: ship the 7 shipped conversions as-is (tone-identical, harmless, minor win), do NOT
+convert Galactic/BA3 (not worth the effort/risk for ~1%). Release house as-is soon.
