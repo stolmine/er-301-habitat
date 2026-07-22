@@ -124,3 +124,42 @@ Galactic from ~45% combined to ~25% combined. If everything lands, the six rever
 go from roughly 115-135% summed (can't run 4 together today) to roughly 60-75%
 summed. Treat these as direction, not commitments; step 0 and per-step re-measure
 are the ground truth.
+
+---
+
+## Reverb conversion — the exact hybrid boundary (analysed 2026-07-22)
+
+TickerTape (Console0Channel/Buss, ChromeOxide) + Lacquer shipped hybrid-float, tone-identical
+(1 LSB, corr 1.0), 0.1.0.38/39. The reverbs follow, mirroring the CreamCoat reference boundary.
+
+**The boundary, confirmed from CreamCoat (its loop is 32 double / 54 float — a genuine hybrid):**
+- **Delay-line arrays -> float** (the memory bulk + per-sample reads/writes). This is the win.
+- **The `bez[]` / interpolation-undersample network -> KEEP double.** In kWoodRoom `bez[bez_cycle]`
+  is the undersample TIMING accumulator (fires the trellis at `> 1.0`) - the exact mCyclePhase
+  lesson from Lacquer: floating a timing accumulator shifts event-sample-positions and
+  decorrelates the output. bez also carries the bezier reconstruction + the output IIR; keep all
+  of it double.
+- **Block-rate coefficient bakes -> keep double, but bake a float copy of any that MULTIPLY a
+  float per-sample** (e.g. kWoodRoom `reg6n` scales the float feedback `f6* * reg6n` in the
+  trellis -> needs `reg6nF`, else every feedback tap is a float*double->double cast trap).
+  `derez` stays double (used only in the double bez context).
+- **Trellis math locals -> float** (inputSample*, drySample*, hA-hF, earlyReflection*, f6*
+  feedback state), with **all trellis literals f-suffixed** (-2.0f Householder, -0.0625f, etc) -
+  a bare double literal in a float expression silently promotes the whole op to double.
+- **Boundary casts are fine** where the float trellis meets the double bez (inputSample crosses
+  contexts a few times/sample) - that is the deliberate precision boundary, not the per-op trap.
+
+**Verification gate (per unit, non-negotiable):** the `tools/house-bench` A/B harness across the
+FULL param space (each unit's corner settings) - must be max diff 1 LSB (3.05e-5) + corr
+1.0000000 at every point, like the shipped four. The harness already caught the Lacquer
+phase-accumulator decorrelation that a single-operating-point check would have missed.
+
+**Per-unit specifics:**
+- kWoodRoom (798 lines): a3AL..a3IR + a6AL..a6ZKR delay arrays -> float; f6* feedback -> float;
+  reg6n -> reg6nF; bez[]/bezF[] double. Full-double baseline, biggest win (~29%->12-15%).
+- WoodenBox: same full-double CreamCoat pattern.
+- Verbity / Galactic: storage already float - fix is REMOVING the `(double)` cast-traps in the
+  FDN math (convert the math to float), NOT re-typing storage. Simpler than kWoodRoom.
+- BrightAmbience3: float the tap accumulators; CAVEAT - gather-bound over a 256KB buffer (~L2
+  size), may be load-latency-bound not FLOP-bound, so measure the delta specifically.
+- SKIP the character-changing sin->poly swaps (Galactic/BA3) per user: "no character change".
