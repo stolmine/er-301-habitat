@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**156 items** — 42 done, 7 wip, 105 todo, 2 blocked. *Rendered 2026-07-22.*
+**156 items** — 42 done, 8 wip, 104 todo, 2 blocked. *Rendered 2026-07-22.*
 
 ## DSP
 
@@ -15,6 +15,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ~ | `ca-noise-texture` | Cellular-automata granular noise texture source (Vivary) | manual · 2026-07-16 |
 | ~ | `fabula-am335x` | Fabula reverb am335x port: hybrid-float + pow2-mask + zipper-fix | manual · 2026-07-12 |
 | ~ | `fdn-reverb` | NEON FDN reverb (Householder core + per-line filters + spectral flavor overlay) | manual · 2026-07-16 |
+| ~ | `tessera-into-ngoma` | Port Tessera's Trinity-derived innovations into Ngoma | manual *(attested)* · 2026-07-22 |
 | ~ | `trinity-fm-unit` | Profile Modbap Trinity FM voice + build ER-301 FM drum unit | manual · 2026-07-20 |
 | ~ | `vitrail-unit` | Vitrail - dual switched-capacitor character filter unit | manual · 2026-07-18 |
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
@@ -51,7 +52,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `spectrum-ply-versions` | Spectrum (Spectrogram) 2/3/4/6-ply versions with higher spectral resolution | manual · 2026-07-21 |
 |   | `station-x-character` | Station X (codescan FIR): improve output character (currently mostly noise-like filtering) | manual · 2026-07-09 |
 |   | `stolmine-original-units` | stolmine originals backlog: X-op FM voice + additional monokit filter models | manual · 2026-07-09 |
-|   | `tessera-into-ngoma` | Port Tessera's Trinity-derived innovations into Ngoma | manual · 2026-07-21 |
 |   | `units-2d-wavetable-osc` | 2D/3D Wavetable Oscillator — X/Y-addressable wavetable with stacked pseudo-3D frame viz | manual · 2026-07-09 |
 |   | `units-spectral-processing` | Spectral Mask + Spectral Gate — sidechain-keyed / crossover per-band spectral processors | manual · 2026-07-09 |
 | ✗ | `kryos-load-hang` | Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware | manual · 2026-07-09 |

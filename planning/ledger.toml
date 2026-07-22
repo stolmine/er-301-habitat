@@ -1773,8 +1773,17 @@ e_hi's mechanism.
 [[item]]
 id = "tessera-into-ngoma"
 title = "Port Tessera's Trinity-derived innovations into Ngoma"
-status = "todo"
-stamped = "2026-07-21T22:42:02-05:00"
+status = "wip"
+stamped = "2026-07-22T11:46:07-05:00"
+attested = """2026-07-22: implementation COMPLETE through P6 (commits addcf41..: P0 housekeeping,
+P1-P3 verbatim scalar transplant at 2.8.3.72 with 38-point descriptor parity vs frozen Tessera
+2.8.3.62 (median NCC 0.99999999976), P4 variable drive/clip at 2.8.3.73 (kDriveMax=12, default
+clipper=1.0 = corpus anchor, sqrt-law kept over tanh by A/B, equal-loudness makeup cubic), P5
+NEON 4-quad kernel at 2.8.3.74 (0 suspect hints; parity gate caught and fixed a quarter-cycle
+sine-convention offset), P6 release-notes stub. Parity harness: trinity-midi-harness/mirror
+(tessera-frozen + ngoma-mirror + parity_tessera_ngoma.py). REMAINING = the manual verify:
+hardware insert/trigger/no-hang smoke test, hardware CPU%, and the by-ear A/B on the rig
+(no device access this session; see the session hardware checklist)."""
 area = "dsp"
 touches = ["mods/spreadsheet/DrumVoice.*"]
 verify = { kind = "manual", ref = "Ngoma reproduces Tessera's timbral behaviours on the shared parameters; A/B by ear" }
