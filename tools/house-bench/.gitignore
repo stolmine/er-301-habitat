@@ -1,0 +1,5 @@
+# compiled harness binaries + objects (build on demand)
+r_*
+*.o
+!*.cpp
+!*.h
