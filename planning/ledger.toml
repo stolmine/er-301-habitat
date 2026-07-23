@@ -2121,4 +2121,11 @@ deviation, ratio 0.99-1.14) but did NOT measure audible LEVEL: the noise-bed lou
 set by noiseMix (line 605-607) + the blend y = y*(1-noiseMix*0.5) + noiseLp*(...) (line 931), never
 validated against hardware. So the loudness-and-persistence-vs-CC scaling is the gap, not the FM
 depth. Fix: measure TOTAL grit energy/level vs grit CC on the re-pinned rig (not just FM deviation),
-then refit the noiseMix law + noiseTau together."""
+then refit the noiseMix law + noiseTau together.
+RESOLVED IN CODE 2026-07-23 (2.8.3.82, campaign planning/ngoma-grit-drama.md): measured on the
+re-pinned rig (53 cells) + firmware gate decoded. Bed tau tracks Decay ONLY (37/105/252/412 ms,
+grit-independent) -> noiseTau = 0.88*tauC^0.809, 150ms cap + 60ms fix deleted. Bed level = one flat
+plateau from CC88 (pitch-scaled); the ~CC114 "step" is the VOICE being gate-killed, so the
+(1-noiseMix*0.5) trim + tauEff collapse are replaced by the firmware cubed gate env. Validated:
+persistence ratio 0.92-1.11 across grit x decay, bed +-0.9 dB, grit-0 bit-identical. Remaining:
+the manual device ear-check vs the Trinity (checklist in the campaign doc)."""
