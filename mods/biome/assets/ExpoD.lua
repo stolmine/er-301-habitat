@@ -37,7 +37,7 @@ function ExpoD:onLoadGraph(channelCount)
 
   connect(trig, "Out", op, "Trigger")
   addFader(self, op, "decay", "Decay", 0.2)
-  addFader(self, op, "curve", "Curve", 0.0)
+  addFader(self, op, "curve", "Curve", 1.0)
   addFader(self, op, "level", "Level", 1.0)
 
   connect(op, "Out", self, "Out1")
@@ -76,7 +76,7 @@ function ExpoD:onLoadViews()
       range = self.objects.curveRange,
       biasMap = Encoder.getMap("[-1,1]"),
       biasPrecision = 2,
-      initialBias = 0.0
+      initialBias = 1.0
     },
     level = GainBias {
       button = "level",

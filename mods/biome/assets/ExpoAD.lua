@@ -39,8 +39,8 @@ function ExpoAD:onLoadGraph(channelCount)
   connect(trig, "Out", op, "Trigger")
   addFader(self, op, "attack", "Attack", 0.01)
   addFader(self, op, "decay", "Decay", 0.2)
-  addFader(self, op, "acurve", "Attack Curve", 0.0)
-  addFader(self, op, "dcurve", "Decay Curve", 0.0)
+  addFader(self, op, "acurve", "Attack Curve", 1.0)
+  addFader(self, op, "dcurve", "Decay Curve", 1.0)
   addFader(self, op, "level", "Level", 1.0)
 
   connect(op, "Out", self, "Out1")
@@ -91,7 +91,7 @@ function ExpoAD:onLoadViews()
       range = self.objects.acurveRange,
       biasMap = Encoder.getMap("[-1,1]"),
       biasPrecision = 2,
-      initialBias = 0.0
+      initialBias = 1.0
     },
     dcurve = GainBias {
       button = "dcurve",
@@ -101,7 +101,7 @@ function ExpoAD:onLoadViews()
       range = self.objects.dcurveRange,
       biasMap = Encoder.getMap("[-1,1]"),
       biasPrecision = 2,
-      initialBias = 0.0
+      initialBias = 1.0
     },
     level = GainBias {
       button = "level",

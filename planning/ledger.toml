@@ -1984,7 +1984,9 @@ SWIG bound, toc entries (Expo D 'ED', Expo AD 'EA'), both arches build, ExpoEnve
 suspect), graphic-virtual lint OK, Lua parses (luac -p), linux pkg installed to emu. REMAINING: emu
 audition (fire triggers, sweep Curve linear<->expo, AD attack+decay, retrigger) + am335x hardware
 sanity. Chosen defaults (open questions resolved): 2 curve controls for AD, bipolar curve, Level
-kept, no EOC out, retrigger restarts (may click on retrigger mid-decay - acceptable v1)."""
+kept, no EOC out, retrigger restarts (may click on retrigger mid-decay - acceptable v1).
+2.2.1.7 (user): all curve controls DEFAULT TO FULLY EXPONENTIAL (+1.0 = k~3.95, fast-drop/slow-tail
+decay), not linear - envelopes start fully expo out of the box; the linear/log side is dialled in."""
 area = "dsp"
 touches = ["mods/biome/ExpoEnvelope.*", "mods/biome/assets/ExpoD.lua", "mods/biome/assets/ExpoAD.lua"]
 verify = { kind = "manual", ref = "in emu: gate-triggered Expo D (decay-only) and Expo AD (attack-decay) envelope units in biome; each has a curve/expo-variation control that morphs the segment shape (e.g. linear <-> exponential); both arches build; am335x sanity" }
