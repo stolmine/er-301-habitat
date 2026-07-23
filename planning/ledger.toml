@@ -2096,3 +2096,22 @@ original depth fit may be compromised - RE-CAPTURE on the re-pinned rig (per-par
 FREQUENCY, phase-domain, feedback_phase_domain_measurement) and re-fit kGritKappa/kGritDepthTrim so
 the phase-mod is present through ~50% travel AND still matches hardware hit-to-hit decorrelation (the
 two must be consistent). Not a mechanism change - a depth/shape re-fit. Fable dispatched 2026-07-23."""
+
+[[item]]
+id = "ngoma-grit-noise-persistence"
+title = "Grit noise bed decays too fast vs hardware - separate short envelope (60ms fixed / 150ms cap)"
+status = "todo"
+stamped = "2026-07-23T11:39:05-05:00"
+area = "dsp"
+touches = ["mods/spreadsheet/DrumVoice.cpp"]
+verify = { kind = "manual", ref = "the grit noise bed (>0.8 regime) persists as long as it does on the Trinity hardware, not the current short fixed decay; measure hardware noise-bed persistence vs Decay and refit noiseTau" }
+note = """User + diagnosis, 2026-07-23. User: grit persists much longer on the hardware than on Ngoma;
+suspected a separate envelope / different level scaling. CONFIRMED: grit has two components with
+different envelopes. (1) The noise-FM phase-mod (jitDev) rides the modes' own r3 envelope
+(DrumVoice.cpp ~807/853/908) - persists with the voice, fine. (2) The NOISE BED (the audible grit at
+>0.8) has its OWN envelope noiseEnv (line 770/928) with tau = noiseTau, which is CAPPED at 150 ms
+(line 608, noiseTau = min(tauEff,150)) and HARD-FIXED at 60 ms above CC110 (line 609) - decoupled from
+Decay. That short fixed tau is why grit dies early on Ngoma while it persists on hardware. FIX (needs
+hardware, like the rest of grit): measure the hardware noise-bed persistence vs the Decay knob on the
+re-pinned rig and refit noiseTau (likely tie it to the voice decay / a longer measured law, remove the
+60 ms fix). Scoped follow-up to [[ngoma-grit-tuning]]; not blindly changed - measure first."""
