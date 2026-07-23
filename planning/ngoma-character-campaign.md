@@ -120,9 +120,42 @@ Deliberately NOT ported: per-sample folding of the lanes (the additive
 representation of the folded waveform is exact for a per-trigger-constant char;
 folding per-sample would buy only mid-hit knob response at real NEON cost).
 
-## P3 - validation
+## P3 - validation (measured, ngoma-mirror vs hardware + prev-source A/B)
 
-(filled in below as measured)
+- Hardware parity (model clipper 0 vs hardware CC8, n60 shape 0, 13 chars x 4
+  harmonics): median +1.0 dB, mean |err| 1.8 dB above floor - from the painted
+  table's +13 dB class errors to sub-2 dB generative. h3 exact at the corpus
+  char (0.065/0.065), null tracked at CC80 (0.027/0.025), top 0.548/0.560.
+  Residual: h7 reads ~2x hot at the very top (0.014 hw vs 0.027 model - small
+  absolute, the h7-null region).
+- oscB family (shape CC55): 3fB/fB 0.059/0.060, 0.194/0.188, 0.507/0.516 at
+  cc 48/96/127; 5fB/fB 0.019/0.021, 0.114/0.132, 0.167/0.163. Essentially exact.
+- COLLISION-ZONE FINDING: at shape ~ 0 both parents share fc, and the model's
+  varied parent start phases (0.37-turn spread, anti-click, level-calibrated)
+  attenuate the summed fundamental (factor 0.44) while fold harmonics sum near
+  1.0 - inflating audible ratios 2.1x (+6.4 dB measured before the fix).
+  Hardware's oscillators reset PHASE-ALIGNED: its shape-0 fundamental measures
+  1.67x the separated carrier, uniform across the whole Character throw (4
+  chars). Fixed with an analytic coherence correction on the fold lanes
+  (computed from the model's own phases, crossfaded out by r = 0.15; NOT a
+  fit). OPEN ITEM: the hardware's 1.67x shape-0 level structure itself remains
+  unmodeled (the model's shape-0 fundamental is relatively too quiet by ~2.3x)
+  - that is a Shape-side level-structure follow-up, separable from Character.
+- Regression (new vs 2.8.3.77 source, mirror A/B, char at the corpus point):
+  grit throw {0,0.35,0.65,0.85,0.95}, decay {0.05,0.5,1.5}, shape
+  {0.2,0.6,1.0}, clipper {0.5,1.0}: NCC 0.976-0.999, band-fraction deltas
+  <= 0.005 everywhere except the shape-1.0 cell (e_fund -0.125 / e_up +0.125),
+  which is an IMPROVEMENT: hardware at that cell reads e_fund 0.65/e_up 0.29;
+  prev model 0.93/0.07; new 0.84/0.15-0.17. decay_fund ratios 0.998-1.002.
+- Headroom: default patch peak 0.989 (prev 0.926); worst corner over
+  char x shape at level 0.8 dropped 1.96 -> 1.28 (the painted raises used to
+  pile up at char 1.0). No level-policy change needed.
+- Aliasing spot check at voct 4/5/6 (fc up to 7 kHz), shape 1 char 1: no NaN,
+  sane peaks (lanes are pure sines; the range gate zeroes out-of-band lanes,
+  m15 at 15x fc included).
+- Static gates: both arches build, DrumVoice.o am335x 0 NEON suspect hints
+  (kernel untouched - all changes are trigger-time bake), graphic virtuals OK,
+  linux pkg 2.8.3.78 installed to emu.
 
 ## Hardware checklist (needs the device + ears)
 

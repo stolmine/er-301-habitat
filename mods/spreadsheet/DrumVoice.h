@@ -14,7 +14,11 @@ namespace stolmine
   // behind Ngoma's 14-parameter control surface and output chain (variable
   // clipper, EQ, compressor, level). See planning/ngoma-tessera-integration.md
   // section 4 for the mapping. Tessera.cpp/.h stay frozen as the reference
-  // model; do not port changes back from here.
+  // model; do not port changes back from here. Since 2.8.3.73+ this engine
+  // deliberately diverges from frozen Tessera: Shape campaign (generative
+  // cross lattice, morphing clipper stage, onset bloom) and Character
+  // campaign (generative morph+wavefold harmonic lanes, NM 14 -> 16); see
+  // planning/ngoma-shape-fm-campaign.md and planning/ngoma-character-campaign.md.
   class DrumVoice : public od::Object
   {
   public:

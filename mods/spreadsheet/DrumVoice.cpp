@@ -39,13 +39,17 @@ namespace stolmine
   // mechanism. All control interdependencies reduce to analytic forms (no 2-D
   // tables needed).
   // ---------------------------------------------------------------------------
-  static const int NM = 14;
+  static const int NM = 16;
 
   // mode (h,k): f = fc*(h + k*r)
-  // 12 core modes plus two that exist only once Character opens the fold: measured on the
-  // 4-D map, (3,3) rises 0.000 -> 0.229 and (5,1) 0.000 -> 0.122 from ch0 to ch127.
-  static const float kH[NM] = {1, 1, 1, 3, 1, 3, 1, 5, 3, 5, 7, 3, 3, 5};
-  static const float kK[NM] = {0, 1, -1, 1, 2, 2, -2, 2, 0, 0, 0, -1, 3, 1};
+  // 12 fitted modes + 4 GENERATIVE fold lanes (m8/9/10/14 = h3/h5/h7/h9 of the
+  // carrier, m12/m15 = 3fB/5fB of oscB). Character campaign: the hardware voice
+  // is two oscillators morphed sine->triangle and WAVEFOLDED; the fold is
+  // odd-symmetric so it makes only odd harmonics of each parent, and those lanes
+  // are now painted from the exact Fourier series of the read fold law (see the
+  // Character block below), not from fitted per-mode regressions.
+  static const float kH[NM] = {1, 1, 1, 3, 1, 3, 1, 5, 3, 5, 7, 3, 3, 5, 9, 5};
+  static const float kK[NM] = {0, 1, -1, 1, 2, 2, -2, 2, 0, 0, 0, -1, 3, 1, 0, 5};
   // Per-mode amplitude, least-squares fitted against all 1143 hardware captures
   // (fit_amps.py). amp = c0 + c1*dL + c2*foldN + c3*r + c4*lf + c5*g.
   // The r term is included ONLY for the modes where the stored data shows a real
@@ -54,50 +58,101 @@ namespace stolmine
   // 0.58) - earlier fits produced a large negative r slope there purely because 370 of
   // 423 samples sit at r=0.39, and that phantom slope was collapsing the sub (the
   // body/punch) by up to 5x at mid Shape.
+  // Column c2 (formerly foldN) is retired: Character's effect on every lane is
+  // now generative (see the Character block below), so the fitted foldN slopes
+  // are zeroed and the feature is gone. Rows m8/9/10/12/14/15 are fully
+  // generative lanes; their regressions are unused (zeroed).
   static const float kAmpFit[NM][6] = {
-    { 0.9935f,  0.0070f,  0.0049f,  0.0000f, -0.0122f, -0.0801f},  // h=1 k=+0 carrier
-    { 0.6483f,  0.0306f, -0.0419f,  0.0000f, -0.0482f, -0.0203f},  // h=1 k=+1 osc2
-    { 0.3075f,  0.0240f, 0.0000f,  0.0000f, -0.0278f, -0.0301f},  // h=1 k=-1 sub
+    { 0.9935f,  0.0070f,  0.0000f,  0.0000f, -0.0122f, -0.0801f},  // h=1 k=+0 carrier
+    { 0.6483f,  0.0306f,  0.0000f,  0.0000f, -0.0482f, -0.0203f},  // h=1 k=+1 osc2
+    { 0.3075f,  0.0240f,  0.0000f,  0.0000f, -0.0278f, -0.0301f},  // h=1 k=-1 sub
     { 0.2088f,  0.0251f,  0.0000f,  0.0141f, -0.0347f,  0.0450f},  // h=3 k=+1
     { 0.3876f, -0.0014f,  0.0000f, -0.1182f, -0.0597f,  0.0165f},  // h=1 k=+2
     { 0.1923f,  0.0130f,  0.0000f, -0.0632f, -0.0428f,  0.1504f},  // h=3 k=+2
     { 0.2590f, -0.0566f,  0.0000f,  0.0000f, -0.1133f,  0.2749f},  // h=1 k=-2 sub
-    { 0.1107f, -0.0036f,  0.0488f, -0.0136f,  0.0175f,  0.3865f},  // h=5 k=+2
-    { 0.1667f,  0.0504f,  0.2011f,  0.1799f, -0.0446f,  0.0166f},  // h=3 k=+0
-    { 0.0500f,  0.0267f, -0.0601f,  0.0000f,  0.0003f,  0.2468f},  // h=5 k=+0 (base 0.19->0.05: HW h5~0 at low Character)
-    { 0.0000f,  0.0023f, -0.0553f, -0.0391f,  0.0055f,  0.4403f},  // h=7 k=+0 (base 0.16->0: HW has no h7 until the fold opens)
-    { 0.1542f, -0.0047f, -0.1143f,  0.3891f, -0.0221f,  0.0759f},  // h=3 k=-1
-    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=3 k=+3 fold-only
-    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=5 k=+1 fold-only
+    { 0.1107f, -0.0036f,  0.0000f, -0.0136f,  0.0175f,  0.3865f},  // h=5 k=+2
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=3 k=+0 generative
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=5 k=+0 generative
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=7 k=+0 generative
+    { 0.1542f, -0.0047f,  0.0000f,  0.3891f, -0.0221f,  0.0759f},  // h=3 k=-1 (kCrossPaint-dead)
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=3 k=+3 generative (3fB)
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=5 k=+1 (kCrossPaint-dead)
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=9 k=+0 generative
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=5 k=+5 generative (5fB)
   };
 
-  // ---- Character is a spectrum SWAP, not an additive fold (measured, 4-D map, grit 0/40,
-  // all shapes and notes, median per-mode amplitude relative to the carrier, ch0 -> ch127):
-  //   KILLED: (1,-1) 0.233->0  (3,1) 0.177->0  (1,2) 0.094->0  (3,2) 0.070->0
-  //           (1,-2) 0.538->0.154
-  //   RAISED: (3,0) 0.050->0.472   (3,-1) 0.020->0.192   (5,0) 0->0.099
-  //   NEW:    (3,3) 0->0.229       (5,1) 0->0.122
-  // Five fitted foldN coefficients had the WRONG SIGN - they boosted what the hardware
-  // kills - which is why Character "did much less" on the model than on the hardware.
+  // ---- Character: GENERATIVE morph + wavefold (firmware read, instruction level;
+  // Character campaign 2026-07-23, planning/ngoma-character-campaign.md).
   //
-  // The raise is ADDITIVE, not a crossfade override. An override (a = a*(1-fold) + target
-  // *fold) makes the amplitude a fixed constant at full fold, discarding the fitted c1..c5
-  // dependence on decay, shape, pitch and GRIT - which blew up e_hi/e_sub/crest at high
-  // grit when tried. Adding a fold-scaled delta keeps those measured slopes alive.
-  // Applied in the RAW fold, not pitch-trimmed foldN: the hardware's Character effect is
-  // pitch-flat across four octaves, while the -0.163 trim collapsed the model's response
-  // ~2.8x from n36 to n84 - worst exactly where woodblocks and snares live.
-  static const float kFoldKill[NM] = {1.00f, 1.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.29f,
-                                      1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f};
-  // m8 (3,0) and m11 (3,-1) carry the measured h3 boost that IS Character's signature effect
-  // (HW h3 0.25->0.47 as the fold opens). Refit stronger (0.28->0.45, 0.25->0.40) so the boost
-  // actually lands; the aggregate-error minimum wanted them near zero, which neutered Character.
-  static const float kFoldRaise[NM] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                       0.4500f, 0.0053f, 0.0f, 0.4000f, 0.5725f, 0.3050f};
-  // tone modes ring long, sidebands short
+  // The hardware's Character knob does two things to BOTH oscillators, in sequence:
+  //   blend = clamp(2*char, 0, 1)  sine -> triangle waveform morph (bottom half)
+  //   w     = clamp(2*char, 1, 2)  wavefold drive (top half)
+  //   fold(mix) = (|u - round(u)| - 0.25)*4,  u = w*mix*0.25 + 0.25
+  // The fold is odd-symmetric: it generates ONLY odd harmonics of each parent,
+  // riding the parent's envelope (the measured 0.89-1.0 tau ratios of the "tone"
+  // modes). Confirmed on a fresh 162-capture transparent-output sweep: h2 = 0
+  // everywhere, h3 NULL at CC80, h7 null at CC112-120, h9 null at CC96, carrier
+  // a1(char) non-monotonic within 1-2% of theory on 3 notes.
+  //
+  // blend and w are functions of ONE knob, so the harmonic curves are 1-D. The
+  // five tables below are the exact Fourier series of the folded waveform,
+  // evaluated offline over the knob throw with the fitted calibration
+  // (char_eff = min(cc/124, 0.970), w gain 0.95, triangle harmonic softness
+  // 0.85; typical residual x1.42 vs hardware across 4 harmonics x 12 chars x
+  // 3 notes, including the nulls - the painted table had +13 dB class errors).
+  // kCharA1 is normalized at the corpus fit point (char CC48) so every fitted
+  // kAmpFit intercept keeps its operating point; R tables are SIGNED (a
+  // negative ratio becomes a half-turn phase offset - the products are
+  // coherent, not arbitrary). Fold ratios additionally scale with parent pitch
+  // as (f_parent/253.6)^-0.128 (measured; one exponent explains both the
+  // per-note trend and the carrier-vs-oscB family offset).
+  // The voice carries TRANSPARENT-output harmonic levels; at high Clipper the
+  // drive+limiter stage regenerates the extra brightness exactly as the
+  // hardware's does (same generate-dont-paint architecture as kCrossPaint).
+  static const float kCharA1[33] = {
+      +1.1424f, +1.1306f, +1.1189f, +1.1071f, +1.0953f, +1.0835f, +1.0718f,
+      +1.0600f, +1.0482f, +1.0364f, +1.0247f, +1.0129f, +1.0011f, +0.9893f,
+      +0.9776f, +0.9658f, +0.9791f, +1.0216f, +1.0492f, +1.0645f, +1.0698f,
+      +1.0668f, +1.0568f, +1.0410f, +1.0202f, +0.9952f, +0.9666f, +0.9349f,
+      +0.9005f, +0.8638f, +0.8250f, +0.8127f, +0.8127f
+  };
+  static const float kCharR3[33] = {
+      +0.0000f, -0.0050f, -0.0100f, -0.0152f, -0.0204f, -0.0258f, -0.0313f,
+      -0.0370f, -0.0427f, -0.0486f, -0.0546f, -0.0608f, -0.0671f, -0.0736f,
+      -0.0802f, -0.0869f, -0.0900f, -0.0762f, -0.0513f, -0.0188f, +0.0189f,
+      +0.0605f, +0.1051f, +0.1521f, +0.2014f, +0.2530f, +0.3071f, +0.3641f,
+      +0.4245f, +0.4890f, +0.5585f, +0.5809f, +0.5809f
+  };
+  static const float kCharR5[33] = {
+      +0.0000f, +0.0018f, +0.0036f, +0.0055f, +0.0074f, +0.0093f, +0.0113f,
+      +0.0133f, +0.0154f, +0.0175f, +0.0197f, +0.0219f, +0.0242f, +0.0265f,
+      +0.0289f, +0.0313f, +0.0315f, +0.0173f, -0.0068f, -0.0350f, -0.0637f,
+      -0.0907f, -0.1147f, -0.1353f, -0.1523f, -0.1658f, -0.1761f, -0.1836f,
+      -0.1884f, -0.1910f, -0.1915f, -0.1913f, -0.1913f
+  };
+  static const float kCharR7[33] = {
+      -0.0000f, -0.0009f, -0.0018f, -0.0028f, -0.0038f, -0.0047f, -0.0058f,
+      -0.0068f, -0.0078f, -0.0089f, -0.0100f, -0.0112f, -0.0123f, -0.0135f,
+      -0.0147f, -0.0160f, -0.0154f, -0.0015f, +0.0194f, +0.0399f, +0.0554f,
+      +0.0645f, +0.0670f, +0.0638f, +0.0562f, +0.0454f, +0.0325f, +0.0183f,
+      +0.0036f, -0.0110f, -0.0253f, -0.0295f, -0.0295f
+  };
+  static const float kCharR9[33] = {
+      -0.0000f, +0.0006f, +0.0011f, +0.0017f, +0.0023f, +0.0029f, +0.0035f,
+      +0.0041f, +0.0047f, +0.0054f, +0.0061f, +0.0068f, +0.0075f, +0.0082f,
+      +0.0089f, +0.0097f, +0.0088f, -0.0044f, -0.0213f, -0.0330f, -0.0363f,
+      -0.0318f, -0.0220f, -0.0100f, +0.0020f, +0.0123f, +0.0197f, +0.0239f,
+      +0.0245f, +0.0218f, +0.0159f, +0.0135f, +0.0135f
+  };
+  // Fold-ratio pitch droop (measured -0.128, clamped for out-of-map pitches).
+  static const float kCharDroopExp = -0.128f;
+  static const float kCharDroopRef = 1.0f / 253.6f;
+
+  // tone modes ring long, sidebands short; the generative fold lanes are tone
+  // class (they ride the parent envelope; measured 0.89-0.95).
   static const float kTauR[NM] = {1.00f, 0.94f, 0.35f, 0.35f, 0.35f, 0.34f,
                                   0.20f, 0.17f, 0.95f, 0.95f, 0.93f, 0.35f,
-                                  0.89f, 0.60f};
+                                  0.89f, 0.60f, 0.93f, 0.89f};
 
   // ---- Trinity output stage (measured: findings-clipper.md, 152 hardware captures) ----
   // A soft clip on the SUMMED output, proven acting on the sum rather than per-partial
@@ -158,29 +213,11 @@ namespace stolmine
                                    3.546f, 3.701f, 3.810f, 3.888f, 3.940f, 3.976f, 4.001f,
                                    4.021f, 4.034f};
 
-  // PRESENCE GATE (fit_gating.py, logistic on "was this mode detected", trained on
-  // unswept captures only - at high Sweep the pitch has moved off fc so non-detection
-  // is an analysis artifact, not absence).
-  //
-  // Applied ONLY to the h=3/5/7 core harmonics (modes 8-11). Those are genuinely absent
-  // until Character opens the fold - the measured dead-zone below CC 78 - and their gate
-  // coefficients are dominated by foldN (+2.4..+3.2). The amplitude fit gave them
-  // intercepts of 0.15-0.19 because it only ever saw them when present (selection bias),
-  // so without the gate the model renders core harmonics with the fold shut: too much
-  // energy between the peaks (flatness 0.228 vs the hardware's 0.130).
-  // The core modes (carrier/osc2/sub/sidebands) are NOT gated: their non-detections are
-  // masking, not absence, and gating them would wrongly attenuate the fundamental.
-  static const bool kGated[NM] = {false, false, false, false, false, false,
-                                  false, false, true, true, true, true, false, false};
-  static const float kGateFit[NM][6] = {
-    {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0},
-    {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0}, {0,0,0,0,0,0},
-    {-1.6036f, -0.0850f, 2.8771f, 1.1738f,  0.0406f, 0.6956f},  // h=3 k=+0
-    {-2.2754f,  0.2021f, 3.2338f, 1.5403f,  0.0160f, 0.8017f},  // h=5 k=+0
-    {-2.2610f,  0.3351f, 3.0902f, 1.3819f, -0.2955f, 0.0801f},  // h=7 k=+0
-    {-1.5053f,  0.3840f, 2.4148f, 0.5393f,  0.0810f, 0.7474f},  // h=3 k=-1
-    {0,0,0,0,0,0}, {0,0,0,0,0,0},
-  };
+  // PRESENCE GATE: RETIRED (Character campaign). The gated lanes were the h=3/5/7
+  // core harmonics + (3,-1); the harmonics are now generative fold lanes whose
+  // curves are genuinely ~0 with the fold shut (no gate needed), and (3,-1) is a
+  // kCrossPaint-silenced cross lane. The fitted logistic coefficients live in git
+  // history (kGateFit, 2.8.3.52-2.8.3.77) if the cross lanes are ever revisited.
 
   // ---- Grit = common-mode noise FM (measured: findings-grit.md, 155 captures) ----
   // Grit does NOT primarily add a noise bed. It frequency-modulates the oscillators with
@@ -430,7 +467,8 @@ namespace stolmine
 
     // ---- Tessera block-rate laws (verbatim unless marked ADAPTED) ----
     // knobs 0..1 -> the hardware's CC 0..127 throw (all laws fitted in CC domain)
-    float ccChar = character * 127.0f;
+    // (ccChar retired: the Character LUTs are indexed by the knob directly,
+    // with the CC mapping baked into the tables at generation time.)
     float ccShape = shape * 127.0f;
     float ccGrit = grit * 127.0f;
     // ADAPTED: Ngoma's Sweep dial stays a 0..72 "semitones" throw (existing
@@ -495,8 +533,20 @@ namespace stolmine
     // kCrossPaint comment block up top for the full evidence chain); the
     // product lattice is generated by the clipper stage from the two real
     // partial families instead.
-    // Character -> fold amount: dead zone to CC 78, then linear (when osc2 active)
-    float fold = CLAMP(0.0f, 1.0f, (ccChar - 78.0f) / 42.0f);
+    // Character: generative morph+fold curves, 33-point LUT over the knob throw
+    // (see the kCharA1/kCharR* block). Baked per trigger like every other amp.
+    float chA1, chR3, chR5, chR7, chR9;
+    {
+      float cu = character * 32.0f;
+      int cli = (int)cu;
+      if (cli > 31) cli = 31;
+      float clf = cu - (float)cli;
+      chA1 = kCharA1[cli] + (kCharA1[cli + 1] - kCharA1[cli]) * clf;
+      chR3 = kCharR3[cli] + (kCharR3[cli + 1] - kCharR3[cli]) * clf;
+      chR5 = kCharR5[cli] + (kCharR5[cli + 1] - kCharR5[cli]) * clf;
+      chR7 = kCharR7[cli] + (kCharR7[cli + 1] - kCharR7[cli]) * clf;
+      chR9 = kCharR9[cli] + (kCharR9[cli + 1] - kCharR9[cli]) * clf;
+    }
     // ADAPTED: Ngoma's Decay dial is honest seconds (0.01..2.0 s), so tauC is the
     // dial value directly -- this REPLACES Tessera's CC decay law (which derived
     // tauC from a fitted quadratic-in-log CC curve). Everything downstream of tauC
@@ -590,13 +640,28 @@ namespace stolmine
         // from Tessera's F0 parameter. Same CLAMP(8,8000) range as Tessera.
         float fc = 110.0f * powf(2.0f, voct[i] + octave);
         fc = CLAMP(8.0f, 8000.0f, fc);
-        float foldN = fold * powf(fc / 246.5f, -0.163f);   // fold falls with pitch
         float lf = logf(fc / 246.5f);                      // pitch feature
         // gN (grit feature) is hoisted to the block scope above
-        // sine-dip only exists when osc2 is inactive (core-only regime)
-        float sineDip = 0.0f;
-        if (ccChar < 64.0f) sineDip = ccChar / 64.0f;
-        else if (ccChar < 85.0f) sineDip = 1.0f - (ccChar - 64.0f) / 21.0f;
+        // Fold-ratio pitch droop, per parent oscillator (measured -0.128; one
+        // exponent explains the per-note trend AND the carrier-vs-oscB offset).
+        float droopC = powf(fc * kCharDroopRef, kCharDroopExp);
+        droopC = CLAMP(0.5f, 1.5f, droopC);
+        float droopB = powf(fc * (1.0f + r) * kCharDroopRef, kCharDroopExp);
+        droopB = CLAMP(0.5f, 1.5f, droopB);
+        float aCar = 0.0f, aOscB = 0.0f;   // parent amps, stashed for the fold lanes
+        // Collision-zone coherence correction (computed after m0/m1 below).
+        // At shape ~ 0 both parents sit on fc: the hardware's oscillators reset
+        // PHASE-ALIGNED (measured: its shape-0 fundamental is 1.67x the
+        // separated carrier, uniform across the whole Character throw), while
+        // this model's parent lanes keep their load-bearing varied start
+        // phases (anti-click; the level calibration was fitted through them).
+        // The fold-lane ratios are exact per family, so in the collision zone
+        // the AUDIBLE ratio picks up the parents' coherence factors. Correct
+        // analytically from the model's own start phases (parent spread 0.37
+        // turn; cos terms are constants), crossfaded out as the families
+        // separate. NOT a fit. Open item (campaign doc): the hardware's 1.67x
+        // shape-0 level structure itself is unmodeled - a Shape-side follow-up.
+        float corr3 = 1.0f, corr5 = 1.0f, corrSolo = 1.0f;
 
         for (int m = 0; m < NM; m++)
         {
@@ -604,36 +669,50 @@ namespace stolmine
           s.mfreq[m] = f;
           s.mfreqSr[m] = f * invSr;   // baked phase-increment-per-sample (P5)
           const float *c = kAmpFit[m];
-          float a = c[0] + c[1] * dL + c[2] * foldN + c[3] * r + c[4] * lf + c[5] * gN;
-          // core h3 keeps its measured sine-dip when osc2 is inactive
-          if (m == 8 && r <= 0.1f) a += 0.07f * (1.0f - sineDip) - 0.07f;
+          float a = c[0] + c[1] * dL + c[3] * r + c[4] * lf + c[5] * gN;
+          // Parent lanes carry the fold's own fundamental trajectory a1(char):
+          // non-monotonic (dip at the morph top, recover, fall to 0.81 at full
+          // fold), measured within 1-2% on three notes.
+          if (m == 0 || m == 1) a *= chA1;
           if (a < 0.0f) a = 0.0f;
           if (a > 1.5f) a = 1.5f;
-          if (kGated[m])   // fold-gated core harmonics: soft presence, no clicks on sweeps
+          if (m == 0) aCar = a;
+          if (m == 1)
           {
-            const float *gc = kGateFit[m];
-            float z = gc[0] + gc[1] * dL + gc[2] * foldN + gc[3] * r + gc[4] * lf + gc[5] * gN;
-            if (z < -20.0f) z = -20.0f; else if (z > 20.0f) z = 20.0f;
-            a *= 1.0f / (1.0f + expf(-z));
+            aOscB = a;
+            // Coherence factors for the collision zone (see block above).
+            // Parent phase spread 0.37 turn; kappa_n uses cos(2*pi*n*0.37):
+            // n=1 -0.6845, n=3 +0.7705, n=5 +0.5878.
+            float colX = 1.0f - r * (1.0f / 0.15f);
+            float sum = aCar + aOscB;
+            if (colX > 0.0f && sum > 1e-6f && aCar > 1e-6f)
+            {
+              float cross = 2.0f * aCar * aOscB;
+              float sq = aCar * aCar + aOscB * aOscB;
+              float k1 = sqrtf(sq + cross * -0.6845f) / sum;
+              float k3 = sqrtf(sq + cross * 0.7705f) / sum;
+              float k5 = sqrtf(sq + cross * 0.5878f) / sum;
+              float c3 = k1 / k3;                 // paired lanes (m8+m12)
+              float c5 = k1 / k5;                 // paired lanes (m9+m15)
+              float cS = k1 * sum / aCar;         // solo lanes (m10, m14)
+              corr3 = 1.0f + (CLAMP(0.25f, 4.0f, c3) - 1.0f) * colX;
+              corr5 = 1.0f + (CLAMP(0.25f, 4.0f, c5) - 1.0f) * colX;
+              corrSolo = 1.0f + (CLAMP(0.25f, 4.0f, cS) - 1.0f) * colX;
+            }
           }
-
-          if (kFoldRaise[m] > 0.0f)
+          // GENERATIVE fold lanes: exact harmonic series of the folded parent.
+          // A negative signed ratio is a half-turn phase offset (set below).
+          float chSign = 0.0f;
+          switch (m)
           {
-            // Intermod (k!=0) fold modes only exist once osc2 detunes them off the harmonic
-            // (lattice f=fc*(h+k*r)); at r~0 they collapse onto 3f/5f and wrongly brighten,
-            // with phase cancellation that also HID the real h3 boost. Their raise was fit at
-            // higher shapes where they are separate, so gate it by r. On the clean shape-0
-            // Character sweep this lifts h3 (0.34->0.43, HW 0.47) and h7 (0.08->0.13, HW 0.12)
-            // toward hardware; higher shapes (r>0.1) are unaffected. Grid-neutral.
-            float rGate = (kK[m] != 0) ? CLAMP(0.0f, 1.0f, r / 0.10f) : 1.0f;
-            // Character x Shape is 2-D: a constant h3 raise nails one shape and overshoots the
-            // other (HW h3 at max Character is ~0.47 at shape 0 but the mode pile-up would push
-            // it to ~0.9 at high shape). The h3-family raise falls off with r to hold ~0.5-0.6
-            // across the throw. Fitted slope 0.8, floored at 0.2.
-            float r3g = (m == 8 || m == 11) ? CLAMP(0.2f, 1.0f, 1.0f - 0.8f * r) : 1.0f;
-            a += fold * kFoldRaise[m] * rGate * r3g;
+            case 8:  a = aCar  * fabsf(chR3) * droopC * corr3; chSign = chR3; break;
+            case 9:  a = aCar  * fabsf(chR5) * droopC * corr5; chSign = chR5; break;
+            case 10: a = aCar  * fabsf(chR7) * droopC * corrSolo; chSign = chR7; break;
+            case 14: a = aCar  * fabsf(chR9) * droopC * corrSolo; chSign = chR9; break;
+            case 12: a = aOscB * fabsf(chR3) * droopB * corr3; chSign = chR3; break;
+            case 15: a = aOscB * fabsf(chR5) * droopB * corr5; chSign = chR5; break;
+            default: break;
           }
-          else if (kFoldKill[m] < 1.0f) a *= 1.0f - fold * (1.0f - kFoldKill[m]);
           // P2: cross modes are limiter products, not voice content - the
           // painted lanes are silenced and the clipper stage generates the
           // real product lattice from the surviving families. Voice-generated
@@ -658,6 +737,11 @@ namespace stolmine
           // Varied (not aligned) start phases: all-aligned created an artificial
           // broadband click. Varying them matches the measured sub-mode amplitude
           // (0.23 vs HW 0.216) and punch (1.5 vs HW 1.3) while keeping the impact.
+          // GENERATIVE fold lanes are the exception: a folded oscillator's
+          // harmonic n starts at n x the parent's phase (plus a half turn when
+          // the signed series coefficient is negative) - the fold's products
+          // are phase-coherent with the parent, and the drive+limiter stage
+          // sees the real alignment when it makes intermods from them.
           // P5 CONVENTION OFFSET: the triangle+polySine path renders
           // -cos(2*pi*p) = sin(2*pi*(p - 0.25)), i.e. it lags the reference
           // sineLUT (sin(2*pi*p)) by a quarter cycle. A constant phase offset
@@ -666,8 +750,23 @@ namespace stolmine
           // time - preserving the LOAD-BEARING inter-mode start-phase
           // relationships above (found by the P5 parity gate: without this
           // the clipper sees different mode alignment; NCC 0.05, peak +4.5%).
-          s.phase[m] = 0.25f + 0.37f * (float)m + 0.25f;
-          s.phase[m] -= floorf(s.phase[m]);
+          {
+            bool foldLane = (m == 8 || m == 9 || m == 10 || m == 12 ||
+                             m == 14 || m == 15);
+            float logical;
+            if (foldLane)
+            {
+              // parent logical start phase: carrier lane 0 or oscB lane 1
+              float lp = (m == 12 || m == 15) ? (0.25f + 0.37f) : 0.25f;
+              logical = kH[m] * lp + (chSign < 0.0f ? 0.5f : 0.0f);
+            }
+            else
+            {
+              logical = 0.25f + 0.37f * (float)m;
+            }
+            s.phase[m] = logical + 0.25f;
+            s.phase[m] -= floorf(s.phase[m]);
+          }
           float tm = tauEff * kTauR[m];
           float ceil = (kTauR[m] < 0.5f) ? hfCeilMs(f) : 1e9f;
           if (tm > ceil) tm = ceil;
@@ -675,20 +774,9 @@ namespace stolmine
           float Tramp = rampDurMs(tm) * 0.001f;      // ramp duration (s), tau-preserving
           s.mdecay[m] = 1.0f / (Tramp * sr);         // per-sample linear ramp decrement
         }
-        // Explicit pad-lane silence (P5): modes [NM..15] are never written by
-        // the loop above; zero them on every trigger so the 4-quad NEON
-        // kernel can process all 16 lanes unconditionally (ramp=0 -> r3=0
-        // regardless of phase/mfreq drift, no tail loop needed).
-        for (int m = NM; m < 16; m++)
-        {
-          s.phase[m] = 0.0f;
-          s.env[m] = 0.0f;
-          s.mfreq[m] = 0.0f;
-          s.mfreqSr[m] = 0.0f;
-          s.mdecay[m] = 0.0f;
-          s.ramp[m] = 0.0f;
-          s.bloomAmt[m] = 0.0f;
-        }
+        // (Character campaign: NM is now 16 - the two former padding lanes are
+        // the generative (9,0) and (5,5) fold lanes, so the 4-quad NEON kernel's
+        // 16 unconditional lanes are all live and the P5 pad-zero loop is gone.)
         // P2 onset bloom carrier: one shared scalar exp decay (1 -> 0), lane
         // factor = 1 - bloomAmt[m]*bloomEnv. Time constant tied to the pitch
         // envelope (firmware: the fold_B center IS p4). 2*sweepTime reproduces
