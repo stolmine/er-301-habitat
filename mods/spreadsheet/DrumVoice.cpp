@@ -131,6 +131,26 @@ namespace stolmine
   // pinned at the CC48 corpus tables - the state every amp coefficient was fitted
   // against; the equal-loudness makeup is re-anchored at the clean home (below).
   static const float kDriveMax = 12.0f;
+  // P2 (shape campaign): the cross-lattice modes are now GENERATIVE, not painted.
+  // Firmware (FUN_2400b1d8): the voice is two folded oscillators (fc, fc*(1+r))
+  // mixed linearly; every corpus mode with k != 0 and h-k != 0 reindexes exactly
+  // as (h-k)*fc + k*fB - intermod products of the OUTPUT LIMITER, not voice
+  // content. Measured on the fresh grit=0 Shape grid (180 captures, per-capture
+  // empirical fc/r): cross modes collapse -46.7 dB (n=200) when the hardware
+  // output stage goes transparent (CC8) - they are absent from the voice. And
+  // the painted kAmpFit cross amplitudes measured +13 dB hot vs hardware at the
+  // corpus point itself (123 pairs, iqr +8.6..+19.7) - a per-mode error the
+  // band-energy grid was blind to, and the measured root of "Shape reads as
+  // muddy waveshaping": a static, too-loud, phase-arbitrary painted lattice on
+  // top of the real one. With the painted cross lanes silenced (kCrossPaint=0),
+  // this model's own drive+sqrt-limiter stage generates the product lattice from
+  // the two real partial families: measured +7.6 dB vs hardware at the corpus
+  // point (generated-only probe, 123 pairs, iqr +0.7..+15.6) - closer than any
+  // painted variant tried (+13.0 painted, +8.4 trimmed-painted), with real
+  // product phases, real within-hit evolution, and threshold-tracking across
+  // the whole Clipper throw for free. Next lever for the +7.6 dB residual:
+  // pre-clip crest calibration against transparent-clipper hardware captures.
+  static const float kCrossPaint = 0.0f;
   static const float kClipTh[16] = {9e9f, 9e9f, 0.221f, 0.145f, 0.095f, 0.070f, 0.070f,
                                     0.070f, 0.070f, 0.070f, 0.070f, 0.070f, 0.070f,
                                     0.070f, 0.070f, 0.070f};
@@ -288,6 +308,14 @@ namespace stolmine
     // Block-baked per-mode phase increment (mfreq/sr), set at trigger time.
     // Removes a per-mode-per-sample division from the modal kernel (P5).
     float mfreqSr[16];
+    // P2 (shape campaign): per-lane onset-bloom mask, baked at trigger.
+    // Measured (fit_bloom.py, 72 grit=0 cells): the osc-B family (h-k=0 lanes,
+    // (1,1)/(3,3)) starts ~37% LOW and fades in as 1 - 0.61*exp(-t/(2*sweepTime))
+    // -- the firmware's pitch-envelope-swept fold_B center (p4*0.5+0.5). Other
+    // lanes measured flat (harmC +-6%) or covered by their fast decay classes
+    // (cross +15% early, inside iqr noise); their mask is 0.
+    float bloomAmt[16];
+    float bloomEnv = 0.0f, bloomCoeff = 0.0f;
     float pitchEnv = 0, pitchCoeff = 0.999f, startMult = 1;
     float noiseEnv = 0, noiseCoeff = 0, noiseLp = 0, burst = 0, burstCoeff = 0;
     float jitLp = 0, jitHz = 0;          // common-mode FM state + per-hit depth
@@ -317,7 +345,7 @@ namespace stolmine
     float cachedShape = 0.0f;
     float cachedGrit = 0.0f;
 
-    Internal() { for (int m = 0; m < 16; m++) { phase[m] = 0; env[m] = 0; mfreq[m] = 0; mfreqSr[m] = 0; mdecay[m] = 0; ramp[m] = 0; } }
+    Internal() { for (int m = 0; m < 16; m++) { phase[m] = 0; env[m] = 0; mfreq[m] = 0; mfreqSr[m] = 0; mdecay[m] = 0; ramp[m] = 0; bloomAmt[m] = 0; } }
   };
 
   DrumVoice::DrumVoice()
@@ -415,13 +443,19 @@ namespace stolmine
     // Normalise both so kappa*fc IS the resulting deviation in Hz.
     float jitNorm = 1.7320508f * kGritDepthTrim / sqrtf(jitCoeff / (2.0f - jitCoeff));
 
-    // Clipper threshold/makeup pinned at the corpus point (CC 48): that is the
-    // operating point the whole 1143-capture corpus was recorded at, so it is the
-    // state every amplitude coefficient in this file was fitted against. The
-    // Clipper PARAM now drives the pre-clip DRIVE instead (P4, plan 4.3).
+    // Clipper stage (P4 -> P2 shape campaign): the knob drives BOTH the pre-clip
+    // drive (below) and the stage's effective hardware CC. P4 pinned the tables
+    // at the corpus CC48 point; measurement showed that leaves the stage
+    // NON-transparent at clipper=0 (drive 1 still clips peaks at th~0.9 and
+    // sprays intermod products +42 dB above the hardware's transparent output,
+    // which is genuinely product-free at CC8, th=9e9 below CC12). The hardware
+    // knob's own semantics raise the threshold to transparency at the bottom,
+    // so the model's throw now morphs ccEff = 8 + 40*clipper: bit-identical
+    // CC48 tables at clipper=1 (every fitted coefficient's operating point),
+    // truly transparent at clipper=0.
     float clipTh, clipG;
     {
-      float ccClip = 48.0f;
+      float ccClip = 8.0f + 40.0f * clipperParam;
       float u = CLAMP(0.0f, 15.0f, ccClip / 8.0f);
       int ci = (int)u;
       if (ci > 14) ci = 14;
@@ -435,26 +469,32 @@ namespace stolmine
     // stacking a second, unmeasured curve (tanh) under the same knob was rejected
     // in the P4 A/B (crest collapses harder at equal ct; see the integration log).
     float driveLinear = 1.0f + clipperParam * (kDriveMax - 1.0f);
-    // Equal-loudness makeup, RE-ANCHORED at clipper = 0 (shape campaign P0): the
-    // unit now ships CLEAN, so the loudness reference is the clean voice at UNITY
-    // gain (makeup(0) = 1.0 exactly) and the rest of the throw is attenuated to
-    // match it - pushing Clipper changes crest/density, not loudness. Replaces the
-    // P4 cubic-in-(1-clipper), which was referenced at clipper = 1 and left the
-    // bottom -3.2 dB down under its +8 dB cap; with a unity-gain home there is no
-    // gain-up anywhere on the throw, so the cap (noise-pump guard) is obsolete.
-    // Form is physical: numerator over driveLinear, since below limiting RMS is
-    // proportional to drive. Quadratic numerator least-squares fitted to the
-    // measured RMS(0)/RMS(c) of the shipped default hit (ngoma-mirror, 11 throw
-    // points, max ripple 0.022 dB). makeup(1) = 0.2845 (fit; measured 0.2841,
-    // -11.0 dB): the corpus-heft top of throw plays at the clean default's
-    // loudness. Absolute-scale parity vs hardware captures at clipper = 1 now
-    // needs this factor divided out (pre-makeup signal is untouched).
-    float makeup = (1.0f + clipperParam * (2.335642f + clipperParam * 0.078083f))
+    // Equal-loudness makeup, RE-ANCHORED at clipper = 0 (shape campaign P0,
+    // REFIT after the P2 threshold morph): the unit ships CLEAN, and the whole
+    // stage (clipG(0)*makeup(0)) is NET UNITY at the home position - the clean
+    // voice passes at its natural level; the rest of the throw is attenuated to
+    // equal loudness, so pushing Clipper changes crest/density, not loudness.
+    // The leading 3.329 is exactly 1/clipG(0) (the CC8 point of the measured
+    // hardware gain table under the /3.329 corpus normalisation). Cubic
+    // numerator over driveLinear, least-squares fitted to ngoma-mirror RMS of
+    // the shipped default hit at 11 throw points with the ccEff-morphing stage
+    // (max ripple 0.5 dB; the mid-throw knee where the threshold lands is the
+    // ripple source). Net stage gain at clipper = 1 is 0.3583 (-8.9 dB): the
+    // corpus-heft top plays at the clean default's loudness. Absolute-scale
+    // parity vs hardware captures at clipper = 1 must divide this factor out
+    // (the pre-makeup signal there is bit-identical to the P4 corpus stage).
+    float makeup = 3.329f *
+                   (1.0f + clipperParam * (-2.632211f +
+                    clipperParam * (6.107731f - clipperParam * 3.183871f)))
                    / driveLinear;
     float blockClipGain = clipG * makeup;
 
     // Shape -> osc2 detune ratio (measured linear, pitch-tracked)
     float r = CLAMP(0.0f, 2.0f, 0.0189f * (ccShape - 9.2f));
+    // Shape campaign P2: painted cross-lattice lanes are silenced (see the
+    // kCrossPaint comment block up top for the full evidence chain); the
+    // product lattice is generated by the clipper stage from the two real
+    // partial families instead.
     // Character -> fold amount: dead zone to CC 78, then linear (when osc2 active)
     float fold = CLAMP(0.0f, 1.0f, (ccChar - 78.0f) / 42.0f);
     // ADAPTED: Ngoma's Decay dial is honest seconds (0.01..2.0 s), so tauC is the
@@ -594,6 +634,11 @@ namespace stolmine
             a += fold * kFoldRaise[m] * rGate * r3g;
           }
           else if (kFoldKill[m] < 1.0f) a *= 1.0f - fold * (1.0f - kFoldKill[m]);
+          // P2: cross modes are limiter products, not voice content - the
+          // painted lanes are silenced and the clipper stage generates the
+          // real product lattice from the surviving families. Voice-generated
+          // modes (k=0 carrier harmonics, h-k=0 osc-B family) are untouched.
+          if (kK[m] != 0 && (kH[m] - kK[m]) != 0) a *= kCrossPaint;
           if (f <= 15.0f || f >= nyq) a = 0.0f;           // drop out-of-range modes
           // measured-amp -> initial-amp correction (see winAvg)
           float tmS = tauEff * kTauR[m] * 0.001f;
@@ -606,6 +651,10 @@ namespace stolmine
           a *= winAvg(tauEff * 0.001f) / winAvg(tmS);
           s.env[m] = a;               // static initial amplitude; the ramp carries the decay
           s.ramp[m] = 1.0f;
+          // P2 onset bloom: osc-B family lanes (h-k = 0) fade in over the
+          // pitch-envelope window (measured 1 - 0.61*exp(-t/20ms) at the
+          // hardware's time-CC40 point; tied to sweepTime, see bloomCoeff).
+          s.bloomAmt[m] = (kK[m] != 0 && (kH[m] - kK[m]) == 0) ? 0.61f : 0.0f;
           // Varied (not aligned) start phases: all-aligned created an artificial
           // broadband click. Varying them matches the measured sub-mode amplitude
           // (0.23 vs HW 0.216) and punch (1.5 vs HW 1.3) while keeping the impact.
@@ -638,7 +687,15 @@ namespace stolmine
           s.mfreqSr[m] = 0.0f;
           s.mdecay[m] = 0.0f;
           s.ramp[m] = 0.0f;
+          s.bloomAmt[m] = 0.0f;
         }
+        // P2 onset bloom carrier: one shared scalar exp decay (1 -> 0), lane
+        // factor = 1 - bloomAmt[m]*bloomEnv. Time constant tied to the pitch
+        // envelope (firmware: the fold_B center IS p4). 2*sweepTime reproduces
+        // the measured ~20 ms fade at the capture point (time CC40 ~ 10.7 ms);
+        // the x2 scaling is calibrated at that single point (see campaign doc).
+        s.bloomEnv = 1.0f;
+        s.bloomCoeff = expf(-1.0f / (2.0f * sweepTime * sr));
         s.startMult = startMult;
         s.pitchCoeff = pitchCoeff;
         s.pitchEnv = 1.0f;
@@ -695,12 +752,17 @@ namespace stolmine
       // shape: one broadcast per sample, not per-lane state).
       float jitDevSr = jitDev * invSr;
       float heldMul = held ? 0.0f : 1.0f;
+      // P2 onset-bloom carrier: one scalar exp decay per sample, broadcast to
+      // the lanes below (lane factor 1 - bloomAmt*bloomEnv; bloomAmt is 0 on
+      // all but the osc-B family lanes, so most lanes multiply by exactly 1).
+      s.bloomEnv *= s.bloomCoeff;
       float y;
 #ifdef __ARM_NEON
       {
         float32x4_t pmulV     = vdupq_n_f32(pmul);
         float32x4_t jitDevSrV = vdupq_n_f32(jitDevSr);
         float32x4_t heldMulV  = vdupq_n_f32(heldMul);
+        float32x4_t bloomEnvV = vdupq_n_f32(s.bloomEnv);
         float32x4_t zeroV     = vdupq_n_f32(0.0f);
         float32x4_t oneV      = vdupq_n_f32(1.0f);
         float32x4_t acc       = vdupq_n_f32(0.0f);
@@ -712,6 +774,7 @@ namespace stolmine
           float *md = &s.mdecay[4 * q];
           float *rm = &s.ramp[4 * q];
           float *ev = &s.env[4 * q];
+          float *bm = &s.bloomAmt[4 * q];
 
           float32x4_t phase = vld1q_f32(ph);
           float32x4_t freq  = vld1q_f32(fr);
@@ -754,7 +817,11 @@ namespace stolmine
           poly = vmlsq_f32(poly, t6, vdupq_n_f32(0.0046816f));
           float32x4_t sine = vmulq_f32(tri, poly);
 
-          acc = vmlaq_f32(acc, sine, vmulq_f32(envv, r3));
+          // P2 onset bloom: factor = 1 - bloomAmt*bloomEnv (vmls), 1.0 on
+          // non-B lanes by construction (bloomAmt 0).
+          float32x4_t bloomA = vld1q_f32(bm);
+          float32x4_t bloomF = vmlsq_f32(oneV, bloomA, bloomEnvV);
+          acc = vmlaq_f32(acc, sine, vmulq_f32(vmulq_f32(envv, r3), bloomF));
         }
 
         float32x2_t sumPair = vadd_f32(vget_high_f32(acc), vget_low_f32(acc));
@@ -773,7 +840,8 @@ namespace stolmine
           if (s.ramp[m] < 0.0f) s.ramp[m] = 0.0f;
           float r3 = s.ramp[m] * s.ramp[m] * s.ramp[m];   // cubed linear ramp
           float tri = 4.0f * (s.phase[m] < 0.5f ? s.phase[m] : 1.0f - s.phase[m]) - 1.0f;
-          y += s.env[m] * r3 * polySine(tri);
+          float bloomF = 1.0f - s.bloomAmt[m] * s.bloomEnv;   // P2 onset bloom
+          y += s.env[m] * r3 * bloomF * polySine(tri);
         }
       }
 #endif
