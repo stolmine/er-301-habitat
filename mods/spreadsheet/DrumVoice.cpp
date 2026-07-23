@@ -255,9 +255,19 @@ namespace stolmine
   //              wobble is deliberately NOT faked with noise
   //   CC 120+    random again, deep, under the additive-noise regime;
   //              corr-matched 0.55 vs hw 0.59 at CC120
+  //
+  // Nodes 10-15 (CC80-120) RE-CONVERGED for 2.8.3.82 (gritlvl campaign): their
+  // corr targets were originally fitted against a model with no voice gate and
+  // no measured bed, which mis-calibrates them once both exist (the gate
+  // truncates the correlating tail, the bed decorrelates hits). Same hardware
+  // targets, same estimator, re-run under the shipped structure: CC80 0.44 vs
+  // hw 0.39; CC88-112 sit at the bed's corr ceiling 0.94 (hw 0.90-0.96);
+  // CC120 est+corr both bed-saturated, node pinned for a sane CC127
+  // extrapolation (jit 4.3 vs hw 5.2). Nodes 0-9 (the est-fitted random zone)
+  // are byte-identical to the 2.8.3.81 fit - verified ratio 0.91-1.00.
   static const float kGritKappa[16] = {
     0.0000f, 0.0000f, 0.0000f, 0.3306f, 0.8875f, 1.2900f, 1.5517f, 1.3880f,
-    1.4386f, 1.3162f, 0.5807f, 0.1663f, 0.1041f, 0.1066f, 0.1091f, 0.5908f};
+    1.4386f, 1.3162f, 0.8569f, 0.2150f, 0.0398f, 0.0577f, 0.0422f, 0.1560f};
   static const float kGritDepthTrim = 1.0f;
 
   static inline uint32_t lcg(uint32_t &s) { s = s * 1103515245u + 12345u; return s; }
@@ -371,6 +381,8 @@ namespace stolmine
     float bloomEnv = 0.0f, bloomCoeff = 0.0f;
     float pitchEnv = 0, pitchCoeff = 0.999f, startMult = 1;
     float noiseEnv = 0, noiseCoeff = 0, noiseLp = 0, burst = 0, burstCoeff = 0;
+    float bedPitch = 1.0f;               // per-hit bed level pitch factor (fc/246.5)^p
+    float gateEnv = 1.0f;                // firmware grit voice-gate state (env^3 in audio)
     float jitHz = 0;                     // common-mode FM per-hit depth (kappa*fc)
     uint32_t jitRng = 0x9e3779b9u;       // own stream: must not perturb the noise bed
     int holdLeft = 0;
@@ -567,46 +579,61 @@ namespace stolmine
     // (grit collapse, L/dL, kTauR classes, rampDurMs) is untouched.
     float tauC = decay * 1000.0f;   // ms
 
-    // Grit -> decay-time scaling above the 0.75 breakpoint.
+    // ---- Grit voice-gate + noise-bed laws (gritlvl campaign, 2026-07-23;
+    // planning/ngoma-grit-drama.md, harness gritlvl/capture_gritlvl/analyze_gritlvl) ----
     //
-    // The hardware does NOT impose a tau ceiling on mode decay (that model was refuted
-    // empirically) and does NOT add a damping rate. Above grit 0.75 it scales the
-    // decay-time PARAMETER itself, linearly, reaching exactly zero at grit 1.0.
-    // Breakpoint and slope are exact; the zone is entered only above 0.75.
-    //
-    // The tone collapsing toward silence at max grit is faithful, not a defect: the
-    // noise path carries its own envelope and survives, which is the "just noise"
-    // behaviour at the top of the throw. Independently, this is the same mechanism we
-    // heard and logged as "amp-env shortening past ~0.75 (808 snare)".
-    //
-    // kGritDecFloor keeps tau off zero (expf(-1/0) is a division by zero) and is the
-    // only free parameter here.
-    static const float kGritDecBreak = 0.75f;
-    static const float kGritDecSlope = 4.0f;
-    static const float kGritDecFloor = 1.0f / 3000.0f;   // tauC * this ~ 1 ms at the top
+    // Firmware (FUN_2400b1d8, decoded at instruction level): grit's mix-out is a
+    // dedicated GATE envelope on the oscillator term - env init 1.0 at trigger,
+    // linear decrement rate*(1/T), clamped at a sustain floor, and the audio path
+    // takes env^3. rate = 4*(g-0.5) clamped [0,1]; floor = 1-rate; T = the decay
+    // time clamped to a 400 ms ceiling. The "noise bed" is NOT an enveloped noise
+    // source: it is the FM'd oscillator mixed in with a STATIC grit gain
+    // ((g-0.5)*3.25 saturating at 0.8125 by g=0.75) and left to die under the
+    // main decay VCA - which is why the measured bed persistence tracks Decay
+    // ONLY (tau_hi 37/105/252/412 ms at tauC 96/402/1160/1963, IDENTICAL across
+    // grit 96-127) and scales with pitch. The old tauEff collapse
+    // (tauC*(1-4*(gN-0.75))) misattributed the gate's T-ramp to the per-mode
+    // decay parameter: hardware tonal energy sits on two FLAT plateaus
+    // (-7.3 dB across CC92-112, -20.5 dB across CC116-127 at note 60), not a
+    // progressive collapse, and the carrier-band decay saturates at ~70 ms from
+    // CC88 (441/99/71/69 ms at CC72/80/88/92) instead of shrinking linearly.
     float gN = ccGrit / 127.0f;
-    float tauEff = tauC;
-    if (gN > kGritDecBreak)
-    {
-      float k = 1.0f - (gN - kGritDecBreak) * kGritDecSlope;
-      tauEff = tauC * (k > kGritDecFloor ? k : kGritDecFloor);
-    }
-    float L = logf(tauC);            // spectral-reshaping driver (pre-ceiling)
+    float tauEff = tauC;             // per-mode decay: grit no longer scales it
+    float L = logf(tauC);            // spectral-reshaping driver
     float dL = L - 5.489f;           // L0 = ln(242 ms)
 
-    // Grit additive-noise path. The firmware confirms grit is noise-FM (the jitter path
-    // below), and that the genuine mix-out to "just noise" happens ONLY above the 0.75
-    // breakpoint (CC 95.25). The old additive noise bed from CC 25 was compensating for FM
-    // depth the magnitude-fit under-rendered - a fudge, not a mechanism. Removing it below
-    // 95.25 is neutral on the grid and slightly improves e_hi/e_up (the exact broadband
-    // bands the bed was polluting); the measured kGritKappa jitter now carries all grit
-    // character below 0.75, as the mechanism says it should. The top regime is unchanged.
-    float noiseMix = 0.0f;
-    if (ccGrit >= 115.0f) noiseMix = 0.75f;
-    else if (ccGrit > 110.0f) noiseMix = 0.35f + (ccGrit - 110.0f) / 5.0f * 0.40f;
-    else if (ccGrit > 95.25f) noiseMix = CLAMP(0.0f, 0.35f, 0.0074f * (ccGrit - 18.0f));
-    float noiseTau = tauEff < 150.0f ? tauEff : 150.0f;
-    if (ccGrit > 110.0f) noiseTau = 60.0f;
+    // Voice gate (firmware mechanism, constants forward-fitted on the mirror):
+    // above kGateTopCC the hardware kills the voice outright (measured -13 dB
+    // tonal step between CC112 and CC116, FLAT through 127) - modelled as the
+    // gate time dropping to kGateTopMs.
+    static const float kGateCapMs = 400.0f;
+    static const float kGateTopCC = 114.0f;
+    static const float kGateTopMs = 20.0f;
+    float gateRate = CLAMP(0.0f, 1.0f, (gN - 0.5f) * 4.0f);
+    float gateFloor = 1.0f - gateRate;
+    float gateTms = tauC < kGateCapMs ? tauC : kGateCapMs;
+    if (ccGrit >= kGateTopCC) gateTms = kGateTopMs;
+    float gateDecr = gateRate / (gateTms * 0.001f * sr);
+
+    // Noise bed: level ramps in from kBedOnCC and is FLAT from kBedFullCC to the
+    // top (measured hi-band bed energy -26.5 dB re grit-0 total, constant from
+    // CC88 through 127 - the audible "step" at ~CC114 is the voice being killed,
+    // not the bed rising). Persistence is decay-tracked and grit-independent:
+    // noiseTau = A * tauC^B ms (replaces the 150 ms cap + 60 ms fix, both of
+    // which the hardware refutes).
+    static const float kBedOnCC = 64.0f;
+    static const float kBedFullCC = 88.0f;
+    static const float kBedFlat = 0.447f;
+    static const float kBedTauA = 0.88f;
+    static const float kBedTauB = 0.809f;
+    static const float kBedPitchExp = 0.30f;  // bed level rises mildly with fc (n48 fit)
+    float bedAmp = 0.0f;
+    if (ccGrit > kBedOnCC)
+    {
+      float u = (ccGrit - kBedOnCC) / (kBedFullCC - kBedOnCC);
+      bedAmp = kBedFlat * (u < 1.0f ? u : 1.0f);
+    }
+    float noiseTau = kBedTauA * powf(tauC, kBedTauB);
 
     // Sweep -> start pitch multiplier (linear in OCTAVES); verbatim.
     float startMult = 1.12f * powf(2.0f, ccSweep / 22.5f);
@@ -769,8 +796,14 @@ namespace stolmine
         s.holdLeft = holdSamples;
         s.noiseEnv = 1.0f;
         s.noiseCoeff = expf(-1.0f / (noiseTau * 0.001f * sr));
-        // regime-4 attack burst (measured punch 9.8 / atk_frac 0.41 at grit >= ~115)
-        s.burst = (ccGrit >= 115.0f) ? 8.0f : 0.0f;
+        // Bed level scales with pitch (measured: n48 bed sits ~-3.4 dB relative
+        // to n60's; firmware: the bed IS the FM'd oscillator, so it carries the
+        // voice's pitch scaling). Baked per trigger from the hit's fc.
+        s.bedPitch = powf(fc / 246.5f, kBedPitchExp);
+        s.gateEnv = 1.0f;              // firmware grit gate: init 1.0 every hit
+        // top-regime attack burst (measured punch 9.8 / atk_frac 0.41), tied to
+        // the same top step the voice-kill uses
+        s.burst = (ccGrit >= kGateTopCC) ? 8.0f : 0.0f;
         s.burstCoeff = expf(-1.0f / (0.005f * sr));
         {
           float u = CLAMP(0.0f, 15.0f, ccGrit / 8.0f);
@@ -924,11 +957,19 @@ namespace stolmine
       }
       y *= s.atkEnv;
 
-      // noise body (own env) + grit attack burst
+      // Voice gate (firmware mix-out): linear decrement toward the sustain
+      // floor, cubed into the audio path. Replaces the old (1 - noiseMix*0.5)
+      // static trim AND the tauEff modal collapse - the hardware shortens the
+      // voice with this gate, it does not rescale the per-mode decay.
+      s.gateEnv -= gateDecr;
+      if (s.gateEnv < gateFloor) s.gateEnv = gateFloor;
+      y *= s.gateEnv * s.gateEnv * s.gateEnv;
+
+      // noise bed (own decay-tracked env, pitch-scaled level) + grit attack burst
       s.noiseEnv *= s.noiseCoeff;
       s.burst *= s.burstCoeff;
       s.noiseLp += noiseLpG * (noise(s.rng) - s.noiseLp);
-      y = y * (1.0f - noiseMix * 0.5f) + s.noiseLp * (noiseMix * s.noiseEnv + s.burst * 0.12f);
+      y += s.noiseLp * (bedAmp * s.bedPitch * s.noiseEnv + s.burst * 0.12f);
 
       // Ngoma addition: Punch, post-noise-mix, pre-drive/clip (drops the old
       // droopFreq pitch coupling along with the rest of the old engine).
