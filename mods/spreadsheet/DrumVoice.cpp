@@ -122,12 +122,14 @@ namespace stolmine
   // gaps). Higher drive keeps flattening peak but overshoots crest (-11% at 30, -18% at 60)
   // and stretches apparent decay, so 12 is the calibrated point.
   // P4 (plan 4.3): the 12x became the TOP of the Clipper throw rather than a fixed
-  // constant. driveLinear = 1 + clipper*(kDriveMax-1); at the shipped default
-  // clipper=1.0 the stage is bit-identical to the fixed-12x parity-proven state
-  // (the corpus point / frozen-Tessera heft); backing the knob off progressively
-  // releases the modal bank's real pre-drive dynamics (the Shape/Grit crest
-  // variation the fixed drive was flattening). Threshold and makeup stay pinned
-  // at the CC48 corpus tables - the state every amp coefficient was fitted against.
+  // constant. driveLinear = 1 + clipper*(kDriveMax-1); at clipper=1.0 the stage is
+  // bit-identical (pre-makeup) to the fixed-12x parity-proven state (the corpus
+  // point / frozen-Tessera heft); backing the knob off progressively releases the
+  // modal bank's real pre-drive dynamics (the Shape/Grit crest variation the fixed
+  // drive was flattening). Shape campaign P0: the SHIPPED DEFAULT moved to
+  // clipper=0.0 - the unit ships clean and the knob adds heft. Threshold stays
+  // pinned at the CC48 corpus tables - the state every amp coefficient was fitted
+  // against; the equal-loudness makeup is re-anchored at the clean home (below).
   static const float kDriveMax = 12.0f;
   static const float kClipTh[16] = {9e9f, 9e9f, 0.221f, 0.145f, 0.095f, 0.070f, 0.070f,
                                     0.070f, 0.070f, 0.070f, 0.070f, 0.070f, 0.070f,
@@ -427,25 +429,28 @@ namespace stolmine
       clipTh = (kClipTh[ci] + (kClipTh[ci + 1] - kClipTh[ci]) * cf) / kSMH;
       clipG = (kClipG[ci] + (kClipG[ci + 1] - kClipG[ci]) * cf) / 3.329f;
     }
-    // Variable drive (P4): linear throw 1..kDriveMax; clipper=1.0 (default) is the
-    // parity anchor (bit-identical to the fixed 12x stage). Keep the measured
+    // Variable drive (P4): linear throw 1..kDriveMax; clipper=1.0 is the parity
+    // anchor (bit-identical pre-makeup to the fixed 12x stage). Keep the measured
     // sqrt-law curve: at top-of-throw it IS the frozen reference by identity, and
     // stacking a second, unmeasured curve (tanh) under the same knob was rejected
     // in the P4 A/B (crest collapses harder at equal ct; see the integration log).
     float driveLinear = 1.0f + clipperParam * (kDriveMax - 1.0f);
-    // Equal-loudness makeup: with the pinned-threshold limiter, RMS drops as drive
-    // backs off (crest rises 2.5 -> 7.7 across the throw - that is the point) but
-    // loudness should not. Cubic in (1 - clipper), least-squares fitted against the
-    // corpus reference hit's measured RMS ratio RMS(1)/RMS(c) at 8 points across
-    // the throw (fit error <= 2.6%, i.e. <= 0.22 dB ripple); exactly 1.0 at the
-    // default (clipper = 1) so the parity anchor stays bit-identical. Extrapolates
-    // to 2.48 at clipper = 0 (measured 3.58; the +8 dB cap is deliberate - full
-    // compensation would pump the low-drive noise floor). Consequence: at low
-    // clipper the peak rises toward ~1.9x pre-level while loudness holds; that is
-    // the released crest, trim Level if routing straight to a DAC.
-    float mk = 1.0f - clipperParam;
-    float makeup = 1.0f + mk * (0.646242f + mk * (-2.083327f + mk * 2.917451f));
-    if (makeup > 2.512f) makeup = 2.512f;   // +8 dB cap
+    // Equal-loudness makeup, RE-ANCHORED at clipper = 0 (shape campaign P0): the
+    // unit now ships CLEAN, so the loudness reference is the clean voice at UNITY
+    // gain (makeup(0) = 1.0 exactly) and the rest of the throw is attenuated to
+    // match it - pushing Clipper changes crest/density, not loudness. Replaces the
+    // P4 cubic-in-(1-clipper), which was referenced at clipper = 1 and left the
+    // bottom -3.2 dB down under its +8 dB cap; with a unity-gain home there is no
+    // gain-up anywhere on the throw, so the cap (noise-pump guard) is obsolete.
+    // Form is physical: numerator over driveLinear, since below limiting RMS is
+    // proportional to drive. Quadratic numerator least-squares fitted to the
+    // measured RMS(0)/RMS(c) of the shipped default hit (ngoma-mirror, 11 throw
+    // points, max ripple 0.022 dB). makeup(1) = 0.2845 (fit; measured 0.2841,
+    // -11.0 dB): the corpus-heft top of throw plays at the clean default's
+    // loudness. Absolute-scale parity vs hardware captures at clipper = 1 now
+    // needs this factor divided out (pre-makeup signal is untouched).
+    float makeup = (1.0f + clipperParam * (2.335642f + clipperParam * 0.078083f))
+                   / driveLinear;
     float blockClipGain = clipG * makeup;
 
     // Shape -> osc2 detune ratio (measured linear, pitch-tracked)

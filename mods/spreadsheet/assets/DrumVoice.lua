@@ -56,7 +56,7 @@ function DrumVoice:onLoadGraph(channelCount)
   attack:hardSet("Bias", 0.0)
   hold:hardSet("Bias", 0.0)
   decay:hardSet("Bias", 0.25)
-  clipper:hardSet("Bias", 1.0)  -- default = top of throw = corpus-point heft (P4)
+  clipper:hardSet("Bias", 0.0)  -- default = CLEAN (bottom of throw); 1.0 = corpus-point heft
   eq:hardSet("Bias", 0.0)
   level:hardSet("Bias", 0.8)
   compAmt:hardSet("Bias", 0.0)
@@ -275,7 +275,7 @@ function DrumVoice:onLoadViews(objects, branches)
       button = "clip", description = "Clipper",
       branch = branches.clipper, gainbias = objects.clipper, range = objects.clipper,
       biasMap = Encoder.getMap("[0,1]"), biasUnits = app.unitNone,
-      biasPrecision = 2, initialBias = 1.0
+      biasPrecision = 2, initialBias = 0.0
     },
     levelEQ = GainBias {
       button = "eq", description = "EQ",
