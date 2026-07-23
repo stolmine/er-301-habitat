@@ -2114,4 +2114,11 @@ different envelopes. (1) The noise-FM phase-mod (jitDev) rides the modes' own r3
 Decay. That short fixed tau is why grit dies early on Ngoma while it persists on hardware. FIX (needs
 hardware, like the rest of grit): measure the hardware noise-bed persistence vs the Decay knob on the
 re-pinned rig and refit noiseTau (likely tie it to the voice decay / a longer measured law, remove the
-60 ms fix). Scoped follow-up to [[ngoma-grit-tuning]]; not blindly changed - measure first."""
+60 ms fix). Scoped follow-up to [[ngoma-grit-tuning]]; not blindly changed - measure first.
+SECOND DIMENSION (user, 2026-07-23): even with timbre now closer, grit feels much more DRAMATIC on
+hardware. Grit drama = FM depth x persistence x noise-bed loudness. The re-fit matched FM DEPTH (Hz
+deviation, ratio 0.99-1.14) but did NOT measure audible LEVEL: the noise-bed loudness-vs-control is
+set by noiseMix (line 605-607) + the blend y = y*(1-noiseMix*0.5) + noiseLp*(...) (line 931), never
+validated against hardware. So the loudness-and-persistence-vs-CC scaling is the gap, not the FM
+depth. Fix: measure TOTAL grit energy/level vs grit CC on the re-pinned rig (not just FM deviation),
+then refit the noiseMix law + noiseTau together."""
