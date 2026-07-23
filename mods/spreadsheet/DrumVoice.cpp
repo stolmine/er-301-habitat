@@ -649,19 +649,6 @@ namespace stolmine
         float droopB = powf(fc * (1.0f + r) * kCharDroopRef, kCharDroopExp);
         droopB = CLAMP(0.5f, 1.5f, droopB);
         float aCar = 0.0f, aOscB = 0.0f;   // parent amps, stashed for the fold lanes
-        // Collision-zone coherence correction (computed after m0/m1 below).
-        // At shape ~ 0 both parents sit on fc: the hardware's oscillators reset
-        // PHASE-ALIGNED (measured: its shape-0 fundamental is 1.67x the
-        // separated carrier, uniform across the whole Character throw), while
-        // this model's parent lanes keep their load-bearing varied start
-        // phases (anti-click; the level calibration was fitted through them).
-        // The fold-lane ratios are exact per family, so in the collision zone
-        // the AUDIBLE ratio picks up the parents' coherence factors. Correct
-        // analytically from the model's own start phases (parent spread 0.37
-        // turn; cos terms are constants), crossfaded out as the families
-        // separate. NOT a fit. Open item (campaign doc): the hardware's 1.67x
-        // shape-0 level structure itself is unmodeled - a Shape-side follow-up.
-        float corr3 = 1.0f, corr5 = 1.0f, corrSolo = 1.0f;
 
         for (int m = 0; m < NM; m++)
         {
@@ -677,40 +664,18 @@ namespace stolmine
           if (a < 0.0f) a = 0.0f;
           if (a > 1.5f) a = 1.5f;
           if (m == 0) aCar = a;
-          if (m == 1)
-          {
-            aOscB = a;
-            // Coherence factors for the collision zone (see block above).
-            // Parent phase spread 0.37 turn; kappa_n uses cos(2*pi*n*0.37):
-            // n=1 -0.6845, n=3 +0.7705, n=5 +0.5878.
-            float colX = 1.0f - r * (1.0f / 0.15f);
-            float sum = aCar + aOscB;
-            if (colX > 0.0f && sum > 1e-6f && aCar > 1e-6f)
-            {
-              float cross = 2.0f * aCar * aOscB;
-              float sq = aCar * aCar + aOscB * aOscB;
-              float k1 = sqrtf(sq + cross * -0.6845f) / sum;
-              float k3 = sqrtf(sq + cross * 0.7705f) / sum;
-              float k5 = sqrtf(sq + cross * 0.5878f) / sum;
-              float c3 = k1 / k3;                 // paired lanes (m8+m12)
-              float c5 = k1 / k5;                 // paired lanes (m9+m15)
-              float cS = k1 * sum / aCar;         // solo lanes (m10, m14)
-              corr3 = 1.0f + (CLAMP(0.25f, 4.0f, c3) - 1.0f) * colX;
-              corr5 = 1.0f + (CLAMP(0.25f, 4.0f, c5) - 1.0f) * colX;
-              corrSolo = 1.0f + (CLAMP(0.25f, 4.0f, cS) - 1.0f) * colX;
-            }
-          }
+          if (m == 1) aOscB = a;
           // GENERATIVE fold lanes: exact harmonic series of the folded parent.
           // A negative signed ratio is a half-turn phase offset (set below).
           float chSign = 0.0f;
           switch (m)
           {
-            case 8:  a = aCar  * fabsf(chR3) * droopC * corr3; chSign = chR3; break;
-            case 9:  a = aCar  * fabsf(chR5) * droopC * corr5; chSign = chR5; break;
-            case 10: a = aCar  * fabsf(chR7) * droopC * corrSolo; chSign = chR7; break;
-            case 14: a = aCar  * fabsf(chR9) * droopC * corrSolo; chSign = chR9; break;
-            case 12: a = aOscB * fabsf(chR3) * droopB * corr3; chSign = chR3; break;
-            case 15: a = aOscB * fabsf(chR5) * droopB * corr5; chSign = chR5; break;
+            case 8:  a = aCar  * fabsf(chR3) * droopC; chSign = chR3; break;
+            case 9:  a = aCar  * fabsf(chR5) * droopC; chSign = chR5; break;
+            case 10: a = aCar  * fabsf(chR7) * droopC; chSign = chR7; break;
+            case 14: a = aCar  * fabsf(chR9) * droopC; chSign = chR9; break;
+            case 12: a = aOscB * fabsf(chR3) * droopB; chSign = chR3; break;
+            case 15: a = aOscB * fabsf(chR5) * droopB; chSign = chR5; break;
             default: break;
           }
           // P2: cross modes are limiter products, not voice content - the
@@ -734,36 +699,36 @@ namespace stolmine
           // pitch-envelope window (measured 1 - 0.61*exp(-t/20ms) at the
           // hardware's time-CC40 point; tied to sweepTime, see bloomCoeff).
           s.bloomAmt[m] = (kK[m] != 0 && (kH[m] - kK[m]) == 0) ? 0.61f : 0.0f;
-          // Varied (not aligned) start phases: all-aligned created an artificial
-          // broadband click. Varying them matches the measured sub-mode amplitude
-          // (0.23 vs HW 0.216) and punch (1.5 vs HW 1.3) while keeping the impact.
-          // GENERATIVE fold lanes are the exception: a folded oscillator's
-          // harmonic n starts at n x the parent's phase (plus a half turn when
-          // the signed series coefficient is negative) - the fold's products
-          // are phase-coherent with the parent, and the drive+limiter stage
-          // sees the real alignment when it makes intermods from them.
-          // P5 CONVENTION OFFSET: the triangle+polySine path renders
-          // -cos(2*pi*p) = sin(2*pi*(p - 0.25)), i.e. it lags the reference
-          // sineLUT (sin(2*pi*p)) by a quarter cycle. A constant phase offset
-          // is invariant under accumulation, so baking +0.25 into the start
-          // phase makes the kernel render sin(2*pi*(logical phase)) for all
-          // time - preserving the LOAD-BEARING inter-mode start-phase
-          // relationships above (found by the P5 parity gate: without this
-          // the clipper sees different mode alignment; NCC 0.05, peak +4.5%).
+          // FIRMWARE start-phase scheme (shape0-level campaign): on each trigger
+          // the hardware hard-resets BOTH parent phase accumulators to exactly
+          // 0.0 (r8-gated skip of the accumulator reload, verified at
+          // instruction level: 0x2400b508/0x2400b50e osc B, same pattern osc C;
+          // reset constant DAT_2400b740 = 0x00000000). The +0.25 quarter-turn
+          // in the firmware is applied only to the TABLE INDEX, and the table
+          // is cos-form: the effective oscillator is -sin(2*pi*phase), so both
+          // parents start ALIGNED AT A ZERO CROSSING. That is simultaneously
+          //  (a) the coherent sum: at shape ~ 0 the parents collapse onto fc
+          //      and add in phase - measured shape-0 fundamental 1.65-1.69x
+          //      the separated carrier, uniform across Character; and
+          //  (b) the click-tamer: a sinusoid starting at its zero crossing has
+          //      no value discontinuity, so the instant envelope (no attack
+          //      ramp in the firmware) produces no broadband splash. Measured:
+          //      hardware onset HF(>4k) fraction 0.0000 in the first 4 ms.
+          // The old varied phases (Tessera f774e02) existed to kill the click
+          // caused by all-lanes-at-+0.25 (cosine PEAK) alignment; zero-crossing
+          // alignment kills it the way the hardware does. The global -sin
+          // polarity is an unobservable overall sign (every fold harmonic is
+          // odd), so lanes use logical phase 0 = sin rising.
+          // Fold lanes: harmonic n of a parent starting at sin-zero is
+          // b_n*sin(n*theta) - it starts at n*0 = 0 plus a half turn when the
+          // signed series coefficient is negative. Cross lanes are silenced
+          // (kCrossPaint); the drive+limiter stage sees the hardware-true
+          // alignment when it generates intermods.
+          // P5 CONVENTION OFFSET (unchanged): the triangle+polySine path
+          // renders -cos(2*pi*p) = sin(2*pi*(p - 0.25)); baking +0.25 into the
+          // stored phase makes the kernel render sin(2*pi*(logical phase)).
           {
-            bool foldLane = (m == 8 || m == 9 || m == 10 || m == 12 ||
-                             m == 14 || m == 15);
-            float logical;
-            if (foldLane)
-            {
-              // parent logical start phase: carrier lane 0 or oscB lane 1
-              float lp = (m == 12 || m == 15) ? (0.25f + 0.37f) : 0.25f;
-              logical = kH[m] * lp + (chSign < 0.0f ? 0.5f : 0.0f);
-            }
-            else
-            {
-              logical = 0.25f + 0.37f * (float)m;
-            }
+            float logical = (chSign < 0.0f) ? 0.5f : 0.0f;
             s.phase[m] = logical + 0.25f;
             s.phase[m] -= floorf(s.phase[m]);
           }
