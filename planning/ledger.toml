@@ -2077,3 +2077,22 @@ are 'deterministic but extraction is noise-limited') AND how it avoids the onset
 phases (candidate: the onset envelope / fold does it). Then use the hardware's real start-phase scheme.
 PRECONDITION: re-pin the +71-73 cent rig drift + validate the instrument BEFORE interpreting data
 (reference_trinity_firmware_re, feedback_validate_the_instrument_first). Fable dispatched 2026-07-23."""
+
+[[item]]
+id = "ngoma-grit-tuning"
+title = "Ngoma grit: noise phase-mod too weak below 0.8 - re-fit depth vs re-pinned hardware"
+status = "wip"
+stamped = "2026-07-23T10:40:02-05:00"
+area = "dsp"
+touches = ["mods/spreadsheet/DrumVoice.cpp"]
+verify = { kind = "manual", ref = "grit's common-mode noise phase-mod is audibly present and building through ~50% travel (matching the hardware), not near-silent until the 0.8 noise bed; hit-to-hit decorrelation still tracks hardware; regression on other mechanisms holds" }
+note = """User, 2026-07-23. Grit has 'very little effect until we pass 0.8 and the noise bed picks up; we
+don't get the noise phase-mod up to 50% travel that occurs on the hardware.' The mechanism is known
+(common-mode noise FM, depth = kappa(grit)*fc, kGritKappa 16-entry table + kGritDepthTrim=1.85,
+DrumVoice.cpp ~238). The table PEAKS at CC56-64 (~50% travel, kappa 0.055 = ~6 Hz dev at 110 Hz) then
+falls off - so in principle it should peak at 50%, but the absolute depth is evidently too subtle to
+hear. CRITICAL: grit was characterized BEFORE the +67-73 cent rig-drift was discovered, so the
+original depth fit may be compromised - RE-CAPTURE on the re-pinned rig (per-partial instantaneous
+FREQUENCY, phase-domain, feedback_phase_domain_measurement) and re-fit kGritKappa/kGritDepthTrim so
+the phase-mod is present through ~50% travel AND still matches hardware hit-to-hit decorrelation (the
+two must be consistent). Not a mechanism change - a depth/shape re-fit. Fable dispatched 2026-07-23."""
