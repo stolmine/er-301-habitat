@@ -28,40 +28,56 @@ namespace stolmine
     float *level = mLevel.buffer();
     float *out = mOutput.buffer();
 
-    // Block-rate: phase increment from the decay time, curvature from the
-    // curve inlet. Sampling time/curve once per block keeps the loop cheap
-    // (no per-sample divide-by-time or expf); envelopes respond fine at
-    // block rate.
-    float dt = globalConfig.samplePeriod / MAX(kExpoMinTime, decay[0]);
-    float k = expoCurveToK(curve[0]);
+    // Block-rate: phase increments from the decay time (and the fixed
+    // anti-click onset rise), curvature from the curve inlet. Sampling
+    // time/curve once per block keeps the loop cheap (no per-sample
+    // divide-by-time or expf); envelopes respond fine at block rate.
+    float dtRise = globalConfig.samplePeriod / kExpoDeclickRise;
+    float dtDecay = globalConfig.samplePeriod / MAX(kExpoMinTime, decay[0]);
+    float kRise = expoCurveToK(1.0f); // soft (fully-expo) onset, low initial slope
+    float kDecay = expoCurveToK(curve[0]);
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
       bool high = trig[i] > 0.5f;
       if (high && !mGateHigh)
       {
-        mState = EXPO_DECAY;
+        // Ramp up from wherever we are now, never a step (tomf's Strike
+        // principle) - kills the onset pop AND the retrigger pop.
+        mStartEnv = mCurrentEnv;
+        mState = EXPO_ATTACK;
         mPhase = 0.0f;
       }
       mGateHigh = high;
 
       float env;
-      if (mState == EXPO_DECAY)
+      switch (mState)
       {
-        // Compute at the current phase (peak at phase 0), then advance.
-        env = expoShape(1.0f - mPhase, k);
-        mPhase += dt;
+      case EXPO_ATTACK:
+        // Shaped rise from mStartEnv to the peak (1.0).
+        env = mStartEnv + (1.0f - mStartEnv) * expoShape(mPhase, kRise);
+        mPhase += dtRise;
+        if (mPhase >= 1.0f)
+        {
+          mState = EXPO_DECAY;
+          mPhase = 0.0f;
+        }
+        break;
+      case EXPO_DECAY:
+        env = expoShape(1.0f - mPhase, kDecay); // peak at phase 0 -> 0
+        mPhase += dtDecay;
         if (mPhase >= 1.0f)
         {
           mState = EXPO_IDLE;
           mPhase = 0.0f;
         }
-      }
-      else
-      {
+        break;
+      default:
         env = 0.0f;
+        break;
       }
 
+      mCurrentEnv = env;
       out[i] = env * level[i];
     }
   }
@@ -103,6 +119,9 @@ namespace stolmine
       bool high = trig[i] > 0.5f;
       if (high && !mGateHigh)
       {
+        // Attack ramps from the current level, never a step (tomf's Strike
+        // principle) - retriggering mid-envelope glides up instead of popping.
+        mStartEnv = mCurrentEnv;
         mState = EXPO_ATTACK;
         mPhase = 0.0f;
       }
@@ -112,7 +131,8 @@ namespace stolmine
       switch (mState)
       {
       case EXPO_ATTACK:
-        env = expoShape(mPhase, kA); // rising 0->1
+        // Shaped rise from mStartEnv to the peak (1.0).
+        env = mStartEnv + (1.0f - mStartEnv) * expoShape(mPhase, kA);
         mPhase += dtA;
         if (mPhase >= 1.0f)
         {
@@ -121,7 +141,7 @@ namespace stolmine
         }
         break;
       case EXPO_DECAY:
-        env = expoShape(1.0f - mPhase, kD); // falling 1->0
+        env = expoShape(1.0f - mPhase, kD); // peak at phase 0 -> 0
         mPhase += dtD;
         if (mPhase >= 1.0f)
         {
@@ -134,6 +154,7 @@ namespace stolmine
         break;
       }
 
+      mCurrentEnv = env;
       out[i] = env * level[i];
     }
   }

@@ -30,7 +30,11 @@ namespace stolmine
   }
 
   enum { EXPO_IDLE = 0, EXPO_ATTACK = 1, EXPO_DECAY = 2 };
-  static const float kExpoMinTime = 0.0005f; // 0.5 ms floor caps the max rate
+  static const float kExpoMinTime = 0.0005f;     // 0.5 ms floor caps the max rate
+  // Anti-click onset rise for the decay-only unit: like tomf's Strike, the
+  // envelope never jumps instantly (a 0->peak step is the pop). A short shaped
+  // rise from the current level to the peak declicks the onset AND retriggers.
+  static const float kExpoDeclickRise = 0.002f;  // 2 ms fixed rise for Expo D
 
   // Decay-only envelope.
   class ExpoD : public od::Object
@@ -52,6 +56,8 @@ namespace stolmine
     int mState = EXPO_IDLE;
     float mPhase = 0.0f;
     bool mGateHigh = false;
+    float mCurrentEnv = 0.0f; // last output (pre-Level), for click-free ramps
+    float mStartEnv = 0.0f;   // env level captured at trigger; rise ramps from here
   };
 
   // Attack-decay envelope.
@@ -76,6 +82,8 @@ namespace stolmine
     int mState = EXPO_IDLE;
     float mPhase = 0.0f;
     bool mGateHigh = false;
+    float mCurrentEnv = 0.0f; // last output (pre-Level), for click-free ramps
+    float mStartEnv = 0.0f;   // env level captured at trigger; rise ramps from here
   };
 
 } // namespace stolmine

@@ -1986,7 +1986,12 @@ audition (fire triggers, sweep Curve linear<->expo, AD attack+decay, retrigger) 
 sanity. Chosen defaults (open questions resolved): 2 curve controls for AD, bipolar curve, Level
 kept, no EOC out, retrigger restarts (may click on retrigger mid-decay - acceptable v1).
 2.2.1.7 (user): all curve controls DEFAULT TO FULLY EXPONENTIAL (+1.0 = k~3.95, fast-drop/slow-tail
-decay), not linear - envelopes start fully expo out of the box; the linear/log side is dialled in."""
+decay), not linear - envelopes start fully expo out of the box; the linear/log side is dialled in.
+2.2.1.8 (user, anti-pop): adopted tomf Strike's principle (~/repos/er-301-custom-units/mods/strike)
+- ALWAYS RAMP, NEVER STEP. Expo D no longer jumps 0->peak (that instant step was the pop); it now has
+a fixed 2ms shaped onset rise (kExpoDeclickRise). BOTH units' attack now ramps from the CURRENT env
+level (mStartEnv=mCurrentEnv at trigger) to peak, so retriggering mid-envelope glides up instead of
+popping. Added mCurrentEnv/mStartEnv state. Both arches, NEON-clean, installed."""
 area = "dsp"
 touches = ["mods/biome/ExpoEnvelope.*", "mods/biome/assets/ExpoD.lua", "mods/biome/assets/ExpoAD.lua"]
 verify = { kind = "manual", ref = "in emu: gate-triggered Expo D (decay-only) and Expo AD (attack-decay) envelope units in biome; each has a curve/expo-variation control that morphs the segment shape (e.g. linear <-> exponential); both arches build; am335x sanity" }
