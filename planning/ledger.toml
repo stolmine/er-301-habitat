@@ -2100,8 +2100,8 @@ two must be consistent). Not a mechanism change - a depth/shape re-fit. Fable di
 [[item]]
 id = "ngoma-grit-noise-persistence"
 title = "Grit noise bed decays too fast vs hardware - separate short envelope (60ms fixed / 150ms cap)"
-status = "todo"
-stamped = "2026-07-23T11:39:05-05:00"
+status = "wip"
+stamped = "2026-07-23T14:01:25-05:00"
 area = "dsp"
 touches = ["mods/spreadsheet/DrumVoice.cpp"]
 verify = { kind = "manual", ref = "the grit noise bed (>0.8 regime) persists as long as it does on the Trinity hardware, not the current short fixed decay; measure hardware noise-bed persistence vs Decay and refit noiseTau" }
