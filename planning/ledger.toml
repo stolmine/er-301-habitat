@@ -2033,3 +2033,24 @@ shipped catalog. Already fixed opportunistically: Vitrail routing 'Routing (A>B 
 parallel)' -> 'Routing' (2026-07-22, biome 2.2.1.5). Pairs naturally with the
 [[reconcile-notes-memory-codebase]] pass. Watch: some parentheticals carry real info (units,
 value ranges) - restructure those rather than delete."""
+
+[[item]]
+id = "ngoma-character-campaign"
+title = "Pin down Ngoma Character control - mechanism from firmware, fix the engine to match hardware"
+status = "wip"
+stamped = "2026-07-23T09:07:23-05:00"
+area = "dsp"
+touches = ["mods/spreadsheet/DrumVoice.*"]
+verify = { kind = "manual", ref = "Character sweep on Ngoma reproduces the Trinity hardware's timbral fold behavior; harmC residuals (were +-9..14 dB after the Shape campaign) close; regression on Shape/decay/grit holds" }
+note = """User, 2026-07-23. Next campaign after ngoma-shape-fm-campaign (which solved Shape: BLOCK =
+two FOLDED oscillators mixed linearly, the 'lattice' is limiter intermod - FM and additive-paint both
+refuted; fix = generate, don't paint). Character is very likely the SAME class of problem: BLOCK's
+oscillators are FOLDED, and Character probably drives that wavefold depth generatively, but our engine
+PAINTS Character as additive harmonic raises (kFoldRaise m8/m11, shape-dependent, r-gated) - the Shape
+campaign flagged harmC +-9..14 dB residuals as exactly this Character-side over-painting. Firmware
+Character read was REJECTED once (85ea7e8) and fit to hardware instead; re-read it now with the
+corrected two-folded-osc understanding. Resolve WHICH BLOCK arg is Character (s1 was undetermined in
+the 7-arg map; s2=Shape). CRITICAL PRECONDITION: the rig had ~+0.75 semitone tuning drift and stored
+corpus fits share the nominal-fc assumption - RE-PIN the rig tuning and validate the instrument BEFORE
+interpreting any Character data (see reference_trinity_firmware_re, feedback_validate_the_instrument_first,
+feedback_pin_every_cc_hardware_profiling). Fable campaign dispatched 2026-07-23."""
