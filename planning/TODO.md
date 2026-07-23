@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**161 items** — 44 done, 8 wip, 107 todo, 2 blocked. *Rendered 2026-07-22.*
+**161 items** — 44 done, 9 wip, 106 todo, 2 blocked. *Rendered 2026-07-22.*
 
 ## DSP
 
@@ -16,6 +16,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ~ | `ca-noise-texture` | Cellular-automata granular noise texture source (Vivary) | manual · 2026-07-16 |
 | ~ | `fabula-am335x` | Fabula reverb am335x port: hybrid-float + pow2-mask + zipper-fix | manual · 2026-07-12 |
 | ~ | `fdn-reverb` | NEON FDN reverb (Householder core + per-line filters + spectral flavor overlay) | manual · 2026-07-16 |
+| ~ | `ngoma-shape-fm-campaign` | Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping) | manual *(attested)* · 2026-07-22 |
 | ~ | `trinity-fm-unit` | Profile Modbap Trinity FM voice + build ER-301 FM drum unit | manual · 2026-07-20 |
 | ~ | `vitrail-unit` | Vitrail - dual switched-capacitor character filter unit | manual · 2026-07-18 |
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
@@ -41,7 +42,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `multimode-drum-voice-profile` | Profile + emulate multi-engine digital drum voice (per mode) | manual · 2026-07-17 |
 |   | `multiout-nlc-chaos` | NLC chaotic modulation sources (clean-room): Sloth, Chua, Hyperchaos, Squid Axon, + lower-pri | manual · 2026-07-09 |
 |   | `ngoma-cpu-optimization` | Ngoma: CPU optimization round 2 (~33% mono Cortex-A8 idle is steep) | manual · 2026-07-09 |
-|   | `ngoma-shape-fm-campaign` | Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping) | manual · 2026-07-22 |
 |   | `ngoma-sound-tuning` | Ngoma: careful sound-tuning pass (param cross-couplings, per-partial decay, mode ratios, sub-octave) | manual · 2026-07-09 |
 |   | `open303-port` | Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit | manual · 2026-07-11 |
 |   | `parfait-shaper-oversampling` | Parfait: per-band shaper oversampling to kill aliasing audible as mix is lowered at high drive | manual · 2026-07-09 |

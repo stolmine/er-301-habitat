@@ -1952,10 +1952,19 @@ silently exempt). Bias/static default is unchanged; only the CV-depth gain defau
 [[item]]
 id = "ngoma-shape-fm-campaign"
 title = "Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping)"
-status = "todo"
-stamped = "2026-07-22T11:56:42-05:00"
+status = "wip"
+stamped = "2026-07-22T22:26:18-05:00"
+attested = """2026-07-22: Fable campaign agent dispatched. TWO coupled asks (user): (1) set Ngoma's
+Clipper DEFAULT to 0 (ship clean, not the corpus-heft 1.0) - this also frees Shape, since the
+limiting regime muddies it; revisit the equal-loudness makeup reference now that 0 is home. (2)
+Perfect the Shape engine: today Shape produces MUDDY WAVESHAPING, not the clean FM-ish sidebands of
+the Trinity hardware, which LIMITS THE PALETTE. Strong hypothesis - the additive lattice detune
+(f=fc*(h+k*r)) is a magnitude approximation that cannot make true FM sidebands; the hardware likely
+does real phase-modulation. Agent to RE-WALK the firmware for the Shape/BLOCK mechanism, mine the
+existing corpus/findings, and CAPTURE FRESH Shape sweeps on the live MIDI<->audio rig (still set up),
+then implement + validate against hardware descriptors. NEON kernel discipline must hold."""
 area = "dsp"
-touches = ["mods/spreadsheet/DrumVoice.*", "mods/spreadsheet/Tessera.cpp"]
+touches = ["mods/spreadsheet/DrumVoice.*"]
 verify = { kind = "manual", ref = "Shape sweep on Ngoma (and/or frozen Tessera) reproduces the Trinity hardware's interesting FM-like spectral activity through the mid-Shape region, audibly, at low Clipper as well as high" }
 note = """User, 2026-07-22, after the tessera-into-ngoma port shipped and verified on hardware (10% mono).
 Shape remains an UNSOLVED problem carried over from Tessera: even at LOW clipping (where the fixed
