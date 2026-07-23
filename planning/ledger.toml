@@ -2129,3 +2129,31 @@ plateau from CC88 (pitch-scaled); the ~CC114 "step" is the VOICE being gate-kill
 (1-noiseMix*0.5) trim + tauEff collapse are replaced by the firmware cubed gate env. Validated:
 persistence ratio 0.92-1.11 across grit x decay, bed +-0.9 dB, grit-0 bit-identical. Remaining:
 the manual device ear-check vs the Trinity (checklist in the campaign doc)."""
+
+[[item]]
+id = "ngoma-known-residuals"
+title = "Ngoma parked 2026-07-23 (2.8.3.82): stands on its own, ~10% mono - three known misses vs hardware"
+status = "todo"
+stamped = "2026-07-23T16:35:28-05:00"
+area = "dsp"
+touches = ["mods/spreadsheet/DrumVoice.*"]
+verify = { kind = "manual", ref = "on a future Ngoma revisit, A/B vs Trinity: sub-partial body present, Character reaches the hardware's overfolded extreme, Shape's harmonic trajectory matches hardware" }
+note = """User PARKED Ngoma here, 2026-07-23. It stands on its own as a voice and hits very little CPU
+(~10% mono, the NEON pass). Three honest misses vs the Trinity hardware, in the user's words + the
+technical read, for whoever revisits:
+(1) MISSING SUB PARTIALS again (the k=-1,-2 sub-fc body/punch). Recurs after the shape/character/grit
+campaigns reshaped the amp structure (kCrossPaint dead, generative fold, voice gate). Prior sub fixes:
+winAvg initial-amp correction + phantom-r-slope removal (b44782e). Re-check the k<0 sub-mode
+amplitudes vs hardware; likely suppressed again by the new structure.
+(2) CHARACTER doesn't hit the same OVERFOLDED state the hardware does. The fold is Fourier-series
+LUTs with char_eff = min(cc/124, 0.970) [capped], w gain 0.95, tri softness 0.85 (fits) - the cap +
+softness likely keep the top of the throw short of the hardware's maximum fold depth. Check the
+extreme.
+(3) SHAPE 'slides around some different harmonics / produces a different structure than hw'. Shape =
+two oscillators fc and fc*(1+2*Shape) (r = 2*Shape); the harmonic trajectory across the throw diverges
+from hardware. Residuals already noted in planning/ngoma-shape-fm-campaign.md (harmC) and the ~1.67x
+shape-0 structure. Re-audit the r-mapping / collision-zone harmonic structure vs a fresh Shape sweep.
+Mechanisms solved + docs: shape-fm / character / shape0-level / grit-tuning / grit-drama campaign docs
+in planning/. All hardware work needs the rig RE-PINNED first (drift varies session to session:
++71/+67/+45c across the recent campaigns). The several ngoma-* wip items are shipped-pending-device
+ear-check, now parked in that state."""
