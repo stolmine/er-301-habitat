@@ -2054,3 +2054,26 @@ the 7-arg map; s2=Shape). CRITICAL PRECONDITION: the rig had ~+0.75 semitone tun
 corpus fits share the nominal-fc assumption - RE-PIN the rig tuning and validate the instrument BEFORE
 interpreting any Character data (see reference_trinity_firmware_re, feedback_validate_the_instrument_first,
 feedback_pin_every_cc_hardware_profiling). Fable campaign dispatched 2026-07-23."""
+
+[[item]]
+id = "ngoma-shape0-level-campaign"
+title = "Ngoma shape-0 fundamental level structure (oscillator phase coherence at low r)"
+status = "wip"
+stamped = "2026-07-23T09:59:27-05:00"
+area = "dsp"
+touches = ["mods/spreadsheet/DrumVoice.*"]
+verify = { kind = "manual", ref = "at shape~0 the model's fundamental level matches the hardware's measured 1.67x-coherent structure across notes and Character; onset stays click-free; regression on Shape/Character/decay/grit holds" }
+note = """User, 2026-07-23. The loose thread BOTH prior campaigns flagged. At shape~=0 the two BLOCK
+oscillators (fc and fc*(1+2*Shape)) collapse toward the same frequency and the HARDWARE sums them
+COHERENTLY: measured 1.67x shape-0 fundamental, uniform across all Character values, because the
+hardware resets its oscillators PHASE-ALIGNED each trigger. Our model uses VARIED per-mode start
+phases (ported from Tessera commit f774e02, which varied them to kill an artificial broadband onset
+click) - so at shape-0 the parents decorrelate, attenuating the summed fundamental 0.44x and inflating
+audible ratios +6.4 dB; the model's shape-0 fundamental ends up ~2.3x too quiet. The Character
+campaign added a PARTIAL analytic coherence correction (computed from the model's own phases, not
+fitted, crossfaded out by r=0.15) - this campaign should REPLACE that with the real mechanism.
+RESOLVE FROM FIRMWARE: how BLOCK sets oscillator start phases per trigger (Shape campaign found they
+are 'deterministic but extraction is noise-limited') AND how it avoids the onset click WITHOUT varied
+phases (candidate: the onset envelope / fold does it). Then use the hardware's real start-phase scheme.
+PRECONDITION: re-pin the +71-73 cent rig drift + validate the instrument BEFORE interpreting data
+(reference_trinity_firmware_re, feedback_validate_the_instrument_first). Fable dispatched 2026-07-23."""
