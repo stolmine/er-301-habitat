@@ -433,7 +433,7 @@ namespace stolmine
     float shape     = CLAMP(0.0f, 1.0f, mShape.value());
     float grit      = CLAMP(0.0f, 1.0f, mGrit.value());
     float punch     = CLAMP(0.0f, 1.0f, mPunch.value());
-    float sweep     = CLAMP(0.0f, 72.0f, mSweep.value());
+    float sweep     = CLAMP(0.0f, 1.0f, mSweep.value());
     float sweepTime = CLAMP(0.001f, 0.5f, mSweepTime.value());
     float attack    = CLAMP(0.0f, 0.05f, mAttack.value());
     float hold      = CLAMP(0.0f, 0.5f, mHold.value());
@@ -471,10 +471,9 @@ namespace stolmine
     // with the CC mapping baked into the tables at generation time.)
     float ccShape = shape * 127.0f;
     float ccGrit = grit * 127.0f;
-    // ADAPTED: Ngoma's Sweep dial stays a 0..72 "semitones" throw (existing
-    // control range); normalize it onto Tessera's measured CC 0..127 law
-    // instead of introducing a second, CC-native Sweep control.
-    float ccSweep = sweep * (127.0f / 72.0f);
+    // Ngoma's Sweep dial is normalized 0..1; map onto Tessera's measured
+    // CC 0..127 law. (Old 0..72 default 18 = 0.25 here, ccSweep 31.75 - same.)
+    float ccSweep = sweep * 127.0f;
 
     float jitCoeff = 1.0f - expf(-6.2832f * kGritLpHz / globalConfig.sampleRate);
     // noise() is uniform (std 1/sqrt(3)); the one-pole scales variance by a/(2-a).

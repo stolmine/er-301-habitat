@@ -42,7 +42,7 @@ namespace stolmine
     od::Parameter mShape{"Shape", 0.0f};
     od::Parameter mGrit{"Grit", 0.0f};
     od::Parameter mPunch{"Punch", 0.4f};
-    od::Parameter mSweep{"Sweep", 18.0f};
+    od::Parameter mSweep{"Sweep", 0.25f};
     od::Parameter mSweepTime{"SweepTime", 0.04f};
     od::Parameter mAttack{"Attack", 0.0f};
     od::Parameter mHold{"Hold", 0.0f};

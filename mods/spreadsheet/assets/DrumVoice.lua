@@ -51,21 +51,21 @@ function DrumVoice:onLoadGraph(channelCount)
   shape:hardSet("Bias", 0.0)
   grit:hardSet("Bias", 0.0)
   punch:hardSet("Bias", 0.4)
-  sweep:hardSet("Bias", 18.0)
+  sweep:hardSet("Bias", 0.25)
   sweepTime:hardSet("Bias", 0.04)
   attack:hardSet("Bias", 0.0)
   hold:hardSet("Bias", 0.0)
   decay:hardSet("Bias", 0.25)
   clipper:hardSet("Bias", 0.0)  -- default = CLEAN (bottom of throw); 1.0 = corpus-point heft
   eq:hardSet("Bias", 0.0)
-  level:hardSet("Bias", 0.8)
+  level:hardSet("Bias", 0.5)
   compAmt:hardSet("Bias", 0.0)
   octave:hardSet("Bias", 0.0)
 
   -- Gain defaults on wide-range adapters so 1 V CV sweeps the useful
   -- range. Identity (Gain = 1.0) is only meaningful for 0..1 params;
   -- the rest need explicit per-param gain.
-  sweep:hardSet("Gain", 72.0)
+  sweep:hardSet("Gain", 1.0)
   sweepTime:hardSet("Gain", 0.5)
   decay:hardSet("Gain", 2.0)
   hold:hardSet("Gain", 0.5)
@@ -119,12 +119,6 @@ function DrumVoice:onLoadGraph(channelCount)
 end
 
 function DrumVoice:onLoadViews(objects, branches)
-  local sweepMap = (function()
-    local m = app.LinearDialMap(0, 72)
-    m:setSteps(12, 1, 0.1, 0.01)
-    return m
-  end)()
-
   local decayMap = (function()
     local m = app.LinearDialMap(0.01, 2)
     m:setSteps(0.5, 0.1, 0.01, 0.001)
@@ -198,10 +192,10 @@ function DrumVoice:onLoadViews(objects, branches)
       branch = branches.sweep,
       gainbias = objects.sweep,
       range = objects.sweepRange,
-      biasMap = sweepMap,
+      biasMap = Encoder.getMap("[0,1]"),
       biasUnits = app.unitNone,
-      biasPrecision = 1,
-      initialBias = 18,
+      biasPrecision = 2,
+      initialBias = 0.25,
       sweepTimeParam = objects.sweepTime:getParameter("Bias")
     },
     decay = DrumVoiceDecayControl {
@@ -226,7 +220,7 @@ function DrumVoice:onLoadViews(objects, branches)
       biasMap = Encoder.getMap("[0,1]"),
       biasUnits = app.unitNone,
       biasPrecision = 2,
-      initialBias = 0.8,
+      initialBias = 0.5,
       clipperParam = objects.clipper:getParameter("Bias"),
       eqParam = objects.eq:getParameter("Bias"),
       compParam = objects.compAmt:getParameter("Bias")
@@ -313,7 +307,7 @@ local adapterBiases = {
 
 function DrumVoice:serialize()
   local t = Unit.serialize(self)
-  t.schema = 5 -- schema 5 = modal engine transplant (measured-laws engine); param keys unchanged, laws changed - old presets load but sound different
+  t.schema = 6 -- schema 5 = modal engine transplant. schema 6 = Sweep normalized 0..1 (was 0..72), Level default 0.5.
   for _, name in ipairs(adapterBiases) do
     local obj = self.objects[name]
     if obj then
@@ -341,6 +335,11 @@ function DrumVoice:deserialize(t)
   -- Migration to schema 4 (.175): xform removed. Saved CV bindings against
   -- xformTrig / depth / spread / xformTarget branches will fail to resolve
   -- and produce a log warning; they're orphaned by design.
+  -- Migration to schema 6: Sweep rescaled 0..72 -> 0..1. Divide the legacy
+  -- Bias so old presets keep the same pitch-envelope depth.
+  if (t.schema == nil or t.schema < 6) and t.sweep ~= nil then
+    t.sweep = t.sweep / 72.0
+  end
 
   Unit.deserialize(self, t)
   for _, name in ipairs(adapterBiases) do
