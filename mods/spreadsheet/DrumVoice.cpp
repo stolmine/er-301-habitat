@@ -219,30 +219,46 @@ namespace stolmine
   // kCrossPaint-silenced cross lane. The fitted logistic coefficients live in git
   // history (kGateFit, 2.8.3.52-2.8.3.77) if the cross lanes are ever revisited.
 
-  // ---- Grit = common-mode noise FM (measured: findings-grit.md, 155 captures) ----
-  // Grit does NOT primarily add a noise bed. It frequency-modulates the oscillators with
-  // noise, which is why hardware repeats decorrelate (5 identical hits correlate 0.999 at
-  // Grit 0 and 0.13 at Grit 64) while their spectra stay stable to 0.02%: same spectrum,
-  // new waveform every hit. A magnitude-STFT corpus is blind to this, which is how 1143
-  // captures missed it.
+  // ---- Grit = common-mode noise FM (re-fit on the re-pinned rig, 2026-07-23;
+  // planning/ngoma-grit-tuning.md, harness grit2lib/capture_grit2/fit_grit2) ----
+  // Grit frequency-modulates the oscillators with ONE shared noise deviation
+  // applied identically to every mode (firmware: a single PRNG sample added to
+  // the phase increment, so depth is structurally proportional to fc):
+  //     deviation std (Hz) = kappa(grit) * fc
   //
-  // The deviation is COMMON-MODE: measured absolute jitter is constant (1.4x spread)
-  // across partials spanning 33x in frequency, so it is ONE shared phase modulation
-  // applied to every mode, not per-mode noise and not proportional to frequency. Depth
-  // scales with the fundamental: depth = kappa(grit) * fc.
+  // Modulator spectrum: WHITE - a fresh draw every sample, no filter. This is
+  // the firmware's injection (no lowpass exists anywhere in that path) and it
+  // is what the re-pinned rig measures: with a white modulator, matching the
+  // in-band deviation through the identical phase-domain estimator lands
+  // hit-to-hit decorrelation on the hardware's values with no bandwidth knob
+  // at all. The old 40 Hz one-pole was a proxy fitted to decorrelation at a
+  // drift-era depth under-read; because a slow modulator decorrelates ~1/fm^2
+  // harder per Hz, it needed total depth ~30-45x LOW to avoid over-random
+  // hits - which is exactly why Grit was near-inaudible below 0.8 while the
+  // hardware's noise phase-mod is plainly audible from ~20% travel.
   //
-  // kappa at CC 0,8,...,120 from the note-60 sweep. The first three entries are the
-  // 0.10% analysis floor and are therefore zero, matching the measured dead zone.
-  // Note the shape: it PEAKS at CC 56-64 and falls back by CC 88, then the separate
-  // additive-noise regime takes over above CC 115. Four regimes, not one ramp.
+  // kappa at CC 0,8,...,120, forward-model fitted per node against the pinned
+  // note-60 sweep (every CC pinned incl. pitch CC20; per-capture empirical fc;
+  // 8 repeats/cell; hw and model measured through the SAME estimator so its
+  // band-limit bias cancels). Measured regime structure, all IF-lock verified:
+  //   CC 0-20    dead (hardware emits no measurable FM; the CC20 interp leak
+  //              from node 3 is the 8-CC table grid's resolution floor)
+  //   CC 24-72   RANDOM noise FM (IF tracks decorrelated across hits), depth
+  //              rising to a ~1.3-1.55 plateau; est-matched to 0.99-1.14,
+  //              repeat corr tracks hardware (e.g. 0.23/0.30 at CC32)
+  //   CC 80      mixed zone (some hit pairs IF-correlate); corr-matched 0.37
+  //              vs hw 0.39
+  //   CC 88-112  hardware's modulation is TRIGGER-LOCKED (IF tracks correlate
+  //              0.94-0.97 across hits - a deterministic wobble, not noise).
+  //              The random component is fitted to the measured decorrelation
+  //              (corr 0.955 vs hw 0.963); the residual 2 Hz deterministic
+  //              wobble is deliberately NOT faked with noise
+  //   CC 120+    random again, deep, under the additive-noise regime;
+  //              corr-matched 0.55 vs hw 0.59 at CC120
   static const float kGritKappa[16] = {
-    0.0000f, 0.0000f, 0.0000f, 0.0072f, 0.0207f, 0.0352f, 0.0478f, 0.0550f,
-    0.0541f, 0.0372f, 0.0306f, 0.0096f, 0.0100f, 0.0091f, 0.0095f, 0.0196f};
-  // modulator bandwidth: one-pole at 40 Hz reproduces the measured hit-to-hit
-  // decorrelation across the whole throw (model 0.78/0.34/0.16 vs hardware
-  // 0.75/0.37/0.13 at Grit 24/32/64). 1.85 centres the residual depth bias.
-  static const float kGritLpHz = 40.0f;
-  static const float kGritDepthTrim = 1.85f;
+    0.0000f, 0.0000f, 0.0000f, 0.3306f, 0.8875f, 1.2900f, 1.5517f, 1.3880f,
+    1.4386f, 1.3162f, 0.5807f, 0.1663f, 0.1041f, 0.1066f, 0.1091f, 0.5908f};
+  static const float kGritDepthTrim = 1.0f;
 
   static inline uint32_t lcg(uint32_t &s) { s = s * 1103515245u + 12345u; return s; }
   static inline float noise(uint32_t &s) { return (float)((lcg(s) >> 9) & 0xFFFF) / 32768.0f - 1.0f; }
@@ -355,7 +371,7 @@ namespace stolmine
     float bloomEnv = 0.0f, bloomCoeff = 0.0f;
     float pitchEnv = 0, pitchCoeff = 0.999f, startMult = 1;
     float noiseEnv = 0, noiseCoeff = 0, noiseLp = 0, burst = 0, burstCoeff = 0;
-    float jitLp = 0, jitHz = 0;          // common-mode FM state + per-hit depth
+    float jitHz = 0;                     // common-mode FM per-hit depth (kappa*fc)
     uint32_t jitRng = 0x9e3779b9u;       // own stream: must not perturb the noise bed
     int holdLeft = 0;
     float prevTrig = 0;
@@ -475,10 +491,9 @@ namespace stolmine
     // CC 0..127 law. (Old 0..72 default 18 = 0.25 here, ccSweep 31.75 - same.)
     float ccSweep = sweep * 127.0f;
 
-    float jitCoeff = 1.0f - expf(-6.2832f * kGritLpHz / globalConfig.sampleRate);
-    // noise() is uniform (std 1/sqrt(3)); the one-pole scales variance by a/(2-a).
-    // Normalise both so kappa*fc IS the resulting deviation in Hz.
-    float jitNorm = 1.7320508f * kGritDepthTrim / sqrtf(jitCoeff / (2.0f - jitCoeff));
+    // noise() is uniform (std 1/sqrt(3)); normalise so kappa*fc IS the total
+    // deviation std in Hz (white modulator - see the Grit comment block).
+    float jitNorm = 1.7320508f * kGritDepthTrim;
 
     // Clipper stage (P4 -> P2 shape campaign): the knob drives BOTH the pre-clip
     // drive (below) and the stage's effective hardware CC. P4 pinned the tables
@@ -787,9 +802,9 @@ namespace stolmine
       float pmul = 1.0f + (s.startMult - 1.0f) * s.pitchEnv;
       bool held = s.holdLeft > 0;
 
-      // one shared noise-FM deviation in Hz, added identically to every mode
-      s.jitLp += jitCoeff * (noise(s.jitRng) - s.jitLp);
-      float jitDev = s.jitLp * jitNorm * s.jitHz;
+      // one shared noise-FM deviation in Hz, added identically to every mode;
+      // WHITE: fresh draw per sample, exactly the firmware's injection
+      float jitDev = noise(s.jitRng) * jitNorm * s.jitHz;
 
       // ---- Modal bank kernel (P5 NEON pass) ----
       // 14 modes padded to 16 lanes = 4 NEON quads on am335x; identical
