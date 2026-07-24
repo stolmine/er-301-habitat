@@ -52,6 +52,21 @@
 // See planning/mirror-unit-design.md.
 #include "Mirror.h"
 #include "MirrorPhosphorGraphic.h"
+#include "APFTank.h"
+#include "FabricGraphic.h"
+// FDNTank: NEON-oriented feedback-delay-network reverb (working name).
+// See planning/fdn-reverb-design.md.
+#include "FDNTank.h"
+// Vivary: 1D cellular-automata granular noise texture (POC).
+// See planning/ca-wavetable-noise-design.md.
+#include "Vivary.h"
+// Ferrum: 2-op FM drum voice, built from profiled Modbap Trinity NEON/FM
+// (~/repos/trinity-midi-harness/findings.md).
+#include "Ferrum.h"
+// Tessera: analog BLOCK drum voice from profiled Trinity BLOCK.
+#include "Tessera.h"
+// Moire: moving intermod-lattice voice (original, r-animated lattice).
+#include "Moire.h"
 #define SWIGLUA
 %}
 
@@ -99,3 +114,10 @@
 %include "CanalsRoutingGraphic.h"
 %include "Mirror.h"
 %include "MirrorPhosphorGraphic.h"
+%include "APFTank.h"
+%include "FabricGraphic.h"
+%include "FDNTank.h"
+%include "Vivary.h"
+%include "Ferrum.h"
+%include "Tessera.h"
+%include "Moire.h"

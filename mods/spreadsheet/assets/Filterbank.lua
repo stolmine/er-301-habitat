@@ -18,6 +18,14 @@ local function floatMap(min, max)
   return map
 end
 
+-- Normalized (0..1 / -1..1) controls: framework standard coarse step 0.01
+-- (= Encoder.getMap("[0,1]")/("[-1,1]")). floatMap coarse 0.1 stays on levels.
+local function normMap(min, max)
+  local map = app.LinearDialMap(min, max)
+  map:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return map
+end
+
 local function intMap(min, max)
   local map = app.LinearDialMap(min, max)
   map:setSteps(4, 1, 0.25, 0.25)
@@ -25,15 +33,15 @@ local function intMap(min, max)
   return map
 end
 
-local mixMap = floatMap(0, 1)
-local macroQMap = floatMap(0, 1)
+local mixMap = normMap(0, 1)
+local macroQMap = normMap(0, 1)
 local bandCountMap = intMap(2, 16)
 local rotateMap = intMap(-16, 16)
 local vOctMap = floatMap(-2, 2)
 local slewMap = floatMap(0, 5)
 local inputLevelMap = floatMap(0, 4)
 local outputLevelMap = floatMap(0, 4)
-local tanhMap = floatMap(0, 1)
+local tanhMap = normMap(0, 1)
 
 local builtinScaleNames = {
   [0] = "chr", "maj", "min", "h.min",

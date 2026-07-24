@@ -244,16 +244,18 @@ namespace house
 
       double wet = 1.0 - pow(1.0 - C, 2.0);
 
+      float reg4nF = (float)reg4n;
+      float wetF = (float)wet;
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
       {
-        double inputSampleL = *in1;
-        double inputSampleR = *in2;
+        float inputSampleL = *in1;
+        float inputSampleR = *in2;
         // Denormal flush — deterministic constant (dither dropped).
-        if (fabs(inputSampleL) < 1.18e-23) inputSampleL = 1.18e-17;
-        if (fabs(inputSampleR) < 1.18e-23) inputSampleR = 1.18e-17;
-        double drySampleL = inputSampleL;
-        double drySampleR = inputSampleR;
+        if (fabsf(inputSampleL) < 1.18e-23f) inputSampleL = 1.18e-17f;
+        if (fabsf(inputSampleR) < 1.18e-23f) inputSampleR = 1.18e-17f;
+        float drySampleL = inputSampleL;
+        float drySampleR = inputSampleR;
 
         bez[wbb_cycle] += derez;
         // INTENTIONAL L/R swap from AW source ("stereo got reversed
@@ -266,21 +268,21 @@ namespace house
           bez[wbb_cycle] = 0.0;
 
           // ===== Left verb path (4 stages × 4 lines) =====
-          double dualmonoSampleL = bez[wbb_SampL];
-          b4AL[c4AL] = dualmonoSampleL + (g4AL * reg4n);
-          b4BL[c4BL] = dualmonoSampleL + (g4BL * reg4n);
-          b4CL[c4CL] = dualmonoSampleL + (g4CL * reg4n);
-          b4DL[c4DL] = dualmonoSampleL + (g4DL * reg4n);
+          float dualmonoSampleL = bez[wbb_SampL];
+          b4AL[c4AL] = dualmonoSampleL + (g4AL * reg4nF);
+          b4BL[c4BL] = dualmonoSampleL + (g4BL * reg4nF);
+          b4CL[c4CL] = dualmonoSampleL + (g4CL * reg4nF);
+          b4DL[c4DL] = dualmonoSampleL + (g4DL * reg4nF);
 
           c4AL++; if (c4AL < 0 || c4AL > shortA) c4AL = 0;
           c4BL++; if (c4BL < 0 || c4BL > shortB) c4BL = 0;
           c4CL++; if (c4CL < 0 || c4CL > shortC) c4CL = 0;
           c4DL++; if (c4DL < 0 || c4DL > shortD) c4DL = 0;
 
-          double hA = b4AL[c4AL - ((c4AL > shortA) ? shortA + 1 : 0)];
-          double hB = b4BL[c4BL - ((c4BL > shortB) ? shortB + 1 : 0)];
-          double hC = b4CL[c4CL - ((c4CL > shortC) ? shortC + 1 : 0)];
-          double hD = b4DL[c4DL - ((c4DL > shortD) ? shortD + 1 : 0)];
+          float hA = b4AL[c4AL - ((c4AL > shortA) ? shortA + 1 : 0)];
+          float hB = b4BL[c4BL - ((c4BL > shortB) ? shortB + 1 : 0)];
+          float hC = b4CL[c4CL - ((c4CL > shortC) ? shortC + 1 : 0)];
+          float hD = b4DL[c4DL - ((c4DL > shortD) ? shortD + 1 : 0)];
 
           // 4-line diff-Householder: hX - (sum others). Sum-preserving.
           b4EL[c4EL] = hA - (hB + hC + hD);
@@ -329,14 +331,14 @@ namespace house
           g4BL = hB - (hA + hC + hD);
           g4CL = hC - (hA + hB + hD);
           g4DL = hD - (hA + hB + hC);
-          dualmonoSampleL = (hA + hB + hC + hD) * 0.125;
+          dualmonoSampleL = (hA + hB + hC + hD) * 0.125f;
 
           // ===== Right verb path (walked in reverse line order) =====
-          double dualmonoSampleR = bez[wbb_SampR];
-          b4DR[c4DR] = dualmonoSampleR + (g4DR * reg4n);
-          b4HR[c4HR] = dualmonoSampleR + (g4HR * reg4n);
-          b4LR[c4LR] = dualmonoSampleR + (g4LR * reg4n);
-          b4PR[c4PR] = dualmonoSampleR + (g4PR * reg4n);
+          float dualmonoSampleR = bez[wbb_SampR];
+          b4DR[c4DR] = dualmonoSampleR + (g4DR * reg4nF);
+          b4HR[c4HR] = dualmonoSampleR + (g4HR * reg4nF);
+          b4LR[c4LR] = dualmonoSampleR + (g4LR * reg4nF);
+          b4PR[c4PR] = dualmonoSampleR + (g4PR * reg4nF);
 
           c4DR++; if (c4DR < 0 || c4DR > shortD) c4DR = 0;
           c4HR++; if (c4HR < 0 || c4HR > shortH) c4HR = 0;
@@ -393,7 +395,7 @@ namespace house
           g4HR = hB - (hA + hC + hD);
           g4LR = hC - (hA + hB + hD);
           g4PR = hD - (hA + hB + hC);
-          dualmonoSampleR = (hA + hB + hC + hD) * 0.125;
+          dualmonoSampleR = (hA + hB + hC + hD) * 0.125f;
 
           // Shift the outer-Bezier ABC history.
           // INTENTIONAL L/R swap on output: dualmonoSampleR → bez_AL,
@@ -420,11 +422,11 @@ namespace house
         inputSampleR = (bez[wbb_BR] + (CBR * (1.0 - X)) + (BAR * X)) * 0.125;
 
         // Wet/dry
-        inputSampleL = (inputSampleL * wet) + (drySampleL * (1.0 - wet));
-        inputSampleR = (inputSampleR * wet) + (drySampleR * (1.0 - wet));
+        inputSampleL = (inputSampleL * wetF) + (drySampleL * (1.0f - wetF));
+        inputSampleR = (inputSampleR * wetF) + (drySampleR * (1.0f - wetF));
 
-        *out1 = (float)inputSampleL;
-        *out2 = (float)inputSampleR;
+        *out1 = inputSampleL;
+        *out2 = inputSampleR;
 
         in1++;
         in2++;
@@ -435,22 +437,22 @@ namespace house
 
   private:
     // 4×4 FDN delay arrays, per side (16 lines × 2 = 32 arrays)
-    double b4AL[d4A + 5], b4AR[d4A + 5];
-    double b4BL[d4B + 5], b4BR[d4B + 5];
-    double b4CL[d4C + 5], b4CR[d4C + 5];
-    double b4DL[d4D + 5], b4DR[d4D + 5];
-    double b4EL[d4E + 5], b4ER[d4E + 5];
-    double b4FL[d4F + 5], b4FR[d4F + 5];
-    double b4GL[d4G + 5], b4GR[d4G + 5];
-    double b4HL[d4H + 5], b4HR[d4H + 5];
-    double b4IL[d4I + 5], b4IR[d4I + 5];
-    double b4JL[d4J + 5], b4JR[d4J + 5];
-    double b4KL[d4K + 5], b4KR[d4K + 5];
-    double b4LL[d4L + 5], b4LR[d4L + 5];
-    double b4ML[d4M + 5], b4MR[d4M + 5];
-    double b4NL[d4N + 5], b4NR[d4N + 5];
-    double b4OL[d4O + 5], b4OR[d4O + 5];
-    double b4PL[d4P + 5], b4PR[d4P + 5];
+    float b4AL[d4A + 5], b4AR[d4A + 5];
+    float b4BL[d4B + 5], b4BR[d4B + 5];
+    float b4CL[d4C + 5], b4CR[d4C + 5];
+    float b4DL[d4D + 5], b4DR[d4D + 5];
+    float b4EL[d4E + 5], b4ER[d4E + 5];
+    float b4FL[d4F + 5], b4FR[d4F + 5];
+    float b4GL[d4G + 5], b4GR[d4G + 5];
+    float b4HL[d4H + 5], b4HR[d4H + 5];
+    float b4IL[d4I + 5], b4IR[d4I + 5];
+    float b4JL[d4J + 5], b4JR[d4J + 5];
+    float b4KL[d4K + 5], b4KR[d4K + 5];
+    float b4LL[d4L + 5], b4LR[d4L + 5];
+    float b4ML[d4M + 5], b4MR[d4M + 5];
+    float b4NL[d4N + 5], b4NR[d4N + 5];
+    float b4OL[d4O + 5], b4OR[d4O + 5];
+    float b4PL[d4P + 5], b4PR[d4P + 5];
 
     int c4AL, c4BL, c4CL, c4DL, c4EL, c4FL, c4GL, c4HL;
     int c4IL, c4JL, c4KL, c4LL, c4ML, c4NL, c4OL, c4PL;
@@ -459,8 +461,8 @@ namespace house
 
     // Cross-channel feedback taps (L's final stage feeds R input
     // next cycle and vice versa).
-    double g4AL, g4BL, g4CL, g4DL;
-    double g4DR, g4HR, g4LR, g4PR;
+    float g4AL, g4BL, g4CL, g4DL;
+    float g4DR, g4HR, g4LR, g4PR;
 
     // Bezier-undersample state.
     double bez[wbb_total];

@@ -78,7 +78,6 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | **biome** | NR | Gate sequencer inspired by the Noise Engineering Numeric Repetitor |
 | | 94 Discont | 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush) |
 | | Latch Filter | Switched-capacitor S&H into SVF with V/Oct tracking |
-| | Canals | Linked resonant filter inspired by Three Sisters -- crossover/formant modes |
 | | Gesture | Continuous gesture recorder/looper -- 5/10/20s buffer, movement-detected auto-write |
 | | Gated Slew | Slew limiter with gate-controlled activation |
 | | Tilt EQ | One-knob spectral tilt filter |
@@ -106,6 +105,13 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Larets | Stepped multi-effect -- 10 effects (stutter/reverse/bitcrush/downsample/filter/pitch shift/distortion/shuffle/delay/comb) with clock-locked buffer tricks, true-stereo per-channel buffers, linked CPR single-band compressor, bipolar global param offset, 16-step sequencer with xform gate |
 | | Colmatage | Clock-driven breakbeat cutter -- WarpCut-derived algorithm with parameterized block size, repeat count, accel/ritard geometric series, bipolar duty cycle (reverse on negative), tanh saturation. Based on Nick Collins' BBCut library via Livecut |
 | | Pecto | Comb resonator -- 16 tap patterns, 4 resonator types (raw/guitar/clarinet/sitar), V/Oct, xform gate randomization |
+| | Ngoma | Macro drum voice -- single-macro character morph across kick/snare/tom/cymbal territory, NEON voice bus, audio-reactive cube overview graphic |
+| | JF | Hex-voiced slope engine -- 6 harmonically-coupled function generators (Just-Friends-style), per-voice ramp/envelope/oscillator behavior, multi-output |
+| | Visadhara | Additive percussion macro voice -- 6-voice NEON additive synthesis (BIA-derived) with Spread / Harmonic / Morph / Decay / Level, trigger-fired AR |
+| | Network | Macro spatial reverb -- 32-tap stereo with virtual-reflector room geometry, orbiting listener motion, per-tap azimuth panning |
+| | Canals | Linked resonant filter -- Three-Sisters-style crossover/formant modes, 4-input normalling topology (Low/Centre/High/All), self-oscillation, 2x oversampling |
+| | Mirror | Aliasing oscillator -- Nyquist-folding synthesis, variable fold/sync, complex-oscillator voice |
+| | Fabula | Algorithmic room reverb -- SR/2 Dattorro/Griesinger figure-8 allpass tank, organic Brownian delay modulation, discrete early-reflection network, Living Freeze hold, tunable wet highpass, xform room re-roll gate |
 | **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization -- stereo-aware passthrough with waveform display, user-controllable timebase (1x-64x) and Y-axis gain (0.25x-4x) |
 | | Spectrogram | Inline FFT spectrum analyzer -- 256-point pffft, stereo passthrough, peak hold + RMS gradient |
 | **catchall** | Sfera | Z-plane morphing filter -- 32 configs, audio-reactive ferrofluid visualization (experimental) |
@@ -113,6 +119,20 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Flakes | Granular shimmer/freeze -- feedback looper with self-modulating delay (experimental) |
 
 ## Changelog
+
+### v2.7.0
+
+**Fabula -- new algorithmic room reverb in spreadsheet.** See [RELEASE-2.7.0.md](RELEASE-2.7.0.md) for full details. spreadsheet v2.8.2 -> v2.8.3; all other packages unchanged. Firmware unchanged.
+
+**Fabula** -- a smooth, long-decay algorithmic room reverb built on an SR/2 Dattorro/Griesinger figure-8 allpass tank. Organic Brownian delay-line modulation (in place of a plain LFO), a discrete early-reflection network, and a continuous Living Freeze hold. Size drives a custom "fabric" waterfall overview; a tunable wet highpass lives under Mix; an Xform gate re-rolls the room (all params but Freeze by default) with target/depth/fire controls. Enter on Size or Mix expands their sub-parameters to full faders.
+
+### v2.6.2
+
+**Parfait + Impasto per-band modulation fixes.** See [RELEASE-2.6.2.md](RELEASE-2.6.2.md) for full details. spreadsheet v2.8.1 -> v2.8.2; all other packages unchanged. Firmware unchanged. Per-band CV on both multiband units now reaches the audio (previously moved only the on-screen control), and Parfait's saturation Type selector is easier to dial.
+
+### v2.6.1
+
+**Mirror (new aliasing oscillator) + Canals rebuild, moved biome -> spreadsheet.** See [RELEASE-2.6.1.md](RELEASE-2.6.1.md) for full details. biome v2.2.0 -> v2.2.1, spreadsheet v2.7.1 -> v2.8.1. Mirror is a complex oscillator built around deliberate aliasing (wavetable formant engine, phase-threshold sync, four-stage crusher, phase-space viz). Canals is a full ZDF-SVF rebuild with audio-rate modulation, 2x oversampling, and a 4-input normalling topology; it moved out of biome, so existing biome.Canals patches must be re-pointed at spreadsheet.Canals.
 
 ### v2.5.1
 
@@ -358,4 +378,6 @@ Joe Filbrun - I drew directly from your menu paging schemes in Accents
 Nick Collins - Colmatage's algorithm descends from the BBCut library (ICMC 2002)
 
 Remy Muller - The Livecut VST (GPLv2) served as the primary C++ reference for the cut procedures
+
+Chris Johnson (Airwindows) - I have ported several of your excellent reverbs and reused Spiral quite a bit, along with other bits and pieces
 

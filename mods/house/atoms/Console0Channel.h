@@ -105,25 +105,30 @@ namespace house
       if (panKnob < 0.0) panKnob = 0.0;
       if (panKnob > 1.0) panKnob = 1.0;
       double panOffset = (panKnob - 0.5) * 2.0; // [-1, 1]
-      double gainL = gainScale;
-      double gainR = gainScale;
-      if (panOffset > 0.0) gainL *= (1.0 - panOffset);
-      if (panOffset < 0.0) gainR *= (1.0 + panOffset);
+      double gainLd = gainScale;
+      double gainRd = gainScale;
+      if (panOffset > 0.0) gainLd *= (1.0 - panOffset);
+      if (panOffset < 0.0) gainRd *= (1.0 + panOffset);
+      // Bake block-rate gains to float once, so the per-sample path is pure float (the whole
+      // hot loop is averaging LPs + a polynomial - float precision is ample, and this drops
+      // the per-sample float<->double cast traps + slow scalar VFPv3 doubles on Cortex-A8).
+      float gainL = (float)gainLd;
+      float gainR = (float)gainRd;
 
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
       {
-        double inputSampleL = *in1;
-        double inputSampleR = *in2;
-        if (fabs(inputSampleL) < 1.18e-23) inputSampleL = 1.18e-17;
-        if (fabs(inputSampleR) < 1.18e-23) inputSampleR = 1.18e-17;
+        float inputSampleL = *in1;
+        float inputSampleR = *in2;
+        if (fabsf(inputSampleL) < 1.18e-23f) inputSampleL = 1.18e-17f;
+        if (fabsf(inputSampleR) < 1.18e-23f) inputSampleR = 1.18e-17f;
 
         // Pre-sat 1-sample-delayed averaging LP.
-        double tempL = inputSampleL;
-        inputSampleL = (inputSampleL + avgAL) * 0.5;
+        float tempL = inputSampleL;
+        inputSampleL = (inputSampleL + avgAL) * 0.5f;
         avgAL = tempL;
-        double tempR = inputSampleR;
-        inputSampleR = (inputSampleR + avgAR) * 0.5;
+        float tempR = inputSampleR;
+        inputSampleR = (inputSampleR + avgAR) * 0.5f;
         avgAR = tempR;
 
         // Apply gain.
@@ -131,36 +136,36 @@ namespace house
         inputSampleR *= gainR;
 
         // BigFastSin sat curve (verbatim from AW source).
-        if (inputSampleL > 1.4137166941154) inputSampleL = 1.4137166941154;
-        if (inputSampleL < -1.4137166941154) inputSampleL = -1.4137166941154;
-        if (inputSampleL > 0.0)
-          inputSampleL = (inputSampleL / 2.0) * (2.8274333882308 - inputSampleL);
+        if (inputSampleL > 1.4137166941154f) inputSampleL = 1.4137166941154f;
+        if (inputSampleL < -1.4137166941154f) inputSampleL = -1.4137166941154f;
+        if (inputSampleL > 0.0f)
+          inputSampleL = (inputSampleL / 2.0f) * (2.8274333882308f - inputSampleL);
         else
-          inputSampleL = -(inputSampleL / -2.0) * (2.8274333882308 + inputSampleL);
+          inputSampleL = -(inputSampleL / -2.0f) * (2.8274333882308f + inputSampleL);
 
-        if (inputSampleR > 1.4137166941154) inputSampleR = 1.4137166941154;
-        if (inputSampleR < -1.4137166941154) inputSampleR = -1.4137166941154;
-        if (inputSampleR > 0.0)
-          inputSampleR = (inputSampleR / 2.0) * (2.8274333882308 - inputSampleR);
+        if (inputSampleR > 1.4137166941154f) inputSampleR = 1.4137166941154f;
+        if (inputSampleR < -1.4137166941154f) inputSampleR = -1.4137166941154f;
+        if (inputSampleR > 0.0f)
+          inputSampleR = (inputSampleR / 2.0f) * (2.8274333882308f - inputSampleR);
         else
-          inputSampleR = -(inputSampleR / -2.0) * (2.8274333882308 + inputSampleR);
+          inputSampleR = -(inputSampleR / -2.0f) * (2.8274333882308f + inputSampleR);
 
         // Post-sat averaging LP.
         tempL = inputSampleL;
-        inputSampleL = (inputSampleL + avgBL) * 0.5;
+        inputSampleL = (inputSampleL + avgBL) * 0.5f;
         avgBL = tempL;
         tempR = inputSampleR;
-        inputSampleR = (inputSampleR + avgBR) * 0.5;
+        inputSampleR = (inputSampleR + avgBR) * 0.5f;
         avgBR = tempR;
 
-        *out1 = (float)inputSampleL;
-        *out2 = (float)inputSampleR;
+        *out1 = inputSampleL;
+        *out2 = inputSampleR;
         in1++; in2++; out1++; out2++;
       }
     }
 
   private:
-    double avgAL, avgAR, avgBL, avgBR;
+    float avgAL, avgAR, avgBL, avgBR;
 #endif
   };
 

@@ -18,10 +18,15 @@ return {
     { title = "PSR",              moduleName = "PingableScaledRandom",  category = "Biome", keywords = "random, trigger, cv, utility, modulation, sample and hold, psr" },
     { title = "Bletchley Park",   moduleName = "CodescanOsc",           category = "Biome", keywords = "oscillator, wavetable, codescan, generator, digital, bletchley" },
     { title = "Station X",        moduleName = "CodescanFilter",        category = "Biome", keywords = "filter, fir, convolution, codescan, effect, digital, station x" },
-    { title = "Fade Mixer",       moduleName = "FadeMixer",             category = "Biome", keywords = "mixer, crossfade, fade, utility" },
+    { title = "Fade Mixer",       moduleName = "FadeMixer",             category = "Biome", keywords = "mixer, crossfade, fade, utility, mute, solo" },
+    { title = "Fade Mixer 6",     moduleName = "FadeMixer6",            category = "Biome", keywords = "mixer, crossfade, fade, utility, mute, solo, 6" },
+    { title = "Fade Mixer 8",     moduleName = "FadeMixer8",            category = "Biome", keywords = "mixer, crossfade, fade, utility, mute, solo, 8" },
     { title = "Varishape Voice", moduleName = "VarishapeVoice",       category = "Biome", keywords = "oscillator, voice, synth, varishape, generator" },
     { title = "Varishape Osc",  moduleName = "VarishapeOsc",        category = "Biome", keywords = "oscillator, varishape, polyblep, generator" },
     { title = "Transport",     moduleName = "Transport",            category = "Biome", keywords = "clock, transport, gate, trigger, utility" },
-    { title = "Constant Random", moduleName = "ConstantRandom",  category = "Biome", keywords = "random, noise, cv, utility, modulation, sample and hold, lfo" }
+    { title = "Constant Random", moduleName = "ConstantRandom",  category = "Biome", keywords = "random, noise, cv, utility, modulation, sample and hold, lfo" },
+    { title = "Vitrail",      moduleName = "Vitrail",              category = "Biome", keywords = "filter, switched capacitor, comb, aliasing, resonant, self-oscillation, character, clock, vitrail" },
+    { title = "Expo D",       moduleName = "ExpoD",                category = "Biome", keywords = "envelope, decay, exponential, trigger, eg, percussion, modulation" },
+    { title = "Expo AD",      moduleName = "ExpoAD",               category = "Biome", keywords = "envelope, attack, decay, exponential, trigger, eg, modulation" }
   }
 }

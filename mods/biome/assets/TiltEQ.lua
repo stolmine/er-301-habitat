@@ -40,7 +40,7 @@ local views = {
 
 local function tiltMap()
   local m = app.LinearDialMap(-1, 1)
-  m:setSteps(0.5, 0.1, 0.01, 0.001)
+  m:setSteps(0.1, 0.01, 0.001, 0.0001)
   return m
 end
 

@@ -523,6 +523,14 @@ namespace stolmine
       float wet = mWet.value();
       if (!(wet >= 0.0f)) wet = 0.0f;
       if (wet > 1.0f) wet = 1.0f;
+      // Equal-power (sqrt-law) dry/wet crossfade gains. The dry and the wet are
+      // decorrelated (a reverb spreads energy in time), so the old linear
+      // crossfade (dry*(1-wet) + wet*wet) dipped ~3 dB (and felt worse on
+      // present material) at wet=0.5 - the reported gain loss. sqrt-law keeps
+      // dryGain^2 + wetGain^2 = 1 -> constant power for decorrelated signals ->
+      // flat perceived loudness across the sweep, no center dip. Block rate.
+      const float dryGain = sqrtf(1.0f - wet);
+      const float wetGain = sqrtf(wet);
 
       float glitchAmount = mGlitch.value();
       if (!(glitchAmount >= 0.0f)) glitchAmount = 0.0f;
@@ -1921,9 +1929,9 @@ namespace stolmine
         mWriteIndex++;
         if (mWriteIndex >= maxDelay) mWriteIndex = 0;
 
-        // Mix.
-        const float mixedL = x * (1.0f - wet) + wetL * wet;
-        const float mixedR = x * (1.0f - wet) + wetR * wet;
+        // Mix (equal-power crossfade; gains computed at block rate above).
+        const float mixedL = x * dryGain + wetL * wetGain;
+        const float mixedR = x * dryGain + wetR * wetGain;
 
         // Output DC blockers (stereo). Catches any DC slipping
         // through wet from the wet path's own saturation residue.

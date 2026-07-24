@@ -46,6 +46,10 @@ When your subclass uses the key function pattern, its vtable lives in the packag
 - DrumCubeGraphic crashed on `addChild` for years (the `.175` Ngoma codex `xform-removal` fix was treating the symptom). Root cause was `void DrumCubeGraphic::draw(...)` defined out-of-line in `DrumCubeGraphic.cpp`. Moving the body inline into the header fixed it permanently.
 - AlembicSphereGraphic has the same shape (`mods/catchall/AlembicSphereGraphic.cpp:257` defines `draw()` out-of-line). Currently works by luck. The lint script `tools/check-graphic-virtual-defs.sh` flags it. **Refactor before next release.**
 
+**Honesty about the mechanism:** the *rule* is airtight and reproduced by bisected incidents, but the *exact* linker transition — precisely how the dynamic loader resolves vtable addresses between the kernel ELF and the package `.so` when the derived vtable isn't COMDAT — remains empirical, not fully pinned. Do not over-trust any confident-sounding causal story here (including this doc's); trust the reproductions.
+
+**Scope: this is not a graphics rule.** It applies to *any* package class that subclasses a framework type with virtual functions: `od::Graphic`, `od::Object`, `od::Followable`, `od::Parameter`, `od::Option`, `od::Task`, `od::ReferenceCounted` — anything in `od::*`. Graphics are just where it bit first and worst. If the base has virtuals and your package extends it, keep every override inline.
+
 ## The correct pattern
 
 ```cpp
@@ -181,6 +185,20 @@ void MyOscillator::process() { ... }   // out-of-line → KEY FUNCTION → at ri
 
 (Most unit `process()` bodies are large. Inline doesn't mean "one-liner" — it means "in the header." A 200-line `process()` in a header is fine. The linker dedups COMDAT bodies the same way it dedups COMDAT vtables.)
 
+**The Visadhara Phase 2 incident (2026-05-03) — why you can't trust a clean lint here.** Visadhara is an `od::Object` unit. Phase 1 (skeleton) had `process()` and the dtor out-of-line in `Visadhara.cpp` and loaded fine on hardware. Phase 2 added params and more code to the `process()` body and **hard-faulted on insert** — with **a clean lint**, because `check-graphic-virtual-defs.sh` only scans the *graphic* virtual names (`draw`, `notifyVisible`, `setSize`, …) and does not yet flag `od::Object` virtuals (`process`, `populateGraph`, `serialize`, `deserialize`). The fix: move `Internal`, ctor, dtor, and `process()` all inline into `Visadhara.h` and delete `Visadhara.cpp`. It then loaded cleanly, and is now the **canonical all-inline pattern** for new package C++ classes. Lesson: on an `od::Object` subclass, a green lint proves nothing — verify by hand (no `.o`, weak vtable) until the lint is extended.
+
+## Existing code silently at risk
+
+These units define `process()` (or other virtuals) out-of-line in a `.cpp`. They load on the current hardware/firmware by linker luck, but a firmware rebuild that shifts an `od::Object`/`od::Graphic` vtable slot could surface the fault as an insert-crash. Do **not** migrate pre-emptively (churn for no user benefit); migrate a unit when you're already doing substantial work on it, or in a batch if the ABI ever actually shifts.
+
+- `mods/spreadsheet/`: `DrumVoice` (Ngoma), `Helicase`, `JF`, `Pecto`, `MultitapDelay` (Petrichor), `Etcher`, `MultibandSaturator` (Parfait), `MultibandCompressor` (Impasto), `Filterbank` (Tomograph), `TrackerSeq` (Excel), `GateSeq` (Ballot), `Larets`, `Blanda`, `Colmatage`, `Rauschen`
+- `mods/catchall/`: `Alembic`
+- `mods/biome/`: units with `.cpp`/`.h` splits
+
+`AlembicSphereGraphic` (`mods/catchall/`) is the one *graphic* still out-of-line; the lint flags it. Ledger item `rauschen-header-only-migration` tracks Rauschen's migration (and points at this list) as a low-priority `todo`.
+
+**Lint blind spot:** `tools/check-graphic-virtual-defs.sh` currently only matches the graphic virtual names, so it will **not** catch the `od::Object` units above. Extend it to also flag `process` / `populateGraph` / `serialize` / `deserialize` definitions in package `.cpp` files, then this list becomes machine-checkable.
+
 ## How to write a custom graphic from scratch
 
 1. Pick an existing all-inline graphic as your template. Good references:
@@ -202,6 +220,9 @@ Before any release that touches custom graphics:
 
 ```bash
 # 1. Lint scan — fails on out-of-line virtuals.
+#    NOTE: only catches *graphic* virtuals (draw/notifyVisible/setSize/...).
+#    It does NOT yet flag od::Object virtuals (process/serialize/...), so a
+#    green result does not clear an od::Object unit — hand-verify steps 4-5.
 tools/check-graphic-virtual-defs.sh
 
 # 2. Build for am335x with force-clean SWIG (catches stale wrapper).

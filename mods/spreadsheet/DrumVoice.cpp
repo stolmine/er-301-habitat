@@ -1,25 +1,318 @@
 #include "DrumVoice.h"
-#include "DrumVoiceSineLUT.h"
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
-#include <string.h>
 
 #ifdef __ARM_NEON
 #include <arm_neon.h>
 #endif
 
+// no-tree-vectorize is load-bearing on am335x (feedback_disable_tree_vectorize_am335x);
+// applied globally for this package via mod.mk CFLAGS.
+
 namespace stolmine
 {
+  // ---------------------------------------------------------------------------
+  // Engine transplant (2.8.3.72): the oscillator/FM/membrane core that used to
+  // live in this file is gone, replaced verbatim by the modal lattice engine
+  // from Tessera.cpp - itself fitted to the Trinity BLOCK mode-structure
+  // campaign (1143 hardware captures: fine 1-D throws for all 8 controls + all
+  // 28 2-D pair matrices; analysis: ~/repos/trinity-midi-harness/analysis-
+  // modemap.md). Ngoma's 14-parameter surface, trigger/hold/attack shell,
+  // punch stage, and output chain (variable clipper, EQ, compressor, level)
+  // survive; see planning/ngoma-tessera-integration.md section 4 for the
+  // param-mapping decisions. Tessera.cpp/.h are the frozen reference model -
+  // every table below is copied byte-for-byte from there; do not edit one
+  // without the other unless intentionally diverging.
+  //
+  // KEY STRUCTURAL FINDING (Tessera): the hardware spectrum is NOT stretched
+  // odd harmonics. Every capture factorizes as f(h,k) = fc*(h + k*r): a core
+  // oscillator (odd harmonics h) cross-modulated by a 2nd oscillator at
+  // fc*(1+r), giving uniformly-spaced intermod sidebands. ~30% of sideband
+  // amplitude sits BELOW fc (the k=-1,-2 "sub" modes) - that is the
+  // hardware's body/punch, which a stretched-harmonic model cannot produce at
+  // all.
+  //
+  // Two decay classes (measured): "tone" modes (carrier / osc2 / folded core
+  // harmonics) ring at tauRatio ~0.93-1.0; ALL sidebands are short (~0.35,
+  // weak ones 0.15-0.2). That class split IS the measured brightness-decay
+  // mechanism. All control interdependencies reduce to analytic forms (no 2-D
+  // tables needed).
+  // ---------------------------------------------------------------------------
+  static const int NM = 16;
 
-  // 0.999f init can't go through memset (only byte patterns); needs a
-  // separate loop. noinline + no-tree-vectorize so gcc doesn't lift it
-  // back into a NEON quad-store with :64 hint.
-  __attribute__((noinline, optimize("no-tree-vectorize")))
-  static void initPartialDecayCoeffs(float *partialDecay)
+  // mode (h,k): f = fc*(h + k*r)
+  // 12 fitted modes + 4 GENERATIVE fold lanes (m8/9/10/14 = h3/h5/h7/h9 of the
+  // carrier, m12/m15 = 3fB/5fB of oscB). Character campaign: the hardware voice
+  // is two oscillators morphed sine->triangle and WAVEFOLDED; the fold is
+  // odd-symmetric so it makes only odd harmonics of each parent, and those lanes
+  // are now painted from the exact Fourier series of the read fold law (see the
+  // Character block below), not from fitted per-mode regressions.
+  static const float kH[NM] = {1, 1, 1, 3, 1, 3, 1, 5, 3, 5, 7, 3, 3, 5, 9, 5};
+  static const float kK[NM] = {0, 1, -1, 1, 2, 2, -2, 2, 0, 0, 0, -1, 3, 1, 0, 5};
+  // Per-mode amplitude, least-squares fitted against all 1143 hardware captures
+  // (fit_amps.py). amp = c0 + c1*dL + c2*foldN + c3*r + c4*lf + c5*g.
+  // The r term is included ONLY for the modes where the stored data shows a real
+  // r-dependence (3,4,5,7,8,10,11). For the carrier, osc2, both sub modes and (5,0)
+  // the measured amplitude is FLAT in r (e.g. sub = 0.226/0.243/0.236 at r=0.20/0.39/
+  // 0.58) - earlier fits produced a large negative r slope there purely because 370 of
+  // 423 samples sit at r=0.39, and that phantom slope was collapsing the sub (the
+  // body/punch) by up to 5x at mid Shape.
+  // Column c2 (formerly foldN) is retired: Character's effect on every lane is
+  // now generative (see the Character block below), so the fitted foldN slopes
+  // are zeroed and the feature is gone. Rows m8/9/10/12/14/15 are fully
+  // generative lanes; their regressions are unused (zeroed).
+  static const float kAmpFit[NM][6] = {
+    { 0.9935f,  0.0070f,  0.0000f,  0.0000f, -0.0122f, -0.0801f},  // h=1 k=+0 carrier
+    { 0.6483f,  0.0306f,  0.0000f,  0.0000f, -0.0482f, -0.0203f},  // h=1 k=+1 osc2
+    { 0.3075f,  0.0240f,  0.0000f,  0.0000f, -0.0278f, -0.0301f},  // h=1 k=-1 sub
+    { 0.2088f,  0.0251f,  0.0000f,  0.0141f, -0.0347f,  0.0450f},  // h=3 k=+1
+    { 0.3876f, -0.0014f,  0.0000f, -0.1182f, -0.0597f,  0.0165f},  // h=1 k=+2
+    { 0.1923f,  0.0130f,  0.0000f, -0.0632f, -0.0428f,  0.1504f},  // h=3 k=+2
+    { 0.2590f, -0.0566f,  0.0000f,  0.0000f, -0.1133f,  0.2749f},  // h=1 k=-2 sub
+    { 0.1107f, -0.0036f,  0.0000f, -0.0136f,  0.0175f,  0.3865f},  // h=5 k=+2
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=3 k=+0 generative
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=5 k=+0 generative
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=7 k=+0 generative
+    { 0.1542f, -0.0047f,  0.0000f,  0.3891f, -0.0221f,  0.0759f},  // h=3 k=-1 (kCrossPaint-dead)
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=3 k=+3 generative (3fB)
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=5 k=+1 (kCrossPaint-dead)
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=9 k=+0 generative
+    { 0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f},  // h=5 k=+5 generative (5fB)
+  };
+
+  // ---- Character: GENERATIVE morph + wavefold (firmware read, instruction level;
+  // Character campaign 2026-07-23, planning/ngoma-character-campaign.md).
+  //
+  // The hardware's Character knob does two things to BOTH oscillators, in sequence:
+  //   blend = clamp(2*char, 0, 1)  sine -> triangle waveform morph (bottom half)
+  //   w     = clamp(2*char, 1, 2)  wavefold drive (top half)
+  //   fold(mix) = (|u - round(u)| - 0.25)*4,  u = w*mix*0.25 + 0.25
+  // The fold is odd-symmetric: it generates ONLY odd harmonics of each parent,
+  // riding the parent's envelope (the measured 0.89-1.0 tau ratios of the "tone"
+  // modes). Confirmed on a fresh 162-capture transparent-output sweep: h2 = 0
+  // everywhere, h3 NULL at CC80, h7 null at CC112-120, h9 null at CC96, carrier
+  // a1(char) non-monotonic within 1-2% of theory on 3 notes.
+  //
+  // blend and w are functions of ONE knob, so the harmonic curves are 1-D. The
+  // five tables below are the exact Fourier series of the folded waveform,
+  // evaluated offline over the knob throw with the fitted calibration
+  // (char_eff = min(cc/124, 0.970), w gain 0.95, triangle harmonic softness
+  // 0.85; typical residual x1.42 vs hardware across 4 harmonics x 12 chars x
+  // 3 notes, including the nulls - the painted table had +13 dB class errors).
+  // kCharA1 is normalized at the corpus fit point (char CC48) so every fitted
+  // kAmpFit intercept keeps its operating point; R tables are SIGNED (a
+  // negative ratio becomes a half-turn phase offset - the products are
+  // coherent, not arbitrary). Fold ratios additionally scale with parent pitch
+  // as (f_parent/253.6)^-0.128 (measured; one exponent explains both the
+  // per-note trend and the carrier-vs-oscB family offset).
+  // The voice carries TRANSPARENT-output harmonic levels; at high Clipper the
+  // drive+limiter stage regenerates the extra brightness exactly as the
+  // hardware's does (same generate-dont-paint architecture as kCrossPaint).
+  static const float kCharA1[33] = {
+      +1.1424f, +1.1306f, +1.1189f, +1.1071f, +1.0953f, +1.0835f, +1.0718f,
+      +1.0600f, +1.0482f, +1.0364f, +1.0247f, +1.0129f, +1.0011f, +0.9893f,
+      +0.9776f, +0.9658f, +0.9791f, +1.0216f, +1.0492f, +1.0645f, +1.0698f,
+      +1.0668f, +1.0568f, +1.0410f, +1.0202f, +0.9952f, +0.9666f, +0.9349f,
+      +0.9005f, +0.8638f, +0.8250f, +0.8127f, +0.8127f
+  };
+  static const float kCharR3[33] = {
+      +0.0000f, -0.0050f, -0.0100f, -0.0152f, -0.0204f, -0.0258f, -0.0313f,
+      -0.0370f, -0.0427f, -0.0486f, -0.0546f, -0.0608f, -0.0671f, -0.0736f,
+      -0.0802f, -0.0869f, -0.0900f, -0.0762f, -0.0513f, -0.0188f, +0.0189f,
+      +0.0605f, +0.1051f, +0.1521f, +0.2014f, +0.2530f, +0.3071f, +0.3641f,
+      +0.4245f, +0.4890f, +0.5585f, +0.5809f, +0.5809f
+  };
+  static const float kCharR5[33] = {
+      +0.0000f, +0.0018f, +0.0036f, +0.0055f, +0.0074f, +0.0093f, +0.0113f,
+      +0.0133f, +0.0154f, +0.0175f, +0.0197f, +0.0219f, +0.0242f, +0.0265f,
+      +0.0289f, +0.0313f, +0.0315f, +0.0173f, -0.0068f, -0.0350f, -0.0637f,
+      -0.0907f, -0.1147f, -0.1353f, -0.1523f, -0.1658f, -0.1761f, -0.1836f,
+      -0.1884f, -0.1910f, -0.1915f, -0.1913f, -0.1913f
+  };
+  static const float kCharR7[33] = {
+      -0.0000f, -0.0009f, -0.0018f, -0.0028f, -0.0038f, -0.0047f, -0.0058f,
+      -0.0068f, -0.0078f, -0.0089f, -0.0100f, -0.0112f, -0.0123f, -0.0135f,
+      -0.0147f, -0.0160f, -0.0154f, -0.0015f, +0.0194f, +0.0399f, +0.0554f,
+      +0.0645f, +0.0670f, +0.0638f, +0.0562f, +0.0454f, +0.0325f, +0.0183f,
+      +0.0036f, -0.0110f, -0.0253f, -0.0295f, -0.0295f
+  };
+  static const float kCharR9[33] = {
+      -0.0000f, +0.0006f, +0.0011f, +0.0017f, +0.0023f, +0.0029f, +0.0035f,
+      +0.0041f, +0.0047f, +0.0054f, +0.0061f, +0.0068f, +0.0075f, +0.0082f,
+      +0.0089f, +0.0097f, +0.0088f, -0.0044f, -0.0213f, -0.0330f, -0.0363f,
+      -0.0318f, -0.0220f, -0.0100f, +0.0020f, +0.0123f, +0.0197f, +0.0239f,
+      +0.0245f, +0.0218f, +0.0159f, +0.0135f, +0.0135f
+  };
+  // Fold-ratio pitch droop (measured -0.128, clamped for out-of-map pitches).
+  static const float kCharDroopExp = -0.128f;
+  static const float kCharDroopRef = 1.0f / 253.6f;
+
+  // tone modes ring long, sidebands short; the generative fold lanes are tone
+  // class (they ride the parent envelope; measured 0.89-0.95).
+  static const float kTauR[NM] = {1.00f, 0.94f, 0.35f, 0.35f, 0.35f, 0.34f,
+                                  0.20f, 0.17f, 0.95f, 0.95f, 0.93f, 0.35f,
+                                  0.89f, 0.60f, 0.93f, 0.89f};
+
+  // ---- Trinity output stage (measured: findings-clipper.md, 152 hardware captures) ----
+  // A soft clip on the SUMMED output, proven acting on the sum rather than per-partial
+  // (hardware output peak stays pinned at 0.203-0.206 across every timbre while crest
+  // collapses 11.1 -> 3.0). Level-invariant to ~4% across a 5-point velocity sweep, so a
+  // memoryless curve is the right model:  y = g * x / sqrt(1 + (x/th)^2).
+  //
+  // Transparent below CC ~12; threshold falls 0.221 -> 0.070 across CC 16-40; above CC 40
+  // the threshold is fixed and the knob is pure drive, with makeup gain asymptoting ~4.03.
+  //
+  // th is tabulated in HARDWARE capture units; kSMH converts to this model's units
+  // (model base peak 2.6143 <-> hardware unclipped base peak 0.2030). That conversion
+  // matters because a saturator is nonlinear: unlike every earlier fit, absolute scale
+  // is not free here.
+  static const float kSMH = 0.2030f / 2.6143f;
+  // Pre-clipper drive. The hardware's output peak is PINNED at 0.262 with CV 6.8% across
+  // all 1120 cells of the timbre map, because its voice always drives the limiter into
+  // limiting. Our voice did not: at Grit 108 the model peaked at 0.04, far below threshold,
+  // so no limiting happened and peak swung 15.8x across the Grit throw (hardware: 1.10x).
+  // Driving harder pins the peak the same way the hardware does. Measured on the map:
+  // spread 15.8x -> 2.2x, and crest error +75% -> +7% (crest was one of the three largest
+  // gaps). Higher drive keeps flattening peak but overshoots crest (-11% at 30, -18% at 60)
+  // and stretches apparent decay, so 12 is the calibrated point.
+  // P4 (plan 4.3): the 12x became the TOP of the Clipper throw rather than a fixed
+  // constant. driveLinear = 1 + clipper*(kDriveMax-1); at clipper=1.0 the stage is
+  // bit-identical (pre-makeup) to the fixed-12x parity-proven state (the corpus
+  // point / frozen-Tessera heft); backing the knob off progressively releases the
+  // modal bank's real pre-drive dynamics (the Shape/Grit crest variation the fixed
+  // drive was flattening). Shape campaign P0: the SHIPPED DEFAULT moved to
+  // clipper=0.0 - the unit ships clean and the knob adds heft. Threshold stays
+  // pinned at the CC48 corpus tables - the state every amp coefficient was fitted
+  // against; the equal-loudness makeup is re-anchored at the clean home (below).
+  static const float kDriveMax = 12.0f;
+  // P2 (shape campaign): the cross-lattice modes are now GENERATIVE, not painted.
+  // Firmware (FUN_2400b1d8): the voice is two folded oscillators (fc, fc*(1+r))
+  // mixed linearly; every corpus mode with k != 0 and h-k != 0 reindexes exactly
+  // as (h-k)*fc + k*fB - intermod products of the OUTPUT LIMITER, not voice
+  // content. Measured on the fresh grit=0 Shape grid (180 captures, per-capture
+  // empirical fc/r): cross modes collapse -46.7 dB (n=200) when the hardware
+  // output stage goes transparent (CC8) - they are absent from the voice. And
+  // the painted kAmpFit cross amplitudes measured +13 dB hot vs hardware at the
+  // corpus point itself (123 pairs, iqr +8.6..+19.7) - a per-mode error the
+  // band-energy grid was blind to, and the measured root of "Shape reads as
+  // muddy waveshaping": a static, too-loud, phase-arbitrary painted lattice on
+  // top of the real one. With the painted cross lanes silenced (kCrossPaint=0),
+  // this model's own drive+sqrt-limiter stage generates the product lattice from
+  // the two real partial families: measured +7.6 dB vs hardware at the corpus
+  // point (generated-only probe, 123 pairs, iqr +0.7..+15.6) - closer than any
+  // painted variant tried (+13.0 painted, +8.4 trimmed-painted), with real
+  // product phases, real within-hit evolution, and threshold-tracking across
+  // the whole Clipper throw for free. Next lever for the +7.6 dB residual:
+  // pre-clip crest calibration against transparent-clipper hardware captures.
+  static const float kCrossPaint = 0.0f;
+  static const float kClipTh[16] = {9e9f, 9e9f, 0.221f, 0.145f, 0.095f, 0.070f, 0.070f,
+                                    0.070f, 0.070f, 0.070f, 0.070f, 0.070f, 0.070f,
+                                    0.070f, 0.070f, 0.070f};
+  static const float kClipG[16] = {1.000f, 1.000f, 1.538f, 2.150f, 2.648f, 3.037f, 3.329f,
+                                   3.546f, 3.701f, 3.810f, 3.888f, 3.940f, 3.976f, 4.001f,
+                                   4.021f, 4.034f};
+
+  // PRESENCE GATE: RETIRED (Character campaign). The gated lanes were the h=3/5/7
+  // core harmonics + (3,-1); the harmonics are now generative fold lanes whose
+  // curves are genuinely ~0 with the fold shut (no gate needed), and (3,-1) is a
+  // kCrossPaint-silenced cross lane. The fitted logistic coefficients live in git
+  // history (kGateFit, 2.8.3.52-2.8.3.77) if the cross lanes are ever revisited.
+
+  // ---- Grit = common-mode noise FM (re-fit on the re-pinned rig, 2026-07-23;
+  // planning/ngoma-grit-tuning.md, harness grit2lib/capture_grit2/fit_grit2) ----
+  // Grit frequency-modulates the oscillators with ONE shared noise deviation
+  // applied identically to every mode (firmware: a single PRNG sample added to
+  // the phase increment, so depth is structurally proportional to fc):
+  //     deviation std (Hz) = kappa(grit) * fc
+  //
+  // Modulator spectrum: WHITE - a fresh draw every sample, no filter. This is
+  // the firmware's injection (no lowpass exists anywhere in that path) and it
+  // is what the re-pinned rig measures: with a white modulator, matching the
+  // in-band deviation through the identical phase-domain estimator lands
+  // hit-to-hit decorrelation on the hardware's values with no bandwidth knob
+  // at all. The old 40 Hz one-pole was a proxy fitted to decorrelation at a
+  // drift-era depth under-read; because a slow modulator decorrelates ~1/fm^2
+  // harder per Hz, it needed total depth ~30-45x LOW to avoid over-random
+  // hits - which is exactly why Grit was near-inaudible below 0.8 while the
+  // hardware's noise phase-mod is plainly audible from ~20% travel.
+  //
+  // kappa at CC 0,8,...,120, forward-model fitted per node against the pinned
+  // note-60 sweep (every CC pinned incl. pitch CC20; per-capture empirical fc;
+  // 8 repeats/cell; hw and model measured through the SAME estimator so its
+  // band-limit bias cancels). Measured regime structure, all IF-lock verified:
+  //   CC 0-20    dead (hardware emits no measurable FM; the CC20 interp leak
+  //              from node 3 is the 8-CC table grid's resolution floor)
+  //   CC 24-72   RANDOM noise FM (IF tracks decorrelated across hits), depth
+  //              rising to a ~1.3-1.55 plateau; est-matched to 0.99-1.14,
+  //              repeat corr tracks hardware (e.g. 0.23/0.30 at CC32)
+  //   CC 80      mixed zone (some hit pairs IF-correlate); corr-matched 0.37
+  //              vs hw 0.39
+  //   CC 88-112  hardware's modulation is TRIGGER-LOCKED (IF tracks correlate
+  //              0.94-0.97 across hits - a deterministic wobble, not noise).
+  //              The random component is fitted to the measured decorrelation
+  //              (corr 0.955 vs hw 0.963); the residual 2 Hz deterministic
+  //              wobble is deliberately NOT faked with noise
+  //   CC 120+    random again, deep, under the additive-noise regime;
+  //              corr-matched 0.55 vs hw 0.59 at CC120
+  //
+  // Nodes 10-15 (CC80-120) RE-CONVERGED for 2.8.3.82 (gritlvl campaign): their
+  // corr targets were originally fitted against a model with no voice gate and
+  // no measured bed, which mis-calibrates them once both exist (the gate
+  // truncates the correlating tail, the bed decorrelates hits). Same hardware
+  // targets, same estimator, re-run under the shipped structure: CC80 0.44 vs
+  // hw 0.39; CC88-112 sit at the bed's corr ceiling 0.94 (hw 0.90-0.96);
+  // CC120 est+corr both bed-saturated, node pinned for a sane CC127
+  // extrapolation (jit 4.3 vs hw 5.2). Nodes 0-9 (the est-fitted random zone)
+  // are byte-identical to the 2.8.3.81 fit - verified ratio 0.91-1.00.
+  static const float kGritKappa[16] = {
+    0.0000f, 0.0000f, 0.0000f, 0.3306f, 0.8875f, 1.2900f, 1.5517f, 1.3880f,
+    1.4386f, 1.3162f, 0.8569f, 0.2150f, 0.0398f, 0.0577f, 0.0422f, 0.1560f};
+  static const float kGritDepthTrim = 1.0f;
+
+  static inline uint32_t lcg(uint32_t &s) { s = s * 1103515245u + 12345u; return s; }
+  static inline float noise(uint32_t &s) { return (float)((lcg(s) >> 9) & 0xFFFF) / 32768.0f - 1.0f; }
+
+  // The measured amp table holds EXTRACTOR-measured amplitudes, which for short-tau
+  // modes are already partly decayed over the ~110 ms analysis window. Convert a
+  // measured amp back to the true initial amp: W(tau) = (tau/T)(1-e^-T/tau) is the
+  // window-average of the decay; initial = measured * W(tau_carrier)/W(tau_mode).
+  // Without this the sub/sideband modes render ~2x too quiet (measured across the grid).
+  static inline float winAvg(float tau_s)
   {
-    for (int i = 0; i < 4; i++)
-      partialDecay[i] = 0.999f;
+    const float Tw = 0.11f;
+    if (tau_s < 1e-4f) return 1e-4f;
+    return (tau_s / Tw) * (1.0f - expf(-Tw / tau_s));
+  }
+
+  // The hardware amplitude envelope is a CUBED LINEAR RAMP, not an exponential (firmware:
+  // the level jumps to 1.0, then decrements linearly, and the audio path uses level^3).
+  // We render each mode's decay as (ramp)^3 with ramp falling 1 -> 0 over a duration T.
+  // rampDurMs(tau) maps a mode's exponential time-constant (the quantity the mode extractor
+  // and all our fitted decay laws report) to the ramp duration T whose log-linear-fit tau
+  // equals it - so the swap is tau-preserving and the fitted tables stay valid. The fit was
+  // measured against the extractor: T = 9.952*tau^0.8445 (reproduces 100/200/400/800/1600 ms
+  // ramps read back as 15/36/79/167/430 ms tau). The amp correction stays the exponential
+  // winAvg above: the amp table was regression-fit against exp-winAvg-corrected initial amps,
+  // and re-deriving it for the cubed shape (tried) regressed sub_amp without helping decay.
+  static inline float rampDurMs(float tau_ms)
+  {
+    if (tau_ms < 0.1f) tau_ms = 0.1f;
+    return 9.952f * powf(tau_ms, 0.8445f);
+  }
+
+  // measured HF tau ceiling: no cap below ~600 Hz, ~500 ms @950 Hz, ~60 ms @1.4 kHz+
+  static inline float hfCeilMs(float f)
+  {
+    if (f <= 600.0f) return 1.0e9f;
+    if (f >= 1400.0f) return 60.0f;
+    if (f <= 950.0f)
+    {
+      float t = (logf(f) - logf(600.0f)) / (logf(950.0f) - logf(600.0f));
+      return 3000.0f * powf(500.0f / 3000.0f, t);
+    }
+    float t = (logf(f) - logf(950.0f)) / (logf(1400.0f) - logf(950.0f));
+    return 500.0f * powf(60.0f / 500.0f, t);
   }
 
   static inline float fast_tanh(float x)
@@ -48,10 +341,15 @@ namespace stolmine
   static inline float fast_fromDb(float db) { return fast_exp2(db * 0.16609640474f); }
 
   // Polynomial sine for triangle-input ([-1,1]) -> sine([-pi/2, pi/2]).
-  // 7th-order odd-power approx, max error ~7e-6 over the input domain.
-  // Used in pure-sine paths (FM modulators, sub) where character morph
-  // isn't needed -- saves the LUT memory load + linear interp + sign flip.
-  // Stays bounded: at tri=1, output = 0.99988 (vs LUT ~0.99988).
+  // 7th-order odd-power approx, max error ~7e-6 over the input domain --
+  // below the retired sineLUT's lerp error. This is the substitution for
+  // the modal bank's per-mode sineLUT() gather: Cortex-A8 NEON has no
+  // gather load (feedback_neon_no_gather_lut_dsp), so a per-lane indexed
+  // LUT read cannot cross-mode vectorize; polynomial substitution is the
+  // proven escape (JF, Visadhara precedent). Used by the scalar (non-ARM)
+  // fallback of the modal kernel in process() -- the NEON path inlines the
+  // identical polynomial on quads (same coefficients, same wrap semantics)
+  // so linux emu and am335x hardware run the same algorithm.
   static inline float polySine(float tri)
   {
     float t2 = tri * tri;
@@ -60,118 +358,50 @@ namespace stolmine
     return tri * (1.5707963f - 0.6459640f * t2 + 0.0796921f * t4 - 0.0046816f * t6);
   }
 
-  // 4-lane phasor advance + polynomial sine. NEON-vectorized on am335x;
-  // scalar fallback on x86/emu. CRITICAL: phases/inc/outSines MUST be
-  // class member arrays (or otherwise heap-allocated) -- stack-locals
-  // trigger GCC `:64` alignment hint under -O3 -ffast-math which traps
-  // on Cortex-A8 (see feedback_neon_intrinsics_drumvoice memory).
-  static inline void neonAdvanceSines(float *phases, const float *inc, float *outSines)
-  {
-#ifdef __ARM_NEON
-    float32x4_t ph = vld1q_f32(phases);
-    float32x4_t in = vld1q_f32(inc);
-    ph = vaddq_f32(ph, in);
-    // Wrap to [0,1): subtract floor. inc is non-negative; ph stays in
-    // [0,1); after add ph in [0,2). vcvtq_s32_f32 truncates toward zero
-    // == floor for non-negative values.
-    int32x4_t   ipart = vcvtq_s32_f32(ph);
-    float32x4_t fpart = vcvtq_f32_s32(ipart);
-    ph = vsubq_f32(ph, fpart);
-    // Triangle: tri = 4 * min(p, 1-p) - 1
-    float32x4_t one  = vdupq_n_f32(1.0f);
-    float32x4_t inv  = vsubq_f32(one, ph);
-    float32x4_t mn   = vminq_f32(ph, inv);
-    float32x4_t tris = vsubq_f32(vmulq_n_f32(mn, 4.0f), one);
-    // 7th-order polynomial sine (matches scalar polySine):
-    //   tri * (1.5708 - 0.6460*t^2 + 0.0797*t^4 - 0.00468*t^6)
-    float32x4_t t2 = vmulq_f32(tris, tris);
-    float32x4_t t4 = vmulq_f32(t2, t2);
-    float32x4_t t6 = vmulq_f32(t4, t2);
-    float32x4_t poly = vmlsq_f32(vdupq_n_f32(1.5707963f), t2, vdupq_n_f32(0.6459640f));
-    poly = vmlaq_f32(poly, t4, vdupq_n_f32(0.0796921f));
-    poly = vmlsq_f32(poly, t6, vdupq_n_f32(0.0046816f));
-    float32x4_t sines = vmulq_f32(tris, poly);
-    vst1q_f32(phases, ph);
-    vst1q_f32(outSines, sines);
-#else
-    for (int j = 0; j < 4; j++) {
-      phases[j] += inc[j];
-      phases[j] -= floorf(phases[j]);
-      float p = phases[j];
-      float tri = 4.0f * (p < 0.5f ? p : 1.0f - p) - 1.0f;
-      float t2 = tri * tri;
-      float t4 = t2 * t2;
-      float t6 = t4 * t2;
-      outSines[j] = tri * (1.5707963f - 0.6459640f*t2 + 0.0796921f*t4 - 0.0046816f*t6);
-    }
-#endif
-  }
-
-  static inline float lookupSine(const float *lut, float tri)
-  {
-    float absTri = fabsf(tri);
-    float idx = absTri * 128.0f;
-    int i = (int)idx;
-    if (i >= 128) i = 127;
-    float frac = idx - (float)i;
-    float val = lut[i] + frac * (lut[i + 1] - lut[i]);
-    return tri >= 0.0f ? val : -val;
-  }
-
   struct DrumVoice::Internal
   {
-    // Static reference to the precomputed sine LUT (DrumVoiceSineLUT.h).
-    // The pointer is initialized at class-static-init time from the
-    // already-populated kDrumVoiceSineLUT array — no runtime sinf calls,
-    // no package-trig-bug exposure (per feedback_package_trig_lut.md /
-    // feedback_unit_output_names_table-style hard-faults that have been
-    // killing Ngoma on insertion across multiple firmware builds).
-    static const float *sLUT;
+    // ---- Tessera modal engine state (verbatim engine; copied field-for-field
+    // from Tessera::Internal). Sized [16]: only NM=14 modes are ever written
+    // at trigger time; pad slots [14]/[15] are explicitly zeroed on every
+    // trigger (phase/env/mfreq/mfreqSr/mdecay/ramp all 0 -- algebraically
+    // silent: ramp=0 keeps r3=0 regardless of phase/mfreq drift) so the P5
+    // NEON kernel can process all 4 quads unconditionally, no tail loop.
+    float phase[16], env[16], mfreq[16], mdecay[16];
+    float ramp[16];              // cubed-ramp decay state (1 -> 0), cubed at output
+    // Block-baked per-mode phase increment (mfreq/sr), set at trigger time.
+    // Removes a per-mode-per-sample division from the modal kernel (P5).
+    float mfreqSr[16];
+    // P2 (shape campaign): per-lane onset-bloom mask, baked at trigger.
+    // Measured (fit_bloom.py, 72 grit=0 cells): the osc-B family (h-k=0 lanes,
+    // (1,1)/(3,3)) starts ~37% LOW and fades in as 1 - 0.61*exp(-t/(2*sweepTime))
+    // -- the firmware's pitch-envelope-swept fold_B center (p4*0.5+0.5). Other
+    // lanes measured flat (harmC +-6%) or covered by their fast decay classes
+    // (cross +15% early, inside iqr noise); their mask is 0.
+    float bloomAmt[16];
+    float bloomEnv = 0.0f, bloomCoeff = 0.0f;
+    float pitchEnv = 0, pitchCoeff = 0.999f, startMult = 1;
+    float noiseEnv = 0, noiseCoeff = 0, noiseLp = 0, burst = 0, burstCoeff = 0;
+    float bedPitch = 1.0f;               // per-hit bed level pitch factor (fc/246.5)^p
+    float gateEnv = 1.0f;                // firmware grit voice-gate state (env^3 in audio)
+    float jitHz = 0;                     // common-mode FM per-hit depth (kappa*fc)
+    uint32_t jitRng = 0x9e3779b9u;       // own stream: must not perturb the noise bed
+    int holdLeft = 0;
+    float prevTrig = 0;
+    uint32_t rng = 0x51ee7u;
 
-    float phase1 = 0.0f;
-    float phase2 = 0.0f;
-    float phase3 = 0.0f;   // detuned unison sibling of osc1 (Pass 1)
-    // phaseFm / phase4 / phase5 moved to DrumVoice::mPhaseBank for NEON
-    // class-member alignment safety (2.5.5.111).
-    float wobblePhase = 0.0f;  // pitch-droop LFO (Pass 1)
-
-    float ampEnv = 0.0f;
+    // ---- Ngoma-specific additions on top of the modal engine ----
+    // Attack (4.4): linear ramp 0->1 multiplying the modal bank sum only.
+    // Firmware has no attack (hard jump); default attack=0 reproduces that.
+    float atkEnv = 1.0f, atkIncr = 0.0f;
+    // Punch: Ngoma flavor Tessera has no equivalent of. Post-noise-mix,
+    // pre-drive multiplicative transient boost with its own short decay.
     float punchEnv = 0.0f;
-    float shapeEnv = 0.0f;
 
-    int envPhase = 0;
-    int holdCounter = 0;
-
-    float currentFreq = 110.0f;
-    float sweepRatio = 1.0f;
-    float baseFreq = 110.0f;
-
-    // Sub-sine fundamental has its own pitch-sweep track scaled down to
-    // 0.3x the main sweep amount (Pass 2 #6 -- user observation: the
-    // fundamental takes pitch envelope at reduced strength).
-    float currentSubFreq = 110.0f;
-    float subSweepRatio = 1.0f;
-
-    float ampDecayCoeff = 0.999f;
-    float shapeDecayCoeff = 0.999f;
-    float punchDecayCoeff = 0.999f;
-    float attackIncr = 0.0f;
-
-    uint32_t noiseState = 12345;
-    float noiseLP = 0.0f;     // legacy 1-pole state (unused after Pass 2+)
-    float noiseIc1 = 0.0f;    // SVF state 1 for pitch-tracked LP/BP morph
-    float noiseIc2 = 0.0f;    // SVF state 2
-
-    // Per-trigger wobble parameters (computed at trigger time, used per-sample).
-    float wobbleHz = 12.0f;
-    float wobbleDepth = 0.0f;
-
+    // Output-chain state (EQ + compressor), kept verbatim from pre-transplant
+    // DrumVoice -- engine-agnostic, unaffected by the transplant.
     float ic1eq = 0.0f;
     float ic2eq = 0.0f;
-
     float compDetector = 0.0f;
-
-    float prevTrigger = 0.0f;
 
     float vizEnvLevel = 0.0f;
     bool vizGateState = false;
@@ -180,24 +410,11 @@ namespace stolmine
     float cachedShape = 0.0f;
     float cachedGrit = 0.0f;
 
+    Internal() { for (int m = 0; m < 16; m++) { phase[m] = 0; env[m] = 0; mfreq[m] = 0; mfreqSr[m] = 0; mdecay[m] = 0; ramp[m] = 0; bloomAmt[m] = 0; } }
   };
-
-  const float *DrumVoice::Internal::sLUT = kDrumVoiceSineLUT;
 
   DrumVoice::DrumVoice()
   {
-    // Zero-init seven NEON-touched float[4] arrays via memset (libc
-    // call, not subject to auto-vec). 0.999f init for partial decay
-    // goes through a noinline helper.
-    memset(mPhaseBank, 0, sizeof(mPhaseBank));
-    memset(mIncBank, 0, sizeof(mIncBank));
-    memset(mSineBank, 0, sizeof(mSineBank));
-    memset(mPartialPhases, 0, sizeof(mPartialPhases));
-    memset(mPartialInc, 0, sizeof(mPartialInc));
-    memset(mPartialSines, 0, sizeof(mPartialSines));
-    memset(mPartialEnvs, 0, sizeof(mPartialEnvs));
-    initPartialDecayCoeffs(mPartialDecayCoeffs);
-
     addInput(mTrigger);
     addInput(mVOct);
     addOutput(mOut);
@@ -216,9 +433,6 @@ namespace stolmine
     addParameter(mCompAmt);
     addParameter(mOctave);
     mpInternal = new Internal();
-    // sLUT is the precomputed kDrumVoiceSineLUT — no runtime trig init
-    // needed. Removes the package-trig-bug fault surface from the
-    // constructor entirely.
   }
 
   DrumVoice::~DrumVoice()
@@ -240,17 +454,19 @@ namespace stolmine
     float *out  = mOut.buffer();
 
     float sr = globalConfig.sampleRate;
+    float nyq = sr * 0.45f;
+    float invSr = 1.0f / sr;   // block-rate; the modal kernel uses this instead of a per-sample /sr
 
     float character = CLAMP(0.0f, 1.0f, mCharacter.value());
     float shape     = CLAMP(0.0f, 1.0f, mShape.value());
     float grit      = CLAMP(0.0f, 1.0f, mGrit.value());
     float punch     = CLAMP(0.0f, 1.0f, mPunch.value());
-    float sweep     = CLAMP(0.0f, 72.0f, mSweep.value());
+    float sweep     = CLAMP(0.0f, 1.0f, mSweep.value());
     float sweepTime = CLAMP(0.001f, 0.5f, mSweepTime.value());
     float attack    = CLAMP(0.0f, 0.05f, mAttack.value());
     float hold      = CLAMP(0.0f, 0.5f, mHold.value());
     float decay     = CLAMP(0.01f, 2.0f, mDecay.value());
-    float clipper   = CLAMP(0.0f, 1.0f, mClipper.value());
+    float clipperParam = CLAMP(0.0f, 1.0f, mClipper.value());
     float eq        = CLAMP(-1.0f, 1.0f, mEQ.value());
     float level     = CLAMP(0.0f, 1.0f, mLevel.value());
     float compAmt   = CLAMP(0.0f, 1.0f, mCompAmt.value());
@@ -272,67 +488,172 @@ namespace stolmine
     s.cachedShape = shape;
     s.cachedGrit = grit;
 
-    // V/Oct + octave offset: block-rate
+    // V/Oct + octave offset: block-rate (unchanged from pre-transplant
+    // DrumVoice). fc itself is computed per-trigger below, at the trigger
+    // sample's V/Oct value.
     float octave = floorf(CLAMP(-4.0f, 4.0f, mOctave.value()) + 0.5f);
-    float pitch = voct[0] + octave;
-    float baseFreq = 110.0f * powf(2.0f, pitch);
-    baseFreq = CLAMP(10.0f, sr * 0.49f, baseFreq);
 
-    // Pitch-morphing partial ratios (block-rate). Low pitch (~55 Hz):
-    // wide spread -- partials sit at 2.5/4.2/7.0x baseFreq, filling the
-    // audible band even when the fundamental is sub-audible (missing-
-    // fundamental psychoacoustics). High pitch (>=440 Hz): tight cluster
-    // at 1.7/2.0/2.4x baseFreq, creating cymbal-like phase-interference
-    // sheen. Linear interpolation in log-pitch space (3 octaves of range).
-    float pitchParam = fast_log2(baseFreq / 55.0f) * (1.0f / 3.0f);
-    if (pitchParam < 0.0f) pitchParam = 0.0f;
-    if (pitchParam > 1.0f) pitchParam = 1.0f;
-    float mode1Ratio = 2.5f + pitchParam * (1.7f - 2.5f);  // 2.5 -> 1.7
-    float mode2Ratio = 4.2f + pitchParam * (2.0f - 4.2f);  // 4.2 -> 2.0
-    float mode3Ratio = 7.0f + pitchParam * (2.4f - 7.0f);  // 7.0 -> 2.4
+    // ---- Tessera block-rate laws (verbatim unless marked ADAPTED) ----
+    // knobs 0..1 -> the hardware's CC 0..127 throw (all laws fitted in CC domain)
+    // (ccChar retired: the Character LUTs are indexed by the knob directly,
+    // with the CC mapping baked into the tables at generation time.)
+    float ccShape = shape * 127.0f;
+    float ccGrit = grit * 127.0f;
+    // Ngoma's Sweep dial is normalized 0..1; map onto Tessera's measured
+    // CC 0..127 law. (Old 0..72 default 18 = 0.25 here, ccSweep 31.75 - same.)
+    float ccSweep = sweep * 127.0f;
 
-    // Grit high-end knee: the last 30% of grit travel (grit > 0.7) should
-    // push oscs toward silence and noise toward dominance, with punch
-    // onset boosted. Below 0.7 grit does its baseline cross-fade; above
-    // 0.7 this aboveKnee term adds extra aggression. Branchless floor:
-    // aboveKnee >= 0 by construction.
-    float aboveKnee = grit - 0.7f;
-    if (aboveKnee < 0.0f) aboveKnee = 0.0f;
+    // noise() is uniform (std 1/sqrt(3)); normalise so kappa*fc IS the total
+    // deviation std in Hz (white modulator - see the Grit comment block).
+    float jitNorm = 1.7320508f * kGritDepthTrim;
 
-    // Pitch-tracked 2-pole noise filter morphing LP -> BP as pitch rises.
-    // Low pitch (~55 Hz): pure LP, warm/broad. High pitch (>=440 Hz): pure
-    // BP, focused band. Morph between them gives Trinity-flavored scale-
-    // dependent noise character.
+    // Clipper stage (P4 -> P2 shape campaign): the knob drives BOTH the pre-clip
+    // drive (below) and the stage's effective hardware CC. P4 pinned the tables
+    // at the corpus CC48 point; measurement showed that leaves the stage
+    // NON-transparent at clipper=0 (drive 1 still clips peaks at th~0.9 and
+    // sprays intermod products +42 dB above the hardware's transparent output,
+    // which is genuinely product-free at CC8, th=9e9 below CC12). The hardware
+    // knob's own semantics raise the threshold to transparency at the bottom,
+    // so the model's throw now morphs ccEff = 8 + 40*clipper: bit-identical
+    // CC48 tables at clipper=1 (every fitted coefficient's operating point),
+    // truly transparent at clipper=0.
+    float clipTh, clipG;
+    {
+      float ccClip = 8.0f + 40.0f * clipperParam;
+      float u = CLAMP(0.0f, 15.0f, ccClip / 8.0f);
+      int ci = (int)u;
+      if (ci > 14) ci = 14;
+      float cf = u - (float)ci;
+      clipTh = (kClipTh[ci] + (kClipTh[ci + 1] - kClipTh[ci]) * cf) / kSMH;
+      clipG = (kClipG[ci] + (kClipG[ci + 1] - kClipG[ci]) * cf) / 3.329f;
+    }
+    // Variable drive (P4): linear throw 1..kDriveMax; clipper=1.0 is the parity
+    // anchor (bit-identical pre-makeup to the fixed 12x stage). Keep the measured
+    // sqrt-law curve: at top-of-throw it IS the frozen reference by identity, and
+    // stacking a second, unmeasured curve (tanh) under the same knob was rejected
+    // in the P4 A/B (crest collapses harder at equal ct; see the integration log).
+    float driveLinear = 1.0f + clipperParam * (kDriveMax - 1.0f);
+    // Equal-loudness makeup, RE-ANCHORED at clipper = 0 (shape campaign P0,
+    // REFIT after the P2 threshold morph): the unit ships CLEAN, and the whole
+    // stage (clipG(0)*makeup(0)) is NET UNITY at the home position - the clean
+    // voice passes at its natural level; the rest of the throw is attenuated to
+    // equal loudness, so pushing Clipper changes crest/density, not loudness.
+    // The leading 3.329 is exactly 1/clipG(0) (the CC8 point of the measured
+    // hardware gain table under the /3.329 corpus normalisation). Cubic
+    // numerator over driveLinear, least-squares fitted to ngoma-mirror RMS of
+    // the shipped default hit at 11 throw points with the ccEff-morphing stage
+    // (max ripple 0.5 dB; the mid-throw knee where the threshold lands is the
+    // ripple source). Net stage gain at clipper = 1 is 0.3583 (-8.9 dB): the
+    // corpus-heft top plays at the clean default's loudness. Absolute-scale
+    // parity vs hardware captures at clipper = 1 must divide this factor out
+    // (the pre-makeup signal there is bit-identical to the P4 corpus stage).
+    float makeup = 3.329f *
+                   (1.0f + clipperParam * (-2.632211f +
+                    clipperParam * (6.107731f - clipperParam * 3.183871f)))
+                   / driveLinear;
+    float blockClipGain = clipG * makeup;
+
+    // Shape -> osc2 detune ratio (measured linear, pitch-tracked)
+    float r = CLAMP(0.0f, 2.0f, 0.0189f * (ccShape - 9.2f));
+    // Shape campaign P2: painted cross-lattice lanes are silenced (see the
+    // kCrossPaint comment block up top for the full evidence chain); the
+    // product lattice is generated by the clipper stage from the two real
+    // partial families instead.
+    // Character: generative morph+fold curves, 33-point LUT over the knob throw
+    // (see the kCharA1/kCharR* block). Baked per trigger like every other amp.
+    float chA1, chR3, chR5, chR7, chR9;
+    {
+      float cu = character * 32.0f;
+      int cli = (int)cu;
+      if (cli > 31) cli = 31;
+      float clf = cu - (float)cli;
+      chA1 = kCharA1[cli] + (kCharA1[cli + 1] - kCharA1[cli]) * clf;
+      chR3 = kCharR3[cli] + (kCharR3[cli + 1] - kCharR3[cli]) * clf;
+      chR5 = kCharR5[cli] + (kCharR5[cli + 1] - kCharR5[cli]) * clf;
+      chR7 = kCharR7[cli] + (kCharR7[cli + 1] - kCharR7[cli]) * clf;
+      chR9 = kCharR9[cli] + (kCharR9[cli + 1] - kCharR9[cli]) * clf;
+    }
+    // ADAPTED: Ngoma's Decay dial is honest seconds (0.01..2.0 s), so tauC is the
+    // dial value directly -- this REPLACES Tessera's CC decay law (which derived
+    // tauC from a fitted quadratic-in-log CC curve). Everything downstream of tauC
+    // (grit collapse, L/dL, kTauR classes, rampDurMs) is untouched.
+    float tauC = decay * 1000.0f;   // ms
+
+    // ---- Grit voice-gate + noise-bed laws (gritlvl campaign, 2026-07-23;
+    // planning/ngoma-grit-drama.md, harness gritlvl/capture_gritlvl/analyze_gritlvl) ----
     //
-    // SVF (Cytomic TPT) coefficients at block rate; state ic1/ic2 in
-    // Internal. Center cut tracks at ~25x fundamental, clamped; Q rises
-    // with pitch so higher pitches are more focused.
-    float noiseCut = baseFreq * 25.0f;
-    if (noiseCut < 400.0f)   noiseCut = 400.0f;
-    if (noiseCut > 8000.0f)  noiseCut = 8000.0f;
-    float noiseQ = 0.7f + (baseFreq - 55.0f) * 0.010f;  // 0.7 @ 55Hz, ~4.6 @ 440Hz
-    if (noiseQ < 0.7f) noiseQ = 0.7f;
-    if (noiseQ > 4.0f) noiseQ = 4.0f;
-    float noiseK = 1.0f / noiseQ;
-    float noiseG = tanf(3.14159f * noiseCut / sr);
-    float noiseA1 = 1.0f / (1.0f + noiseG * (noiseG + noiseK));
-    float noiseA2 = noiseG * noiseA1;
-    float noiseA3 = noiseG * noiseA2;
-    // BP mix: 0 at low pitch (LP only), 1 at high pitch (BP only).
-    float noiseBpMix = (baseFreq - 110.0f) / 330.0f;  // 0 @ 110Hz, 1 @ 440Hz
-    if (noiseBpMix < 0.0f) noiseBpMix = 0.0f;
-    if (noiseBpMix > 1.0f) noiseBpMix = 1.0f;
-    float noiseLpMix = 1.0f - noiseBpMix;
+    // Firmware (FUN_2400b1d8, decoded at instruction level): grit's mix-out is a
+    // dedicated GATE envelope on the oscillator term - env init 1.0 at trigger,
+    // linear decrement rate*(1/T), clamped at a sustain floor, and the audio path
+    // takes env^3. rate = 4*(g-0.5) clamped [0,1]; floor = 1-rate; T = the decay
+    // time clamped to a 400 ms ceiling. The "noise bed" is NOT an enveloped noise
+    // source: it is the FM'd oscillator mixed in with a STATIC grit gain
+    // ((g-0.5)*3.25 saturating at 0.8125 by g=0.75) and left to die under the
+    // main decay VCA - which is why the measured bed persistence tracks Decay
+    // ONLY (tau_hi 37/105/252/412 ms at tauC 96/402/1160/1963, IDENTICAL across
+    // grit 96-127) and scales with pitch. The old tauEff collapse
+    // (tauC*(1-4*(gN-0.75))) misattributed the gate's T-ramp to the per-mode
+    // decay parameter: hardware tonal energy sits on two FLAT plateaus
+    // (-7.3 dB across CC92-112, -20.5 dB across CC116-127 at note 60), not a
+    // progressive collapse, and the carrier-band decay saturates at ~70 ms from
+    // CC88 (441/99/71/69 ms at CC72/80/88/92) instead of shrinking linearly.
+    float gN = ccGrit / 127.0f;
+    float tauEff = tauC;             // per-mode decay: grit no longer scales it
+    float L = logf(tauC);            // spectral-reshaping driver
+    float dL = L - 5.489f;           // L0 = ln(242 ms)
 
-    // Clipper drive (block-rate). Simple tanh with moderate 1..10x range
-    // and gain compensation (divide by tanh(drive)) so output amplitude
-    // stays near unity as drive increases.
-    bool clipperActive = clipper > 0.001f;
-    float driveLinear = clipperActive ? (1.0f + clipper * 9.0f) : 1.0f;
-    float driveNorm   = clipperActive ? fast_tanh(driveLinear) : 1.0f;
+    // Voice gate (firmware mechanism, constants forward-fitted on the mirror):
+    // above kGateTopCC the hardware kills the voice outright (measured -13 dB
+    // tonal step between CC112 and CC116, FLAT through 127) - modelled as the
+    // gate time dropping to kGateTopMs.
+    static const float kGateCapMs = 400.0f;
+    static const float kGateTopCC = 114.0f;
+    static const float kGateTopMs = 20.0f;
+    float gateRate = CLAMP(0.0f, 1.0f, (gN - 0.5f) * 4.0f);
+    float gateFloor = 1.0f - gateRate;
+    float gateTms = tauC < kGateCapMs ? tauC : kGateCapMs;
+    if (ccGrit >= kGateTopCC) gateTms = kGateTopMs;
+    float gateDecr = gateRate / (gateTms * 0.001f * sr);
 
-    // DJ filter coefficients (block-rate). EQ is bipolar: -1..0 = LP,
-    // 0 = bypass, 0..+1 = HP. Magnitude drives cutoff sweep.
+    // Noise bed: level ramps in from kBedOnCC and is FLAT from kBedFullCC to the
+    // top (measured hi-band bed energy -26.5 dB re grit-0 total, constant from
+    // CC88 through 127 - the audible "step" at ~CC114 is the voice being killed,
+    // not the bed rising). Persistence is decay-tracked and grit-independent:
+    // noiseTau = A * tauC^B ms (replaces the 150 ms cap + 60 ms fix, both of
+    // which the hardware refutes).
+    static const float kBedOnCC = 64.0f;
+    static const float kBedFullCC = 88.0f;
+    static const float kBedFlat = 0.447f;
+    static const float kBedTauA = 0.88f;
+    static const float kBedTauB = 0.809f;
+    static const float kBedPitchExp = 0.30f;  // bed level rises mildly with fc (n48 fit)
+    float bedAmp = 0.0f;
+    if (ccGrit > kBedOnCC)
+    {
+      float u = (ccGrit - kBedOnCC) / (kBedFullCC - kBedOnCC);
+      bedAmp = kBedFlat * (u < 1.0f ? u : 1.0f);
+    }
+    float noiseTau = kBedTauA * powf(tauC, kBedTauB);
+
+    // Sweep -> start pitch multiplier (linear in OCTAVES); verbatim.
+    float startMult = 1.12f * powf(2.0f, ccSweep / 22.5f);
+    // ADAPTED: Ngoma's SweepTime dial is honest seconds (0.001..0.5 s) and IS tauP
+    // directly -- this REPLACES Tessera's CC time law (0.002*exp(0.042*ccTime)).
+    float tauP = sweepTime;
+    float pitchCoeff = expf(-1.0f / (tauP * sr));
+    // ADAPTED: Ngoma's Hold dial is honest seconds (0..0.5 s) and gives holdSamples
+    // directly -- this REPLACES Tessera's CC hold law (0.001*2^(ccHold/8.6), 4s clamp);
+    // the 0.5s param range makes that clamp moot here.
+    int holdSamples = (int)(hold * sr);
+    float noiseLpG = 1.0f - expf(-6.2832f * 4000.0f / sr);
+
+    // Ngoma addition: Punch decay coefficient (Tessera has no punch stage).
+    // Computed at block rate per the plan's Punch mapping (4.2).
+    float punchDecayCoeff = expf(-1.0f / (0.003f * sr));
+
+    // DJ filter coefficients (block-rate, unchanged from pre-transplant
+    // DrumVoice). EQ is bipolar: -1..0 = LP, 0 = bypass, 0..+1 = HP.
+    // Magnitude drives cutoff sweep.
     float eqCut = eq;
     float absEqCut = fabsf(eqCut);
     bool filterActive = absEqCut >= 0.01f;
@@ -352,416 +673,322 @@ namespace stolmine
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
-      // Trigger detection: rising edge
-      float trigVal = trig[i];
-      if (trigVal > 0.5f && s.prevTrigger <= 0.5f)
+      float tv = trig[i];
+      if (tv > 0.5f && s.prevTrig <= 0.5f)   // rising edge -> new hit
       {
-        // Grit envelope coupling: high grit shortens decay
-        float effectiveDecay = decay;
-        if (grit > 0.75f)
-          effectiveDecay *= (1.0f - (grit - 0.75f) * 4.0f * 0.7f);
-        if (effectiveDecay < 0.001f) effectiveDecay = 0.001f;
+        // ADAPTED: fc comes from Ngoma's V/Oct + Octave law (no separate F0
+        // knob, matching the pre-transplant DrumVoice control surface), not
+        // from Tessera's F0 parameter. Same CLAMP(8,8000) range as Tessera.
+        float fc = 110.0f * powf(2.0f, voct[i] + octave);
+        fc = CLAMP(8.0f, 8000.0f, fc);
+        float lf = logf(fc / 246.5f);                      // pitch feature
+        // gN (grit feature) is hoisted to the block scope above
+        // Fold-ratio pitch droop, per parent oscillator (measured -0.128; one
+        // exponent explains the per-note trend AND the carrier-vs-oscB offset).
+        float droopC = powf(fc * kCharDroopRef, kCharDroopExp);
+        droopC = CLAMP(0.5f, 1.5f, droopC);
+        float droopB = powf(fc * (1.0f + r) * kCharDroopRef, kCharDroopExp);
+        droopB = CLAMP(0.5f, 1.5f, droopB);
+        float aCar = 0.0f, aOscB = 0.0f;   // parent amps, stashed for the fold lanes
 
-        s.baseFreq = baseFreq;
-        float freqStart = baseFreq * powf(2.0f, sweep / 12.0f);
-        // Pass 1 #1: 0.7x effective sweep time -> ~1.4x faster pitch drop
-        // to better match Trinity Block's snappier envelope.
-        float sweepSamples = sweepTime * sr * 0.7f;
-        if (sweepSamples < 1.0f) sweepSamples = 1.0f;
-        s.currentFreq = freqStart;
-        s.sweepRatio = powf(baseFreq / freqStart, 1.0f / sweepSamples);
+        for (int m = 0; m < NM; m++)
+        {
+          float f = fc * (kH[m] + kK[m] * r);
+          s.mfreq[m] = f;
+          s.mfreqSr[m] = f * invSr;   // baked phase-increment-per-sample (P5)
+          const float *c = kAmpFit[m];
+          float a = c[0] + c[1] * dL + c[3] * r + c[4] * lf + c[5] * gN;
+          // Parent lanes carry the fold's own fundamental trajectory a1(char):
+          // non-monotonic (dip at the morph top, recover, fall to 0.81 at full
+          // fold), measured within 1-2% on three notes.
+          if (m == 0 || m == 1) a *= chA1;
+          if (a < 0.0f) a = 0.0f;
+          if (a > 1.5f) a = 1.5f;
+          if (m == 0) aCar = a;
+          if (m == 1) aOscB = a;
+          // GENERATIVE fold lanes: exact harmonic series of the folded parent.
+          // A negative signed ratio is a half-turn phase offset (set below).
+          float chSign = 0.0f;
+          switch (m)
+          {
+            case 8:  a = aCar  * fabsf(chR3) * droopC; chSign = chR3; break;
+            case 9:  a = aCar  * fabsf(chR5) * droopC; chSign = chR5; break;
+            case 10: a = aCar  * fabsf(chR7) * droopC; chSign = chR7; break;
+            case 14: a = aCar  * fabsf(chR9) * droopC; chSign = chR9; break;
+            case 12: a = aOscB * fabsf(chR3) * droopB; chSign = chR3; break;
+            case 15: a = aOscB * fabsf(chR5) * droopB; chSign = chR5; break;
+            default: break;
+          }
+          // P2: cross modes are limiter products, not voice content - the
+          // painted lanes are silenced and the clipper stage generates the
+          // real product lattice from the surviving families. Voice-generated
+          // modes (k=0 carrier harmonics, h-k=0 osc-B family) are untouched.
+          if (kK[m] != 0 && (kH[m] - kK[m]) != 0) a *= kCrossPaint;
+          if (f <= 15.0f || f >= nyq) a = 0.0f;           // drop out-of-range modes
+          // measured-amp -> initial-amp correction (see winAvg)
+          float tmS = tauEff * kTauR[m] * 0.001f;
+          if (kTauR[m] < 0.5f)   // ceiling applies to sidebands only, not tone modes
+          {
+            float ceilS = hfCeilMs(f) * 0.001f;
+            if (tmS > ceilS) tmS = ceilS;
+          }
+          if (tmS < 0.002f) tmS = 0.002f;
+          a *= winAvg(tauEff * 0.001f) / winAvg(tmS);
+          s.env[m] = a;               // static initial amplitude; the ramp carries the decay
+          s.ramp[m] = 1.0f;
+          // P2 onset bloom: osc-B family lanes (h-k = 0) fade in over the
+          // pitch-envelope window (measured 1 - 0.61*exp(-t/20ms) at the
+          // hardware's time-CC40 point; tied to sweepTime, see bloomCoeff).
+          s.bloomAmt[m] = (kK[m] != 0 && (kH[m] - kK[m]) == 0) ? 0.61f : 0.0f;
+          // FIRMWARE start-phase scheme (shape0-level campaign): on each trigger
+          // the hardware hard-resets BOTH parent phase accumulators to exactly
+          // 0.0 (r8-gated skip of the accumulator reload, verified at
+          // instruction level: 0x2400b508/0x2400b50e osc B, same pattern osc C;
+          // reset constant DAT_2400b740 = 0x00000000). The +0.25 quarter-turn
+          // in the firmware is applied only to the TABLE INDEX, and the table
+          // is cos-form: the effective oscillator is -sin(2*pi*phase), so both
+          // parents start ALIGNED AT A ZERO CROSSING. That is simultaneously
+          //  (a) the coherent sum: at shape ~ 0 the parents collapse onto fc
+          //      and add in phase - measured shape-0 fundamental 1.65-1.69x
+          //      the separated carrier, uniform across Character; and
+          //  (b) the click-tamer: a sinusoid starting at its zero crossing has
+          //      no value discontinuity, so the instant envelope (no attack
+          //      ramp in the firmware) produces no broadband splash. Measured:
+          //      hardware onset HF(>4k) fraction 0.0000 in the first 4 ms.
+          // The old varied phases (Tessera f774e02) existed to kill the click
+          // caused by all-lanes-at-+0.25 (cosine PEAK) alignment; zero-crossing
+          // alignment kills it the way the hardware does. The global -sin
+          // polarity is an unobservable overall sign (every fold harmonic is
+          // odd), so lanes use logical phase 0 = sin rising.
+          // Fold lanes: harmonic n of a parent starting at sin-zero is
+          // b_n*sin(n*theta) - it starts at n*0 = 0 plus a half turn when the
+          // signed series coefficient is negative. Cross lanes are silenced
+          // (kCrossPaint); the drive+limiter stage sees the hardware-true
+          // alignment when it generates intermods.
+          // P5 CONVENTION OFFSET (unchanged): the triangle+polySine path
+          // renders -cos(2*pi*p) = sin(2*pi*(p - 0.25)); baking +0.25 into the
+          // stored phase makes the kernel render sin(2*pi*(logical phase)).
+          {
+            float logical = (chSign < 0.0f) ? 0.5f : 0.0f;
+            s.phase[m] = logical + 0.25f;
+            s.phase[m] -= floorf(s.phase[m]);
+          }
+          float tm = tauEff * kTauR[m];
+          float ceil = (kTauR[m] < 0.5f) ? hfCeilMs(f) : 1e9f;
+          if (tm > ceil) tm = ceil;
+          if (tm < 2.0f) tm = 2.0f;
+          float Tramp = rampDurMs(tm) * 0.001f;      // ramp duration (s), tau-preserving
+          s.mdecay[m] = 1.0f / (Tramp * sr);         // per-sample linear ramp decrement
+        }
+        // (Character campaign: NM is now 16 - the two former padding lanes are
+        // the generative (9,0) and (5,5) fold lanes, so the 4-quad NEON kernel's
+        // 16 unconditional lanes are all live and the P5 pad-zero loop is gone.)
+        // P2 onset bloom carrier: one shared scalar exp decay (1 -> 0), lane
+        // factor = 1 - bloomAmt[m]*bloomEnv. Time constant tied to the pitch
+        // envelope (firmware: the fold_B center IS p4). 2*sweepTime reproduces
+        // the measured ~20 ms fade at the capture point (time CC40 ~ 10.7 ms);
+        // the x2 scaling is calibrated at that single point (see campaign doc).
+        s.bloomEnv = 1.0f;
+        s.bloomCoeff = expf(-1.0f / (2.0f * sweepTime * sr));
+        s.startMult = startMult;
+        s.pitchCoeff = pitchCoeff;
+        s.pitchEnv = 1.0f;
+        s.holdLeft = holdSamples;
+        s.noiseEnv = 1.0f;
+        s.noiseCoeff = expf(-1.0f / (noiseTau * 0.001f * sr));
+        // Bed level scales with pitch (measured: n48 bed sits ~-3.4 dB relative
+        // to n60's; firmware: the bed IS the FM'd oscillator, so it carries the
+        // voice's pitch scaling). Baked per trigger from the hit's fc.
+        s.bedPitch = powf(fc / 246.5f, kBedPitchExp);
+        s.gateEnv = 1.0f;              // firmware grit gate: init 1.0 every hit
+        // top-regime attack burst (measured punch 9.8 / atk_frac 0.41), tied to
+        // the same top step the voice-kill uses
+        s.burst = (ccGrit >= kGateTopCC) ? 8.0f : 0.0f;
+        s.burstCoeff = expf(-1.0f / (0.005f * sr));
+        {
+          float u = CLAMP(0.0f, 15.0f, ccGrit / 8.0f);
+          int gi = (int)u; if (gi > 14) gi = 14;
+          float gf = u - (float)gi;
+          s.jitHz = (kGritKappa[gi] + (kGritKappa[gi + 1] - kGritKappa[gi]) * gf) * fc;
+        }
 
-        // Sub-sine pitch sweep: 0.3x the main sweep amount. Fundamental
-        // gets a gentler pitch env per listening feedback.
-        float subFreqStart = baseFreq * powf(2.0f, sweep * 0.3f / 12.0f);
-        s.currentSubFreq = subFreqStart;
-        s.subSweepRatio  = powf(baseFreq / subFreqStart, 1.0f / sweepSamples);
-
-        s.phase1 = 0.0f;
-        s.phase2 = 0.0f;
-        s.phase3 = 0.0f;
-        mPhaseBank[0] = 0.0f;  // phaseFm
-        mPhaseBank[1] = 0.0f;  // phase4
-        mPhaseBank[2] = 0.0f;  // phase5
-        mPhaseBank[3] = 0.0f;  // 3rd harmonic
-        mPartialPhases[0] = 0.0f;  // sub-octave
-        mPartialPhases[1] = 0.0f;
-        mPartialPhases[2] = 0.0f;
-        mPartialPhases[3] = 0.0f;
-        s.wobblePhase = 0.0f;
-
-        // Wobble depth responds to a composite of decay, sweep, and pitch.
-        // Pitch scalar gives deeper-pitched strikes more droop (bigger
-        // drums wobble more). Cap at 0.03 -- half of the pre-0.100 ceiling
-        // based on listening feedback.
-        float pitchScale = 110.0f / baseFreq;
-        if (pitchScale < 0.5f) pitchScale = 0.5f;
-        if (pitchScale > 1.5f) pitchScale = 1.5f;
-
-        float wobbleRaw = 0.005f + effectiveDecay * 0.010f + sweep * 0.00014f;
-        s.wobbleDepth = wobbleRaw * pitchScale;
-        if (s.wobbleDepth > 0.03f) s.wobbleDepth = 0.03f;
-        s.wobbleHz    = 14.0f / (1.0f + effectiveDecay * 8.0f);  // ~14 @ 0s, ~3.5 @ 0.5s
-
-        s.ampDecayCoeff   = expf(-1.0f / (effectiveDecay * sr));
-        s.shapeDecayCoeff = expf(-1.0f / (effectiveDecay * 0.6f * sr));
-        s.punchDecayCoeff = expf(-1.0f / (0.003f * sr));
-
-        // Per-partial decay times scaled by pitch register: kick-territory
-        // partials decay short, cymbal-territory long. Higher modes also
-        // fade faster than lower modes (real drum mode-amplitude falloff).
-        // pitchParam was computed at block-rate above (0 @ 55Hz, 1 @ 440Hz).
-        float pitchDecayScale = 0.5f + pitchParam * 1.5f;  // 0.5x kick, 2.0x cymbal
-        float pSubT   = effectiveDecay;
-        float pMode1T = effectiveDecay * pitchDecayScale * 1.0f;
-        float pMode2T = effectiveDecay * pitchDecayScale * 0.7f;
-        float pMode3T = effectiveDecay * pitchDecayScale * 0.5f;
-        if (pSubT   < 0.001f) pSubT   = 0.001f;
-        if (pMode1T < 0.001f) pMode1T = 0.001f;
-        if (pMode2T < 0.001f) pMode2T = 0.001f;
-        if (pMode3T < 0.001f) pMode3T = 0.001f;
-        mPartialDecayCoeffs[0] = expf(-1.0f / (pSubT   * sr));
-        mPartialDecayCoeffs[1] = expf(-1.0f / (pMode1T * sr));
-        mPartialDecayCoeffs[2] = expf(-1.0f / (pMode2T * sr));
-        mPartialDecayCoeffs[3] = expf(-1.0f / (pMode3T * sr));
-        mPartialEnvs[0] = 1.0f;
-        mPartialEnvs[1] = 1.0f;
-        mPartialEnvs[2] = 1.0f;
-        mPartialEnvs[3] = 1.0f;
-
+        // ---- Ngoma additions: attack ramp + punch (Tessera has neither) ----
+        // Attack (4.4): default 0 = authentic instant-on (firmware hard jump).
         if (attack > 0.0001f)
         {
-          s.ampEnv = 0.0f;
-          s.shapeEnv = 0.0f;
-          s.attackIncr = 1.0f / (attack * sr);
-          s.envPhase = 1;
+          s.atkEnv = 0.0f;
+          s.atkIncr = 1.0f / (attack * sr);
         }
         else
         {
-          s.ampEnv = 1.0f;
-          s.shapeEnv = 1.0f;
-          s.attackIncr = 0.0f;
-          s.envPhase = (hold > 0.0001f) ? 2 : 3;
+          s.atkEnv = 1.0f;
+          s.atkIncr = 0.0f;
         }
-
-        s.holdCounter = (hold > 0.0001f) ? (int)(hold * sr) : 0;
-        // Punch boosted in the high-grit knee: aboveKnee at trigger time
-        // drives punchEnv up to 1.6x at grit=1.0, so the transient slap
-        // stays prominent even as the steady-state oscs are gone.
-        s.punchEnv = punch * (1.0f + aboveKnee * 2.0f);
+        // Punch (KEEP, Ngoma flavor): drops the old aboveKnee grit coupling --
+        // the Ngoma grit-knee system dies with the rest of the old engine.
+        s.punchEnv = punch;
         s.vizGateState = true;
       }
-      s.prevTrigger = trigVal;
+      s.prevTrig = tv;
 
-      // Pitch sweep: converge to baseFreq
-      if (s.currentFreq > s.baseFreq + 0.01f || s.currentFreq < s.baseFreq - 0.01f)
-        s.currentFreq *= s.sweepRatio;
-      else
-        s.currentFreq = s.baseFreq;
+      s.pitchEnv *= s.pitchCoeff;
+      float pmul = 1.0f + (s.startMult - 1.0f) * s.pitchEnv;
+      bool held = s.holdLeft > 0;
 
-      // Sub-sine sweep: converge to baseFreq at its own (shallower) rate.
-      if (s.currentSubFreq > s.baseFreq + 0.01f || s.currentSubFreq < s.baseFreq - 0.01f)
-        s.currentSubFreq *= s.subSweepRatio;
-      else
-        s.currentSubFreq = s.baseFreq;
+      // one shared noise-FM deviation in Hz, added identically to every mode;
+      // WHITE: fresh draw per sample, exactly the firmware's injection
+      float jitDev = noise(s.jitRng) * jitNorm * s.jitHz;
 
-      // Per-partial envelope decay via NEON quad. UNCONDITIONAL per-sample
-      // -- safe to decay always: envs are 0.0 in idle phase (0 * coeff =
-      // still 0), 1.0 from trigger reset, and decay monotonically.
-      // Placing this here (outside the envPhase switch) avoids inflating
-      // case 3's body, which would be the "switch with differential case
-      // bodies" pattern that crashes Cortex-A8 (see 2.5.5.92-.97 bisect).
-      {
+      // ---- Modal bank kernel (P5 NEON pass) ----
+      // 14 modes padded to 16 lanes = 4 NEON quads on am335x; identical
+      // scalar fallback on linux/x86 so emu exercises the same algorithm
+      // the hardware runs (same poly-sine coefficients, same negative-safe
+      // floor wrap -- jitDev can transiently drive the phase increment
+      // negative at low fc + high grit, so a forward-only wrap is wrong
+      // here). pmul, jitDevSr, heldMul are per-sample scalars, common-mode
+      // across every lane (the measured grit mechanism is one shared
+      // noise-FM deviation applied identically to every mode -- see the
+      // Grit comment block above -- which is exactly the NEON-friendly
+      // shape: one broadcast per sample, not per-lane state).
+      float jitDevSr = jitDev * invSr;
+      float heldMul = held ? 0.0f : 1.0f;
+      // P2 onset-bloom carrier: one scalar exp decay per sample, broadcast to
+      // the lanes below (lane factor 1 - bloomAmt*bloomEnv; bloomAmt is 0 on
+      // all but the osc-B family lanes, so most lanes multiply by exactly 1).
+      s.bloomEnv *= s.bloomCoeff;
+      float y;
 #ifdef __ARM_NEON
-        float32x4_t pe = vld1q_f32(mPartialEnvs);
-        float32x4_t pc = vld1q_f32(mPartialDecayCoeffs);
-        pe = vmulq_f32(pe, pc);
-        vst1q_f32(mPartialEnvs, pe);
+      {
+        float32x4_t pmulV     = vdupq_n_f32(pmul);
+        float32x4_t jitDevSrV = vdupq_n_f32(jitDevSr);
+        float32x4_t heldMulV  = vdupq_n_f32(heldMul);
+        float32x4_t bloomEnvV = vdupq_n_f32(s.bloomEnv);
+        float32x4_t zeroV     = vdupq_n_f32(0.0f);
+        float32x4_t oneV      = vdupq_n_f32(1.0f);
+        float32x4_t acc       = vdupq_n_f32(0.0f);
+
+        for (int q = 0; q < 4; q++)
+        {
+          float *ph = &s.phase[4 * q];
+          float *fr = &s.mfreqSr[4 * q];
+          float *md = &s.mdecay[4 * q];
+          float *rm = &s.ramp[4 * q];
+          float *ev = &s.env[4 * q];
+          float *bm = &s.bloomAmt[4 * q];
+
+          float32x4_t phase = vld1q_f32(ph);
+          float32x4_t freq  = vld1q_f32(fr);
+          float32x4_t mdec  = vld1q_f32(md);
+          float32x4_t ramp  = vld1q_f32(rm);
+          float32x4_t envv  = vld1q_f32(ev);
+
+          // phase advance: inc = mfreqSr*pmul + jitDevSr (common-mode)
+          float32x4_t inc = vmlaq_f32(jitDevSrV, freq, pmulV);
+          phase = vaddq_f32(phase, inc);
+
+          // negative-safe wrap to [0,1): floor via truncate-toward-zero,
+          // corrected down by 1 where the truncation rounded up (fp > ph
+          // only happens for negative non-integer phase).
+          int32x4_t   ipart = vcvtq_s32_f32(phase);
+          float32x4_t fpart = vcvtq_f32_s32(ipart);
+          uint32x4_t  negMask = vcgtq_f32(fpart, phase);
+          float32x4_t adj = vbslq_f32(negMask, oneV, zeroV);
+          float32x4_t floorP = vsubq_f32(fpart, adj);
+          phase = vsubq_f32(phase, floorP);
+          vst1q_f32(ph, phase);
+
+          // ramp: decrement masked by heldMul (0 while held), clamp >= 0
+          ramp = vsubq_f32(ramp, vmulq_f32(mdec, heldMulV));
+          ramp = vmaxq_f32(ramp, zeroV);
+          vst1q_f32(rm, ramp);
+          float32x4_t r3 = vmulq_f32(vmulq_f32(ramp, ramp), ramp);
+
+          // triangle: tri = 4*min(phase, 1-phase) - 1
+          float32x4_t inv = vsubq_f32(oneV, phase);
+          float32x4_t mn  = vminq_f32(phase, inv);
+          float32x4_t tri = vsubq_f32(vmulq_n_f32(mn, 4.0f), oneV);
+
+          // 7th-order polynomial sine (matches scalar polySine exactly)
+          float32x4_t t2 = vmulq_f32(tri, tri);
+          float32x4_t t4 = vmulq_f32(t2, t2);
+          float32x4_t t6 = vmulq_f32(t4, t2);
+          float32x4_t poly = vmlsq_f32(vdupq_n_f32(1.5707963f), t2, vdupq_n_f32(0.6459640f));
+          poly = vmlaq_f32(poly, t4, vdupq_n_f32(0.0796921f));
+          poly = vmlsq_f32(poly, t6, vdupq_n_f32(0.0046816f));
+          float32x4_t sine = vmulq_f32(tri, poly);
+
+          // P2 onset bloom: factor = 1 - bloomAmt*bloomEnv (vmls), 1.0 on
+          // non-B lanes by construction (bloomAmt 0).
+          float32x4_t bloomA = vld1q_f32(bm);
+          float32x4_t bloomF = vmlsq_f32(oneV, bloomA, bloomEnvV);
+          acc = vmlaq_f32(acc, sine, vmulq_f32(vmulq_f32(envv, r3), bloomF));
+        }
+
+        float32x2_t sumPair = vadd_f32(vget_high_f32(acc), vget_low_f32(acc));
+        sumPair = vpadd_f32(sumPair, sumPair);
+        y = vget_lane_f32(sumPair, 0);
+      }
 #else
-        for (int j = 0; j < 4; j++) mPartialEnvs[j] *= mPartialDecayCoeffs[j];
+      {
+        y = 0.0f;
+        for (int m = 0; m < 16; m++)
+        {
+          float inc = s.mfreqSr[m] * pmul + jitDevSr;
+          s.phase[m] += inc;
+          s.phase[m] -= floorf(s.phase[m]);      // negative-safe floor == NEON wrap by construction
+          s.ramp[m] -= s.mdecay[m] * heldMul;
+          if (s.ramp[m] < 0.0f) s.ramp[m] = 0.0f;
+          float r3 = s.ramp[m] * s.ramp[m] * s.ramp[m];   // cubed linear ramp
+          float tri = 4.0f * (s.phase[m] < 0.5f ? s.phase[m] : 1.0f - s.phase[m]) - 1.0f;
+          float bloomF = 1.0f - s.bloomAmt[m] * s.bloomEnv;   // P2 onset bloom
+          y += s.env[m] * r3 * bloomF * polySine(tri);
+        }
+      }
 #endif
-      }
+      if (held) s.holdLeft--;
 
-      // Pitch droop: ampEnv-scaled static + decay-tied wobble LFO.
-      // Pass 1 #7: wobble LFO uses sLUT (sinf miscompute on package .so).
-      // Phase advance per-sample at sr rate; mapped via tri->sin lookup.
-      s.wobblePhase += s.wobbleHz / sr;
-      s.wobblePhase -= floorf(s.wobblePhase);
-      float wTri = 4.0f * (s.wobblePhase < 0.5f ? s.wobblePhase : 1.0f - s.wobblePhase) - 1.0f;
-      float wobble = lookupSine(s.sLUT, wTri) * s.wobbleDepth * s.ampEnv;
-
-      float droopFreq = s.currentFreq * (1.0f + s.ampEnv * 0.015f + wobble);
-      if (s.punchEnv > 0.01f)
-        droopFreq *= (1.0f + s.punchEnv * 0.05f);
-
-      // === Oscillator section at 2x rate (anti-alias for fold + FM) ===
-      //
-      // Osc1 (carrier) + osc2 (Shape FM modulator) + phaseFm (metallic
-      // inharmonic modulator at 2.71x ratio) all run at 2x sample rate so
-      // their harmonic content and FM sidebands stay below the 2x Nyquist.
-      // A 2-tap moving-average decimator (zero at 2x Nyquist) brings the
-      // pair back down to sr. NEON can't usefully parallelize the serial
-      // phase recurrence on a mono voice, so this is scalar x2.
-      float sr2 = sr * 2.0f;
-      float foldGain = 1.0f + (character > 0.5f ? (character - 0.5f) * 2.0f * 6.0f : 0.0f);
-      float tMorph   = character < 0.5f ? character * 2.0f : 0.0f;
-      // Shape FM ceiling raised 2.0 -> 6.0 so the fader reaches modulation
-      // index ~6 at max -- 3x deeper than the prior tuning, hits hard FM
-      // territory without needing extra range on the knob.
-      float shapeFmDepth   = shape * shape * s.shapeEnv * 6.0f;
-      if (grit > 0.5f)
-        shapeFmDepth += (grit - 0.5f) * 2.0f * shape * 0.5f;
-
-      // Grit taming: lower FM and noise-FM ceilings (3 -> 2 and 2000 -> 1000)
-      // so high grit no longer blows the output up. The tail of the chain
-      // also applies a gritGainComp to walk loudness back further.
-      float metFmDepth     = grit * 2.0f * s.ampEnv;
-      float gritNoiseFmDev = grit * grit * 1000.0f * s.ampEnv;
-      if (character > 0.7f)
-        gritNoiseFmDev += (character - 0.7f) * 3.3f * grit * 500.0f;
-
-      // Sub-sine mix amount: pure-sine territory full, heavy-FM pulls
-      // back. Hoisted (constant across 2 k-iters; ampEnv updates after).
-      float subMix = (1.0f - shape) * 0.5f * s.ampEnv;
-
-      // 3rd-harmonic partial mix. Less than sub by half -- adds tonal
-      // body sheen without competing with the fundamental. Same
-      // (1-shape) gating so heavy-FM territory mutes the partial.
-      float partial3Mix = (1.0f - shape) * 0.25f * s.ampEnv;
-
-      // Sub-octave + membrane modes: each has its OWN decay envelope
-      // (mPartialEnvs[0..3]) computed per-sample via NEON quad. Decay
-      // times scaled by pitch register at trigger time -- low pitch
-      // gets short tails (kick punch), high pitch gets long tails
-      // (cymbal sustain). Higher modes also fade faster than the lower
-      // ones, mirroring real drum mode amplitude falloff.
-      float subOctaveMix = 0.3f * mPartialEnvs[0];
-
-      // Modes lightly shape-gated -- heavy FM territory pulls back
-      // since the FM is its own spectrum.
-      float modeShapeGate = 1.0f - shape * 0.4f;     // 1.0 -> 0.6
-      float mode1Mix = 0.16f * mPartialEnvs[1] * modeShapeGate;
-      float mode2Mix = 0.13f * mPartialEnvs[2] * modeShapeGate;
-      float mode3Mix = 0.10f * mPartialEnvs[3] * modeShapeGate;
-
-      float osSamp[2];
-      for (int k = 0; k < 2; k++)
+      // Ngoma addition: linear attack ramp on the modal bank sum ONLY (4.4).
+      // Applied here -- after the modal sum, before the noise-body mix below --
+      // so the measured regime-4 noise burst is never softened by the attack.
+      if (s.atkEnv < 1.0f)
       {
-        // Osc2 (Shape modulator): small detune, same character shaping
-        // as osc1 so the FM source has matching timbre.
-        float inc2 = droopFreq * (1.0f + shape * 0.0058f) / sr2;
-        s.phase2 += inc2;
-        s.phase2 -= floorf(s.phase2);
-        float tri2 = 4.0f * (s.phase2 < 0.5f ? s.phase2 : 1.0f - s.phase2) - 1.0f;
-        float shapeSample;
-        if (character < 0.5f)
-        {
-          float sine2 = lookupSine(s.sLUT, tri2);
-          shapeSample = tri2 + (sine2 - tri2) * tMorph;
-        }
-        else
-        {
-          shapeSample = lookupSine(s.sLUT, tri2 * foldGain);
-        }
-
-        // NEON-vectorized phasor + polynomial sine bank for the 3 pure-
-        // sine paths. Lane 3 (zero increment) reserved for a future
-        // additive partial. mPhaseBank/mIncBank/mSineBank are class
-        // members -> heap-allocated, GCC emits vld1.32 [reg] no-hint
-        // safe variant. Stack-locals would trap (see memory).
-        // Sub-sine (lane 2) now runs at 2x rate; gets decimated
-        // alongside oscs after the k-loop.
-        mIncBank[0] = droopFreq * 2.71f / sr2;          // metallic FM
-        mIncBank[1] = droopFreq * 2.0f / sr2;           // spacious FM mod
-        mIncBank[2] = s.currentSubFreq / sr2;           // sub-sine fundamental
-        mIncBank[3] = droopFreq * 3.0f / sr2;           // 3rd-harmonic partial
-        neonAdvanceSines(mPhaseBank, mIncBank, mSineBank);
-        float fmMod        = mSineBank[0];
-        float mod4         = mSineBank[1];
-        float subSigAt2x   = mSineBank[2];
-        float partial3At2x = mSineBank[3];
-
-        // Second NEON quad: additive partials.
-        //   Lane 0: sub-octave at 0.5x sub-sine pitch (gentler sweep)
-        //   Lane 1: membrane mode 1 (mode1Ratio x droopFreq, pitch-morphed)
-        //   Lane 2: membrane mode 2
-        //   Lane 3: membrane mode 3
-        mPartialInc[0] = 0.5f * s.currentSubFreq / sr2;
-        mPartialInc[1] = mode1Ratio * droopFreq / sr2;
-        mPartialInc[2] = mode2Ratio * droopFreq / sr2;
-        mPartialInc[3] = mode3Ratio * droopFreq / sr2;
-        neonAdvanceSines(mPartialPhases, mPartialInc, mPartialSines);
-        float subOctaveAt2x = mPartialSines[0];
-        float mode1At2x     = mPartialSines[1];
-        float mode2At2x     = mPartialSines[2];
-        float mode3At2x     = mPartialSines[3];
-
-        float spaciousDepth = (shape > 0.5f) ? (shape - 0.5f) * 2.0f * s.shapeEnv * 3.0f : 0.0f;
-
-        // Osc1 carrier: Shape FM + spacious 2x FM + Metallic FM + broadband
-        // noise FM all injected into the phase increment.
-        float inc1 = droopFreq / sr2;
-        inc1 += shapeSample * shapeFmDepth * droopFreq / sr2;
-        inc1 += mod4 * spaciousDepth * droopFreq / sr2;
-        inc1 += fmMod * metFmDepth * droopFreq / sr2;
-        if (grit > 0.0f)
-        {
-          s.noiseState = s.noiseState * 1664525u + 1013904223u;
-          float noise = (float)(int32_t)s.noiseState / 2147483648.0f;
-          inc1 += noise * gritNoiseFmDev / sr2;
-        }
-        s.phase1 += inc1;
-        s.phase1 -= floorf(s.phase1);
-        float tri1 = 4.0f * (s.phase1 < 0.5f ? s.phase1 : 1.0f - s.phase1) - 1.0f;
-        float toneSample;
-        if (character < 0.5f)
-        {
-          float sine1 = lookupSine(s.sLUT, tri1);
-          toneSample = tri1 + (sine1 - tri1) * tMorph;
-        }
-        else
-        {
-          toneSample = lookupSine(s.sLUT, tri1 * foldGain);
-        }
-
-        // Pass 1 #4: osc3 unison sibling at +0.4% detune (~7 cents).
-        // Same FM injection as osc1 (including Pass 2 spacious 2x) so it
-        // tracks identically -- adds beating thickness without spectral
-        // divergence.
-        float inc3 = droopFreq * 1.004f / sr2;
-        inc3 += shapeSample * shapeFmDepth * droopFreq * 1.004f / sr2;
-        inc3 += mod4 * spaciousDepth * droopFreq * 1.004f / sr2;
-        inc3 += fmMod * metFmDepth * droopFreq * 1.004f / sr2;
-        s.phase3 += inc3;
-        s.phase3 -= floorf(s.phase3);
-        float tri3 = 4.0f * (s.phase3 < 0.5f ? s.phase3 : 1.0f - s.phase3) - 1.0f;
-        float toneSample3;
-        if (character < 0.5f)
-        {
-          float sine3 = lookupSine(s.sLUT, tri3);
-          toneSample3 = tri3 + (sine3 - tri3) * tMorph;
-        }
-        else
-        {
-          toneSample3 = lookupSine(s.sLUT, tri3 * foldGain);
-        }
-
-        // Mix: oscs + sub-sine + 3rd-harmonic partial + sub-octave +
-        // 3 pitch-morphed inharmonic membrane modes. All NEON-derived
-        // sines decimate alongside the oscs at 2x rate.
-        osSamp[k] = toneSample * 1.0f
-                  + toneSample3 * 0.6f
-                  + subSigAt2x * subMix
-                  + partial3At2x * partial3Mix
-                  + subOctaveAt2x * subOctaveMix
-                  + mode1At2x * mode1Mix
-                  + mode2At2x * mode2Mix
-                  + mode3At2x * mode3Mix;
+        s.atkEnv += s.atkIncr;
+        if (s.atkEnv > 1.0f) s.atkEnv = 1.0f;
       }
+      y *= s.atkEnv;
 
-      // 2-tap moving-average halfband decimator: zero at the 2x Nyquist,
-      // good enough for drum-band content. Replace with a longer halfband
-      // FIR later if the residual aliasing above sr/2 is audible.
-      float sample = 0.5f * (osSamp[0] + osSamp[1]);
+      // Voice gate (firmware mix-out): linear decrement toward the sustain
+      // floor, cubed into the audio path. Replaces the old (1 - noiseMix*0.5)
+      // static trim AND the tauEff modal collapse - the hardware shortens the
+      // voice with this gate, it does not rescale the per-mode decay.
+      s.gateEnv -= gateDecr;
+      if (s.gateEnv < gateFloor) s.gateEnv = gateFloor;
+      y *= s.gateEnv * s.gateEnv * s.gateEnv;
 
-      // Attenuate oscillator sum as grit rises. Two-piece curve:
-      //   grit 0.0..0.7: baseline drop -- (1 - grit*0.3) reaches 0.79.
-      //   grit 0.7..1.0: aggressive drop -- aboveKnee*2.0 takes another
-      //     0.6 off, leaving 0.19 at grit=1.0 (just a hint of transient).
-      // Sub-sine rides the same envelope, so high-grit hits stay clean
-      // of pitched body content.
-      sample *= ((1.0f - grit * 0.3f) - aboveKnee * 2.0f);
+      // noise bed (own decay-tracked env, pitch-scaled level) + grit attack burst
+      s.noiseEnv *= s.noiseCoeff;
+      s.burst *= s.burstCoeff;
+      s.noiseLp += noiseLpG * (noise(s.rng) - s.noiseLp);
+      y += s.noiseLp * (bedAmp * s.bedPitch * s.noiseEnv + s.burst * 0.12f);
 
-      // Direct noise mix through pitch-tracked SVF. LP output at low
-      // pitch, BP output at high pitch, blended via noiseBpMix/noiseLpMix.
-      // Slope 2.5 so noise dominates at high grit while the osc sum has
-      // been pre-attenuated above. SVF state always advances (warm across
-      // the gate); mix only when grit is high enough to expose noise.
-      s.noiseState = s.noiseState * 1664525u + 1013904223u;
-      float rawNoiseSig = (float)(int32_t)s.noiseState / 2147483648.0f;
-      float nV3 = rawNoiseSig - s.noiseIc2;
-      float nV1 = noiseA1 * s.noiseIc1 + noiseA2 * nV3;
-      float nV2 = s.noiseIc2 + noiseA2 * s.noiseIc1 + noiseA3 * nV3;
-      s.noiseIc1 = 2.0f * nV1 - s.noiseIc1;
-      s.noiseIc2 = 2.0f * nV2 - s.noiseIc2;
-      float noiseOut = nV2 * noiseLpMix + nV1 * noiseK * noiseBpMix;
-      // Noise gain: baseline (grit-0.4)*2.5 hits 1.5 at grit=1.0, plus
-      // aboveKnee*2.0 boost for the top 30% (extra +0.6 at grit=1.0,
-      // bringing peak to ~2.1). Together with the harder osc drop above
-      // this gives the "mostly noise" feel at high grit.
-      float gritNoiseGain = ((grit - 0.4f) * 2.5f + aboveKnee * 2.0f) * s.ampEnv;
-      if (gritNoiseGain > 0.0f)
-        sample += noiseOut * gritNoiseGain;
-
-      // Amp envelope state machine
-      switch (s.envPhase)
-      {
-      case 1: // attack
-        s.ampEnv   += s.attackIncr;
-        s.shapeEnv += s.attackIncr;
-        if (s.ampEnv >= 1.0f)
-        {
-          s.ampEnv   = 1.0f;
-          s.shapeEnv = 1.0f;
-          s.envPhase = (s.holdCounter > 0) ? 2 : 3;
-        }
-        break;
-      case 2: // hold
-        s.holdCounter--;
-        if (s.holdCounter <= 0)
-          s.envPhase = 3;
-        break;
-      case 3: // decay
-        s.ampEnv   *= s.ampDecayCoeff;
-        s.shapeEnv *= s.shapeDecayCoeff;
-        if (s.ampEnv < 1e-5f)
-        {
-          // Hard reset of every internal envelope and downstream tail
-          // state when the main amp envelope ends. Ensures nothing
-          // (punch tail, SVF ringing, comp detector) sneaks past the
-          // main amp env. Per the "amp env governs everything" rule.
-          s.ampEnv = 0.0f;
-          s.shapeEnv = 0.0f;
-          s.punchEnv = 0.0f;
-          s.envPhase = 0;
-          s.vizGateState = false;
-          s.ic1eq = 0.0f;
-          s.ic2eq = 0.0f;
-          s.compDetector = 0.0f;
-          s.noiseLP = 0.0f;
-          s.noiseIc1 = 0.0f;
-          s.noiseIc2 = 0.0f;
-          s.wobblePhase = 0.0f;
-          mPhaseBank[0] = 0.0f;
-          mPhaseBank[1] = 0.0f;
-          mPhaseBank[2] = 0.0f;
-          mPhaseBank[3] = 0.0f;
-          mPartialPhases[0] = 0.0f;
-          mPartialPhases[1] = 0.0f;
-          mPartialPhases[2] = 0.0f;
-          mPartialPhases[3] = 0.0f;
-          mPartialEnvs[0] = 0.0f;
-          mPartialEnvs[1] = 0.0f;
-          mPartialEnvs[2] = 0.0f;
-          mPartialEnvs[3] = 0.0f;
-        }
-        break;
-      default: // idle
-        break;
-      }
-
-      sample *= s.ampEnv;
-
-      // Punch
-      sample *= (1.0f + s.punchEnv);
-      s.punchEnv *= s.punchDecayCoeff;
+      // Ngoma addition: Punch, post-noise-mix, pre-drive/clip (drops the old
+      // droopFreq pitch coupling along with the rest of the old engine).
+      y *= (1.0f + s.punchEnv);
+      s.punchEnv *= punchDecayCoeff;
       if (s.punchEnv < 1e-5f) s.punchEnv = 0.0f;
 
-      // Clipper: simple tanh with gain compensation.
-      if (clipperActive)
-        sample = fast_tanh(sample * driveLinear) / driveNorm;
+      float yd = y * driveLinear;
+      float ct = yd / clipTh;
+      // __builtin_sqrtf maps straight to VFP vsqrt.f32. Plain sqrtf() left GCC emitting
+      // an out-of-line `bl sqrtf` fallback in the per-sample loop, which is both slow on
+      // Cortex-A8 and an AAPCS call barrier inside the audio path. 1+ct*ct is provably
+      // >= 1, so the fallback is dead weight.
+      // ADAPTED: Tessera fuses `* level` into this line; Ngoma keeps its existing output
+      // chain order (clip -> EQ -> comp -> level), so `level` is deferred to the final
+      // `out[i] = sample * level` below instead. blockClipGain = clipG * makeup (P4).
+      float sample = blockClipGain * yd / __builtin_sqrtf(1.0f + ct * ct);
 
-      // DJ filter (TPT SVF, Cytomic formulation)
+      // DJ filter (TPT SVF, Cytomic formulation) -- unchanged from pre-transplant DrumVoice.
       if (filterActive)
       {
         float v0 = sample;
@@ -775,7 +1002,8 @@ namespace stolmine
       }
 
       // CPR single-band one-knob comp (replaces Makeup). Auto makeup
-      // built in. Bypassed when compAmt < 0.001.
+      // built in. Bypassed when compAmt < 0.001. Unchanged from
+      // pre-transplant DrumVoice.
       if (compActive)
       {
         float absLevel = sample < 0.0f ? -sample : sample;
@@ -791,7 +1019,11 @@ namespace stolmine
       out[i] = sample * level;
     }
 
-    s.vizEnvLevel = s.ampEnv;
+    // Viz pollers (cube graphic): env[0]*ramp[0]^3 is the carrier's LIVE
+    // value (deliberate fix vs Tessera's getEnvLevel(), which returns the
+    // static initial amplitude -- see plan section 4.5).
+    s.vizEnvLevel = s.env[0] * s.ramp[0] * s.ramp[0] * s.ramp[0];
+    s.vizGateState = (s.ramp[0] > 0.0f);
   }
 
 } // namespace stolmine

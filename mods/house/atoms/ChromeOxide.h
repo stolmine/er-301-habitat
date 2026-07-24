@@ -84,14 +84,16 @@ namespace house
 
     struct Coefs
     {
-      double iirAmount;
-      double bias;
-      double noise;
-      double glitch;
-      double indrive;
-      double densityA;
-      double bassGainTrim;
-      double trebleGainTrim;
+      // float: read every sample; baked once per block (float precision ample for gains/
+      // amounts). Keeping them float avoids per-sample float<->double casts in the hot path.
+      float iirAmount;
+      float bias;
+      float noise;
+      float glitch;
+      float indrive;
+      float densityA;
+      float bassGainTrim;
+      float trebleGainTrim;
     };
 
     static void bakeCoefs(double A, double B, double overallscale, Coefs& out)
@@ -146,27 +148,27 @@ namespace house
         flip = false;
       }
 
-      double process(double in, const Coefs& c)
+      float process(float in, const Coefs& c)
       {
-        double low, high;
+        float low, high;
         processSplit(in, c, low, high);
         return low + high;
       }
 
-      void processSplit(double in, const Coefs& c,
-                        double& outLow, double& outHigh)
+      void processSplit(float in, const Coefs& c,
+                        float& outLow, float& outHigh)
       {
-        double inputSample = in * c.indrive;
-        double bassSample = inputSample;
+        float inputSample = in * c.indrive;
+        float bassSample = inputSample;
 
         if (flip)
         {
-          iirA = (iirA * (1.0 - c.iirAmount)) + (inputSample * c.iirAmount);
+          iirA = (iirA * (1.0f - c.iirAmount)) + (inputSample * c.iirAmount);
           inputSample -= iirA;
         }
         else
         {
-          iirB = (iirB * (1.0 - c.iirAmount)) + (inputSample * c.iirAmount);
+          iirB = (iirB * (1.0f - c.iirAmount)) + (inputSample * c.iirAmount);
           inputSample -= iirB;
         }
         // inputSample now holds the high-band component.
@@ -175,28 +177,28 @@ namespace house
 
         if (flip)
         {
-          iirC = (iirC * (1.0 - c.iirAmount)) + (bassSample * c.iirAmount);
+          iirC = (iirC * (1.0f - c.iirAmount)) + (bassSample * c.iirAmount);
           bassSample = iirC;
         }
         else
         {
-          iirD = (iirD * (1.0 - c.iirAmount)) + (bassSample * c.iirAmount);
+          iirD = (iirD * (1.0f - c.iirAmount)) + (bassSample * c.iirAmount);
           bassSample = iirD;
         }
 
         flip = !flip;
 
         // Noise-FM warble via 5-slot piecewise interp.
-        double bridgerectifier = inputSample;
-        double randy = c.bias + ((double)nextRand() / (double)0x7FFFFFFF) * c.noise;
-        if ((randy >= 0.0) && (randy < 1.0))
-          bridgerectifier = (inputSample * randy) + (secondSample * (1.0 - randy));
-        else if ((randy >= 1.0) && (randy < 2.0))
-          bridgerectifier = (secondSample * (randy - 1.0)) + (thirdSample * (2.0 - randy));
-        else if ((randy >= 2.0) && (randy < 3.0))
-          bridgerectifier = (thirdSample * (randy - 2.0)) + (fourthSample * (3.0 - randy));
-        else if ((randy >= 3.0) && (randy < 4.0))
-          bridgerectifier = (fourthSample * (randy - 3.0)) + (fifthSample * (4.0 - randy));
+        float bridgerectifier = inputSample;
+        float randy = c.bias + ((float)nextRand() / (float)0x7FFFFFFF) * c.noise;
+        if ((randy >= 0.0f) && (randy < 1.0f))
+          bridgerectifier = (inputSample * randy) + (secondSample * (1.0f - randy));
+        else if ((randy >= 1.0f) && (randy < 2.0f))
+          bridgerectifier = (secondSample * (randy - 1.0f)) + (thirdSample * (2.0f - randy));
+        else if ((randy >= 2.0f) && (randy < 3.0f))
+          bridgerectifier = (thirdSample * (randy - 2.0f)) + (fourthSample * (3.0f - randy));
+        else if ((randy >= 3.0f) && (randy < 4.0f))
+          bridgerectifier = (fourthSample * (randy - 3.0f)) + (fifthSample * (4.0f - randy));
         // Shift sample history.
         fifthSample = fourthSample;
         fourthSample = thirdSample;
@@ -221,8 +223,8 @@ namespace house
         return fpd & 0x7FFFFFFFu;
       }
 
-      double iirA, iirB, iirC, iirD;
-      double secondSample, thirdSample, fourthSample, fifthSample;
+      float iirA, iirB, iirC, iirD;
+      float secondSample, thirdSample, fourthSample, fifthSample;
       bool flip;
       uint32_t fpd;
     };
@@ -257,13 +259,13 @@ namespace house
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
       {
-        double inL = *in1;
-        double inR = *in2;
-        if (fabs(inL) < 1.18e-23) inL = 1.18e-17;
-        if (fabs(inR) < 1.18e-23) inR = 1.18e-17;
+        float inL = *in1;
+        float inR = *in2;
+        if (fabsf(inL) < 1.18e-23f) inL = 1.18e-17f;
+        if (fabsf(inR) < 1.18e-23f) inR = 1.18e-17f;
 
-        *out1 = (float)mMonoL.process(inL, cox);
-        *out2 = (float)mMonoR.process(inR, cox);
+        *out1 = mMonoL.process(inL, cox);
+        *out2 = mMonoR.process(inR, cox);
         in1++; in2++; out1++; out2++;
       }
     }

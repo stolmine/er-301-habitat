@@ -77,9 +77,19 @@ Framework calls `addSubGraphic(self.subGraphic)` on cursor enter and `removeSubG
 - show()/hide() elements per mode
 - Grab "shiftPressed"/"shiftReleased" in onCursorEnter, release in onCursorLeave
 - shiftPressed toggles mode, shiftReleased returns true (consume, no-op)
+## Control expansion views (expand-to-fader on ENTER)  [CANONICAL]
+Make a control's sub-parameters expand to full faders when the user presses ENTER on it (the impasto/parfait band behavior). Do NOT override `enterReleased` - the framework already handles it: `ViewControl:enterReleased -> toggleContext()`, gated on `callUp("hasView", self.id)`. A control expands iff the unit declares a **view named after that control's key**.
+- Register each sub-param as its OWN full ViewControl (GainBias/ModeSelector/...) in the `controls` table, binding the SAME adapter Bias (`gainbias = self.objects.X`, `X:getParameter("Bias")`) as the parent's compact submenu readout, so the readout and the fader stay in sync. These are "expansion controls."
+- Do NOT list them in `expanded`/`collapsed`.
+- In the second return table, add a view keyed by the PARENT control's key, parent listed FIRST then the expansion controls:
+  - `size = { "size", "decay", "damp", "diffusion" }`, `mix = { "mix", "hpf" }`
+  - impasto: `bandlo = { "bandlo", "loAmt", "loBias", "loType", "loWt", "loFreq", "loMorph", "loQ" }`
+- The compact shift-submenu readouts (paramMode) and the expansion faders coexist. Verify with `unit:hasView("<key>")` in the emu.
+- The expand is view-registration, not control code: structurally identical GainBias+setControlGraphic controls (impasto BandControl vs Pecto DensityControl) differ ONLY in whether the unit declares the per-control view. That is why a control "doesn't expand."
 ## Reference
 - xroot/Unit/ViewControl/Gate.lua
 - mods/stolmine/assets/TransformGateControl.lua
+- Control expansion views: mods/spreadsheet/assets/MultibandSaturator.lua (onLoadViews band views), mods/zaum/assets/Fabula.lua (size/mix views); framework: xroot/Unit/ViewControl/init.lua enterReleased/getFloatingMenuItems
 - mods/stolmine/assets/NRCircle.lua
 
 Pattern for adding a second sub-display mode to a GainBias control, toggled by shift key. Used in Filterbank's MixControl.
@@ -321,6 +331,14 @@ Never use Émilie Gillet's deadname anywhere in code, comments, or attribution. 
 Do not use copyrighted product names anywhere -- not in source code, comments, planning docs, commit messages, or any material, even if it's not visible to end users.
 **Why:** User wants to avoid any association with trademarked names throughout the entire codebase, not just in user-facing text.
 **How to apply:** Use original names for units (e.g., "Pecto" not "Rainmaker Comb", "Petrichor" not "Rainmaker Delay"). When referencing inspiration, use generic descriptions ("multiband saturation", "comb resonator") rather than product names. This applies to toc.lua entries, Lua titles, C++ comments, planning docs, commit messages, and README descriptions.
+
+### Dry/wet mix controls -- STANDARD (both apply to every dry/wet mix)
+
+**1. Equal-power (sqrt-law) crossfade for DECORRELATED wets.** A reverb/delay/chorus/granular wet is decorrelated from the dry, so a LINEAR crossfade `dry*(1-mix) + wet*mix` dips ~3 dB at mix=0.5 (the "gain loss at 50% that recovers at 100%" bug). Use `dryGain = sqrtf(1-mix)`, `wetGain = sqrtf(mix)` (so `dryGain^2 + wetGain^2 = 1` -> constant power), computed at BLOCK rate, clamped before the sqrt. Fold any wet makeup into `wetGain`. This is the default for all decorrelated dry/wet.
+- EXCEPTION: if the wet is CORRELATED with the dry (a filter's output, a compressor's parallel path, a waveshaper), keep the LINEAR crossfade -- equal-power would wrongly +3 dB bump the center.
+- Reference: Network/Fabula/Petrichor/Colmatage mix (spreadsheet 2.8.3.x). See feedback_equal_power_drywet_crossfade / ledger `drywet-crossfade-audit`.
+
+**2. Coarse step = 0.01 for mix controls.** A dry/wet (0..1) control's biasMap coarse step (the 2nd `setSteps` arg: `setSteps(superCoarse, COARSE, fine, superFine)`) should be `0.01`, not `0.1` -- the equal-power curve makes small moves near center audible, and 0.1 detents are too jumpy. Give the mix control a dedicated map (`setSteps(0.1, 0.01, 0.001, 0.001)`) or a per-control `biasCoarseStep = 0.01`; do NOT globally change a shared `floatMap` helper (it feeds cutoffs/feedback/etc. that may legitimately want 0.1). See ledger `mix-control-standards`.
 
 Do not use em dashes (—) in public-facing material such as READMEs, release notes, changelogs, or commit messages visible to others.
 **Why:** User preference for cleaner punctuation in published text.

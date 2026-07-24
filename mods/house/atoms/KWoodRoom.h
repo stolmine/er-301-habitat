@@ -272,17 +272,19 @@ namespace house
       int ld3B = kEarlyTable[start + 7];
       int ld3C = kEarlyTable[start + 8];
       double wet = F;
+      float reg6nF = (float)reg6n;   // float feedback scale for the float trellis (avoids f*d cast traps)
+      float wetF = (float)wet;
 
       int sampleFrames = sampleFramesIn;
       while (--sampleFrames >= 0)
       {
-        double inputSampleL = *in1;
-        double inputSampleR = *in2;
+        float inputSampleL = *in1;
+        float inputSampleR = *in2;
         // Denormal flush -- deterministic constant (dither dropped).
-        if (fabs(inputSampleL) < 1.18e-23) inputSampleL = 1.18e-17;
-        if (fabs(inputSampleR) < 1.18e-23) inputSampleR = 1.18e-17;
-        double drySampleL = inputSampleL;
-        double drySampleR = inputSampleR;
+        if (fabsf(inputSampleL) < 1.18e-23f) inputSampleL = 1.18e-17f;
+        if (fabsf(inputSampleR) < 1.18e-23f) inputSampleR = 1.18e-17f;
+        float drySampleL = inputSampleL;
+        float drySampleR = inputSampleR;
 
         bez[bez_cycle] += derez;
         bez[bez_SampL] += (inputSampleL * derez);
@@ -311,20 +313,20 @@ namespace house
           c3FR++; if (c3FR > ld3F) c3FR = 0;
           c3IR++; if (c3IR > ld3I) c3IR = 0;
 
-          double hA = a3AL[c3AL - ((c3AL > ld3A) ? c3AL + 1 : 0)];
-          double hB = a3BL[c3BL - ((c3BL > ld3B) ? c3BL + 1 : 0)];
-          double hC = a3CL[c3CL - ((c3CL > ld3C) ? c3CL + 1 : 0)];
-          double hD = a3CR[c3CR - ((c3CR > ld3C) ? c3CR + 1 : 0)];
-          double hE = a3FR[c3FR - ((c3FR > ld3F) ? c3FR + 1 : 0)];
-          double hF = a3IR[c3IR - ((c3IR > ld3I) ? c3IR + 1 : 0)];
+          float hA = a3AL[c3AL - ((c3AL > ld3A) ? c3AL + 1 : 0)];
+          float hB = a3BL[c3BL - ((c3BL > ld3B) ? c3BL + 1 : 0)];
+          float hC = a3CL[c3CL - ((c3CL > ld3C) ? c3CL + 1 : 0)];
+          float hD = a3CR[c3CR - ((c3CR > ld3C) ? c3CR + 1 : 0)];
+          float hE = a3FR[c3FR - ((c3FR > ld3F) ? c3FR + 1 : 0)];
+          float hF = a3IR[c3IR - ((c3IR > ld3I) ? c3IR + 1 : 0)];
 
           // ----- 3x3 trellis: layer 2 (diff-Householder reduction) -----
-          a3DL[c3DL] = (((hB + hC) * -2.0) + hA);
-          a3EL[c3EL] = (((hA + hC) * -2.0) + hB);
-          a3FL[c3FL] = (((hA + hB) * -2.0) + hC);
-          a3BR[c3BR] = (((hE + hF) * -2.0) + hD);
-          a3ER[c3ER] = (((hD + hF) * -2.0) + hE);
-          a3HR[c3HR] = (((hD + hE) * -2.0) + hF);
+          a3DL[c3DL] = (((hB + hC) * -2.0f) + hA);
+          a3EL[c3EL] = (((hA + hC) * -2.0f) + hB);
+          a3FL[c3FL] = (((hA + hB) * -2.0f) + hC);
+          a3BR[c3BR] = (((hE + hF) * -2.0f) + hD);
+          a3ER[c3ER] = (((hD + hF) * -2.0f) + hE);
+          a3HR[c3HR] = (((hD + hE) * -2.0f) + hF);
 
           c3DL++; if (c3DL > ld3D) c3DL = 0;
           c3EL++; if (c3EL > ld3E) c3EL = 0;
@@ -341,12 +343,12 @@ namespace house
           hF = a3HR[c3HR - ((c3HR > ld3H) ? c3HR + 1 : 0)];
 
           // ----- 3x3 trellis: layer 3 (final reduction) -----
-          a3GL[c3GL] = (((hB + hC) * -2.0) + hA);
-          a3HL[c3HL] = (((hA + hC) * -2.0) + hB);
-          a3IL[c3IL] = (((hA + hB) * -2.0) + hC);
-          a3AR[c3AR] = (((hE + hF) * -2.0) + hD);
-          a3DR[c3DR] = (((hD + hF) * -2.0) + hE);
-          a3GR[c3GR] = (((hD + hE) * -2.0) + hF);
+          a3GL[c3GL] = (((hB + hC) * -2.0f) + hA);
+          a3HL[c3HL] = (((hA + hC) * -2.0f) + hB);
+          a3IL[c3IL] = (((hA + hB) * -2.0f) + hC);
+          a3AR[c3AR] = (((hE + hF) * -2.0f) + hD);
+          a3DR[c3DR] = (((hD + hF) * -2.0f) + hE);
+          a3GR[c3GR] = (((hD + hE) * -2.0f) + hF);
 
           c3GL++; if (c3GL > ld3G) c3GL = 0;
           c3HL++; if (c3HL > ld3H) c3HL = 0;
@@ -362,26 +364,26 @@ namespace house
           hE = a3DR[c3DR - ((c3DR > ld3D) ? c3DR + 1 : 0)];
           hF = a3GR[c3GR - ((c3GR > ld3G) ? c3GR + 1 : 0)];
 
-          double earlyReflectionL = (((hB + hC) * -2.0) + hA) * -0.0625;
-          double earlyReflectionR = (((hE + hF) * -2.0) + hD) * -0.0625;
+          float earlyReflectionL = (((hB + hC) * -2.0f) + hA) * -0.0625f;
+          float earlyReflectionR = (((hE + hF) * -2.0f) + hD) * -0.0625f;
 
           inputSampleL -= earlyReflectionL;
           inputSampleR -= earlyReflectionR;
 
           // ----- 6x6 trellis: input fanout + feedback injection -----
-          a6AL[c6AL] = inputSampleL + (f6BL * reg6n);
-          a6BL[c6BL] = inputSampleL + (f6CL * reg6n);
-          a6CL[c6CL] = inputSampleL + (f6DL * reg6n);
-          a6DL[c6DL] = inputSampleL + (f6EL * reg6n);
-          a6EL[c6EL] = inputSampleL + (f6FL * reg6n);
-          a6FL[c6FL] = inputSampleL + (f6AL * reg6n);
+          a6AL[c6AL] = inputSampleL + (f6BL * reg6nF);
+          a6BL[c6BL] = inputSampleL + (f6CL * reg6nF);
+          a6CL[c6CL] = inputSampleL + (f6DL * reg6nF);
+          a6DL[c6DL] = inputSampleL + (f6EL * reg6nF);
+          a6EL[c6EL] = inputSampleL + (f6FL * reg6nF);
+          a6FL[c6FL] = inputSampleL + (f6AL * reg6nF);
 
-          a6FR[c6FR] = inputSampleR + (f6LR * reg6n);
-          a6LR[c6LR] = inputSampleR + (f6RR * reg6n);
-          a6RR[c6RR] = inputSampleR + (f6XR * reg6n);
-          a6XR[c6XR] = inputSampleR + (f6ZER * reg6n);
-          a6ZER[c6ZER] = inputSampleR + (f6ZKR * reg6n);
-          a6ZKR[c6ZKR] = inputSampleR + (f6FR * reg6n);
+          a6FR[c6FR] = inputSampleR + (f6LR * reg6nF);
+          a6LR[c6LR] = inputSampleR + (f6RR * reg6nF);
+          a6RR[c6RR] = inputSampleR + (f6XR * reg6nF);
+          a6XR[c6XR] = inputSampleR + (f6ZER * reg6nF);
+          a6ZER[c6ZER] = inputSampleR + (f6ZKR * reg6nF);
+          a6ZKR[c6ZKR] = inputSampleR + (f6FR * reg6nF);
 
           // ===== Left side 6x6 trellis (6 layers) =====
 
@@ -400,12 +402,12 @@ namespace house
           hE = a6EL[c6EL - ((c6EL > d6E) ? d6E + 1 : 0)];
           hF = a6FL[c6FL - ((c6FL > d6F) ? d6F + 1 : 0)];
 
-          a6GL[c6GL] = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          a6HL[c6HL] = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          a6IL[c6IL] = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          a6JL[c6JL] = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          a6KL[c6KL] = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          a6LL[c6LL] = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          a6GL[c6GL] = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          a6HL[c6HL] = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          a6IL[c6IL] = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          a6JL[c6JL] = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          a6KL[c6KL] = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          a6LL[c6LL] = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
           // Layer 2
           c6GL++; if (c6GL > d6G) c6GL = 0;
@@ -422,12 +424,12 @@ namespace house
           hE = a6KL[c6KL - ((c6KL > d6K) ? d6K + 1 : 0)];
           hF = a6LL[c6LL - ((c6LL > d6L) ? d6L + 1 : 0)];
 
-          a6ML[c6ML] = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          a6NL[c6NL] = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          a6OL[c6OL] = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          a6PL[c6PL] = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          a6QL[c6QL] = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          a6RL[c6RL] = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          a6ML[c6ML] = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          a6NL[c6NL] = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          a6OL[c6OL] = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          a6PL[c6PL] = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          a6QL[c6QL] = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          a6RL[c6RL] = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
           // Layer 3
           c6ML++; if (c6ML > d6M) c6ML = 0;
@@ -444,12 +446,12 @@ namespace house
           hE = a6QL[c6QL - ((c6QL > d6Q) ? d6Q + 1 : 0)];
           hF = a6RL[c6RL - ((c6RL > d6R) ? d6R + 1 : 0)];
 
-          a6SL[c6SL] = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          a6TL[c6TL] = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          a6UL[c6UL] = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          a6VL[c6VL] = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          a6WL[c6WL] = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          a6XL[c6XL] = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          a6SL[c6SL] = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          a6TL[c6TL] = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          a6UL[c6UL] = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          a6VL[c6VL] = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          a6WL[c6WL] = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          a6XL[c6XL] = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
           // Layer 4
           c6SL++; if (c6SL > d6S) c6SL = 0;
@@ -466,12 +468,12 @@ namespace house
           hE = a6WL[c6WL - ((c6WL > d6W) ? d6W + 1 : 0)];
           hF = a6XL[c6XL - ((c6XL > d6X) ? d6X + 1 : 0)];
 
-          a6YL[c6YL] = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          a6ZAL[c6ZAL] = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          a6ZBL[c6ZBL] = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          a6ZCL[c6ZCL] = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          a6ZDL[c6ZDL] = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          a6ZEL[c6ZEL] = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          a6YL[c6YL] = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          a6ZAL[c6ZAL] = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          a6ZBL[c6ZBL] = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          a6ZCL[c6ZCL] = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          a6ZDL[c6ZDL] = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          a6ZEL[c6ZEL] = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
           // Layer 5
           c6YL++; if (c6YL > d6Y) c6YL = 0;
@@ -488,12 +490,12 @@ namespace house
           hE = a6ZDL[c6ZDL - ((c6ZDL > d6ZD) ? d6ZD + 1 : 0)];
           hF = a6ZEL[c6ZEL - ((c6ZEL > d6ZE) ? d6ZE + 1 : 0)];
 
-          a6ZFL[c6ZFL] = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          a6ZGL[c6ZGL] = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          a6ZHL[c6ZHL] = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          a6ZIL[c6ZIL] = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          a6ZJL[c6ZJL] = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          a6ZKL[c6ZKL] = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          a6ZFL[c6ZFL] = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          a6ZGL[c6ZGL] = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          a6ZHL[c6ZHL] = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          a6ZIL[c6ZIL] = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          a6ZJL[c6ZJL] = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          a6ZKL[c6ZKL] = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
           // Layer 6 -- output goes to R-side feedback taps
           c6ZFL++; if (c6ZFL > d6ZF) c6ZFL = 0;
@@ -510,14 +512,14 @@ namespace house
           hE = a6ZJL[c6ZJL - ((c6ZJL > d6ZJ) ? d6ZJ + 1 : 0)];
           hF = a6ZKL[c6ZKL - ((c6ZKL > d6ZK) ? d6ZK + 1 : 0)];
 
-          f6FR = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          f6LR = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          f6RR = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          f6XR = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          f6ZER = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          f6ZKR = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          f6FR = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          f6LR = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          f6RR = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          f6XR = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          f6ZER = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          f6ZKR = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
-          inputSampleL = ((hA * 2.0) - (hB + hC + hD + hE + hF)) * 0.001953125;
+          inputSampleL = ((hA * 2.0f) - (hB + hC + hD + hE + hF)) * 0.001953125;
 
           // ===== Right side 6x6 trellis (6 layers) =====
 
@@ -536,12 +538,12 @@ namespace house
           hE = a6ZER[c6ZER - ((c6ZER > d6ZE) ? d6ZE + 1 : 0)];
           hF = a6ZKR[c6ZKR - ((c6ZKR > d6ZK) ? d6ZK + 1 : 0)];
 
-          a6ER[c6ER] = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          a6KR[c6KR] = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          a6QR[c6QR] = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          a6WR[c6WR] = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          a6ZDR[c6ZDR] = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          a6ZJR[c6ZJR] = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          a6ER[c6ER] = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          a6KR[c6KR] = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          a6QR[c6QR] = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          a6WR[c6WR] = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          a6ZDR[c6ZDR] = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          a6ZJR[c6ZJR] = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
           // Layer 2
           c6ER++; if (c6ER > d6E) c6ER = 0;
@@ -558,12 +560,12 @@ namespace house
           hE = a6ZDR[c6ZDR - ((c6ZDR > d6ZD) ? d6ZD + 1 : 0)];
           hF = a6ZJR[c6ZJR - ((c6ZJR > d6ZJ) ? d6ZJ + 1 : 0)];
 
-          a6DR[c6DR] = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          a6JR[c6JR] = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          a6PR[c6PR] = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          a6VR[c6VR] = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          a6ZCR[c6ZCR] = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          a6ZIR[c6ZIR] = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          a6DR[c6DR] = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          a6JR[c6JR] = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          a6PR[c6PR] = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          a6VR[c6VR] = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          a6ZCR[c6ZCR] = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          a6ZIR[c6ZIR] = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
           // Layer 3
           c6DR++; if (c6DR > d6D) c6DR = 0;
@@ -580,12 +582,12 @@ namespace house
           hE = a6ZCR[c6ZCR - ((c6ZCR > d6ZC) ? d6ZC + 1 : 0)];
           hF = a6ZIR[c6ZIR - ((c6ZIR > d6ZI) ? d6ZI + 1 : 0)];
 
-          a6CR[c6CR] = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          a6IR[c6IR] = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          a6OR[c6OR] = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          a6UR[c6UR] = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          a6ZBR[c6ZBR] = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          a6ZHR[c6ZHR] = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          a6CR[c6CR] = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          a6IR[c6IR] = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          a6OR[c6OR] = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          a6UR[c6UR] = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          a6ZBR[c6ZBR] = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          a6ZHR[c6ZHR] = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
           // Layer 4
           c6CR++; if (c6CR > d6C) c6CR = 0;
@@ -602,12 +604,12 @@ namespace house
           hE = a6ZBR[c6ZBR - ((c6ZBR > d6ZB) ? d6ZB + 1 : 0)];
           hF = a6ZHR[c6ZHR - ((c6ZHR > d6ZH) ? d6ZH + 1 : 0)];
 
-          a6BR[c6BR] = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          a6HR[c6HR] = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          a6NR[c6NR] = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          a6TR[c6TR] = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          a6ZAR[c6ZAR] = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          a6ZGR[c6ZGR] = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          a6BR[c6BR] = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          a6HR[c6HR] = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          a6NR[c6NR] = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          a6TR[c6TR] = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          a6ZAR[c6ZAR] = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          a6ZGR[c6ZGR] = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
           // Layer 5 -- source has c6ZBR++ instead of c6ER++;
           // preserved literally per feedback_identical_means_identical.
@@ -625,12 +627,12 @@ namespace house
           hE = a6ZAR[c6ZAR - ((c6ZAR > d6ZA) ? d6ZA + 1 : 0)];
           hF = a6ZGR[c6ZGR - ((c6ZGR > d6ZG) ? d6ZG + 1 : 0)];
 
-          a6AR[c6AR] = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          a6GR[c6GR] = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          a6MR[c6MR] = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          a6SR[c6SR] = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          a6YR[c6YR] = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          a6ZFR[c6ZFR] = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          a6AR[c6AR] = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          a6GR[c6GR] = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          a6MR[c6MR] = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          a6SR[c6SR] = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          a6YR[c6YR] = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          a6ZFR[c6ZFR] = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
           // Layer 6 -- output goes to L-side feedback taps
           c6AR++; if (c6AR > d6A) c6AR = 0;
@@ -647,14 +649,14 @@ namespace house
           hE = a6YR[c6YR - ((c6YR > d6Y) ? d6Y + 1 : 0)];
           hF = a6ZFR[c6ZFR - ((c6ZFR > d6ZF) ? d6ZF + 1 : 0)];
 
-          f6AL = ((hA * 2.0) - (hB + hC + hD + hE + hF));
-          f6BL = ((hB * 2.0) - (hA + hC + hD + hE + hF));
-          f6CL = ((hC * 2.0) - (hA + hB + hD + hE + hF));
-          f6DL = ((hD * 2.0) - (hA + hB + hC + hE + hF));
-          f6EL = ((hE * 2.0) - (hA + hB + hC + hD + hF));
-          f6FL = ((hF * 2.0) - (hA + hB + hC + hD + hE));
+          f6AL = ((hA * 2.0f) - (hB + hC + hD + hE + hF));
+          f6BL = ((hB * 2.0f) - (hA + hC + hD + hE + hF));
+          f6CL = ((hC * 2.0f) - (hA + hB + hD + hE + hF));
+          f6DL = ((hD * 2.0f) - (hA + hB + hC + hE + hF));
+          f6EL = ((hE * 2.0f) - (hA + hB + hC + hD + hF));
+          f6FL = ((hF * 2.0f) - (hA + hB + hC + hD + hE));
 
-          inputSampleR = ((hA * 2.0) - (hB + hC + hD + hE + hF)) * 0.001953125;
+          inputSampleR = ((hA * 2.0f) - (hB + hC + hD + hE + hF)) * 0.001953125;
 
           // ===== Inner Bezier (bezF) + IIR filter stage =====
           bezF[bez_cycle] += derezFreq;
@@ -711,11 +713,11 @@ namespace house
         inputSampleR = bez[bez_IIRR] = (inputSampleR * derez) + (bez[bez_IIRR] * (1.0 - derez));
 
         // Wet/dry
-        inputSampleL = (inputSampleL * wet) + (drySampleL * (1.0 - wet));
-        inputSampleR = (inputSampleR * wet) + (drySampleR * (1.0 - wet));
+        inputSampleL = (inputSampleL * wetF) + (drySampleL * (1.0f - wetF));
+        inputSampleR = (inputSampleR * wetF) + (drySampleR * (1.0f - wetF));
 
-        *out1 = (float)inputSampleL;
-        *out2 = (float)inputSampleR;
+        *out1 = inputSampleL;
+        *out2 = inputSampleR;
 
         in1++;
         in2++;
@@ -726,56 +728,56 @@ namespace house
 
   private:
     // 3x3 trellis (early reflections), per side
-    double a3AL[d3A + 5], a3AR[d3A + 5];
-    double a3BL[d3B + 5], a3BR[d3B + 5];
-    double a3CL[d3C + 5], a3CR[d3C + 5];
-    double a3DL[d3D + 5], a3DR[d3D + 5];
-    double a3EL[d3E + 5], a3ER[d3E + 5];
-    double a3FL[d3F + 5], a3FR[d3F + 5];
-    double a3GL[d3G + 5], a3GR[d3G + 5];
-    double a3HL[d3H + 5], a3HR[d3H + 5];
-    double a3IL[d3I + 5], a3IR[d3I + 5];
+    float a3AL[d3A + 5], a3AR[d3A + 5];
+    float a3BL[d3B + 5], a3BR[d3B + 5];
+    float a3CL[d3C + 5], a3CR[d3C + 5];
+    float a3DL[d3D + 5], a3DR[d3D + 5];
+    float a3EL[d3E + 5], a3ER[d3E + 5];
+    float a3FL[d3F + 5], a3FR[d3F + 5];
+    float a3GL[d3G + 5], a3GR[d3G + 5];
+    float a3HL[d3H + 5], a3HR[d3H + 5];
+    float a3IL[d3I + 5], a3IR[d3I + 5];
     int c3AL, c3AR, c3BL, c3BR, c3CL, c3CR;
     int c3DL, c3DR, c3EL, c3ER, c3FL, c3FR;
     int c3GL, c3GR, c3HL, c3HR, c3IL, c3IR;
 
     // 6x6 trellis (main reverb), per side
-    double a6AL[d6A + 5], a6AR[d6A + 5];
-    double a6BL[d6B + 5], a6BR[d6B + 5];
-    double a6CL[d6C + 5], a6CR[d6C + 5];
-    double a6DL[d6D + 5], a6DR[d6D + 5];
-    double a6EL[d6E + 5], a6ER[d6E + 5];
-    double a6FL[d6F + 5], a6FR[d6F + 5];
-    double a6GL[d6G + 5], a6GR[d6G + 5];
-    double a6HL[d6H + 5], a6HR[d6H + 5];
-    double a6IL[d6I + 5], a6IR[d6I + 5];
-    double a6JL[d6J + 5], a6JR[d6J + 5];
-    double a6KL[d6K + 5], a6KR[d6K + 5];
-    double a6LL[d6L + 5], a6LR[d6L + 5];
-    double a6ML[d6M + 5], a6MR[d6M + 5];
-    double a6NL[d6N + 5], a6NR[d6N + 5];
-    double a6OL[d6O + 5], a6OR[d6O + 5];
-    double a6PL[d6P + 5], a6PR[d6P + 5];
-    double a6QL[d6Q + 5], a6QR[d6Q + 5];
-    double a6RL[d6R + 5], a6RR[d6R + 5];
-    double a6SL[d6S + 5], a6SR[d6S + 5];
-    double a6TL[d6T + 5], a6TR[d6T + 5];
-    double a6UL[d6U + 5], a6UR[d6U + 5];
-    double a6VL[d6V + 5], a6VR[d6V + 5];
-    double a6WL[d6W + 5], a6WR[d6W + 5];
-    double a6XL[d6X + 5], a6XR[d6X + 5];
-    double a6YL[d6Y + 5], a6YR[d6Y + 5];
-    double a6ZAL[d6ZA + 5], a6ZAR[d6ZA + 5];
-    double a6ZBL[d6ZB + 5], a6ZBR[d6ZB + 5];
-    double a6ZCL[d6ZC + 5], a6ZCR[d6ZC + 5];
-    double a6ZDL[d6ZD + 5], a6ZDR[d6ZD + 5];
-    double a6ZEL[d6ZE + 5], a6ZER[d6ZE + 5];
-    double a6ZFL[d6ZF + 5], a6ZFR[d6ZF + 5];
-    double a6ZGL[d6ZG + 5], a6ZGR[d6ZG + 5];
-    double a6ZHL[d6ZH + 5], a6ZHR[d6ZH + 5];
-    double a6ZIL[d6ZI + 5], a6ZIR[d6ZI + 5];
-    double a6ZJL[d6ZJ + 5], a6ZJR[d6ZJ + 5];
-    double a6ZKL[d6ZK + 5], a6ZKR[d6ZK + 5];
+    float a6AL[d6A + 5], a6AR[d6A + 5];
+    float a6BL[d6B + 5], a6BR[d6B + 5];
+    float a6CL[d6C + 5], a6CR[d6C + 5];
+    float a6DL[d6D + 5], a6DR[d6D + 5];
+    float a6EL[d6E + 5], a6ER[d6E + 5];
+    float a6FL[d6F + 5], a6FR[d6F + 5];
+    float a6GL[d6G + 5], a6GR[d6G + 5];
+    float a6HL[d6H + 5], a6HR[d6H + 5];
+    float a6IL[d6I + 5], a6IR[d6I + 5];
+    float a6JL[d6J + 5], a6JR[d6J + 5];
+    float a6KL[d6K + 5], a6KR[d6K + 5];
+    float a6LL[d6L + 5], a6LR[d6L + 5];
+    float a6ML[d6M + 5], a6MR[d6M + 5];
+    float a6NL[d6N + 5], a6NR[d6N + 5];
+    float a6OL[d6O + 5], a6OR[d6O + 5];
+    float a6PL[d6P + 5], a6PR[d6P + 5];
+    float a6QL[d6Q + 5], a6QR[d6Q + 5];
+    float a6RL[d6R + 5], a6RR[d6R + 5];
+    float a6SL[d6S + 5], a6SR[d6S + 5];
+    float a6TL[d6T + 5], a6TR[d6T + 5];
+    float a6UL[d6U + 5], a6UR[d6U + 5];
+    float a6VL[d6V + 5], a6VR[d6V + 5];
+    float a6WL[d6W + 5], a6WR[d6W + 5];
+    float a6XL[d6X + 5], a6XR[d6X + 5];
+    float a6YL[d6Y + 5], a6YR[d6Y + 5];
+    float a6ZAL[d6ZA + 5], a6ZAR[d6ZA + 5];
+    float a6ZBL[d6ZB + 5], a6ZBR[d6ZB + 5];
+    float a6ZCL[d6ZC + 5], a6ZCR[d6ZC + 5];
+    float a6ZDL[d6ZD + 5], a6ZDR[d6ZD + 5];
+    float a6ZEL[d6ZE + 5], a6ZER[d6ZE + 5];
+    float a6ZFL[d6ZF + 5], a6ZFR[d6ZF + 5];
+    float a6ZGL[d6ZG + 5], a6ZGR[d6ZG + 5];
+    float a6ZHL[d6ZH + 5], a6ZHR[d6ZH + 5];
+    float a6ZIL[d6ZI + 5], a6ZIR[d6ZI + 5];
+    float a6ZJL[d6ZJ + 5], a6ZJR[d6ZJ + 5];
+    float a6ZKL[d6ZK + 5], a6ZKR[d6ZK + 5];
 
     int c6AL, c6BL, c6CL, c6DL, c6EL, c6FL, c6GL, c6HL, c6IL;
     int c6JL, c6KL, c6LL, c6ML, c6NL, c6OL, c6PL, c6QL, c6RL;
@@ -786,8 +788,8 @@ namespace house
     int c6SR, c6TR, c6UR, c6VR, c6WR, c6XR, c6YR, c6ZAR, c6ZBR;
     int c6ZCR, c6ZDR, c6ZER, c6ZFR, c6ZGR, c6ZHR, c6ZIR, c6ZJR, c6ZKR;
 
-    double f6AL, f6BL, f6CL, f6DL, f6EL, f6FL;
-    double f6FR, f6LR, f6RR, f6XR, f6ZER, f6ZKR;
+    float f6AL, f6BL, f6CL, f6DL, f6EL, f6FL;
+    float f6FR, f6LR, f6RR, f6XR, f6ZER, f6ZKR;
     double avg6L, avg6R;
 
     double bez[bez_total];

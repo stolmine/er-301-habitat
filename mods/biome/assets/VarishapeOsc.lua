@@ -90,7 +90,7 @@ function VarishapeOsc:onLoadViews(objects, branches)
       description = "Fundamental",
       gainbias = objects.f0,
       range = objects.f0,
-      biasMap = f0Map,
+      biasMap = Encoder.getMap("oscFreq"),
       biasUnits = app.unitHertz,
       biasPrecision = 1,
       initialBias = 110.0

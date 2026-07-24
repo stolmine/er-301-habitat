@@ -17,21 +17,29 @@ local function floatMap(min, max)
   return map
 end
 
+-- Normalized (0..1 / -1..1) controls: framework standard coarse step 0.01
+-- (= Encoder.getMap("[0,1]")/("[-1,1]")). floatMap coarse 0.1 stays on levels.
+local function normMap(min, max)
+  local map = app.LinearDialMap(min, max)
+  map:setSteps(0.1, 0.01, 0.001, 0.0001)
+  return map
+end
+
 local driveMap = (function()
   local m = app.LinearDialMap(0, 4)
   m:setSteps(0.5, 0.1, 0.01, 0.001)
   return m
 end)()
 
-local toneMap = floatMap(0, 1)
+local toneMap = normMap(0, 1)
 local toneFreqMap = (function()
   local m = app.LinearDialMap(20, 20000)
   m:setSteps(1000, 100, 10, 1)
   return m
 end)()
 
-local skewMap = floatMap(-1, 1)
-local mixMap = floatMap(0, 1)
+local skewMap = normMap(-1, 1)
+local mixMap = normMap(0, 1)
 local outputMap = floatMap(0, 2)
 local weightMap = (function()
   local m = app.LinearDialMap(0.1, 4)
@@ -51,7 +59,7 @@ local ratioMap = (function()
   return m
 end)()
 
-local speedMap = floatMap(0, 1)
+local speedMap = normMap(0, 1)
 
 local attackMap = (function()
   local m = app.LinearDialMap(0.0001, 0.1)
@@ -181,23 +189,28 @@ function MultibandCompressor:onLoadGraph(channelCount)
     self:addMonoBranch("bandLevel" .. i, bandLevel, "In", bandLevel, "Out")
   end
 
-  -- Set Bias refs for per-band params
+  -- Per-band param refs the C++ reads at audio rate MUST be the adapter's
+  -- modulated "Out" (= Bias + Gain·CV), not the static "Bias" — else CV on
+  -- a per-band sub-branch moves the graphic but not the audio. Out == Bias
+  -- when unpatched, so knobs still work; the tie() above schedules each
+  -- adapter (same as the main params). setBandLevelBias stays "Bias" — it
+  -- only drives band-brightness in the graphic, not audio.
   -- [band][param]: 0=threshold, 1=ratio, 2=speed, 3=attack, 4=release, 5=weight
   for i = 0, 2 do
-    op:setBandBias(i, 0, self.objects["bandThreshold" .. i]:getParameter("Bias"))
-    op:setBandBias(i, 1, self.objects["bandRatio" .. i]:getParameter("Bias"))
-    op:setBandBias(i, 2, self.objects["bandSpeed" .. i]:getParameter("Bias"))
-    op:setBandBias(i, 3, self.objects["bandAttack" .. i]:getParameter("Bias"))
-    op:setBandBias(i, 4, self.objects["bandRelease" .. i]:getParameter("Bias"))
-    op:setBandBias(i, 5, self.objects["bandWeight" .. i]:getParameter("Bias"))
+    op:setBandBias(i, 0, self.objects["bandThreshold" .. i]:getParameter("Out"))
+    op:setBandBias(i, 1, self.objects["bandRatio" .. i]:getParameter("Out"))
+    op:setBandBias(i, 2, self.objects["bandSpeed" .. i]:getParameter("Out"))
+    op:setBandBias(i, 3, self.objects["bandAttack" .. i]:getParameter("Out"))
+    op:setBandBias(i, 4, self.objects["bandRelease" .. i]:getParameter("Out"))
+    op:setBandBias(i, 5, self.objects["bandWeight" .. i]:getParameter("Out"))
     op:setBandLevelBias(i, self.objects["bandLevel" .. i]:getParameter("Bias"))
     if stereo then
-      self.objects.opR:setBandBias(i, 0, self.objects["bandThreshold" .. i]:getParameter("Bias"))
-      self.objects.opR:setBandBias(i, 1, self.objects["bandRatio" .. i]:getParameter("Bias"))
-      self.objects.opR:setBandBias(i, 2, self.objects["bandSpeed" .. i]:getParameter("Bias"))
-      self.objects.opR:setBandBias(i, 3, self.objects["bandAttack" .. i]:getParameter("Bias"))
-      self.objects.opR:setBandBias(i, 4, self.objects["bandRelease" .. i]:getParameter("Bias"))
-      self.objects.opR:setBandBias(i, 5, self.objects["bandWeight" .. i]:getParameter("Bias"))
+      self.objects.opR:setBandBias(i, 0, self.objects["bandThreshold" .. i]:getParameter("Out"))
+      self.objects.opR:setBandBias(i, 1, self.objects["bandRatio" .. i]:getParameter("Out"))
+      self.objects.opR:setBandBias(i, 2, self.objects["bandSpeed" .. i]:getParameter("Out"))
+      self.objects.opR:setBandBias(i, 3, self.objects["bandAttack" .. i]:getParameter("Out"))
+      self.objects.opR:setBandBias(i, 4, self.objects["bandRelease" .. i]:getParameter("Out"))
+      self.objects.opR:setBandBias(i, 5, self.objects["bandWeight" .. i]:getParameter("Out"))
       self.objects.opR:setBandLevelBias(i, self.objects["bandLevel" .. i]:getParameter("Bias"))
     end
   end

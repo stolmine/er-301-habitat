@@ -157,6 +157,9 @@ namespace house
       if (wet < 0.0) wet = 0.0;
       if (dry > 1.0) dry = 1.0;
       if (dry < 0.0) dry = 0.0;
+      // float bakes for the pure-float per-sample FDN (removes the (double) cast-traps)
+      float interpolateF=(float)interpolate, regenF=(float)regen, thunderAmountF=(float)thunderAmount;
+      float lowpassF=(float)lowpass, wetF=(float)wet, dryF=(float)dry;
 
       delayI = (int)(3407.0 * size);
       delayJ = (int)(1823.0 * size);
@@ -174,18 +177,18 @@ namespace house
       int sampleFrames = FRAMELENGTH;
       while (--sampleFrames >= 0)
       {
-        double inputSampleL = *in1;
-        double inputSampleR = *in2;
-        if (fabs(inputSampleL) < 1.18e-23) inputSampleL = 1.18e-17;
-        if (fabs(inputSampleR) < 1.18e-23) inputSampleR = 1.18e-17;
-        double drySampleL = inputSampleL;
-        double drySampleR = inputSampleR;
+        float inputSampleL = *in1;
+        float inputSampleR = *in2;
+        if (fabsf(inputSampleL) < 1.18e-23f) inputSampleL = 1.18e-17f;
+        if (fabsf(inputSampleR) < 1.18e-23f) inputSampleR = 1.18e-17f;
+        float drySampleL = inputSampleL;
+        float drySampleR = inputSampleR;
 
-        if (fabs(iirAL) < 1.18e-37) iirAL = 0.0;
-        iirAL = (iirAL * (1.0 - lowpass)) + (inputSampleL * lowpass);
+        if (fabsf(iirAL) < 1.18e-37f) iirAL = 0.0f;
+        iirAL = (iirAL * (1.0f - lowpassF)) + (inputSampleL * lowpassF);
         inputSampleL = iirAL;
-        if (fabs(iirAR) < 1.18e-37) iirAR = 0.0;
-        iirAR = (iirAR * (1.0 - lowpass)) + (inputSampleR * lowpass);
+        if (fabsf(iirAR) < 1.18e-37f) iirAR = 0.0f;
+        iirAR = (iirAR * (1.0f - lowpassF)) + (inputSampleR * lowpassF);
         inputSampleR = iirAR;
 
         cycle++;
@@ -193,162 +196,162 @@ namespace house
         {
           // Per-tap feedback smoother. Update feedback first, then
           // mirror into previous tap. Reversing breaks the smoother.
-          feedbackAL = (float)((double)feedbackAL * (1.0 - interpolate) + (double)previousAL * interpolate);
+          feedbackAL = (feedbackAL * (1.0f - interpolateF) + previousAL * interpolateF);
           previousAL = feedbackAL;
-          feedbackBL = (float)((double)feedbackBL * (1.0 - interpolate) + (double)previousBL * interpolate);
+          feedbackBL = (feedbackBL * (1.0f - interpolateF) + previousBL * interpolateF);
           previousBL = feedbackBL;
-          feedbackCL = (float)((double)feedbackCL * (1.0 - interpolate) + (double)previousCL * interpolate);
+          feedbackCL = (feedbackCL * (1.0f - interpolateF) + previousCL * interpolateF);
           previousCL = feedbackCL;
-          feedbackDL = (float)((double)feedbackDL * (1.0 - interpolate) + (double)previousDL * interpolate);
+          feedbackDL = (feedbackDL * (1.0f - interpolateF) + previousDL * interpolateF);
           previousDL = feedbackDL;
-          feedbackAR = (float)((double)feedbackAR * (1.0 - interpolate) + (double)previousAR * interpolate);
+          feedbackAR = (feedbackAR * (1.0f - interpolateF) + previousAR * interpolateF);
           previousAR = feedbackAR;
-          feedbackBR = (float)((double)feedbackBR * (1.0 - interpolate) + (double)previousBR * interpolate);
+          feedbackBR = (feedbackBR * (1.0f - interpolateF) + previousBR * interpolateF);
           previousBR = feedbackBR;
-          feedbackCR = (float)((double)feedbackCR * (1.0 - interpolate) + (double)previousCR * interpolate);
+          feedbackCR = (feedbackCR * (1.0f - interpolateF) + previousCR * interpolateF);
           previousCR = feedbackCR;
-          feedbackDR = (float)((double)feedbackDR * (1.0 - interpolate) + (double)previousDR * interpolate);
+          feedbackDR = (feedbackDR * (1.0f - interpolateF) + previousDR * interpolateF);
           previousDR = feedbackDR;
 
-          thunderL = (thunderL * 0.99) - ((double)feedbackAL * thunderAmount);
-          thunderR = (thunderR * 0.99) - ((double)feedbackAR * thunderAmount);
+          thunderL = (thunderL * 0.99f) - (feedbackAL * thunderAmountF);
+          thunderR = (thunderR * 0.99f) - (feedbackAR * thunderAmountF);
 
-          aIL[countI] = (float)(inputSampleL + (((double)feedbackAL + thunderL) * regen));
-          aJL[countJ] = (float)(inputSampleL + ((double)feedbackBL * regen));
-          aKL[countK] = (float)(inputSampleL + ((double)feedbackCL * regen));
-          aLL[countL] = (float)(inputSampleL + ((double)feedbackDL * regen));
-          aIR[countI] = (float)(inputSampleR + (((double)feedbackAR + thunderR) * regen));
-          aJR[countJ] = (float)(inputSampleR + ((double)feedbackBR * regen));
-          aKR[countK] = (float)(inputSampleR + ((double)feedbackCR * regen));
-          aLR[countL] = (float)(inputSampleR + ((double)feedbackDR * regen));
+          aIL[countI] = (inputSampleL + ((feedbackAL + thunderL) * regenF));
+          aJL[countJ] = (inputSampleL + (feedbackBL * regenF));
+          aKL[countK] = (inputSampleL + (feedbackCL * regenF));
+          aLL[countL] = (inputSampleL + (feedbackDL * regenF));
+          aIR[countI] = (inputSampleR + ((feedbackAR + thunderR) * regenF));
+          aJR[countJ] = (inputSampleR + (feedbackBR * regenF));
+          aKR[countK] = (inputSampleR + (feedbackCR * regenF));
+          aLR[countL] = (inputSampleR + (feedbackDR * regenF));
 
           countI++; if (countI < 0 || countI > delayI) countI = 0;
           countJ++; if (countJ < 0 || countJ > delayJ) countJ = 0;
           countK++; if (countK < 0 || countK > delayK) countK = 0;
           countL++; if (countL < 0 || countL > delayL) countL = 0;
 
-          double outIL = (double)aIL[countI - ((countI > delayI) ? delayI + 1 : 0)];
-          double outJL = (double)aJL[countJ - ((countJ > delayJ) ? delayJ + 1 : 0)];
-          double outKL = (double)aKL[countK - ((countK > delayK) ? delayK + 1 : 0)];
-          double outLL = (double)aLL[countL - ((countL > delayL) ? delayL + 1 : 0)];
-          double outIR = (double)aIR[countI - ((countI > delayI) ? delayI + 1 : 0)];
-          double outJR = (double)aJR[countJ - ((countJ > delayJ) ? delayJ + 1 : 0)];
-          double outKR = (double)aKR[countK - ((countK > delayK) ? delayK + 1 : 0)];
-          double outLR = (double)aLR[countL - ((countL > delayL) ? delayL + 1 : 0)];
+          float outIL = aIL[countI - ((countI > delayI) ? delayI + 1 : 0)];
+          float outJL = aJL[countJ - ((countJ > delayJ) ? delayJ + 1 : 0)];
+          float outKL = aKL[countK - ((countK > delayK) ? delayK + 1 : 0)];
+          float outLL = aLL[countL - ((countL > delayL) ? delayL + 1 : 0)];
+          float outIR = aIR[countI - ((countI > delayI) ? delayI + 1 : 0)];
+          float outJR = aJR[countJ - ((countJ > delayJ) ? delayJ + 1 : 0)];
+          float outKR = aKR[countK - ((countK > delayK) ? delayK + 1 : 0)];
+          float outLR = aLR[countL - ((countL > delayL) ? delayL + 1 : 0)];
 
-          aAL[countA] = (float)(outIL - (outJL + outKL + outLL));
-          aBL[countB] = (float)(outJL - (outIL + outKL + outLL));
-          aCL[countC] = (float)(outKL - (outIL + outJL + outLL));
-          aDL[countD] = (float)(outLL - (outIL + outJL + outKL));
-          aAR[countA] = (float)(outIR - (outJR + outKR + outLR));
-          aBR[countB] = (float)(outJR - (outIR + outKR + outLR));
-          aCR[countC] = (float)(outKR - (outIR + outJR + outLR));
-          aDR[countD] = (float)(outLR - (outIR + outJR + outKR));
+          aAL[countA] = (outIL - (outJL + outKL + outLL));
+          aBL[countB] = (outJL - (outIL + outKL + outLL));
+          aCL[countC] = (outKL - (outIL + outJL + outLL));
+          aDL[countD] = (outLL - (outIL + outJL + outKL));
+          aAR[countA] = (outIR - (outJR + outKR + outLR));
+          aBR[countB] = (outJR - (outIR + outKR + outLR));
+          aCR[countC] = (outKR - (outIR + outJR + outLR));
+          aDR[countD] = (outLR - (outIR + outJR + outKR));
 
           countA++; if (countA < 0 || countA > delayA) countA = 0;
           countB++; if (countB < 0 || countB > delayB) countB = 0;
           countC++; if (countC < 0 || countC > delayC) countC = 0;
           countD++; if (countD < 0 || countD > delayD) countD = 0;
 
-          double outAL = (double)aAL[countA - ((countA > delayA) ? delayA + 1 : 0)];
-          double outBL = (double)aBL[countB - ((countB > delayB) ? delayB + 1 : 0)];
-          double outCL = (double)aCL[countC - ((countC > delayC) ? delayC + 1 : 0)];
-          double outDL = (double)aDL[countD - ((countD > delayD) ? delayD + 1 : 0)];
-          double outAR = (double)aAR[countA - ((countA > delayA) ? delayA + 1 : 0)];
-          double outBR = (double)aBR[countB - ((countB > delayB) ? delayB + 1 : 0)];
-          double outCR = (double)aCR[countC - ((countC > delayC) ? delayC + 1 : 0)];
-          double outDR = (double)aDR[countD - ((countD > delayD) ? delayD + 1 : 0)];
+          float outAL = aAL[countA - ((countA > delayA) ? delayA + 1 : 0)];
+          float outBL = aBL[countB - ((countB > delayB) ? delayB + 1 : 0)];
+          float outCL = aCL[countC - ((countC > delayC) ? delayC + 1 : 0)];
+          float outDL = aDL[countD - ((countD > delayD) ? delayD + 1 : 0)];
+          float outAR = aAR[countA - ((countA > delayA) ? delayA + 1 : 0)];
+          float outBR = aBR[countB - ((countB > delayB) ? delayB + 1 : 0)];
+          float outCR = aCR[countC - ((countC > delayC) ? delayC + 1 : 0)];
+          float outDR = aDR[countD - ((countD > delayD) ? delayD + 1 : 0)];
 
-          aEL[countE] = (float)(outAL - (outBL + outCL + outDL));
-          aFL[countF] = (float)(outBL - (outAL + outCL + outDL));
-          aGL[countG] = (float)(outCL - (outAL + outBL + outDL));
-          aHL[countH] = (float)(outDL - (outAL + outBL + outCL));
-          aER[countE] = (float)(outAR - (outBR + outCR + outDR));
-          aFR[countF] = (float)(outBR - (outAR + outCR + outDR));
-          aGR[countG] = (float)(outCR - (outAR + outBR + outDR));
-          aHR[countH] = (float)(outDR - (outAR + outBR + outCR));
+          aEL[countE] = (outAL - (outBL + outCL + outDL));
+          aFL[countF] = (outBL - (outAL + outCL + outDL));
+          aGL[countG] = (outCL - (outAL + outBL + outDL));
+          aHL[countH] = (outDL - (outAL + outBL + outCL));
+          aER[countE] = (outAR - (outBR + outCR + outDR));
+          aFR[countF] = (outBR - (outAR + outCR + outDR));
+          aGR[countG] = (outCR - (outAR + outBR + outDR));
+          aHR[countH] = (outDR - (outAR + outBR + outCR));
 
           countE++; if (countE < 0 || countE > delayE) countE = 0;
           countF++; if (countF < 0 || countF > delayF) countF = 0;
           countG++; if (countG < 0 || countG > delayG) countG = 0;
           countH++; if (countH < 0 || countH > delayH) countH = 0;
 
-          double outEL = (double)aEL[countE - ((countE > delayE) ? delayE + 1 : 0)];
-          double outFL = (double)aFL[countF - ((countF > delayF) ? delayF + 1 : 0)];
-          double outGL = (double)aGL[countG - ((countG > delayG) ? delayG + 1 : 0)];
-          double outHL = (double)aHL[countH - ((countH > delayH) ? delayH + 1 : 0)];
-          double outER = (double)aER[countE - ((countE > delayE) ? delayE + 1 : 0)];
-          double outFR = (double)aFR[countF - ((countF > delayF) ? delayF + 1 : 0)];
-          double outGR = (double)aGR[countG - ((countG > delayG) ? delayG + 1 : 0)];
-          double outHR = (double)aHR[countH - ((countH > delayH) ? delayH + 1 : 0)];
+          float outEL = aEL[countE - ((countE > delayE) ? delayE + 1 : 0)];
+          float outFL = aFL[countF - ((countF > delayF) ? delayF + 1 : 0)];
+          float outGL = aGL[countG - ((countG > delayG) ? delayG + 1 : 0)];
+          float outHL = aHL[countH - ((countH > delayH) ? delayH + 1 : 0)];
+          float outER = aER[countE - ((countE > delayE) ? delayE + 1 : 0)];
+          float outFR = aFR[countF - ((countF > delayF) ? delayF + 1 : 0)];
+          float outGR = aGR[countG - ((countG > delayG) ? delayG + 1 : 0)];
+          float outHR = aHR[countH - ((countH > delayH) ? delayH + 1 : 0)];
 
-          feedbackAL = (float)(outEL - (outFL + outGL + outHL));
-          feedbackBL = (float)(outFL - (outEL + outGL + outHL));
-          feedbackCL = (float)(outGL - (outEL + outFL + outHL));
-          feedbackDL = (float)(outHL - (outEL + outFL + outGL));
-          feedbackAR = (float)(outER - (outFR + outGR + outHR));
-          feedbackBR = (float)(outFR - (outER + outGR + outHR));
-          feedbackCR = (float)(outGR - (outER + outFR + outHR));
-          feedbackDR = (float)(outHR - (outER + outFR + outGR));
+          feedbackAL = (outEL - (outFL + outGL + outHL));
+          feedbackBL = (outFL - (outEL + outGL + outHL));
+          feedbackCL = (outGL - (outEL + outFL + outHL));
+          feedbackDL = (outHL - (outEL + outFL + outGL));
+          feedbackAR = (outER - (outFR + outGR + outHR));
+          feedbackBR = (outFR - (outER + outGR + outHR));
+          feedbackCR = (outGR - (outER + outFR + outHR));
+          feedbackDR = (outHR - (outER + outFR + outGR));
 
           // Sum/8 combiner per AW source (NOT sum/4 -- intentional
           // gain reduction).
-          inputSampleL = (outEL + outFL + outGL + outHL) * 0.125;
-          inputSampleR = (outER + outFR + outGR + outHR) * 0.125;
+          inputSampleL = (outEL + outFL + outGL + outHL) * 0.125f;
+          inputSampleR = (outER + outFR + outGR + outHR) * 0.125f;
 
           if (cycleEnd == 4)
           {
             lastRefL[0] = lastRefL[4];
-            lastRefL[2] = (float)((lastRefL[0] + inputSampleL) * 0.5);
-            lastRefL[1] = (float)((lastRefL[0] + lastRefL[2]) * 0.5);
-            lastRefL[3] = (float)((lastRefL[2] + inputSampleL) * 0.5);
-            lastRefL[4] = (float)inputSampleL;
+            lastRefL[2] = ((lastRefL[0] + inputSampleL) * 0.5f);
+            lastRefL[1] = ((lastRefL[0] + lastRefL[2]) * 0.5f);
+            lastRefL[3] = ((lastRefL[2] + inputSampleL) * 0.5f);
+            lastRefL[4] = inputSampleL;
             lastRefR[0] = lastRefR[4];
-            lastRefR[2] = (float)((lastRefR[0] + inputSampleR) * 0.5);
-            lastRefR[1] = (float)((lastRefR[0] + lastRefR[2]) * 0.5);
-            lastRefR[3] = (float)((lastRefR[2] + inputSampleR) * 0.5);
-            lastRefR[4] = (float)inputSampleR;
+            lastRefR[2] = ((lastRefR[0] + inputSampleR) * 0.5f);
+            lastRefR[1] = ((lastRefR[0] + lastRefR[2]) * 0.5f);
+            lastRefR[3] = ((lastRefR[2] + inputSampleR) * 0.5f);
+            lastRefR[4] = inputSampleR;
           }
           if (cycleEnd == 3)
           {
             lastRefL[0] = lastRefL[3];
-            lastRefL[2] = (float)((lastRefL[0] + lastRefL[0] + inputSampleL) / 3.0);
-            lastRefL[1] = (float)((lastRefL[0] + inputSampleL + inputSampleL) / 3.0);
-            lastRefL[3] = (float)inputSampleL;
+            lastRefL[2] = ((lastRefL[0] + lastRefL[0] + inputSampleL) / 3.0f);
+            lastRefL[1] = ((lastRefL[0] + inputSampleL + inputSampleL) / 3.0f);
+            lastRefL[3] = inputSampleL;
             lastRefR[0] = lastRefR[3];
-            lastRefR[2] = (float)((lastRefR[0] + lastRefR[0] + inputSampleR) / 3.0);
-            lastRefR[1] = (float)((lastRefR[0] + inputSampleR + inputSampleR) / 3.0);
-            lastRefR[3] = (float)inputSampleR;
+            lastRefR[2] = ((lastRefR[0] + lastRefR[0] + inputSampleR) / 3.0f);
+            lastRefR[1] = ((lastRefR[0] + inputSampleR + inputSampleR) / 3.0f);
+            lastRefR[3] = inputSampleR;
           }
           if (cycleEnd == 2)
           {
             lastRefL[0] = lastRefL[2];
-            lastRefL[1] = (float)((lastRefL[0] + inputSampleL) * 0.5);
-            lastRefL[2] = (float)inputSampleL;
+            lastRefL[1] = ((lastRefL[0] + inputSampleL) * 0.5f);
+            lastRefL[2] = inputSampleL;
             lastRefR[0] = lastRefR[2];
-            lastRefR[1] = (float)((lastRefR[0] + inputSampleR) * 0.5);
-            lastRefR[2] = (float)inputSampleR;
+            lastRefR[1] = ((lastRefR[0] + inputSampleR) * 0.5f);
+            lastRefR[2] = inputSampleR;
           }
           if (cycleEnd == 1)
           {
-            lastRefL[0] = (float)inputSampleL;
-            lastRefR[0] = (float)inputSampleR;
+            lastRefL[0] = inputSampleL;
+            lastRefR[0] = inputSampleR;
           }
           cycle = 0;
-          inputSampleL = (double)lastRefL[cycle];
-          inputSampleR = (double)lastRefR[cycle];
+          inputSampleL = lastRefL[cycle];
+          inputSampleR = lastRefR[cycle];
         }
         else
         {
-          inputSampleL = (double)lastRefL[cycle];
-          inputSampleR = (double)lastRefR[cycle];
+          inputSampleL = lastRefL[cycle];
+          inputSampleR = lastRefR[cycle];
         }
 
         if (fabs(iirBL) < 1.18e-37) iirBL = 0.0;
-        iirBL = (iirBL * (1.0 - lowpass)) + (inputSampleL * lowpass);
+        iirBL = (iirBL * (1.0 - lowpassF)) + (inputSampleL * lowpassF);
         inputSampleL = iirBL;
         if (fabs(iirBR) < 1.18e-37) iirBR = 0.0;
-        iirBR = (iirBR * (1.0 - lowpass)) + (inputSampleR * lowpass);
+        iirBR = (iirBR * (1.0 - lowpassF)) + (inputSampleR * lowpassF);
         inputSampleR = iirBR;
 
         // Submix wet/dry: 0.5 = full wet AND full dry summed.
@@ -357,8 +360,8 @@ namespace house
         inputSampleL += drySampleL;
         inputSampleR += drySampleR;
 
-        *out1 = (float)inputSampleL;
-        *out2 = (float)inputSampleR;
+        *out1 = inputSampleL;
+        *out2 = inputSampleR;
         in1++; in2++; out1++; out2++;
       }
     }
@@ -377,12 +380,12 @@ namespace house
     float aGL[kVbG]; float aGR[kVbG];
     float aHL[kVbH]; float aHR[kVbH];
 
-    double iirAL, iirAR, iirBL, iirBR;
+    float iirAL, iirAR, iirBL, iirBR;
     float feedbackAL, feedbackAR, feedbackBL, feedbackBR;
     float feedbackCL, feedbackCR, feedbackDL, feedbackDR;
     float previousAL, previousAR, previousBL, previousBR;
     float previousCL, previousCR, previousDL, previousDR;
-    double thunderL, thunderR;
+    float thunderL, thunderR;
     float lastRefL[7], lastRefR[7];
 
     int countA, countB, countC, countD;
