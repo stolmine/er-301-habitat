@@ -57,6 +57,9 @@
 // FDNTank: NEON-oriented feedback-delay-network reverb (working name).
 // See planning/fdn-reverb-design.md.
 #include "FDNTank.h"
+// Vitrail: dual switched-capacitor character filter.
+// See planning/vitrail-unit.md.
+#include "Vitrail.h"
 // Vivary: 1D cellular-automata granular noise texture (POC).
 // See planning/ca-wavetable-noise-design.md.
 #include "Vivary.h"
@@ -117,6 +120,7 @@
 %include "APFTank.h"
 %include "FabricGraphic.h"
 %include "FDNTank.h"
+%include "Vitrail.h"
 %include "Vivary.h"
 %include "Ferrum.h"
 %include "Tessera.h"

@@ -24,6 +24,7 @@ return {
     { title = "Canals",       moduleName = "Canals",              category = "Spreadsheet", keywords = "filter, resonant, svf, three sisters, crossover, formant, canals" },
     { title = "Mirror",       moduleName = "Mirror",              category = "Spreadsheet", keywords = "oscillator, alias, fold, sync, complex, voice, generator, source, mirror" },
     { title = "Fabula",       moduleName = "Fabula",              category = "Spreadsheet", keywords = "reverb, room, hall, dattorro, algorithmic, tank, allpass, space, freeze, fabula" },
+    { title = "Vitrail",      moduleName = "Vitrail",             category = "Spreadsheet", keywords = "filter, switched capacitor, comb, aliasing, resonant, self-oscillation, character, clock, vitrail" },
     -- Plenum (FDN reverb) suppressed pending the wardrobe voicing pass; the
     -- unit still builds and ships in the package (FDNTank.h + Plenum.lua).
   }

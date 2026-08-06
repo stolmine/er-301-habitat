@@ -168,7 +168,10 @@ namespace stolmine
     float *out = mOut.buffer();
     Internal &I = *mpInternal;
 
-    int routing = CLAMP(0, 49, (int)(mRouting.value() + 0.5f));
+    // Routing arrives NORMALIZED 0-1 so a 0-1 CV sweeps the whole list; scale
+    // back to the 0..49 index here. The clamp also absorbs modulation that
+    // pushes the parameter past either end.
+    int routing = CLAMP(0, 49, (int)(mRouting.value() * 49.0f + 0.5f));
     int clk = CLAMP(0, 2, (int)(mClkSrc.value() + 0.5f));
     int alias = CLAMP(1, 2, (int)(mAlias.value() + 0.5f));
 

@@ -1598,6 +1598,32 @@ modes (capture-plus-model) vs true synthesis modes, and per-hit variation to mod
 statistically."""
 
 [[item]]
+id = "vitrail-viz"
+title = "Vitrail: visualization (unit has no custom graphic)"
+status = "todo"
+stamped = "2026-08-05T21:27:55-05:00"
+area = "ui"
+touches = ["mods/spreadsheet/Vitrail.h", "mods/spreadsheet/assets/Vitrail.lua"]
+verify = { kind = "screenshot", ref = "Vitrail shows a custom overview graphic that reads clearly at 128x64 / 4-bit depth, telegraphs the current routing pair and the drifting dual-clock character, and does NOT capture the encoder (draw-path structure, not CPU)" }
+links = { depends_on = ["vitrail-unit"] }
+note = """User, 2026-08-05, alongside the promotion back to spreadsheet: "i want to do viz for
+it." Vitrail currently ships with NO custom graphic (0 Graphic references in Vitrail.lua) - it is
+plain faders, which undersells the unit now that it has pride of place in spreadsheet.
+OPEN QUESTION (ask before building): WHAT should it depict? The mechanism offers several honest
+candidates - (1) the two switched-capacitor clocks as drifting/beating rings or a Lissajous, which
+is the actual character source; (2) a filter-response curve for the current routing pair, series
+vs parallel visibly different (Tomograph FilterResponseGraphic is the in-repo reference); (3) the
+routing lattice as a 5x5 A-vs-B grid with a series/parallel indicator, which makes the 50-item
+list legible at a glance; (4) an aliasing/comb spectrum view.
+CONSTRAINTS, all learned the hard way: no runtime sinf/cosf from a package .so on am335x - use a
+precomputed LUT ([[feedback_package_trig_lut]]); no out-of-line virtuals on the od::* subclass
+([[feedback_no_out_of_line_virtuals]], tools/check-graphic-virtual-defs.sh); keep the heavy work
+OUT of draw() or the encoder lags ([[feedback_viz_encoder_capture_architectural]], Colmatage is
+the reference, SomSphereGraphic the anti-pattern); od line()/fill() are OR/lighten-only, so
+dark-on-bright needs clear()+fill()+per-pixel pixel() ([[feedback_framebuffer_blend_vs_set]]).
+Also consider the offscreen-viz gate ([[viz-offscreen-gate-all]]) from the start."""
+
+[[item]]
 id = "vitrail-unit"
 title = "Vitrail - dual switched-capacitor character filter unit"
 status = "wip"
@@ -1615,6 +1641,26 @@ coverage-and-gaps.md (dual-core modeled-not-measured; no null-test; distortion-b
 routing / CV untested). Milestones: (1) DSP+minimal unit in emu, (2) am335x harden, (3)
 character fit vs measured curves, (4) UI/viz.
 
+2026-08-05 PROMOTED BACK TO SPREADSHEET + control pass (spreadsheet 2.8.3.85, biome 2.2.1.9).
+User: "it sounds so good i think it deserves pride of place." Reverses the 87063fe demotion:
+Vitrail.{h,cpp,lua} moved biome -> spreadsheet (git mv, sources are globbed so no mod.mk edit),
+requires repointed to spreadsheet.libspreadsheet + spreadsheet.ModeSelector, swig + toc updated in
+BOTH packages. Verified 9 Vitrail symbols in libspreadsheet.so, 0 in libbiome.so.
+(a) ROUTING ENCODER: discreteThreshold 12 -> 8 (~2 detents/step; the habitat standard is 16, but
+the list is 50 long and 12 still read as draconian).
+(b) ROUTING NORMALIZED 0-1 for modulation: the Parameter now carries 0-1 instead of the raw 0-49
+index, so a 0-1 CV sweeps the whole list (at 0-49 a volt barely moved it). spreadsheet
+ModeSelector gained an optional `normalized` flag + currentIndex()/setIndex() helpers - it still
+presents and steps INDICES, only the stored units change; default path is behaviourally unchanged
+for the 10 existing spreadsheet consumers. Vitrail.cpp decodes value*49 with the existing clamp
+absorbing out-of-range modulation. Verified offline: index round-trip exact for all 50 modes, a
+linear 0-1 ramp reaches all 50 (ends half-width, standard rounding). ParameterAdapter mod gain
+already defaults to 0, so CV stays opt-in per [[feedback_mod_gain_default_zero]].
+BREAKING (acceptable - Vitrail has never shipped in a public release): the package move and the
+0-49 -> 0-1 routing rescale both invalidate existing dev patches.
+Both arches build, Vitrail.o 0 NEON suspect hints, graphic-virtual lint OK, both pkgs installed to
+emu. OWED: emu audition of the routing feel at threshold 8 + a CV sweep of routing; am335x
+hardware sanity. NEXT: the viz ([[vitrail-viz]]).
 2026-07-18 MILESTONE 1 DONE: DSP object (Vitrail.h/.cpp) + Lua unit (assets/Vitrail.lua) + registration (swig/toc) + version 2.8.3.32. Full POC v5 port. C++ validated numerically to reproduce the emergent zoo: self-osc gating (single quiet, both-converged/divergent OSC), res-onset 0.8-0.9, comb tracks fB (cutB.03->911Hz). Both arches build clean, 0 NEON :64/:128 hints, no-tree-vectorize pragma applied. Installed to emu. Controls: cutA/cutB/res/gain faders + Mode/ClkSrc/Alias menu options. C++ demo montage sent. NEXT (milestone 2): load/verify in emu; am335x hardware sanity; then harden (fast-tanh, branchless mode tap, per-block cutoff/exp, float-vs-double eval). Milestone 3: fit distortion knee + alias shape to measured curves. Milestone 4: UI/viz.
 
 2026-07-19 User feedback (~30% mono, likes texture, wants departures). DONE: (1) spiral saturator + soft-knee energy governor - tames >0.7 resonant scream (peak 1.02 clipping -> 0.65) leaving self-osc/comb below the knee; tanh->spiralFastSaturate also a CPU win (0 tanh). (2) DEPARTURES: direct clock control (V/Oct inlet transposes BOTH clocks, exact 2^v by construction - playable/tuned; self-osc-as-osc is windowed per hw multiple-osc-windows, comb/filter transposition smooth) + Bloom (Schroeder allpass smear in shared loop, apf_phase_resonance). (3) CPU: fastExp2 replaces per-sample powf (0 pow calls) keeping audio-rate cutoff FM. spreadsheet 2.8.3.33, both arches, 0 NEON hints. NEXT: more CPU (float eval on non-recursive parts, block-rate where safe) to cut the 30%; optional departures (clock ratio lock, drift-depth knob); milestone 3 character fit vs measured curves.

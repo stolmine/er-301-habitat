@@ -32,8 +32,9 @@ namespace stolmine
     // Two filters are ALWAYS in the path. Routing picks each filter's tap type and
     // whether they cascade (A>B) or sum (A+B); Clock Src picks which clock tunes them.
     // ModeSelector-driven Parameters (right tool for >2 values, feedback_option_vs_parameter).
-    //   Routing 0..49: [0,25) series a>b, [25,50) parallel a+b; within, idx=a*5+b,
-    //                  type a,b in {0=LP,1=BP,2=HP,3=AP,4=Notch}.
+    //   Routing is NORMALIZED 0-1 (so a 0-1 CV sweeps the whole list); process()
+    //   scales it to index 0..49: [0,25) series a>b, [25,50) parallel a+b;
+    //   within, idx=a*5+b, type a,b in {0=LP,1=BP,2=HP,3=AP,4=Notch}.
     od::Parameter mRouting{"Routing", 0.0f};
     od::Parameter mClkSrc{"Clock Src", 0.0f};  // 0=A 1=B 2=Both
     od::Option mAlias{"Aliasing", 1};          // 1=LO 2=HI

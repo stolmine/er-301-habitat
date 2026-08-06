@@ -25,7 +25,6 @@ return {
     { title = "Varishape Osc",  moduleName = "VarishapeOsc",        category = "Biome", keywords = "oscillator, varishape, polyblep, generator" },
     { title = "Transport",     moduleName = "Transport",            category = "Biome", keywords = "clock, transport, gate, trigger, utility" },
     { title = "Constant Random", moduleName = "ConstantRandom",  category = "Biome", keywords = "random, noise, cv, utility, modulation, sample and hold, lfo" },
-    { title = "Vitrail",      moduleName = "Vitrail",              category = "Biome", keywords = "filter, switched capacitor, comb, aliasing, resonant, self-oscillation, character, clock, vitrail" },
     { title = "Expo D",       moduleName = "ExpoD",                category = "Biome", keywords = "envelope, decay, exponential, trigger, eg, percussion, modulation" },
     { title = "Expo AD",      moduleName = "ExpoAD",               category = "Biome", keywords = "envelope, attack, decay, exponential, trigger, eg, modulation" }
   }

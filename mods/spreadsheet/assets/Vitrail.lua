@@ -4,11 +4,11 @@
 -- Systemic port of the profiling POC (planning/refs/compound-dsp-voice/): aliasing
 -- grit, clock combs, breathing self-oscillation all emerge from the mechanism.
 local app = app
-local libbiome = require "biome.libbiome"
+local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
-local ModeSelector = require "biome.ModeSelector"
+local ModeSelector = require "spreadsheet.ModeSelector"
 local Encoder = require "Encoder"
 local MenuHeader = require "Unit.MenuControl.Header"
 local OptionControl = require "Unit.MenuControl.OptionControl"
@@ -29,10 +29,14 @@ do
   for a = 1, 5 do for b = 1, 5 do routingNames[idx] = ftypes[a] .. "+" .. ftypes[b]; idx = idx + 1 end end
 end
 
+-- Routing is NORMALIZED to 0-1 (not the raw 0-49 index) so a 0-1 CV sweeps the
+-- whole list; the ModeSelector still presents and steps indices, and Vitrail.cpp
+-- decodes value*49 back to the index. Steps are one mode (1/49) per detent-group.
+local kRoutingCount = 50
 local routingMap = (function()
-  local map = app.LinearDialMap(0, 49)
-  map:setSteps(5, 1, 1, 1)
-  map:setRounding(1)
+  local map = app.LinearDialMap(0, 1)
+  local one = 1.0 / (kRoutingCount - 1)
+  map:setSteps(one * 5, one, one, one)
   return map
 end)()
 
@@ -79,7 +83,7 @@ local function addModeParam(self, op, name, paramName, defaultBias)
 end
 
 function Vitrail:onLoadGraph(channelCount)
-  local op = self:addObject("op", libbiome.Vitrail())
+  local op = self:addObject("op", libspreadsheet.Vitrail())
   connect(self, "In1", op, "In")
 
   addFader(self, op, "cutA", "Cutoff A", 0.5)
@@ -105,14 +109,17 @@ function Vitrail:onLoadViews()
       range = self.objects.routing,
       biasMap = routingMap,
       biasUnits = app.unitNone,
-      biasPrecision = 0,
+      biasPrecision = 2,
       initialBias = 0,
       modeNames = routingNames,
-      -- 50-item list: discrete accumulate-step encoder, threshold 12
-      -- (~3 detents/step) - deliberately below the habitat 16 standard
-      -- because the list is long. See mod ModeSelector notes.
+      -- 50-item list: discrete accumulate-step encoder, threshold 8
+      -- (~2 detents/step) - deliberately well below the habitat 16
+      -- standard because the list is long and 12 still read as draconian.
+      -- See mod ModeSelector notes.
       discrete = true,
-      discreteThreshold = 12
+      discreteThreshold = 8,
+      -- Parameter carries 0-1; the selector maps to/from the 0-49 index.
+      normalized = true
     },
     clkSrc = ModeSelector {
       button = "clk",

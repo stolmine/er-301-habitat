@@ -16,40 +16,62 @@ function ModeSelector:init(args)
   -- threshold for a less twitchy selector. Use with an integer biasMap.
   self.discrete = args.discrete
   self.discreteThreshold = args.discreteThreshold or 3
+  -- `normalized`: the underlying parameter carries 0-1 instead of the raw
+  -- mode index, so a 0-1 CV sweeps the whole list (a 0-49 parameter would
+  -- barely move under one volt). The selector still presents and steps
+  -- INDICES; only the stored units change. Requires modeNames to span the
+  -- full index range.
+  self.normalized = args.normalized
   GainBias.init(self, args)
   self.encoderSum = 0
-  if self.discrete then
-    -- Range derived from modeNames keys (so we don't depend on the
-    -- dial map exposing min/max through SWIG).
-    local lo, hi
-    for k in pairs(self.modeNames or {}) do
-      if type(k) == "number" then
-        if not lo or k < lo then lo = k end
-        if not hi or k > hi then hi = k end
-      end
+  -- Range derived from modeNames keys (so we don't depend on the dial map
+  -- exposing min/max through SWIG). Needed by both discrete and normalized.
+  local lo, hi
+  for k in pairs(self.modeNames or {}) do
+    if type(k) == "number" then
+      if not lo or k < lo then lo = k end
+      if not hi or k > hi then hi = k end
     end
-    self.discreteMin = lo or 0
-    self.discreteMax = hi or 1
   end
+  self.discreteMin = lo or 0
+  self.discreteMax = hi or 1
+  self.indexSpan = self.discreteMax - self.discreteMin
   self:updateLabel()
 end
 
+-- Current mode INDEX, whatever the parameter's units are.
+function ModeSelector:currentIndex()
+  local v = self.bias:getValueInUnits()
+  if self.normalized and self.indexSpan > 0 then
+    return self.discreteMin + math.floor(v * self.indexSpan + 0.5)
+  end
+  return math.floor(v + 0.5)
+end
+
+-- Write a mode INDEX back through whatever units the parameter carries.
+function ModeSelector:setIndex(idx)
+  if self.normalized and self.indexSpan > 0 then
+    self.bias:setValueInUnits((idx - self.discreteMin) / self.indexSpan)
+  else
+    self.bias:setValueInUnits(idx)
+  end
+end
+
 function ModeSelector:updateLabel()
-  local value = math.floor(self.bias:getValueInUnits() + 0.5)
-  local name = self.modeNames[value]
+  local name = self.modeNames[self:currentIndex()]
   if name then
     self.fader:setLabel(name)
   end
 end
 
 function ModeSelector:stepDiscrete(dir)
-  local cur = math.floor(self.bias:getValueInUnits() + 0.5)
+  local cur = self:currentIndex()
   local v = cur + dir
   if v < self.discreteMin then v = self.discreteMin end
   if v > self.discreteMax then v = self.discreteMax end
   if v ~= cur then
     self.bias:save()
-    self.bias:setValueInUnits(v)
+    self:setIndex(v)
     self:updateLabel()
   end
 end
