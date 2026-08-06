@@ -2147,7 +2147,27 @@ has an obvious home, and on VANILLA firmware (where sub-outs 3+ are invisible, p
 compatibility contract) the unit degrades into a harmless passthrough instead of a dead end.
 Budget the count accordingly: N destinations needs N+2 framework outputs, and the guide's practical
 ceiling is single digits, so N=6 (8 outputs) is comfortable and N>=8 starts fighting the M6 cycler.
-DECLICK: switching a live signal between destinations steps both the outgoing and incoming outs.
+STEREO/MONO ADAPTATION IS BUILDABLE - VERIFIED (user asked 2026-08-05: "perhaps the unit can adapt
+based on stereo vs mono chain though?"). It can, and the mechanism is exact:
+Chain/Base.lua:441-444 builds the unit args as { chain = self, depth = ..., channelCount =
+self.channelCount }, so when the unit's OWN init(args) runs, args.channelCount is already the HOST
+CHAIN's count (1 mono / 2 stereo) - it only becomes the unit's forced fan-out when the unit
+overwrites it. Unit/init.lua:28 then resolves `args.channelCount or chain.channelCount`, and
+args.chain is passed too, so either route works. Nothing here needs a framework change.
+So the sub-out list can be built per-insert:
+    function Switch:init(args)
+      local stereo = (args.channelCount or 1) > 1          -- host chain, not ours yet
+      local labels = stereo and {"thru", "thru R"} or {"thru"}
+      for i = 1, kMaxDest do labels[#labels + 1] = tostring(i) end
+      args.subOutLabels = labels
+      args.channelCount = #labels
+      Unit.init(self, args)
+    end
+Payoff: a MONO chain does not need the "thru R" slot, so it spends N+1 outputs where a stereo chain
+spends N+2 - one more destination for the same fan-out budget, and a tighter M6 picker. This is
+still a per-INSERT decision, not a live one: the count is fixed once the unit exists, so re-deciding
+after insertion would still need the framework change described above.
+DECLICK: switching a live signal between destinations steps bothDECLICK: switching a live signal between destinations steps both the outgoing and incoming outs.
 Reuse the pattern just shipped in FadeMixer (see [[fademixer-snap-mode]]): per-destination gains
 chasing 0/1 targets through a ~3 ms one-pole, coefficient chosen at block rate so the per-sample path
 stays branchless.
