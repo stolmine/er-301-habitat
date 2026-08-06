@@ -134,7 +134,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `control-descriptions-drop-parentheticals` | Shorten Lua control descriptions that include parentheticals (they overflow the allotted space) | manual · 2026-07-22 |
 |   | `control-step-standards` | Adopt built-in dial-map standards across habitat; inventory every control vs the framework registry | manual · 2026-07-16 |
 |   | `controls-bias-modrange-audit` | Bias + mod-input range audit across all packages (CV can't reach full param range at 10x gainMap) | manual · 2026-07-09 |
-|   | `controls-discrete-encoder-rollout` | Roll out discrete-encoder ModeSelector mode to other discrete selectors (acceleration-independent) | manual · 2026-07-09 |
+|   | `controls-discrete-encoder-rollout` | Discrete-control stepping standard: one feel for every integer/discrete control (surveyed) | manual · 2026-08-05 |
 |   | `controls-fader-response-audit` | Repo-wide fader response audit (dial-map shape, coarse/fine steps, encoder velocity, bias range) | manual · 2026-07-09 |
 |   | `controls-shift-audit-impl` | Shift-button behavior audit — implementation phase (spec locked in planning/shift-handling.md) | manual · 2026-07-09 |
 |   | `controls-subdisplay-and-viz` | Sub-display readout audit for expansion-only controls + bias indicator line on visualizer plies | manual · 2026-07-09 |

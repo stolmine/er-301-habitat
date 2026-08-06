@@ -803,12 +803,36 @@ note = "planning/todo-archive.md '## Controls Audit'. Two unifications: (a) norm
 
 [[item]]
 id = "controls-discrete-encoder-rollout"
-title = "Roll out discrete-encoder ModeSelector mode to other discrete selectors (acceleration-independent)"
+title = "Discrete-control stepping standard: one feel for every integer/discrete control (surveyed)"
 status = "todo"
-stamped = "2026-07-09T20:59:09-05:00"
+stamped = "2026-08-05T23:05:00-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "on each target selector confirm one detent = one step regardless of turn speed, threshold ≈ 4×(detents/option) scaled to option count (full sweep ~30-40 detents, ≥2 detents/option)" }
-note = """planning/todo-archive.md '## Controls Audit'. UNIVERSAL STANDARDIZATION PASS (user 2026-07-22):
+note = """SURVEYED 2026-08-05 - full inventory + the standard at
+planning/discrete-control-standard-inventory.md. User: "we should survey all controls that address
+integers or discrete values/states, even if these are mapped on 0-1 or otherwise float-style
+controls. i would [like] stepping through discrete options to have a standard feel. probably based
+on vitrail's settings for the routing options. these include a lot of subdisplay options."
+MEASURED ADOPTION - the gap is much wider than the earlier note assumed:
+  ModeSelector instances        ~26 across 22 files, only 2 discrete (Parfait, Vitrail)
+  files defining their own encoder()  89, only 3 use the accumulate model
+  files with a paramMode sub-display  41 (route straight to a Readout - the big block)
+  files with an integer dial map      83
+THE STANDARD, taken from Vitrail routing as the user asked: a discrete list has no fractional
+positions, so the encoder's four resolutions collapse to TWO AXES - entries per step, and travel per
+step. coarse = 1 entry at threshold 8 (~2 detents, and coarse MUST be the useful one since it is the
+default state); fine = the same 1 entry at DOUBLE the threshold (deliberate, cannot overshoot);
+shift = discreteJumpStep, a whole group, only where the list has real internal structure. Every step
+is an exact index multiple so nothing can land between entries.
+Threshold 8, not the 16 in the older note - 8 is what actually shipped and reads better.
+TIER 2 IS THE BIG ONE and was the user's own observation: the paramMode sub-display readouts. They
+need the accumulate model in the host control's encoder(), the way scope's SpectrogramFactory
+open-coded it. TransformGateControl alone is shared by Larets, Pecto, TrackerSeq and MultitapDelay,
+so one fix covers four units.
+SEQUENCING: ModeSelector.lua is duplicated in biome + spreadsheet and consumed by ~20 units, so this
+is a catalogue-wide regression surface. Do it AFTER v2.8.0 ships, not inside it.
+
+PRIOR NOTE (2026-07-22): planning/todo-archive.md '## Controls Audit'. UNIVERSAL STANDARDIZATION PASS:
 discrete-value scrolling is too touchy across essentially ALL habitat controls; standardize on
 Parfait's saturation-picker tick sensitivity as THE model. Mechanism (Parfait/ModeSelector,
 shipped 2.8.1.11): accumulate the RAW encoder change into encoderSum, step +/-1 only when
