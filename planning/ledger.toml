@@ -2185,12 +2185,26 @@ silently corrupting whatever sat past the audio stack. It surfaces now because f
 stack canaries and crash diagnostics that finally detect it.
 Both arches, pkg installed."""
 verify = { kind = "manual", ref = "run the crashing patch again (Pecto + Player.VariSpeed, plus the wider set from report 19) for several minutes; no data-abort, and any new crash.log entry must not show 'STACK audio BLOWN'" }
-note = """SWEEP OWED, and it is the real follow-up: the audio task stack is only 2048 bytes and the
-catalogue has more process() frames in the hundreds of bytes - Network 452, AlembicVoice 452, FDNTank
-436, Som/Lambda 316, Carriage 312, Clouds 292, APFTank 284, DrumVoice 276, Anamnesis 276. None alone
-is fatal but they are all one deep callee away from trouble, and chains stack units in sequence.
-Worth adding a build-time lint (objdump the `sub sp, sp, #N` prologue of every process() and fail
-over a budget) so this class cannot regress silently - the same shape as check-neon-hints.sh."""
+note = """SWEEP DONE 2026-08-05 - and it CLEARED. My first note here implied the other large frames
+needed the same fix; they do not, and that was an overstatement. Audited every process() frame >= 256
+bytes plus every function >= 400 bytes across the shipping packages:
+  Network 452, FDNTank 436, APFTank 284, DrumVoice 276, Lambda 316 - ZERO stack arrays. Their buffers
+    are already class members (Network's mTapDelayTarget[kMaxNetworkTaps] and friends). The frame is
+    register spill from a wide per-sample loop, which is not fixable by moving anything and is fine.
+  Som 316 - 11 stack arrays but all tiny ([kNumDims], [4], [2], [16], [12]), several in inner scopes,
+    ~200 bytes total.
+  AlembicVoice 452 - 4 arrays of float[6] = 96 bytes.
+  The genuinely huge frames - SpectrogramGraphic::draw 2064, ColmatageOverviewGraphic::bakeNoiseLUT
+    2048, RaindropGraphic ctor 2048, LaretOverviewGraphic::draw 1584, buildWavetableFrames 1536,
+    FilterResponseGraphic::draw 1424, SomSphereGraphic::draw 1296, analyzeSample 884 - are ALL draw
+    functions, constructors, or Lua-invoked sample analysis. Those run on the UI/DRAW thread, whose
+    app stack is 32768 bytes and measured 42% used in the same crash report. Verified analyzeSample
+    is NOT reachable from AlembicVoice::process.
+So Pecto was a genuine outlier: 1024 bytes of 64-element arrays, 2.4x the next-worst process frame.
+STILL WORTH DOING, but as prevention rather than repair: a build-time lint that objdumps the
+`sub sp, sp, #N` prologue of every process() and fails over a budget (say 512 bytes), the same shape
+as check-neon-hints.sh. Nothing today stops the next unit reintroducing a 64-element stack array, and
+the failure mode is silent memory corruption until a firmware with canaries catches it."""
 
 [[item]]
 id = "scope-probe-pool-leak"
