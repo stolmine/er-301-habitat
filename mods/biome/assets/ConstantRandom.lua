@@ -33,7 +33,7 @@ function ConstantRandom:onLoadGraph(channelCount)
   self:addMonoBranch("slew", slew, "In", slew, "Out")
 
   local level = self:addObject("level", app.ParameterAdapter())
-  level:hardSet("Bias", 1.0)
+  level:hardSet("Bias", 0.5)
   tie(op, "Level", level, "Out")
   self:addMonoBranch("level", level, "In", level, "Out")
 end
@@ -51,12 +51,6 @@ local views = {
 local rateMap = (function()
   local m = app.LinearDialMap(0, 100)
   m:setSteps(1, 0.1, 0.01, 0.001)
-  return m
-end)()
-
-local levelMap = (function()
-  local m = app.LinearDialMap(0, 1)
-  m:setSteps(0.1, 0.01, 0.001, 0.001)
   return m
 end)()
 
@@ -100,10 +94,16 @@ function ConstantRandom:onLoadViews(objects, branches)
     branch = branches.level,
     gainbias = objects.level,
     range = objects.level,
-    biasMap = levelMap,
+    -- The built-in oscillator Level convention, taken as-is: every core
+    -- oscillator (Sine, SingleCycle, AliasingTriangle, AliasingSaw) uses the
+    -- [-1,1] map at a 0.5 default. 0.5 puts the output at +/-5 V, which is what
+    -- a modulation source is normally expected to swing; 1.0 (+/-10 V) is still
+    -- reachable, and the bipolar map additionally allows a NEGATIVE level =
+    -- inverted random, which the old private 0-1 map forbade.
+    biasMap = Encoder.getMap("[-1,1]"),
     biasUnits = app.unitNone,
     biasPrecision = 2,
-    initialBias = 1.0
+    initialBias = 0.5
   }
 
   return controls, views

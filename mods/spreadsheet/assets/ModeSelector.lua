@@ -30,6 +30,11 @@ function ModeSelector:init(args)
   -- turn skipping past entries at an unrelated stride. Default 1 = the old
   -- single-mode behaviour for every existing consumer.
   self.discreteCoarseStep = args.discreteCoarseStep or 1
+  -- `discreteJumpStep`: entries moved per step while SHIFT is held. A discrete
+  -- list cannot be subdivided, so the encoder's four resolutions cannot be four
+  -- step VALUES the way a continuous dial's are. They become two axes instead:
+  -- how many entries a step moves, and how much encoder travel one step costs.
+  self.discreteJumpStep = args.discreteJumpStep
   GainBias.init(self, args)
   self.encoderSum = 0
   -- Range derived from modeNames keys (so we don't depend on the dial map
@@ -86,15 +91,23 @@ end
 
 function ModeSelector:encoder(change, shifted)
   if self.discrete then
-    -- Fine picks one mode at a time; coarse travels a whole set. Both are
-    -- exact multiples of the index, so neither resolution can land between
-    -- entries or skip one.
-    local step = (self.encoderState == Encoder.Fine) and 1 or self.discreteCoarseStep
+    -- Three resolutions, expressed as (step size, travel per step) because a
+    -- discrete list has no fractional positions to reach for:
+    --   shift  -> jump a whole group (discreteJumpStep), for crossing a long list
+    --   coarse -> one step of discreteCoarseStep at the normal threshold (default)
+    --   fine   -> the same step at DOUBLE the threshold, so landing on a
+    --             particular entry takes deliberate travel and cannot overshoot
+    local step, threshold = self.discreteCoarseStep, self.discreteThreshold
+    if shifted and self.discreteJumpStep then
+      step = self.discreteJumpStep
+    elseif self.encoderState == Encoder.Fine then
+      threshold = self.discreteThreshold * 2
+    end
     self.encoderSum = self.encoderSum + change
-    if self.encoderSum > self.discreteThreshold then
+    if self.encoderSum > threshold then
       self.encoderSum = 0
       self:stepDiscrete(step)
-    elseif self.encoderSum < -self.discreteThreshold then
+    elseif self.encoderSum < -threshold then
       self.encoderSum = 0
       self:stepDiscrete(-step)
     end

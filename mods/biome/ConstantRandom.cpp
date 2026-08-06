@@ -31,7 +31,9 @@ namespace stolmine
     // (coeff = (1-s)*50 + 1) was badly bunched: the whole middle half of the
     // dial only covered 22..39 ms, and the top of the throw stopped at 1 s.
     float slewTime = MAX(0.0f, mSlew.value());
-    float level = CLAMP(0.0f, 1.0f, mLevel.value());
+    // Bipolar to match the built-in [-1,1] level map: a negative level
+    // inverts the random rather than muting it.
+    float level = CLAMP(-1.0f, 1.0f, mLevel.value());
     float dt = globalConfig.samplePeriod;
 
     // One-pole toward the target with the requested time constant. A time of 0

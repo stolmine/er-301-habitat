@@ -16,7 +16,7 @@ namespace stolmine
     od::Outlet mOutput{"Out"};
     od::Parameter mRate{"Rate", 5.0f};
     od::Parameter mSlew{"Time", 0.003f}; // slew TIME in seconds (built-in slewTimes)
-    od::Parameter mLevel{"Level", 1.0f};
+    od::Parameter mLevel{"Level", 0.5f};
 #endif
 
   private:

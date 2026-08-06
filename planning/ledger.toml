@@ -1523,7 +1523,21 @@ the v2.7.0 biome toc): a stored slew of 0.5 used to mean "38 ms" and now means "
 clean migration exists because the old 0-1 range overlaps valid new second values, so old patches
 will load with a much longer slew than intended and need re-dialling. Flagged to the user.
 Both arches, ConstantRandom.o 0 NEON suspect hints, pkg installed to emu.
-AUDIT CANDIDATES (crude sweep:AUDIT CANDIDATES (crude sweep:AUDIT CANDIDATES (crude sweep: every app.LinearDialMap in mods/*/assets/*.lua whose max/min ratio is
+LEVEL ADOPTS THE BUILT-IN OSCILLATOR CONVENTION 2026-08-05 (biome 2.2.1.12). User: "level also goes
+too high ... perhaps level just needs to default to 0.5 instead of 1", and pointed at the sine osc.
+Checked: EVERY core oscillator (Oscillators/Sine, SingleCycle, AliasingTriangle, AliasingSaw) uses
+biasMap Encoder.getMap("[-1,1]") with initialBias 0.5. Adopted verbatim, replacing a private
+LinearDialMap(0,1) at default 1.0. The default now swings +/-0.5 internal = +/-5 V = 10 Vpp, which is
+what a modulation source is normally expected to do; 1.0 (+/-10 V) is still reachable.
+The bipolar map also opens NEGATIVE level = inverted random, which the 0-1 map forbade, so the C++
+clamp widened from CLAMP(0,1) to CLAMP(-1,1).
+WORTH RECORDING, because the first analysis was wrong-headed: the earlier reading of "too high" chased
+the OUTPUT SCALING and concluded there was nothing to fix, since at level 1.0 with mod gain 0.5 the
+throw across a 0-1 control is already exactly 1.00 (cv pp 2.0 x gain 0.5). That arithmetic was right
+and irrelevant - the complaint was about the DEFAULT, not the ceiling, and the answer was in the
+built-in convention the whole time. Look for the framework's analogue BEFORE reasoning from first
+principles about scaling.
+AUDIT CANDIDATES (crude sweep:AUDIT CANDIDATES (crude sweep:AUDIT CANDIDATES (crude sweep:AUDIT CANDIDATES (crude sweep: every app.LinearDialMap in mods/*/assets/*.lua whose max/min ratio is
 >= 50x - this is a CANDIDATE list, not a fix list, and each needs its quantity class judged):
   biome     CodescanOsc 0.1..2000, VarishapeOsc 0.1..2000, VarishapeVoice 0.1..2000,
             ConstantRandom rate 0.01..100, SpectralFollower 20..20000 + 0.0001..0.5 + 0.0001..5,
@@ -1793,6 +1807,22 @@ coverage-and-gaps.md (dual-core modeled-not-measured; no null-test; distortion-b
 routing / CV untested). Milestones: (1) DSP+minimal unit in emu, (2) am335x harden, (3)
 character fit vs measured curves, (4) UI/viz.
 
+2026-08-05 ROUTING INCREMENTS REWORKED AGAIN (spreadsheet 2.8.3.88). The 2.8.3.85 pass made COARSE
+step 5 (a whole filter-A family) and fine step 1. Wrong way round in use: coarse is the DEFAULT
+encoder state (EncoderControl.lua:11), so every ordinary turn crossed a whole family per ~2 detents
+and landing on a specific filter pair was impossible. User: "current fine should be coarse ...
+extrapolate other settings from there."
+A discrete list has no fractional positions, so the encoder's resolutions cannot be four step VALUES
+the way a continuous dial's are. They become TWO AXES - how many entries a step moves, and how much
+travel one step costs:
+  shift  -> discreteJumpStep (5 = one filter-A family), for crossing a 50-item list
+  coarse -> discreteCoarseStep (1 entry) at threshold 8            <- the default
+  fine   -> the same 1 entry at DOUBLE the threshold, so landing is deliberate and cannot overshoot
+ModeSelector gained discreteJumpStep (nil default, so all other consumers are untouched); Vitrail
+drops discreteCoarseStep=5 back to the default 1 and takes discreteJumpStep=5.
+CAVEAT to check in the emu: the shift-jump depends on `shifted` actually reaching
+ModeSelector:encoder. If a higher layer swallows shift+encoder it degrades gracefully to the coarse
+step rather than breaking, but the jump would silently not work.
 2026-08-05 PROMOTED BACK TO SPREADSHEET + control pass (spreadsheet 2.8.3.85, biome 2.2.1.9).
 User: "it sounds so good i think it deserves pride of place." Reverses the 87063fe demotion:
 Vitrail.{h,cpp,lua} moved biome -> spreadsheet (git mv, sources are globbed so no mod.mk edit),
