@@ -5,28 +5,28 @@ Generated 2026-08-05. Baseline: **v2.7.0** (2026-07-15). Verify on hardware.
 ## Release set
 
 Published in v2.7.0: `biome catchall mi peaks scope spreadsheet` — six packages.
-That stays the shipping set, minus nothing, plus a pending decision on `house`.
+v2.8.0 ships those six **plus `house`**, which has never been published: seven.
 
 | Package | v2.7.0 | v2.8.0 | Ship | Why |
 |---|---|---|---|---|
 | spreadsheet | 2.8.3 | 2.8.3.90 | yes | largest change set |
-| biome | 2.2.1 | 2.2.1.15 | yes | 4 new units + a breaking control change |
+| biome | 2.2.1 | 2.2.1.17 | yes | 4 new units + a breaking control change |
 | scope | 1.2.1 | 1.2.6 | yes | 3 new units + sub-display |
 | catchall | 0.4.0 | 0.4.0.1 | yes | mix detent only |
 | mi | 1.0.4 | 1.0.4 | yes | unchanged, republish |
 | peaks | 1.0.0 | 1.0.0 | yes | unchanged, republish |
-| **house** | 0.1.0.36 | 0.1.0.43 | **decide** | never published; would be a package debut |
+| **house** | — | 0.1.0.43 | **yes** | **new package** — 8 units debut at once |
 | porcelain | 0.1.0 | — | no | user excluded |
 | kryos | 1.0.0 | — | no | user excluded, `kryos-load-hang` still blocked |
 | zaum | 0.2.0.64 | — | no | user excluded |
 | anamnesis | 0.2.0.83 | — | no | user excluded, `anamnesis-insert-crash` open |
 | stolmine | 1.3.0 | — | no | legacy pre-split package, never in the asset set |
 
-`house` is the only real question. It has never shipped, so including it debuts 8
-Airwindows reverb ports plus TickerTape and Lacquer as a new package. Its
-optimization item (`house-suppress-customs-optimize-ports`) is still wip with
-Galactic and BrightAmbience3 unconverted, and the hybrid-float work in this cycle
-is offline-verified only.
+`house` is a **package debut**, not an update, so its 8 units have never been in
+anyone's hands. That earns its own tier below rather than a couple of A/B rows —
+every unit needs an insert and a CPU check, not just a tone comparison. Its
+optimization item (`house-suppress-customs-optimize-ports`) stays wip: Galactic
+and BrightAmbience3 are the two ports still unconverted.
 
 ---
 
@@ -88,8 +88,25 @@ units. The default paths should be unchanged, but that is the claim under test.
 | 4.4 | **Suppressed units absent** | Search the picker for Plenum, Moire, Vivary, Tessera, Ferrum, RotCoat, Filament, Carriage. | **None appear.** All still compile into their packages. |
 | 4.5 | **NR** | Open the unit. | The circle control reads "Pattern". |
 | 4.6 | **Canals** | Search the picker for "three sisters". | No result. Search "canals" / "formant" still finds it. |
-| 4.7 | **house** (if shipping) | A/B kWoodRoom, WoodenBox, Verbity, Lacquer, TickerTape vs v2.7.0 build. | Tone-identical — hybrid-float claims 1 LSB, corr 1.0000000, but that is **offline-verified only**. |
-| 4.8 | **house** (if shipping) | CPU on each converted reverb. | Should be materially cheaper; f64 op count dropped 75-81% on the converted units. |
+
+## Tier 5 — house, package debut (8 units, never publicly released)
+
+Nothing here has ever shipped. Treat every unit as new even though the ports are
+mature, because no user has run them and the hybrid-float pass is **offline-verified
+only** — tone-identity was proven against a reference build, never on hardware.
+
+| # | Unit | Converted this cycle | Test | Expect |
+|---|---|---|---|---|
+| 5.1 | **kWoodRoom** | yes (0.1.0.40) | Insert, sweep Regen/Time/Tone/Reflect/Position/Mix, CPU. | No hang. Materially cheaper than before conversion (f64 ops 1087 → 270). |
+| 5.2 | **WoodenBox** | yes (0.1.0.41) | Insert, sweep Select/Reso/Mix, CPU. | No hang. f64 ops 369 → 149. |
+| 5.3 | **Verbity** | yes (0.1.0.42) | Insert, sweep Bigness/Longness/Darkness/Wetness, CPU. | No hang. f64 ops 649 → 123. |
+| 5.4 | **Lacquer** | yes (0.1.0.39) | Insert, sweep Cut/Polish/Mix, CPU. Heaviest port in the package. | No hang. Watch CPU closely — this one regressed on a half-conversion once before. |
+| 5.5 | **TickerTape** | yes, via Console0 + ChromeOxide (0.1.0.38) | Insert, sweep its chain, CPU. | No hang; per-atom f64 ops down 60→16, 63→16, 368→89. |
+| 5.6 | **Galactic** | **NO** | Insert, sweep, CPU. | Still full-double. Flag if CPU is unacceptable — conversion is a known open item. |
+| 5.7 | **BrightAmbience3** | **NO** | Insert, sweep, CPU. | Still full-double, and gather-bound. Same flag. |
+| 5.8 | **CreamCoat** | reference boundary | Insert, sweep, CPU. | No hang. This was the conversion reference for the others. |
+| 5.9 | **All 8** | mix detent sweep | Each unit's mix/wet knob. | 0.01 per coarse detent (was 0.001 superFine mismatch only). |
+| 5.10 | **Suppressed** | — | Search the picker for RotCoat, Filament, Carriage. | **Absent.** Still compiled into the package. |
 
 ## Known-broken / accepted going in
 
@@ -100,5 +117,7 @@ units. The default paths should be unchanged, but that is the claim under test.
   no migration is possible — the old 0-1 range overlaps valid new second values.
   Needs a release-note callout.
 - **Vitrail** shift-jump on routing is unverified (see 2.2).
+- **house** Galactic and BrightAmbience3 remain full-double; if their CPU is
+  unacceptable on hardware the fix is known but not done.
 - **Fade Mixer** snap end-zones are half-width; equal-width is a one-line change
   if it reads wrong.

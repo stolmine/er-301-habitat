@@ -1556,6 +1556,10 @@ same way: 20 slots, entry 0 = 0.0, then 0.003..786 s in octaves. Default moved t
 the ORIGINAL shipped behaviour (old slew=0 was instant).
 Verified: at 0 the one-pole coefficient is exactly 1.0, so the value equals its target on the FIRST
 sample - a genuine hard jump, not a fast glide. One detent up is 3 ms as before.
+DEFAULT IS 0 IN ALL THREE PLACES (2.2.1.17): the C++ od::Parameter had been left at 0.003f while the
+Lua graph hardSet and the control initialBias were already 0.0. In practice the Lua wins, but a
+parameter default that disagrees with the unit it belongs to is a trap for anyone reading the header
+or constructing the object without the wrapper. All three now read 0.
 DSP: the Parameter is renamed Slew -> Time and now carries SECONDS;
 alpha = (t > dt) ? 1 - exp(-dt/t) : 1, so a time under one sample is a hard jump = pure S&H, which
 preserves what the old slew=0 default did. New default 0.003 (the map floor) keeps the shipped
@@ -2134,13 +2138,15 @@ RELEASE SET, from what v2.7.0 actually published (checked via the API, not memor
 has been exactly biome/catchall/mi/peaks/scope/spreadsheet for at least the last two releases. That
 stays. User excluded porcelain, kryos, zaum, anamnesis; stolmine is the legacy pre-split package and
 has never been in the asset set.
-  CHANGED  spreadsheet 2.8.3 -> 2.8.3.90, biome 2.2.1 -> 2.2.1.15, scope 1.2.1 -> 1.2.6,
+  CHANGED  spreadsheet 2.8.3 -> 2.8.3.90, biome 2.2.1 -> 2.2.1.17, scope 1.2.1 -> 1.2.6,
            catchall 0.4.0 -> 0.4.0.1
   UNCHANGED but republished as part of the set: mi 1.0.4, peaks 1.0.0
-  OPEN QUESTION: `house` 0.1.0.36 -> 0.1.0.43 has NEVER been published, so including it debuts a new
-  package (8 AW reverb ports + TickerTape + Lacquer). Its own optimization item is still wip with
-  Galactic and BrightAmbience3 unconverted, and this cycle's hybrid-float work is offline-verified
-  only. User's call.
+  NEW PACKAGE: `house` 0.1.0.43 ships (user, 2026-08-05). It has NEVER been published, so this is a
+  DEBUT of 8 units at once - 6 Airwindows reverb ports + TickerTape + Lacquer - not an update. That
+  earns its own tier in the matrix: every unit needs an insert and a CPU check, because no user has
+  ever run them and the hybrid-float pass is offline-verified only (tone-identity proven against a
+  reference build, never on hardware). Galactic and BrightAmbience3 remain full-double.
+  Release set is therefore SEVEN packages: biome catchall house mi peaks scope spreadsheet.
 NEW UNITS THIS RELEASE: Vitrail (spreadsheet), Expo D + Expo AD + Fade Mixer 6 + Fade Mixer 8
 (biome), Spectrogram 3/4/6 (scope). Ngoma's engine is replaced wholesale.
 TWO BREAKING CHANGES needing release-note callouts: (1) Ngoma preset schema 5 - old patches load but
