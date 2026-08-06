@@ -2250,13 +2250,30 @@ set. See also [[feedback_package_trig_lut]] for the other package/firmware bound
 
 [[item]]
 id = "release-v2-8-0"
-title = "v2.8.0 release: hardware test matrix, then ship 6 packages (house pending a call)"
+title = "v2.8.0 release: 7 packages incl. the house debut"
 status = "wip"
 stamped = "2026-08-05T22:47:32-05:00"
 area = "docs"
 attested = """2026-08-05: matrix written to planning/release-v2.8.0-test-matrix.md, covering every
 change since v2.7.0 (2026-07-15) in 4 risk tiers.
-RELEASE SET, from what v2.7.0 actually published (checked via the API, not memory): the asset list
+SHIPPED 2026-08-06 as v2.8.0. User decision: publish on SPOT CHECKS, not the full matrix - the
+discrete-stepping work and the scope leak fix were confirmed on hardware, the rest of the matrix was
+consciously skipped. Recording what that means so the risk is auditable rather than implied:
+UNVERIFIED AT RELEASE - (1) Ngoma preset schema 5, i.e. whether a pre-v2.8 Ngoma patch loads cleanly;
+(2) Constant Random's slew break, which has NO migration path because the old 0-1 range overlaps
+valid new second values; (3) the Pecto audio-stack fix against the patch that actually crashed;
+(4) the entire house package - 8 units nobody outside this repo has run, whose hybrid-float
+tone-identity was proven offline against a reference build and never on hardware.
+The matrix survives at planning/release-v2.8.0-test-matrix.md and is still the right document if any
+of the above comes back as a field report.
+VERSION PASS: released assets are 3-digit by convention (checked against v2.6.1/v2.6.2/v2.7.0 asset
+lists, not from memory); the 4th digit is dev-only and is dropped with the 3rd bumped.
+spreadsheet 2.8.3.95 -> 2.8.4, biome 2.2.1.19 -> 2.2.2, catchall 0.4.0.1 -> 0.4.1,
+house 0.1.0.43 -> 0.1.1, scope 1.2.7 unchanged (its dev bumps had used the 3rd digit already),
+mi 1.0.4 and peaks 1.0.0 untouched.
+Clean rebuild of all 7 both arches; graphic-virtual lint OK, audio-stack lint OK (10 warnings, none
+over budget), NEON hints clean on every unit changed this cycle.
+RELEASE SET, from what v2.7.0 actually publishedRELEASE SET, from what v2.7.0 actually published (checked via the API, not memory): the asset list
 has been exactly biome/catchall/mi/peaks/scope/spreadsheet for at least the last two releases. That
 stays. User excluded porcelain, kryos, zaum, anamnesis; stolmine is the legacy pre-split package and
 has never been in the asset set.

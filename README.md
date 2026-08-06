@@ -111,7 +111,10 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Network | Macro spatial reverb -- 32-tap stereo with virtual-reflector room geometry, orbiting listener motion, per-tap azimuth panning |
 | | Canals | Linked resonant filter -- Three-Sisters-style crossover/formant modes, 4-input normalling topology (Low/Centre/High/All), self-oscillation, 2x oversampling |
 | | Mirror | Aliasing oscillator -- Nyquist-folding synthesis, variable fold/sync, complex-oscillator voice |
+| | Vitrail | Dual switched-capacitor character filter -- two cores on independently drifting clocks with a shared resonance loop, 50 series/parallel routing pairs, DSP-driven tunnel visualization |
 | | Fabula | Algorithmic room reverb -- SR/2 Dattorro/Griesinger figure-8 allpass tank, organic Brownian delay modulation, discrete early-reflection network, Living Freeze hold, tunable wet highpass, xform room re-roll gate |
+| **house** | kWoodRoom, WoodenBox, CreamCoat, BrightAmbience3, Verbity, Galactic | Airwindows reverb ports -- room, box, plate and ambience character, hybrid-float optimized for Cortex-A8 |
+| | TickerTape, Lacquer | Airwindows character processors -- console/tape saturation and lo-fi derez |
 | **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization -- stereo-aware passthrough with waveform display, user-controllable timebase (1x-64x) and Y-axis gain (0.25x-4x) |
 | | Spectrogram | Inline FFT spectrum analyzer -- 256-point pffft, stereo passthrough, peak hold + RMS gradient |
 | **catchall** | Sfera | Z-plane morphing filter -- 32 configs, audio-reactive ferrofluid visualization (experimental) |
@@ -119,6 +122,32 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | | Flakes | Granular shimmer/freeze -- feedback looper with self-modulating delay (experimental) |
 
 ## Changelog
+
+### v2.8.0
+
+**New `house` package + Vitrail + 4 more new units, two breaking changes.** See
+[RELEASE-2.8.0.md](RELEASE-2.8.0.md) for full details. spreadsheet v2.8.3 -> v2.8.4;
+biome v2.2.1 -> v2.2.2; scope v1.2.1 -> v1.2.7; catchall v0.4.0 -> v0.4.1; **house
+v0.1.1 ships for the first time**. mi and peaks unchanged. Firmware unchanged.
+
+**Breaking:** Ngoma's voice engine was replaced (preset schema 5, Clipper default
+flipped to 0.0) and Constant Random's Slew is now a time in seconds rather than a
+0-1 amount, with no migration path. Details in the release notes.
+
+**house** -- eight units debut: six Airwindows reverb ports (kWoodRoom, WoodenBox,
+CreamCoat, BrightAmbience3, Verbity, Galactic) plus TickerTape and Lacquer, most
+hybrid-float converted for Cortex-A8.
+
+**Vitrail** -- dual switched-capacitor character filter with a DSP-driven tunnel
+visualization. **Expo D / Expo AD** -- exponential envelopes. **Fade Mixer 6 / 8**.
+**Spectrogram 3 / 4 / 6** -- wide-span displays backed by a 512-point FFT.
+
+**Fixes** -- Scope no longer leaks its timebase into the built-in scope; Pecto no
+longer overflows the audio task stack (a latent overflow since v2.3.0); Fade
+Mixer's mute and solo actually work.
+
+**Discrete controls** across both packages now step one entry at a time,
+acceleration-independent.
 
 ### v2.7.0
 
