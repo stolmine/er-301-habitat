@@ -2113,6 +2113,38 @@ truncated (draw-thread stack, safe). The earlier overlap-average/512-FFT interpr
 wrong and was reverted. DONE 2026-07-22 (scope 1.2.3, both arches, 0 hints)."""
 
 [[item]]
+id = "fademixer-snap-mode"
+title = "Fade Mixer: Smooth/Snap config option so the family works as N-to-1 switches too"
+status = "wip"
+stamped = "2026-08-05T22:15:38-05:00"
+area = "units"
+touches = ["mods/biome/FadeMixer.cpp", "mods/biome/FadeMixer.h", "mods/biome/assets/FadeMixerFactory.lua"]
+attested = """2026-08-05 SHIPPED (biome 2.2.1.14), hardware audition owed. User: "i'd like to add a
+config option that selects between smooth and 'snap' so that they can be faders as well as simple
+N > 1 switches." All three variants (4/6/8) get it from the shared factory.
+od::Option mMode (1 = Smooth default, 2 = Snap) per [[feedback_option_vs_parameter]], exposed as an
+OptionControl in the unit config menu, enableSerialization in the ctor so it round-trips.
+SELECTION LAW: Snap picks by NEAREST CENTRE - sel = round(fade*(n-1)) - not by equal 1/n slices.
+That is deliberate: it selects exactly the input Smooth would be loudest on, so toggling the option
+never jumps to a different source and a given fade position means the same thing in both modes.
+Documented consequence: the two END inputs own half-width zones (at n=4, in0 holds fade 0..0.167
+while in1 holds 0.167..0.5). If equal-width switch zones are wanted instead, that is a one-line
+change to sel = min(n-1, (int)(fade*n)) - flagged for the audition.
+DECLICK: a hard switch mid-waveform steps the output and clicks, so the live per-channel gains chase
+their targets through a one-pole with a 3 ms time constant. Measured: complementary gains cross at
+0.368/0.632 at 3 ms and the outgoing input is at -58 dB by 20 ms.
+SMOOTH IS BIT-IDENTICAL: the coefficient is chosen at BLOCK rate (1.0 in smooth, the ramp in snap)
+so the per-sample path has no runtime branch inside it (per
+[[feedback_runtime_branched_dsp_dispatch]]), and at coeff 1.0 the gain equals the target on the very
+first sample. Verified against a port of the old law: 0 mismatches over n=2..8 x 101 fade positions.
+Gains live in a CLASS-MEMBER float[8], not a stack local ([[feedback_neon_intrinsics_drumvoice]]).
+SWIG wrapper force-cleaned - the new Option + float[8] change sizeof(FadeMixer)
+([[feedback_swig_header_dep]]). Both arches, FadeMixer.o 0 NEON suspect hints, pkg installed."""
+verify = { kind = "manual", ref = "on all three Fade Mixer variants: the config menu offers Fade smooth/snap; in snap the Fade control hard-selects one input at a time with no click at the switch point; in smooth the unit is unchanged; the setting survives quicksave/reload" }
+note = """Separate from [[fademixer-6-8-plus-mutesolo-fix]] (the 6/8 variants + the mute/solo fix,
+implemented at 202a59d but still open in the ledger pending its own verification)."""
+
+[[item]]
 id = "fademixer-6-8-plus-mutesolo-fix"
 title = "FadeMixer 6/8-input versions + fix broken mute/solo"
 status = "todo"

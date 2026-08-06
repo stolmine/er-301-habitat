@@ -9,6 +9,8 @@ local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local MuteGroup = require "Chain.MuteGroup"
 local FadeMuteMeter = require "biome.FadeMuteMeter"
+local MenuHeader = require "Unit.MenuControl.Header"
+local OptionControl = require "Unit.MenuControl.OptionControl"
 
 local function fadeMap()
   local m = app.LinearDialMap(0, 1)
@@ -112,6 +114,21 @@ return function(nInputs, title, mnemonic)
     expanded[#expanded + 1] = "level"
 
     return controls, { expanded = expanded, collapsed = {} }
+  end
+
+  -- Fade law lives in the config menu: Smooth is the crossfading mixer, Snap
+  -- turns the same Fade control into an N-to-1 switch (the input Smooth would be
+  -- loudest on takes the whole output). A 3 ms declick ramp in the DSP keeps the
+  -- switch from stepping the waveform.
+  function FadeMixerN:onShowMenu(objects, branches)
+    return {
+      header = MenuHeader { description = title },
+      mode = OptionControl {
+        description = "Fade",
+        option = objects.op:getOption("Mode"),
+        choices = { "smooth", "snap" }
+      }
+    }, { "header", "mode" }
   end
 
   return FadeMixerN
