@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**171 items** — 44 done, 18 wip, 107 todo, 2 blocked. *Rendered 2026-08-05.*
+**172 items** — 44 done, 19 wip, 107 todo, 2 blocked. *Rendered 2026-08-05.*
 
 ## DSP
 
@@ -195,6 +195,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | | id | item | verify |
 |---|---|---|---|
 | ~ | `branding-attribution-policy` | Branding + attribution policy: generic externally, precise internally | manual *(attested)* · 2026-08-05 |
+| ~ | `release-v2-8-0` | v2.8.0 release: hardware test matrix, then ship 6 packages (house pending a call) | manual *(attested)* · 2026-08-05 |
 |   | `diffusion-makeup-model-notate` | Notate Fabula's diffusion-makeup gain model as a reusable pattern for tap-based units (main target: Network) | manual · 2026-07-14 |
 |   | `docs-intro-video` | Intro video for Habitat packages | manual · 2026-07-09 |
 | ✓ | `control-expansion-views-pattern` | Canonical pattern: control expansion views (expand sub-params to full faders on ENTER) | manual *(attested)* · 2026-07-14 |

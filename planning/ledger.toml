@@ -2113,6 +2113,38 @@ truncated (draw-thread stack, safe). The earlier overlap-average/512-FFT interpr
 wrong and was reverted. DONE 2026-07-22 (scope 1.2.3, both arches, 0 hints)."""
 
 [[item]]
+id = "release-v2-8-0"
+title = "v2.8.0 release: hardware test matrix, then ship 6 packages (house pending a call)"
+status = "wip"
+stamped = "2026-08-05T22:47:32-05:00"
+area = "docs"
+attested = """2026-08-05: matrix written to planning/release-v2.8.0-test-matrix.md, covering every
+change since v2.7.0 (2026-07-15) in 4 risk tiers.
+RELEASE SET, from what v2.7.0 actually published (checked via the API, not memory): the asset list
+has been exactly biome/catchall/mi/peaks/scope/spreadsheet for at least the last two releases. That
+stays. User excluded porcelain, kryos, zaum, anamnesis; stolmine is the legacy pre-split package and
+has never been in the asset set.
+  CHANGED  spreadsheet 2.8.3 -> 2.8.3.90, biome 2.2.1 -> 2.2.1.15, scope 1.2.1 -> 1.2.6,
+           catchall 0.4.0 -> 0.4.0.1
+  UNCHANGED but republished as part of the set: mi 1.0.4, peaks 1.0.0
+  OPEN QUESTION: `house` 0.1.0.36 -> 0.1.0.43 has NEVER been published, so including it debuts a new
+  package (8 AW reverb ports + TickerTape + Lacquer). Its own optimization item is still wip with
+  Galactic and BrightAmbience3 unconverted, and this cycle's hybrid-float work is offline-verified
+  only. User's call.
+NEW UNITS THIS RELEASE: Vitrail (spreadsheet), Expo D + Expo AD + Fade Mixer 6 + Fade Mixer 8
+(biome), Spectrogram 3/4/6 (scope). Ngoma's engine is replaced wholesale.
+TWO BREAKING CHANGES needing release-note callouts: (1) Ngoma preset schema 5 - old patches load but
+the laws changed, and Clipper's default flipped 1.0 -> 0.0 so it ships much cleaner; (2) Constant
+Random's Slew is now SECONDS not a 0-1 amount, with NO possible migration because the old range
+overlaps valid new values."""
+verify = { kind = "manual", ref = "every row of planning/release-v2.8.0-test-matrix.md exercised on hardware; tier 1 and tier 2 clean before any package is published" }
+note = """Matrix is risk-ordered: tier 1 = breaking/whole-engine (Ngoma, Constant Random, Vitrail),
+tier 2 = shared code touched (ModeSelector across 10 consumers, 27 mix controls), tier 3 = the 8 new
+units, tier 4 = low risk + confirming suppressed units stay out of the picker.
+Highest-risk single item is Ngoma: whole DSP replaced AND this unit has a history of hanging hardware
+on insert (fixed in v2.4.1), so insert/delete cycling is called out separately from the sound tests."""
+
+[[item]]
 id = "branding-attribution-policy"
 title = "Branding + attribution policy: generic externally, precise internally"
 status = "wip"
