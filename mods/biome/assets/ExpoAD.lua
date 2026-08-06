@@ -65,10 +65,9 @@ function ExpoAD:onLoadViews()
       branch = self.branches.attack,
       gainbias = self.objects.attack,
       range = self.objects.attackRange,
-      biasMap = Encoder.getMap("slewTimes"),
+      biasMap = Encoder.getMap("ADSR"),
       biasUnits = app.unitSecs,
       initialBias = 0.01,
-      scaling = app.octaveScaling,
       gainMap = Encoder.getMap("gain")
     },
     decay = GainBias {
@@ -77,10 +76,9 @@ function ExpoAD:onLoadViews()
       branch = self.branches.decay,
       gainbias = self.objects.decay,
       range = self.objects.decayRange,
-      biasMap = Encoder.getMap("slewTimes"),
+      biasMap = Encoder.getMap("ADSR"),
       biasUnits = app.unitSecs,
       initialBias = 0.2,
-      scaling = app.octaveScaling,
       gainMap = Encoder.getMap("gain")
     },
     acurve = GainBias {

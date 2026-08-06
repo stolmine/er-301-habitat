@@ -2481,6 +2481,19 @@ suspect), graphic-virtual lint OK, Lua parses (luac -p), linux pkg installed to 
 audition (fire triggers, sweep Curve linear<->expo, AD attack+decay, retrigger) + am335x hardware
 sanity. Chosen defaults (open questions resolved): 2 curve controls for AD, bipolar curve, Level
 kept, no EOC out, retrigger restarts (may click on retrigger mid-decay - acceptable v1).
+2.2.1.18 (user, 2026-08-05): "make sure expo d and ad time controls are uniform with built in ADSR
+increments and scaling." Time controls moved from Encoder.getMap("slewTimes") to
+Encoder.getMap("ADSR") - the built-in envelope map, bilinear: 0..0.99 s in 0.01 s steps (100 entries,
+fine where envelopes actually live) then 1..10 s in 0.0909 s steps (100 entries for long tails).
+Replaces the octave map, which gave only 19 stops across 0.003..786 s.
+`scaling = app.octaveScaling` REMOVED, and this is correctness rather than cosmetics: Fader::scale
+takes log2(value) under octaveScaling and refreshScaling takes log2(map->min()), so it CANNOT
+represent a map whose minimum is 0 - which is exactly why the built-in ADSR uses the default
+linearScaling with this map. It only affects how the fader BAR is drawn, not the DSP or CV maths.
+Net: gains a true 0 s (instant) and ~10 ms resolution through the musical range; loses dial access
+above 10 s, matching ADSR's own ceiling (the time INLETS are unclamped, so CV can still exceed it).
+Defaults land on map entries exactly - attack 0.01 = entry 1, decay 0.2 = entry 20 - and were left
+alone as voicing choices. gainMap untouched: it is the mod-gain dial, not a time increment.
 2.2.1.7 (user): all curve controls DEFAULT TO FULLY EXPONENTIAL (+1.0 = k~3.95, fast-drop/slow-tail
 decay), not linear - envelopes start fully expo out of the box; the linear/log side is dialled in.
 2.2.1.8 (user, anti-pop): adopted tomf Strike's principle (~/repos/er-301-custom-units/mods/strike)

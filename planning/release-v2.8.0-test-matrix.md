@@ -10,7 +10,7 @@ v2.8.0 ships those six **plus `house`**, which has never been published: seven.
 | Package | v2.7.0 | v2.8.0 | Ship | Why |
 |---|---|---|---|---|
 | spreadsheet | 2.8.3 | 2.8.3.90 | yes | largest change set |
-| biome | 2.2.1 | 2.2.1.17 | yes | 4 new units + a breaking control change |
+| biome | 2.2.1 | 2.2.1.18 | yes | 4 new units + a breaking control change |
 | scope | 1.2.1 | 1.2.6 | yes | 3 new units + sub-display |
 | catchall | 0.4.0 | 0.4.0.1 | yes | mix detent only |
 | mi | 1.0.4 | 1.0.4 | yes | unchanged, republish |
@@ -67,8 +67,8 @@ units. The default paths should be unchanged, but that is the claim under test.
 
 | # | Unit | Package | Test | Expect |
 |---|---|---|---|---|
-| 3.1 | **Expo D** | biome | Trigger; sweep Decay and Curve. | Decay-only envelope; curve default is fully exponential. |
-| 3.2 | **Expo AD** | biome | Trigger; sweep Attack, Decay, both Curves. | AD shape; retrigger mid-decay restarts (may click — accepted v1). |
+| 3.1 | **Expo D** | biome | Trigger; sweep Decay and Curve. | Decay-only envelope; curve default is fully exponential. Decay dial is the **ADSR map** — 0 s at the bottom, 10 ms steps to 1 s, 10 s max. |
+| 3.2 | **Expo AD** | biome | Trigger; sweep Attack, Decay, both Curves. | AD shape; retrigger mid-decay restarts (may click — accepted v1). Both time dials on the **ADSR map**, same feel as the built-in ADSR. |
 | 3.3 | **Fade Mixer 6 / 8** | biome | Patch 6 and 8 sources; sweep Fade. | Crossfades across all inputs; endpoints pick in1 and in6/in8. |
 | 3.4 | **Fade Mixer** (all 3) | biome | **Mute and solo per channel** — these did nothing before 2.2.1.4. | Mute gates that input only; solo acts within this mixer, not the chain. |
 | 3.5 | **Fade Mixer** (all 3) | biome | Config menu → Fade → **snap**; sweep Fade. | Hard N-to-1 switching, **no click** at the switch point. End inputs own half-width zones by design. |
