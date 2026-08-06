@@ -4,27 +4,14 @@ Release date: 2026-08-06
 
 Package updates: spreadsheet 2.8.3 -> 2.8.4, biome 2.2.1 -> 2.2.2, scope
 1.2.1 -> 1.2.7, catchall 0.4.0 -> 0.4.1, and **house 0.1.1 ships for the first
-time**. mi and peaks unchanged. Firmware unchanged.
+time**. mi and peaks unchanged. Firmware updated to 9.6.0; a corresponding reinstall is encouraged.
 
-## Read this first: two changes that alter existing patches
-
-**Ngoma's voice engine has been replaced.** The oscillator/FM/membrane core is
-gone, replaced by a measured modal engine. Presets move to schema 5: old patches
-load, but the laws changed and they will not sound the same. The Clipper default
-also flipped from 1.0 to 0.0, so Ngoma now ships clean and the knob adds heft
-rather than removing it.
-
-**Constant Random's Slew is now a time in seconds**, not a 0-1 amount. There is
-no migration path, because the old 0-1 range overlaps valid new second values: a
-stored slew of 0.5 used to mean 38 ms and now means half a second. Existing
-patches using it need re-dialling.
-
-## New: house
+## New package: house
 
 A package of eight units, shipping publicly for the first time. Six reverb ports
-plus two character processors, all originally by Chris Johnson (Airwindows):
-kWoodRoom, WoodenBox, CreamCoat, BrightAmbience3, Verbity, Galactic, TickerTape
-and Lacquer.
+plus two character processors, most originally by Chris Johnson (Airwindows):
+kWoodRoom, WoodenBox, CreamCoat, BrightAmbience3, Verbity, Galactic. TickerTape
+and Lacquer are original designs based on his work.
 
 Most of them went through a hybrid-float conversion this cycle -- Cortex-A8 has
 no double-precision NEON, so full-double DSP falls back to scalar VFPv3 and runs
@@ -33,6 +20,40 @@ TickerTape's Console0/ChromeOxide chain were converted with the tone verified
 identical against a reference build (1 LSB, correlation 1.0000000), for f64
 operation-count reductions of 75-81%. Galactic and BrightAmbience3 are not yet
 converted and remain heavier.
+
+**kWoodRoom** -- Regen / Time / Tone / Reflect / Position / Mix. A 6x6 feedback
+network with cross-feedback inside the matrix, so it is internally stereo. The
+woody, roomy one, and the heaviest of the six before conversion.
+
+**WoodenBox** -- Box / Reso / Mix. A 4x4 network with an intentional left/right
+swap through the tank. Small, boxy, resonant; the most obviously "a space" of the
+set at short settings.
+
+**CreamCoat** -- Box / Regen / DeRez / Predelay / Wetness. Bright ambience with
+the engine's divisor mechanic exposed as a DeRez knob, so you can grind the
+reflection resolution down deliberately. Submix-style wet/dry: Wetness at 0.5
+sums full wet and full dry rather than crossfading.
+
+**BrightAmbience3** -- Position / Size / Brightness / Wetness. Sparse prime-tap
+delay summation with resonant filter feedback, giving a bright gated halo. Size
+is the CPU dial: it sums up to 487 sparse taps at the top.
+
+**Verbity** -- Bigness / Longness / Darkness / Wetness. Three cascaded 4x4
+networks with a sub-low "thunder" chase underneath. The most conventionally
+hall-like, and the one that goes darkest.
+
+**Galactic** -- Replace / Brightness / Detune / BigDim / Wetness. Three cascaded
+networks with a modulated predelay and full left-right cross-coupling at the
+feedback stage. The lush option, and the one that wanders.
+
+**TickerTape** -- Drive / Tape / Bias / Mix. Not a reverb: a chain of console
+saturation into tape rot into console desaturation. Original design built from
+Airwindows parts.
+
+**Lacquer** -- Drive / Cut / Polish / Mix. Also not a reverb: gritty trajectory
+distortion inside a downsample shell, with clean averaging inside a 2x upsample
+bracket. A mixed-rate character processor, and the heaviest unit in the package.
+Original design built from Airwindows parts.
 
 ## New units elsewhere
 
@@ -109,6 +130,8 @@ swings +/-5 V rather than +/-10 V and can invert.
 
 **Mix controls** across every package now share the built-in dial map, so a
 coarse detent moves 0.01. Impasto and Parfait were ten times coarser than that.
+Spreadsheet effects have had their mix fade power laws adjusted for consistent application.
+Mid mix values should no longer drop in volume.
 
 **Ngoma** beyond the engine swap: NEON'd to roughly 10% CPU mono.
 
@@ -119,20 +142,7 @@ Reseed action in the unit menu.
 
 The `house` package is built from the work of **Chris Johnson (Airwindows)**,
 whose plugins are released under the MIT licence. kWoodRoom, WoodenBox,
-CreamCoat, BrightAmbience3, Verbity, Galactic, TickerTape and Lacquer are all
+CreamCoat, BrightAmbience3, Verbity and Galactic are all
 ports of his designs, and his Spiral saturator is reused widely across the rest
 of the catalog. The ports carry his algorithms; any bugs in them are ours.
 
-Elsewhere in this release: the Mutable Instruments units are based on code by
-**Emilie Gillet** (MIT), the Peaks and Dead Man's Catch units on code by
-**Emilie Gillet** and **Tim Churches** (MIT), and Colmatage's cut procedures
-descend from **Nick Collins**' BBCut library by way of **Remy Muller**'s Livecut.
-
-## Known issues
-
-- Ngoma has three documented differences from its reference: missing sub-partials
-  in the body, Character not reaching the fully-overfolded extreme, and Shape's
-  harmonic trajectory diverging across the throw.
-- house's Galactic and BrightAmbience3 are still full-double and heavier than
-  their converted siblings.
-- Kryos remains unreleased; it hangs on load.
