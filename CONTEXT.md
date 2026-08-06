@@ -55,6 +55,12 @@ Custom unit packages for the ER-301 sound computer (Eurorack DSP module by Ortho
 ### Audio Thread
 - Small stack -- use heap for work buffers in `process()`. Put buffers in Internal struct.
 - Use `kMaxFrameLength = 256` for fixed-size heap buffers
+- The audio task stack is **2048 bytes for the whole chain**. Check with
+  `tools/check-audio-stack.sh` after an am335x build (budget 512B/frame). Pecto
+  broke this rule from v2.3.0 with a 1072-byte frame and silently corrupted
+  memory until firmware canaries caught it -- see `[hab:pecto-audio-stack-overflow]`.
+- `draw()`, constructors and Lua-invoked analysis run on the UI thread (32768-byte
+  app stack); large frames there are fine and are not what this rule is about.
 
 ### ViewControls
 - Expanded view expects ViewControl objects, not raw Graphics

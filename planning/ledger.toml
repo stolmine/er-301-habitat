@@ -2201,10 +2201,17 @@ bytes plus every function >= 400 bytes across the shipping packages:
     app stack is 32768 bytes and measured 42% used in the same crash report. Verified analyzeSample
     is NOT reachable from AlembicVoice::process.
 So Pecto was a genuine outlier: 1024 bytes of 64-element arrays, 2.4x the next-worst process frame.
-STILL WORTH DOING, but as prevention rather than repair: a build-time lint that objdumps the
-`sub sp, sp, #N` prologue of every process() and fails over a budget (say 512 bytes), the same shape
-as check-neon-hints.sh. Nothing today stops the next unit reintroducing a 64-element stack array, and
-the failure mode is silent memory corruption until a firmware with canaries catches it."""
+LINT BUILT 2026-08-05: tools/check-audio-stack.sh. Sums the `sub sp, sp, #N` prologue adjustments of
+every ::process() in an am335x object tree (summing, because GCC splits a large frame across two subs
+when the immediate does not fit one rotation - taking only the first under-reports). FAILs over
+BUDGET (512B default), warns over WARN (256B). Checks process() ONLY: draw/ctors/analyzeSample run on
+the 32768-byte UI stack and a 2 KB frame there is not a finding.
+VALIDATED AGAINST THE KNOWN BAD BUILD rather than assumed working ([[feedback_validate_the_instrument_first]]):
+restored the pre-fix Pecto.cpp, rebuilt, and confirmed the lint FAILs with exit 1 reporting 1076
+bytes; restored the fix and confirmed exit 0. Current tree: clean at 512B with 11 warnings, the
+largest being Network and AlembicVoice at 452.
+CONTEXT.md "Audio Thread" now carries the 2048-byte figure and points at the tool, since the rule was
+already written there and still got broken."""
 
 [[item]]
 id = "scope-probe-pool-leak"
