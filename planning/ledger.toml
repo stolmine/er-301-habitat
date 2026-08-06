@@ -2151,6 +2151,48 @@ truncated (draw-thread stack, safe). The earlier overlap-average/512-FFT interpr
 wrong and was reverted. DONE 2026-07-22 (scope 1.2.3, both arches, 0 hints)."""
 
 [[item]]
+id = "pecto-audio-stack-overflow"
+title = "Pecto blew the 2048-byte audio task stack: 1072-byte process() frame from 5 stack-local arrays"
+status = "wip"
+stamped = "2026-08-05T23:39:05-05:00"
+area = "dsp"
+touches = ["mods/spreadsheet/Pecto.cpp"]
+attested = """2026-08-05 FIXED (spreadsheet 2.8.3.93), hardware confirmation owed.
+EVIDENCE, from /mnt/crash.log (schema 2, see er-301/docs/CRASH_REPORT_FORMAT.md). Reports 18 and 19
+are the same fault with byte-identical registers - Kind: data-abort, Thread: audio,
+"*** STACK audio BLOWN ***", audio 2048/2048 (100%) canary=BLOWN, pc=803dad04 lr=81a5bb24
+sp=803dad04 dfar=40000000 dfsr=5. NOTE pc == sp and psr=ffffffff: the saved exception context is
+itself garbage, so pc/lr do NOT locate the fault - the stack overflow destroyed the frame that would
+have. The BLOWN canary is the finding, not the registers.
+Both crashes happened long after the last insert (140s vs last insert 118s; 236s vs 68s), so this is
+a runtime overflow during use, not an insert-path bug.
+Unit intersection across the two identical signatures: Player.VariSpeed + Pecto. Report 17 is a
+different fault (thread=hwi, Anamnesis, dfar=0xb5) = the separate open [[anamnesis-insert-crash]].
+MEASURED CAUSE: objdump of Pecto.o shows Pecto::process reserving a 1072-BYTE STACK FRAME - 52% of
+the entire 2048-byte audio task stack in one unit, before its callees or the task's own frame. Next
+worst in the whole catalogue is 452. The frame is five stack-local arrays at kMaxCombTaps=64:
+frac float[64]=256, sA int16[64]=128, sB int16[64]=128, idx0 int32[64]=256, idx1 int32[64]=256 =
+1024 bytes, which is essentially the whole frame.
+This violates a rule already written down: CONTEXT.md:56 "Audio Thread: Small stack - use heap for
+work buffers in process(). Put buffers in Internal struct."
+FIX: all five moved into Pecto::Internal (heap). Frame 1072 -> 92 bytes, measured. NEON hints still
+clean. Bonus: frac/sA/sB are read with vld1q_f32/vld1_s16, and stack-local arrays are exactly the
+Cortex-A8 alignment-hint trap ([[feedback_neon_intrinsics_drumvoice]]), so this closes a latent
+second hazard too.
+NOT CAUSED BY THIS SESSION'S WORK: Pecto.cpp has no commits since v2.7.0 - the recent Pecto changes
+were Lua UI only. Pecto has shipped since v2.3.0, so this is a LONGSTANDING overflow that was
+silently corrupting whatever sat past the audio stack. It surfaces now because firmware 9.5.x added
+stack canaries and crash diagnostics that finally detect it.
+Both arches, pkg installed."""
+verify = { kind = "manual", ref = "run the crashing patch again (Pecto + Player.VariSpeed, plus the wider set from report 19) for several minutes; no data-abort, and any new crash.log entry must not show 'STACK audio BLOWN'" }
+note = """SWEEP OWED, and it is the real follow-up: the audio task stack is only 2048 bytes and the
+catalogue has more process() frames in the hundreds of bytes - Network 452, AlembicVoice 452, FDNTank
+436, Som/Lambda 316, Carriage 312, Clouds 292, APFTank 284, DrumVoice 276, Anamnesis 276. None alone
+is fatal but they are all one deep callee away from trouble, and chains stack units in sequence.
+Worth adding a build-time lint (objdump the `sub sp, sp, #N` prologue of every process() and fail
+over a budget) so this class cannot regress silently - the same shape as check-neon-hints.sh."""
+
+[[item]]
 id = "scope-probe-pool-leak"
 title = "Scope timebase leaked into the firmware's MiniScope via the shared FifoProbe pool"
 status = "wip"

@@ -9,7 +9,7 @@ v2.8.0 ships those six **plus `house`**, which has never been published: seven.
 
 | Package | v2.7.0 | v2.8.0 | Ship | Why |
 |---|---|---|---|---|
-| spreadsheet | 2.8.3 | 2.8.3.90 | yes | largest change set |
+| spreadsheet | 2.8.3 | 2.8.3.93 | yes | largest change set + an audio-stack overflow fix |
 | biome | 2.2.1 | 2.2.1.18 | yes | 4 new units + a breaking control change |
 | scope | 1.2.1 | 1.2.7 | yes | 3 new units + sub-display + a probe-pool leak fix |
 | catchall | 0.4.0 | 0.4.0.1 | yes | mix detent only |
@@ -47,6 +47,7 @@ DSP wholesale.
 | 1.7 | **Constant Random** | Rate map linear 0.01-100 → **0-100, coarse 0.1 Hz**. | Dial rate near 0.05 Hz. | One coarse detent moves 0.1 Hz, not 1.0. Slow end usable. |
 | 1.8 | **Constant Random** | **0 Hz = pause** (was a 0.01 Hz floor). | Set rate 0, wait 5 min. | Output freezes on the held value. No new steps at all. |
 | 1.9 | **Constant Random** | Level default **1.0 → 0.5**, map now bipolar `[-1,1]`. | Insert fresh; then set level negative. | Default swings ±5 V not ±10 V. Negative level inverts. |
+| 1.9b | **Pecto** | `process()` stack frame 1072 → 92 bytes. It was blowing the 2048-byte audio task stack. | Rebuild the crashing patch: Pecto + Player.VariSpeed, then the wider set from crash report 19, and run for several minutes. | No data-abort. Any new crash.log entry must NOT say `STACK audio BLOWN`. |
 | 1.10 | **Vitrail** | New to users (built and moved packages post-v2.7.0). | Insert on hardware; sweep Cut A/B, Res, Gain. | No hang. Self-osc and comb behaviour audible. CPU acceptable. |
 
 ## Tier 2 — shared code touched (regression risk beyond the unit changed)

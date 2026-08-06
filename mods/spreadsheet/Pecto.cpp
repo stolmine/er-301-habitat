@@ -69,6 +69,17 @@ namespace stolmine
     int writeIndex = 0;
     float tapPosition[kMaxCombTaps];
     float tapWeight[kMaxCombTaps];
+    // Per-frame gather scratch. HEAP, not process()'s stack: the audio task
+    // stack is 2048 bytes total (CONTEXT.md "Audio Thread: small stack - use
+    // heap for work buffers in process(), put buffers in Internal struct") and
+    // these three were 512 bytes of it, inside a 1072-byte frame. They are also
+    // read with NEON (vld1q_f32/vld1_s16 below), and stack-local arrays are the
+    // Cortex-A8 alignment-hint trap - feedback_neon_intrinsics_drumvoice.
+    float frac[kMaxCombTaps];
+    int16_t sA[kMaxCombTaps];
+    int16_t sB[kMaxCombTaps];
+    int32_t idx0[kMaxCombTaps];
+    int32_t idx1[kMaxCombTaps];
     float fbFilterState = 0.0f;
     float sitarEnvFollower = 0.0f;
     float dcX1 = 0.0f;
@@ -543,11 +554,11 @@ namespace stolmine
     // gather (B) stays scalar but is now isolated and prefetched
     // further ahead. idx0/idx1 are int32_t so NEON intrinsic
     // vst1q_s32 compiles (it wants int32_t*, not int*, on ARM GCC).
-    int32_t idx0[kMaxCombTaps];
-    int32_t idx1[kMaxCombTaps];
-    float frac[kMaxCombTaps];
-    int16_t sA[kMaxCombTaps];
-    int16_t sB[kMaxCombTaps];
+    int32_t *idx0 = s.idx0;
+    int32_t *idx1 = s.idx1;
+    float *frac = s.frac;
+    int16_t *sA = s.sA;
+    int16_t *sB = s.sB;
     const float scale = 1.0f / 32767.0f;
 
     // Process audio
