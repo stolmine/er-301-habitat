@@ -305,7 +305,9 @@ function Etcher:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = { [0] = "ofst", "crv", "wgt", "all" }
+      modeNames = { [0] = "ofst", "crv", "wgt", "all" },
+      discrete = true,
+      discreteThreshold = 8
     },
     xform = TransformGateControl {
       button = "xform",

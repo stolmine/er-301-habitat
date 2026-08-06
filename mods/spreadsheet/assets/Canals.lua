@@ -272,7 +272,9 @@ function Canals:onLoadViews()
       biasUnits     = app.unitNone,
       biasPrecision = 1,
       initialBias   = 0.0,
-      modeNames     = outputNames
+      modeNames     = outputNames,
+      discrete = true,
+      discreteThreshold = 8
     },
     mode = ModeSelector {
       button        = "mode",
@@ -284,7 +286,9 @@ function Canals:onLoadViews()
       biasUnits     = app.unitNone,
       biasPrecision = 0,
       initialBias   = 0,
-      modeNames     = modeNames
+      modeNames     = modeNames,
+      discrete = true,
+      discreteThreshold = 8
     },
     -- Overview ply consolidates the three per-block input branches
     -- under one sub-display with MiniScope previews + sub-button

@@ -3,6 +3,7 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local DiscreteStep = require "spreadsheet.DiscreteStep"
 local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
@@ -257,7 +258,13 @@ function BandControl:encoder(change, shifted)
     self.shiftUsed = true
   end
   if self.paramMode ~= 0 and self.paramFocusedReadout then
-    self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+    if self.paramFocusedReadout == self.typeReadout then
+      -- enumerated set, not a magnitude: steps whole entries under the
+      -- discrete standard so a fast turn cannot skip past one.
+      DiscreteStep.encoder(self, self.typeReadout, change, 0, 7)
+    else
+      self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+    end
     return true
   end
   return GainBias.encoder(self, change, shifted)

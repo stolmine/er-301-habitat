@@ -142,6 +142,40 @@ One representative of each category, to prove the standard before any sweep:
 | Sub-display readout | **TransformGateControl** func | via `DiscreteStep`; 8 consumers |
 | Sub-display readouts | **DensityControl** pattern/slope/resonator | via `DiscreteStep`; the surface that was still wrong after the first pass |
 
+## Spreadsheet comb, 2026-08-05 (2.8.3.95) — COMPLETE
+
+User asked for a manual comb, on the grounds that custom setups escape pattern
+matching. They do: the automated survey keyed on `ModeSelector` and integer maps
+and missed **`addName()`**, which is the strongest signal of all — a readout with
+names *is* a list.
+
+**The rule the comb established.** Not every integer is a discrete list, and
+applying the standard blindly would make the catalogue worse:
+
+- **Enumerated set** (type / mode / scope / grid / curve / shape / macro /
+  effect / octave) → apply the standard. You want to land on a specific one.
+- **Count or magnitude** (step count, tap count, ticks, ratchet, clock div,
+  loop length, semitones) → leave raw. Values are ordered magnitudes, sweeping
+  is the point, and acceleration is *useful* getting from 1 to 64.
+
+**On the standard (15):** Pecto ×3 selectors, Rauschen, MultibandSaturator,
+Vitrail ×2, Etcher, Filterbank, Canals ×2, TrackerSeq, MultitapDelay ×2
+(selectors); TransformGateControl, DensityControl, BandControl, BandListControl,
+DelayInfoControl, DrumVoicePitchControl, FilterListControl,
+HelicaseOverviewControl, LaretStepListControl, RaindropControl,
+SegmentListControl, SeqInfoControl, TimeControl, TransferCurveControl,
+VisadharaPitchControl (sub-display readouts).
+
+**Deliberately left raw (9), each verified a count/magnitude:** ChaselightControl
+(length/vel), ColmatageBlockControl (block 1-8, repeats 1-16), FilterResponseControl
+(band count), GateSeqInfoControl (length/loop/width), LaretClockControl (div 1-16),
+LaretOverviewControl (steps/loop 1-16), RatchetControl (mult/len 1-8),
+StepListControl (offset/length/dev), TapListControl (pitch -24..24 semitones).
+
+One borderline worth an ear: **LaretClockControl's `div` (1-16)**. A clock divider
+is arguably enumerated — landing on ÷4 rather than ÷3 matters — but it is also an
+ordered magnitude. Left raw; flip it if it reads wrong.
+
 ## Risk
 
 `ModeSelector.lua` is duplicated in biome and spreadsheet and is consumed by ~20

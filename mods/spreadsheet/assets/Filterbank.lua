@@ -316,7 +316,9 @@ function Filterbank:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = self.scaleNames
+      modeNames = self.scaleNames,
+      discrete = true,
+      discreteThreshold = 8
     },
     rotate = GainBias {
       button = "rot",

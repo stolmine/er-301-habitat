@@ -3,6 +3,7 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local DiscreteStep = require "spreadsheet.DiscreteStep"
 local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
@@ -173,6 +174,7 @@ function HelicaseOverviewControl:subReleased(i, shifted)
       else
         self.mixReadout:save()
         self.paramFocusedReadout = self.mixReadout
+        DiscreteStep.reset(self)
         self:setSubCursorController(self.mixReadout)
         if not self:hasFocus("encoder") then self:focus() end
       end
@@ -187,6 +189,7 @@ function HelicaseOverviewControl:subReleased(i, shifted)
       else
         self.shapeReadout:save()
         self.paramFocusedReadout = self.shapeReadout
+        DiscreteStep.reset(self)
         self:setSubCursorController(self.shapeReadout)
         if not self:hasFocus("encoder") then self:focus() end
       end
@@ -199,7 +202,13 @@ end
 function HelicaseOverviewControl:encoder(change, shifted)
   if shifted and self.shiftHeld then self.shiftUsed = true end
   if self.paramMode and self.paramFocusedReadout then
-    self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+    if self.paramFocusedReadout == self.shapeReadout then
+      -- enumerated set, not a magnitude: steps whole entries under the
+      -- discrete standard so a fast turn cannot skip past one.
+      DiscreteStep.encoder(self, self.shapeReadout, change, 0, 7)
+    else
+      self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+    end
     return true
   end
   return GainBias.encoder(self, change, shifted)

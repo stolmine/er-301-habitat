@@ -3,6 +3,7 @@ local libstolmine = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Base = require "Unit.ViewControl.EncoderControl"
 local Encoder = require "Encoder"
+local DiscreteStep = require "spreadsheet.DiscreteStep"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -119,7 +120,13 @@ end
 
 function DelayInfoControl:encoder(change, shifted)
   if self.focusedReadout then
-    self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+    if self.focusedReadout == self.stackReadout then
+      -- enumerated set, not a magnitude: steps whole entries under the
+      -- discrete standard so a fast turn cannot skip past one.
+      DiscreteStep.encoder(self, self.stackReadout, change, 0, 4)
+    else
+      self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+    end
     return true
   end
   return false

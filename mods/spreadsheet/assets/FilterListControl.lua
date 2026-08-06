@@ -3,6 +3,7 @@ local libstolmine = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Base = require "Unit.ViewControl.EncoderControl"
 local Encoder = require "Encoder"
+local DiscreteStep = require "spreadsheet.DiscreteStep"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -205,7 +206,13 @@ function FilterListControl:encoder(change, shifted)
     self:scrollTap(change)
     return true
   elseif self.focusedReadout then
-    self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Fine)
+    if self.focusedReadout == self.typeReadout then
+      -- enumerated set, not a magnitude: steps whole entries under the
+      -- discrete standard so a fast turn cannot skip past one.
+      DiscreteStep.encoder(self, self.typeReadout, change, 0, 4)
+    else
+      self.focusedReadout:encoder(change, false, self.encoderState == Encoder.Fine)
+    end
     self.delay:storeFilter(self.currentTap)
     self:updateTypeLabel()
     return true

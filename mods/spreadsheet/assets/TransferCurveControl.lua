@@ -3,6 +3,7 @@ local libstolmine = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Base = require "Unit.ViewControl.EncoderControl"
 local Encoder = require "Encoder"
+local DiscreteStep = require "spreadsheet.DiscreteStep"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -164,7 +165,13 @@ end
 
 function TransferCurveControl:encoder(change, shifted)
   if self.focusedReadout then
-    self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+    if self.focusedReadout == self.scopeReadout then
+      -- enumerated set, not a magnitude: steps whole entries under the
+      -- discrete standard so a fast turn cannot skip past one.
+      DiscreteStep.encoder(self, self.scopeReadout, change, 0, 3)
+    else
+      self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+    end
     if self.focusedReadout == self.scopeReadout then
       local val = math.floor(self.scopeReadout:getValueInUnits() + 0.5)
       local name = scopeNames[val]

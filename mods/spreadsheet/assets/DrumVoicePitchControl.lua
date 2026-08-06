@@ -2,6 +2,7 @@ local app = app
 local Class = require "Base.Class"
 local Pitch = require "Unit.ViewControl.Pitch"
 local Encoder = require "Encoder"
+local DiscreteStep = require "spreadsheet.DiscreteStep"
 local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
@@ -123,6 +124,7 @@ function DrumVoicePitchControl:subReleased(i, shifted)
       else
         self.octaveReadout:save()
         self.paramFocusedReadout = self.octaveReadout
+        DiscreteStep.reset(self)
         self:setSubCursorController(self.octaveReadout)
         if not self:hasFocus("encoder") then self:focus() end
       end
@@ -137,7 +139,13 @@ function DrumVoicePitchControl:encoder(change, shifted)
     self.shiftUsed = true
   end
   if self.paramMode and self.paramFocusedReadout then
-    self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+    if self.paramFocusedReadout == self.octaveReadout then
+      -- enumerated set, not a magnitude: steps whole entries under the
+      -- discrete standard so a fast turn cannot skip past one.
+      DiscreteStep.encoder(self, self.octaveReadout, change, -4, 4)
+    else
+      self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+    end
     return true
   end
   return Pitch.encoder(self, change, shifted)

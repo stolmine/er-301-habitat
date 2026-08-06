@@ -668,7 +668,9 @@ function MultitapDelay:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = { [0] = "1", "2", "4", "8", "16" }
+      modeNames = { [0] = "1", "2", "4", "8", "16" },
+      discrete = true,
+      discreteThreshold = 8
     },
     stack = ModeSelector {
       button = "stack",
@@ -680,7 +682,9 @@ function MultitapDelay:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = { [0] = "1", "2", "4", "8" }
+      modeNames = { [0] = "1", "2", "4", "8" },
+      discrete = true,
+      discreteThreshold = 8
     },
     drift = GainBias {
       button = "drift",

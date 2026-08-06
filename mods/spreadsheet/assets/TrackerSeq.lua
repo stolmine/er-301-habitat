@@ -303,7 +303,9 @@ function TrackerSeq:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = { [0] = "ofst", "len", "dev", "all" }
+      modeNames = { [0] = "ofst", "len", "dev", "all" },
+      discrete = true,
+      discreteThreshold = 8
     }
   }, {
     expanded = { "steps", "info", "clock", "reset", "slew", "xform" },
