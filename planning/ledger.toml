@@ -2150,8 +2150,23 @@ KNOWN RESIDUALS, flagged not fixed:
  - ~1275 PUSHED commits mention measurement targets; 13 were unpushed at the time of this pass.
    History was deliberately NOT rewritten - a force-push breaks every clone, and per the policy
    above the commit record is evidence rather than exposure.
- - The GitHub RELEASE BODIES are published separately from RELEASE-*.md and still carry the old
-   wording; editing them is an outward-facing action and was not done unprompted."""
+ - JF and NR remain initialisms of what they model (see above).
+GITHUB RELEASE BODIES DONE 2026-08-05 (user: "work github release bodies"). Scanned all 20 published
+bodies from the live API - they are stored separately from RELEASE-*.md and did NOT match it, so the
+repo files could not be used as the source. 9 lines across 5 releases carried a clean-room product
+name: v2.6.1 (4x Three Sisters), v1.4.1 + v1.4.0 (Rainmaker), v1.0.0 (Bionic Lester, Three Sisters),
+v0.1.0 (Numeric Repetitor). All reworded to descriptive language via `gh release edit --notes-file`,
+rebuilt BYTE-EXACT from the originals so only the intended text differs - the first attempt had
+normalised CRLF to LF and would have rewritten all 189 lines of the v2.6.1 body for nothing.
+Originals backed up before editing. Re-scanned the live API afterwards: zero brand hits across every
+published release.
+NOT changed, deliberately: v2.0.0's "Inspired by the Shards preset" - a community preset by a named
+individual (Joe Filbrun, credited in the README acknowledgements), so it falls under category A
+attribution rather than brand association, and RELEASE-2.0.0.md was left alone for the same reason.
+NOTE the repo/API divergence found here: RELEASE-2.3.0.md contained a "bring your own Canals / Three
+Sisters" line that the published v2.3.0 body did not, and v1.4.1/v1.4.0/v1.0.0/v0.1.0 carried hits
+with no corresponding RELEASE-*.md at all. Future release-note edits must treat the two as separate
+surfaces."""
 verify = { kind = "manual", ref = "no clean-room/profiled product name appears in any user-visible string, README table, or release note; all license-required author credits remain intact in README acknowledgements" }
 note = """Supersedes the informal rule in [[feedback_no_third_party_branding]] by adding the
 attribution half. Open: whether to edit the published GitHub release bodies to match the reworded
