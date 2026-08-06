@@ -2151,6 +2151,41 @@ truncated (draw-thread stack, safe). The earlier overlap-average/512-FFT interpr
 wrong and was reverted. DONE 2026-07-22 (scope 1.2.3, both arches, 0 hints)."""
 
 [[item]]
+id = "scope-probe-pool-leak"
+title = "Scope timebase leaked into the firmware's MiniScope via the shared FifoProbe pool"
+status = "wip"
+stamped = "2026-08-05T23:25:31-05:00"
+area = "dsp"
+touches = ["mods/scope/ScopeGraphic.h"]
+attested = """2026-08-05 FIXED (scope 1.2.7), hardware confirmation owed. User: "when we adjust
+timescale and gain on scope units the changes can leak to the built in miniscope and persist when
+monitoring signals even after deleting scope unit where we made changes."
+ROOT CAUSE, traced not guessed. od::AudioThread::getFifoProbe() serves from a SHARED ObjectCache
+(AudioThread.cpp:104-112), and od::FifoProbe is constructed with decimate = 2
+(FifoProbe.h:12). The firmware's own od::MiniScope::connectProbe (MiniScope.cpp:262-287) acquires
+from that same pool and NEVER calls setDecimation - it just relies on getting a probe in the default
+state. ScopeGraphic::setDecimation() mutates the pooled object (mpProbe->setDecimation(d)) to carry
+the user's timebase, and disconnectProbe() released it WITHOUT restoring the default. So the next
+consumer of that probe - the built-in MiniScope, i.e. all signal monitoring - inherited the unit's
+timebase, and it persisted after the unit was deleted because the dirty probe simply sat in the pool.
+FIX: restore setDecimation(2) and reset() the buffer before releaseFifoProbe, so the probe goes back
+in the state the pool promises. Named constant kPoolDefaultDecimation with the reasoning in-comment,
+since the coupling is invisible from this file alone.
+ON THE "GAIN" HALF of the report: ScopeGraphic::mGain is a plain member consumed only at draw time
+and CANNOT leak. The single decimation leak explains both symptoms - MiniScope's trigger threshold
+comes from an EWMA over the probe contents, so at 32x the intended decimation the window covers 32x
+more time, the trigger re-acquires differently and the trace's apparent scale changes. Worth
+re-checking on hardware that the gain symptom is gone once the timebase leak is; if any gain
+weirdness survives, it is a SEPARATE bug and this note should not be trusted to cover it.
+AUDIT: ScopeGraphic.h is the ONLY file in habitat that touches the probe pool - Spectrogram does not
+use FifoProbe at all - so no other unit can leak this way.
+Both arches, graphic-virtual lint OK, pkg installed."""
+verify = { kind = "manual", ref = "set a Scope unit to an extreme timebase and gain, delete the unit, then monitor any signal with the built-in scope: the display must be back to its normal timebase, and must stay normal across further inserts/deletes" }
+note = """Class of bug worth remembering: habitat code that borrows a POOLED firmware object must hand
+it back in the state the pool promises. The firmware consumer never re-initialises what it did not
+set. See also [[feedback_package_trig_lut]] for the other package/firmware boundary hazard."""
+
+[[item]]
 id = "release-v2-8-0"
 title = "v2.8.0 release: hardware test matrix, then ship 6 packages (house pending a call)"
 status = "wip"

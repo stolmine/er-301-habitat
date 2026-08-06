@@ -172,6 +172,9 @@ namespace scope_unit
     int   mCalculateCount = 0;
     bool  mShowStatus = false;
 
+    // FifoProbe's constructor default (FifoProbe.h: decimate = 2). The shared
+    // pool hands probes out in this state and od::MiniScope depends on it.
+    static const int kPoolDefaultDecimation = 2;
     static const int WarmUpTime = 10;
     static const int RefreshTime = 2;
 
@@ -259,6 +262,21 @@ namespace scope_unit
       if (mpProbe)
       {
         od::AudioThread::disconnect(&mpProbe->mInput);
+        // RESTORE THE POOL DEFAULT BEFORE HANDING THE PROBE BACK.
+        //
+        // od::AudioThread::getFifoProbe() serves from a SHARED ObjectCache, and
+        // FifoProbe is constructed with decimate = 2. The firmware's own
+        // od::MiniScope acquires from that same pool and NEVER calls
+        // setDecimation - it simply relies on getting a probe in the default
+        // state. So a probe released while still carrying this unit's timebase
+        // leaks that timebase into the firmware's signal monitoring, and it
+        // persists after the unit is deleted because the dirty probe stays in
+        // the pool for the next consumer.
+        //
+        // Reset the buffer too: the next consumer must not inherit samples
+        // captured at our decimation rate.
+        mpProbe->setDecimation(kPoolDefaultDecimation);
+        mpProbe->reset();
         od::AudioThread::releaseFifoProbe(mpProbe);
         mpProbe = nullptr;
         mEWMA.setInitialState(0.0f);

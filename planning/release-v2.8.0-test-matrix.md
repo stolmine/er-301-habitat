@@ -11,7 +11,7 @@ v2.8.0 ships those six **plus `house`**, which has never been published: seven.
 |---|---|---|---|---|
 | spreadsheet | 2.8.3 | 2.8.3.90 | yes | largest change set |
 | biome | 2.2.1 | 2.2.1.18 | yes | 4 new units + a breaking control change |
-| scope | 1.2.1 | 1.2.6 | yes | 3 new units + sub-display |
+| scope | 1.2.1 | 1.2.7 | yes | 3 new units + sub-display + a probe-pool leak fix |
 | catchall | 0.4.0 | 0.4.0.1 | yes | mix detent only |
 | mi | 1.0.4 | 1.0.4 | yes | unchanged, republish |
 | peaks | 1.0.0 | 1.0.0 | yes | unchanged, republish |
@@ -76,6 +76,7 @@ units. The default paths should be unchanged, but that is the claim under test.
 | 3.7 | **Spectrogram 3 / 4 / 6** | scope | Insert each; feed broadband. | Wider canvas; 4 and 6 ply are backed by a 512-pt FFT (256 real bins). |
 | 3.8 | **Spectrogram** (all) | scope | Sub-display: S1 freq log/lin, S2 amp log/lin/exp, S3 peak readout. | Modes switch and **persist across save/reload**. Peak reads the dominant frequency + dB. |
 | 3.9 | **Spectrogram** (all) | scope | Encoder on S1/S2. | One step per ~4 detents, acceleration-independent. |
+| 3.9b | **Scope** (all variants) | scope | Set an extreme timebase + gain, **delete the unit**, then monitor any signal with the built-in scope. | Built-in display back to normal and stays normal. This leaked before 1.2.7. |
 | 3.10 | **Vitrail tunnel viz** | spreadsheet | Watch the Clock Src ply while playing. | Reads as depth at 42x64; rotation tracks A/B drift (Src=Both); resonance steps the polygon; Cut A/B imbalance banks it. Check frame rate. |
 
 ## Tier 4 — lower risk

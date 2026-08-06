@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**172 items** — 44 done, 19 wip, 107 todo, 2 blocked. *Rendered 2026-08-05.*
+**173 items** — 44 done, 20 wip, 107 todo, 2 blocked. *Rendered 2026-08-05.*
 
 ## DSP
 
@@ -21,6 +21,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ~ | `ngoma-grit-tuning` | Ngoma grit: noise phase-mod too weak below 0.8 - re-fit depth vs re-pinned hardware | manual · 2026-07-23 |
 | ~ | `ngoma-shape-fm-campaign` | Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping) | manual *(attested)* · 2026-07-22 |
 | ~ | `ngoma-shape0-level-campaign` | Ngoma shape-0 fundamental level structure (oscillator phase coherence at low r) | manual · 2026-07-23 |
+| ~ | `scope-probe-pool-leak` | Scope timebase leaked into the firmware's MiniScope via the shared FifoProbe pool | manual *(attested)* · 2026-08-05 |
 | ~ | `trinity-fm-unit` | Profile Modbap Trinity FM voice + build ER-301 FM drum unit | manual · 2026-07-20 |
 | ~ | `vitrail-unit` | Vitrail - dual switched-capacitor character filter unit | manual · 2026-07-18 |
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
