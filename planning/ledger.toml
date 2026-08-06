@@ -2113,6 +2113,49 @@ truncated (draw-thread stack, safe). The earlier overlap-average/512-FFT interpr
 wrong and was reverted. DONE 2026-07-22 (scope 1.2.3, both arches, 0 hints)."""
 
 [[item]]
+id = "switch-1-to-n-unit"
+title = "1-to-N switch unit: output selection + output count + passthrough, on the multi-out framework"
+status = "todo"
+stamped = "2026-08-05T22:20:15-05:00"
+area = "units"
+verify = { kind = "manual", ref = "a unit that takes the chain input and routes it to exactly one of N sub-outputs, with a selectable destination, a settable destination count, and a passthrough toggle controlling whether the chain continues to the right; no click at the switch point; setting round-trips" }
+links = { depends_on = ["multiout-framework-quadlfo"] }
+note = """User idea, 2026-08-05: "a simple 1 > N switch, a unit with three controls. 1) output
+selection 2) number of outputs 3) passthrough. this would dynamically adjust number of outputs
+exposed via multiout framework, and allow signal from the left to pass through to the right or not.
+input just comes from the left."
+BLOCKING CONSTRAINT, read from the framework docs BEFORE any code:
+docs/multi-output-units-author-guide.md:197 states plainly - "The framework today assumes FIXED
+sub-out count declared at Unit init." The count comes from the LENGTH of args.subOutLabels, which is
+set in init() before Unit.init(self, args) runs, alongside args.channelCount. Confirmed against all
+three in-repo multi-out units (JF, Canals, Mirror): every one declares a fixed list and none varies
+at runtime. So control (2) as literally specified - dynamically adding/removing EXPOSED outputs on an
+inserted unit - is not buildable without a firmware-side framework change.
+THREE WAYS TO GET THE INTENT, decision owed:
+ (a) FIXED MAX + ACTIVE RANGE. Declare the maximum once; the "outputs" control bounds which
+     destinations the selector can reach and the rest go silent. One unit, keeps all three controls,
+     but the picker still shows every slot including the inactive ones.
+ (b) VARIANT FAMILY (Switch 4 / 6 / 8), count fixed per variant, no count control. Exactly the
+     habitat precedent already used by Fade Mixer 4/6/8 and Spectrogram 3/4/6, and the cleanest UI;
+     costs the count control.
+ (c) Extend the framework to a dynamic count. Firmware-side, far bigger than the unit.
+DESIGN NOTE worth keeping either way - WHAT SUB-OUT 1 SHOULD BE. All three existing habitat multi-out
+units reserve Out1/Out2 as the chain L/R pair and start their real outputs at Out3. That resolves the
+passthrough question neatly: make Out1/Out2 the PASSTHROUGH (input, or silence when the toggle is
+off) and put the N switch destinations at Out3..Out(N+2). Two payoffs - the passthrough control then
+has an obvious home, and on VANILLA firmware (where sub-outs 3+ are invisible, per the guide's
+compatibility contract) the unit degrades into a harmless passthrough instead of a dead end.
+Budget the count accordingly: N destinations needs N+2 framework outputs, and the guide's practical
+ceiling is single digits, so N=6 (8 outputs) is comfortable and N>=8 starts fighting the M6 cycler.
+DECLICK: switching a live signal between destinations steps both the outgoing and incoming outs.
+Reuse the pattern just shipped in FadeMixer (see [[fademixer-snap-mode]]): per-destination gains
+chasing 0/1 targets through a ~3 ms one-pole, coefficient chosen at block rate so the per-sample path
+stays branchless.
+Also settle whether selection is CV-modulatable - if so it wants an od::Inlet or a ParameterAdapter,
+not an od::Option ([[feedback_inlet_vs_parameter_audio_rate_mod]], [[feedback_option_vs_parameter]]).
+Package: biome fits the utility character (it already hosts Fade Mixer and Gridlock)."""
+
+[[item]]
 id = "fademixer-snap-mode"
 title = "Fade Mixer: Smooth/Snap config option so the family works as N-to-1 switches too"
 status = "wip"
