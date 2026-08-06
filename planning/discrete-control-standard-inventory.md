@@ -176,6 +176,47 @@ One borderline worth an ear: **LaretClockControl's `div` (1-16)**. A clock divid
 is arguably enumerated — landing on ÷4 rather than ÷3 matters — but it is also an
 ordered magnitude. Left raw; flip it if it reads wrong.
 
+## Biome comb, 2026-08-05 (2.2.1.19) — COMPLETE
+
+Small surface, three controls. Catchall deliberately excluded (user: those units
+are "meant to be abandoned but available").
+
+**ModeSelector.lua and DiscreteStep.lua are now byte-identical across biome and
+spreadsheet.** biome's copy had drifted — it lacked the fine/double-threshold
+handling, currentIndex/setIndex and discreteJumpStep entirely. Both files require
+only framework modules (`Base.Class`, `Encoder`, `Unit.ViewControl.GainBias`), so
+a straight copy is safe and keeps the two from diverging again.
+
+| Control | Treatment |
+|---|---|
+| **Discont** shaper type (7 modes) | selector opted in |
+| **Latch Filter** mode (2) | selector opted in |
+| **NRCircle** prime (32) / mask (4) / factor (17) | all three via `DiscreteStep` |
+| CodescanFilter kernel length 4-64 | raw — count |
+| PingableScaledRandom 0-128, Quantoffset 2-128 | raw — magnitudes |
+| NR length 1-16 | raw — count |
+
+NRCircle's three are the interesting case: `prime` picks one of **32 rhythm
+patterns**, so each value is a distinct pattern rather than more of something.
+`factor` (0-16) is the judgment call — borderline magnitude, but it sits on the
+same control as prime and mask and mixed feel across three adjacent sub-buttons
+would be worse than either choice applied consistently.
+
+### A trap this comb exposed
+
+NRCircle stores its readouts as `self.prime` / `self.mask` / `self.factor`, not
+the `self.*Readout` convention every other control uses. The first edit used the
+conventional names, which in Lua is not an error — `self.primeReadout` is simply
+`nil`, the equality test is always false, and the control silently keeps its old
+behaviour. **That is indistinguishable from "the fix didn't take"**, which is
+exactly the symptom Pecto produced for a different reason.
+
+Guard added: an audit that every `DiscreteStep.encoder(self, self.X, ...)` target
+`X` is actually assigned somewhere in its own file. All 22 call sites across both
+packages pass. Re-run it after any new application:
+
+    grep -rn 'DiscreteStep.encoder(self, self\.' mods/*/assets/*.lua
+
 ## Risk
 
 `ModeSelector.lua` is duplicated in biome and spreadsheet and is consumed by ~20

@@ -113,7 +113,9 @@ function LatchFilter:onLoadViews()
       biasUnits     = app.unitNone,
       biasPrecision = 0,
       initialBias   = 0,
-      modeNames     = modeNames
+      modeNames     = modeNames,
+      discrete = true,
+      discreteThreshold = 8
     }
   }, {
     expanded  = { "tune", "fundamental", "resonance", "mode" },

@@ -3,6 +3,7 @@ local libstolmine = require "biome.libbiome"
 local Class = require "Base.Class"
 local Base = require "Unit.ViewControl.EncoderControl"
 local Encoder = require "Encoder"
+local DiscreteStep = require "biome.DiscreteStep"
 
 local ply = app.SECTION_PLY
 local center1 = app.GRID5_CENTER1
@@ -117,6 +118,7 @@ end
 function NRCircle:setFocusedReadout(readout)
   if readout then readout:save() end
   self.focusedReadout = readout
+  DiscreteStep.reset(self)
   self:setSubCursorController(readout)
 end
 
@@ -178,6 +180,17 @@ end
 
 function NRCircle:encoder(change, shifted)
   if self.focusedReadout then
+    -- All three address ENUMERATED SETS, not magnitudes: prime picks one of 32
+    -- rhythm patterns, mask one of 4, factor one of 17 - each value is a
+    -- distinct pattern rather than more of something. So they step whole
+    -- entries under the discrete standard and a fast turn cannot skip one.
+    if self.focusedReadout == self.prime then
+      return DiscreteStep.encoder(self, self.prime, change, 0, 31)
+    elseif self.focusedReadout == self.mask then
+      return DiscreteStep.encoder(self, self.mask, change, 0, 3)
+    elseif self.focusedReadout == self.factor then
+      return DiscreteStep.encoder(self, self.factor, change, 0, 16)
+    end
     self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
   end
   return true

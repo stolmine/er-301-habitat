@@ -72,7 +72,9 @@ function Discont:onLoadViews()
       biasUnits     = app.unitNone,
       biasPrecision = 0,
       initialBias   = 0,
-      modeNames     = modeNames
+      modeNames     = modeNames,
+      discrete = true,
+      discreteThreshold = 8
     },
     amount = GainBias {
       button        = "amt",
