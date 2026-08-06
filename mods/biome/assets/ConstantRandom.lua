@@ -28,7 +28,7 @@ function ConstantRandom:onLoadGraph(channelCount)
   self:addMonoBranch("rate", rate, "In", rate, "Out")
 
   local slew = self:addObject("slew", app.ParameterAdapter())
-  slew:hardSet("Bias", 0.003)
+  slew:hardSet("Bias", 0.0)
   tie(op, "Time", slew, "Out")
   self:addMonoBranch("slew", slew, "In", slew, "Out")
 
@@ -42,6 +42,23 @@ local views = {
   expanded = { "rate", "slew", "level" },
   collapsed = {}
 }
+
+-- The built-in slewTimes map (timeOctaveMap 0.003..1000) cannot reach 0, so the
+-- fastest it offers is 3 ms of glide - there is no true sample-and-hold on it.
+-- The framework solves exactly this for FREQUENCY with octaveMapWithZero, which
+-- allocates one extra LUT slot and prepends 0 before the octave series; it just
+-- never shipped the time equivalent. This is that, built the same way, so 0 ms
+-- (a hard jump, pure S&H) sits at the bottom of the throw.
+local slewMapWithZero = (function()
+  local low, high = 0.003, 1000
+  local n, x = 0, low
+  while x < high do n = n + 1; x = x * 2 end
+  local map = app.LUTDialMap(n + 1)
+  map:add(0)
+  x = low
+  while x < high do map:add(x); x = x * 2 end
+  return map
+end)()
 
 -- Rate bottoms out at exactly 0 Hz = paused (the DSP holds its last value
 -- there). Steps are the framework's own [0,10] pattern one decade up:
@@ -81,9 +98,9 @@ function ConstantRandom:onLoadViews(objects, branches)
     branch = branches.slew,
     gainbias = objects.slew,
     range = objects.slew,
-    biasMap = Encoder.getMap("slewTimes"),
+    biasMap = slewMapWithZero,
     biasUnits = app.unitSecs,
-    initialBias = 0.003,
+    initialBias = 0.0,
     scaling = app.octaveScaling,
     gainMap = Encoder.getMap("gain")
   }

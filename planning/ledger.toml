@@ -1546,6 +1546,16 @@ verbatim from GatedSlewLimiter/ExpoD: biasMap Encoder.getMap("slewTimes") (timeO
 The private 0-1 "amount" it replaces was worse than just narrow - the law
 coeff = (1-s)*50 + 1 is hyperbolic in s, so the middle HALF of the dial (0.25..0.75) spanned only
 22..39 ms while the last 25% jumped 74 ms -> 1 s. New throw is 3 ms .. 786 s in even octaves.
+TRUE 0 ms RESTORED (2026-08-05, biome 2.2.1.16). The built-in slewTimes map bottoms out at 0.003 s,
+so taking it wholesale had quietly REMOVED pure sample-and-hold - the fastest setting was 3 ms of
+glide. User: "slew on constant random should be capable of sitting at true 0ms." The DSP already
+handled it (alpha = 1.0 for any time under one sample); the MAP was the limit.
+The framework solves exactly this for FREQUENCY - octaveMapWithZero allocates one extra LUT slot and
+prepends 0 before the octave series - but never shipped the TIME equivalent. Built that locally the
+same way: 20 slots, entry 0 = 0.0, then 0.003..786 s in octaves. Default moved to 0.0, which restores
+the ORIGINAL shipped behaviour (old slew=0 was instant).
+Verified: at 0 the one-pole coefficient is exactly 1.0, so the value equals its target on the FIRST
+sample - a genuine hard jump, not a fast glide. One detent up is 3 ms as before.
 DSP: the Parameter is renamed Slew -> Time and now carries SECONDS;
 alpha = (t > dt) ? 1 - exp(-dt/t) : 1, so a time under one sample is a hard jump = pure S&H, which
 preserves what the old slew=0 default did. New default 0.003 (the map floor) keeps the shipped

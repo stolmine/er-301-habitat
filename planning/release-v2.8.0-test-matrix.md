@@ -43,6 +43,7 @@ DSP wholesale.
 | 1.4 | **Ngoma** | NEON SoA kernel, 14 modes. | CPU meter, mono chain. | ~10% mono. Flag if materially higher. |
 | 1.5 | **Ngoma** | Shape / Character / Grit / Decay all refitted. | Sweep each full throw. | No dropouts, no NaN silence, no runaway. Known misses in `ngoma-known-residuals`. |
 | 1.6 | **Constant Random** | **BREAKING**: Slew is now **seconds**, was a 0-1 amount. | Load a pre-v2.8 patch using Slew. | Slew reads as seconds — a stored 0.5 now means 0.5 s, not 38 ms. Expected; needs re-dialling. |
+| 1.6b | **Constant Random** | Slew throw is 0 ms .. 786 s; **0 is a true hard jump**. | Set slew to the bottom of the throw; trigger fast rates. | Pure sample-and-hold, stepped, zero glide. One detent up gives 3 ms. |
 | 1.7 | **Constant Random** | Rate map linear 0.01-100 → **0-100, coarse 0.1 Hz**. | Dial rate near 0.05 Hz. | One coarse detent moves 0.1 Hz, not 1.0. Slow end usable. |
 | 1.8 | **Constant Random** | **0 Hz = pause** (was a 0.01 Hz floor). | Set rate 0, wait 5 min. | Output freezes on the held value. No new steps at all. |
 | 1.9 | **Constant Random** | Level default **1.0 → 0.5**, map now bipolar `[-1,1]`. | Insert fresh; then set level negative. | Default swings ±5 V not ±10 V. Negative level inverts. |
