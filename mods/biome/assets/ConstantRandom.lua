@@ -42,9 +42,14 @@ local views = {
   collapsed = {}
 }
 
+-- Rate bottoms out at exactly 0 Hz = paused (the DSP holds its last value
+-- there). Steps are the framework's own [0,10] pattern one decade up:
+-- coarse 0.1 Hz, with superCoarse/fine/superFine extrapolated at the 10x
+-- ratio the built-in maps use. The old map was linear 0.01..100 stepping 1 Hz
+-- coarse, which put the entire sub-1 Hz range inside a single detent.
 local rateMap = (function()
-  local m = app.LinearDialMap(0.01, 100)
-  m:setSteps(10, 1, 0.1, 0.01)
+  local m = app.LinearDialMap(0, 100)
+  m:setSteps(1, 0.1, 0.01, 0.001)
   return m
 end)()
 
@@ -71,7 +76,10 @@ function ConstantRandom:onLoadViews(objects, branches)
     range = objects.rate,
     biasMap = rateMap,
     biasUnits = app.unitHertz,
-    biasPrecision = 2,
+    -- 3 decimals so the extrapolated fine/superFine steps (0.01 / 0.001 Hz)
+    -- are actually visible; the slow end is exactly where that resolution
+    -- earns its place.
+    biasPrecision = 3,
     initialBias = 5.0
   }
 

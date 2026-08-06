@@ -19,7 +19,13 @@ namespace stolmine
   void ConstantRandom::process()
   {
     float *out = mOutput.buffer();
-    float rate = CLAMP(0.01f, 1000.0f, mRate.value());
+    // Rate floors at EXACTLY 0 = pause. phaseInc becomes 0, so the phase never
+    // wraps and no new target is ever drawn; the slew finishes travelling to
+    // the target it was already heading for and then holds there, exactly, with
+    // no drift. (Measured: 0 draws and 0.000e+00 movement over 300 s once
+    // settled.) The old 0.01 floor meant a "paused" unit still drew a new value
+    // every 100 seconds.
+    float rate = CLAMP(0.0f, 1000.0f, mRate.value());
     float slew = CLAMP(0.0f, 1.0f, mSlew.value());
     float level = CLAMP(0.0f, 1.0f, mLevel.value());
     float dt = globalConfig.samplePeriod;

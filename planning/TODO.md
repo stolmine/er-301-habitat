@@ -147,7 +147,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `peaks-refinements` | Peaks: Tap LFO clock frequency-counter display, PLO continuous phase-increment, step-position viz | manual · 2026-07-09 |
 |   | `pecto-expansion-views` | Pecto: add per-control expansion views so submenu params open as full faders on enter (impasto pattern) | manual · 2026-07-14 |
 |   | `petrichor-tap-macros` | Petrichor: CV-modulatable macro filter-cutoff offset + tap-pitch macro + xform spread param | manual · 2026-07-09 |
-|   | `rate-time-control-octave-maps` | Rate/time controls on wide-ratio LINEAR dial maps swing far too wide; adopt octave maps | manual · 2026-08-05 |
+|   | `rate-time-control-octave-maps` | Rate/time controls on wide-ratio LINEAR dial maps swing far too wide (Constant Random fixed; audit open) | manual · 2026-08-05 |
 |   | `scope-channel-focus` | Scope: channel focus display switching (show L or R by channel-button selection) | manual · 2026-07-09 |
 |   | `scope-goniometer` | Goniometer / Lissajous — XY stereo-field scope with correlation readout | screenshot: insert; confirm goniometer (L+R vs L-R) or arbitrary-XY Lissajous display with a +1..-1 correlation readout; negligible DSP · 2026-07-09 |
 |   | `ui-editmode-border-expanded` | Edit-mode border vanishes on expanded-graphic + M-hold (user report, needs repro) | manual · 2026-07-09 |

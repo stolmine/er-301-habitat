@@ -1465,7 +1465,7 @@ note = """Two standards, now documented (docs/knowledge-base.md Conventions -> '
 
 [[item]]
 id = "rate-time-control-octave-maps"
-title = "Rate/time controls on wide-ratio LINEAR dial maps swing far too wide; adopt octave maps"
+title = "Rate/time controls on wide-ratio LINEAR dial maps swing far too wide (Constant Random fixed; audit open)"
 status = "todo"
 stamped = "2026-08-05T21:42:49-05:00"
 area = "ui"
@@ -1489,7 +1489,25 @@ straight at it and left it alone because the built-in `rate` LUT (0/10/100/1000/
 match. That judgement is what real use has now overturned: the absence of an exact built-in analogue
 does not make a four-decade linear map acceptable. Re-audit the other "(c) no clean analog" verdicts
 in that inventory with the same skepticism - "no exact builtin" was being read as "leave as is".
-AUDIT CANDIDATES (crude sweep: every app.LinearDialMap in mods/*/assets/*.lua whose max/min ratio is
+CONSTANT RANDOM RESOLVED 2026-08-05 (biome 2.2.1.10) - and NOT by the octave map proposed above.
+User's call: "realistically coarse can be .1 hz, you can extrapolate for other incs. also, it
+should bottom out at 0hz for pause." So the map stays LINEAR and simply gets sane steps:
+app.LinearDialMap(0, 100) with setSteps(1, 0.1, 0.01, 0.001) - the framework's own [0,10] step
+pattern one decade up, coarse as specified and the rest extrapolated at the 10x ratio the built-in
+maps use. biasPrecision 2 -> 3 so the extrapolated fine/superFine are actually visible on the
+readout. One coarse detent at 0.05 Hz is now 0.05 -> 0.15 Hz (was 0.05 -> 1.05).
+Worth keeping in mind for the rest of the audit: a well-chosen LINEAR map with the right step sizes
+was the right answer here, so "wide ratio -> convert to octave" is NOT the rule. The octave form
+buys proportional steps across decades; this control instead wanted a usable absolute resolution at
+the slow end plus a hard zero, which linear gives directly.
+0 Hz = PAUSE, which needed a DSP change too: ConstantRandom.cpp clamped rate to a 0.01 Hz floor, so
+a "paused" unit still drew a new random every 100 s (measured: 2 draws in 300 s). Floor is now
+exactly 0.0f - phaseInc goes to 0, the phase never wraps, no target is ever drawn, and the slew
+finishes travelling to the target it was already heading for and then holds there. Measured: 0 draws
+and 0.000e+00 movement over 300 s once settled. Note the held value is the TARGET, not the
+instantaneous value at the moment of pause - if a slow slew was mid-travel it completes first.
+Both arches, ConstantRandom.o 0 NEON suspect hints, pkg installed to emu. Emu audition owed.
+AUDIT CANDIDATES (crude sweep:AUDIT CANDIDATES (crude sweep: every app.LinearDialMap in mods/*/assets/*.lua whose max/min ratio is
 >= 50x - this is a CANDIDATE list, not a fix list, and each needs its quantity class judged):
   biome     CodescanOsc 0.1..2000, VarishapeOsc 0.1..2000, VarishapeVoice 0.1..2000,
             ConstantRandom rate 0.01..100, SpectralFollower 20..20000 + 0.0001..0.5 + 0.0001..5,
