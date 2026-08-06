@@ -1,4 +1,5 @@
 local Class = require "Base.Class"
+local Encoder = require "Encoder"
 local GainBias = require "Unit.ViewControl.GainBias"
 
 local ModeSelector = Class {}
@@ -22,6 +23,13 @@ function ModeSelector:init(args)
   -- INDICES; only the stored units change. Requires modeNames to span the
   -- full index range.
   self.normalized = args.normalized
+  -- `discreteCoarseStep`: how many modes one coarse step covers. Long lists
+  -- with internal structure (Vitrail's routing is 2 halves x 5x5 filter pairs)
+  -- want coarse to travel a whole SET at a time and fine to pick within it,
+  -- so the two resolutions land on meaningful boundaries instead of the coarse
+  -- turn skipping past entries at an unrelated stride. Default 1 = the old
+  -- single-mode behaviour for every existing consumer.
+  self.discreteCoarseStep = args.discreteCoarseStep or 1
   GainBias.init(self, args)
   self.encoderSum = 0
   -- Range derived from modeNames keys (so we don't depend on the dial map
@@ -78,13 +86,17 @@ end
 
 function ModeSelector:encoder(change, shifted)
   if self.discrete then
+    -- Fine picks one mode at a time; coarse travels a whole set. Both are
+    -- exact multiples of the index, so neither resolution can land between
+    -- entries or skip one.
+    local step = (self.encoderState == Encoder.Fine) and 1 or self.discreteCoarseStep
     self.encoderSum = self.encoderSum + change
     if self.encoderSum > self.discreteThreshold then
       self.encoderSum = 0
-      self:stepDiscrete(1)
+      self:stepDiscrete(step)
     elseif self.encoderSum < -self.discreteThreshold then
       self.encoderSum = 0
-      self:stepDiscrete(-1)
+      self:stepDiscrete(-step)
     end
     return true
   end

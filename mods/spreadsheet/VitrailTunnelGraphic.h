@@ -17,24 +17,61 @@ namespace stolmine
   // the build is -std=gnu++11, where an odr-used static constexpr array member
   // still needs an out-of-class definition.
   static const int kVtVerts = 24;
-  static const int kVtRings = 8;
+  static const int kVtRings = 10;
+  static const int kVtStages = 6;
   static const float kVtVertStep = 2.0f * M_PI / (float)kVtVerts;
   static const float kVtInvRings = 1.0f / (float)kVtRings;
   static const float kVtFocal = 0.55f;    // ring size at unit depth
   static const float kVtBendAmt = 0.30f;  // lateral swing of the far end
+  static const float kVtLean = 0.55f;     // SIGNED shear -> leans left or right
+  static const float kVtSquash = 0.30f;   // foreshortening as it banks
+  static const float kVtTwist = 0.40f;    // radians of spiral per unit depth
+  static const float kVtWobble = 0.17f;   // per-ring out-of-phase wander
+  static const float kVtWobFreq = 1.70f;  // deliberately not a ring multiple
   static const float kVtSwayAmt = 0.06f;  // vertical breathing of the tube
   static const float kVtSwayPitch = 0.45f;
 
-  // Regular triangle inscribed in the unit circle, sampled at the 24 vertex
-  // angles with a corner on vertex 0, normalised so its mean radius is 1. That
-  // keeps the tunnel's visual weight steady as it morphs, instead of shrinking
-  // toward the triangle's smaller area.
-  static const float kVtTri[kVtVerts] = {
-      +1.567340f, +1.108277f, +0.904904f, +0.811315f, +0.783670f,
-      +0.811315f, +0.904904f, +1.108277f, +1.567340f, +1.108277f,
-      +0.904904f, +0.811315f, +0.783670f, +0.811315f, +0.904904f,
-      +1.108277f, +1.567340f, +1.108277f, +0.904904f, +0.811315f,
-      +0.783670f, +0.811315f, +0.904904f, +1.108277f};
+  // Edge count steps DOWN through discrete regular polygons as resonance
+  // rises - circle, 12-gon, octagon, hexagon, square, triangle - rather than
+  // morphing continuously through rounded intermediates. Every one of these
+  // divides 24, so their corners land exactly on vertex samples and stay
+  // sharp at any rotation. A pentagon does not divide 24, which is why the
+  // ladder skips 5.
+  //
+  // Each profile is the polygon's radius sampled at the 24 vertex angles,
+  // normalised so its mean radius is 1: the tunnel keeps a steady visual
+  // weight as it steps down instead of shrinking toward the smaller areas.
+  static const float kVtProfile[kVtStages][kVtVerts] = {
+      // circle
+      {+1.000000f, +1.000000f, +1.000000f, +1.000000f, +1.000000f, +1.000000f,
+       +1.000000f, +1.000000f, +1.000000f, +1.000000f, +1.000000f, +1.000000f,
+       +1.000000f, +1.000000f, +1.000000f, +1.000000f, +1.000000f, +1.000000f,
+       +1.000000f, +1.000000f, +1.000000f, +1.000000f, +1.000000f, +1.000000f},
+      // 12-gon
+      {+1.017332f, +0.982668f, +1.017332f, +0.982668f, +1.017332f, +0.982668f,
+       +1.017332f, +0.982668f, +1.017332f, +0.982668f, +1.017332f, +0.982668f,
+       +1.017332f, +0.982668f, +1.017332f, +0.982668f, +1.017332f, +0.982668f,
+       +1.017332f, +0.982668f, +1.017332f, +0.982668f, +1.017332f, +0.982668f},
+      // octagon
+      {+1.047595f, +0.976203f, +0.976203f, +1.047595f, +0.976203f, +0.976203f,
+       +1.047595f, +0.976203f, +0.976203f, +1.047595f, +0.976203f, +0.976203f,
+       +1.047595f, +0.976203f, +0.976203f, +1.047595f, +0.976203f, +0.976203f,
+       +1.047595f, +0.976203f, +0.976203f, +1.047595f, +0.976203f, +0.976203f},
+      // hexagon
+      {+1.093142f, +0.980084f, +0.946689f, +0.980084f, +1.093142f, +0.980084f,
+       +0.946689f, +0.980084f, +1.093142f, +0.980084f, +0.946689f, +0.980084f,
+       +1.093142f, +0.980084f, +0.946689f, +0.980084f, +1.093142f, +0.980084f,
+       +0.946689f, +0.980084f, +1.093142f, +0.980084f, +0.946689f, +0.980084f},
+      // square
+      {+1.248907f, +1.019728f, +0.914263f, +0.883110f, +0.914263f, +1.019728f,
+       +1.248907f, +1.019728f, +0.914263f, +0.883110f, +0.914263f, +1.019728f,
+       +1.248907f, +1.019728f, +0.914263f, +0.883110f, +0.914263f, +1.019728f,
+       +1.248907f, +1.019728f, +0.914263f, +0.883110f, +0.914263f, +1.019728f},
+      // triangle
+      {+1.567340f, +1.108277f, +0.904904f, +0.811315f, +0.783670f, +0.811315f,
+       +0.904904f, +1.108277f, +1.567340f, +1.108277f, +0.904904f, +0.811315f,
+       +0.783670f, +0.811315f, +0.904904f, +1.108277f, +1.567340f, +1.108277f,
+       +0.904904f, +0.811315f, +0.783670f, +0.811315f, +0.904904f, +1.108277f}};
 
   // VitrailTunnelGraphic - the view down a switched-capacitor tunnel.
   //
@@ -100,25 +137,39 @@ namespace stolmine
       const float ang = mpVitrail->getAngularity();
       const float bend = mpVitrail->getBend();
       const float level = mpVitrail->getLevel();
+      const float spinRad = spin * 2.0f * M_PI;
 
       // ---- unit shape, computed ONCE per frame -------------------------
-      // The per-vertex direction is identical for every ring (only the centre
-      // and the radii change), so the 24 LUT pairs are hoisted out of the ring
-      // loop: 24 interpolated lookups per frame instead of 24 per ring.
-      // Rotating the VERTEX ANGLES (rather than re-indexing the profile) keeps
-      // the triangle's corners perfectly sharp at any rotation.
-      const float spinRad = spin * 2.0f * M_PI;
+      // Resonance selects a DISCRETE polygon from the ladder; it snaps from
+      // one edge count to the next instead of morphing through rounded
+      // in-between shapes.
+      int stage = (int)(ang * (float)kVtStages);
+      if (stage < 0)
+        stage = 0;
+      if (stage > kVtStages - 1)
+        stage = kVtStages - 1;
+      const float *prof = kVtProfile[stage];
+
+      // Unrotated unit shape. The 24 vertex angles are fixed multiples of
+      // 2pi/24, which is exactly stride 3 through the 72-entry LUT, so these
+      // are DIRECT table reads with no interpolation at all. Per-ring rotation
+      // is then a 2x2 rotate of these shared points, which costs far less than
+      // re-sampling 24 interpolated angles for every ring.
       for (int i = 0; i < kVtVerts; i++)
       {
-        float a = kVtVertStep * (float)i + spinRad;
-        float r = 1.0f + ang * (kVtTri[i] - 1.0f);
-        mPx[i] = r * lutCos(a);
-        mPy[i] = r * lutSin(a);
+        mPx[i] = prof[i] * kLutCos[i * 3];
+        mPy[i] = prof[i] * kLutSin[i * 3];
       }
 
       // Half-extent the nearest visible ring is allowed to reach. Generous, so
       // rings genuinely fly past the viewer; the clipper keeps them in the ply.
       const float span = (float)(w < h ? w : h) * 0.5f;
+
+      // Signed shear. A symmetric squash reads as the same lean whichever way
+      // the imbalance goes, so the direction has to live in a term that keeps
+      // its sign; this one leans left for negative bend and right for positive.
+      const float lean = bend * kVtLean;
+      const float squash = 1.0f - kVtSquash * (bend < 0.0f ? -bend : bend);
 
       // ---- rings, far to near ------------------------------------------
       for (int ring = kVtRings - 1; ring >= 0; ring--)
@@ -135,11 +186,19 @@ namespace stolmine
         if (rx > span * 6.0f)
           continue; // so far past the viewer nothing of it lands in the ply
 
-        // Banking: the imbalance both swings the far end sideways and
-        // foreshortens the rings, which is what reads as a change of heading.
-        // Rotating the shape about its own axis would only spin the mouth.
+        // Per-ring rotation. Every term is a function of DEPTH, never of the
+        // array index: rings recycle, so an index-keyed angle would snap when
+        // a ring wrapped. The linear twist is the spiral (each ring further
+        // down the tube is turned a little further, so the whole tube reads as
+        // one continuous helix), and the wobble at a non-ring-multiple rate
+        // keeps neighbours from sitting in a rigid lockstep progression.
+        float ringAng = spinRad + d * kVtTwist +
+                        kVtWobble * lutSin(d * kVtWobFreq + spinRad * 0.5f);
+        float ca = lutCos(ringAng);
+        float sa = lutSin(ringAng);
+
         float depthFrac = d * kVtInvRings;
-        float ry = rx * (1.0f - 0.45f * (bend < 0.0f ? -bend : bend));
+        float ry = rx * squash;
         float cx = (float)cx0 + bend * kVtBendAmt * (float)w * depthFrac;
         // Gentle sway down the length of the tube so the tunnel breathes
         // rather than sitting rigid; this is the "curving torus" term.
@@ -155,13 +214,18 @@ namespace stolmine
         if (shade > 15)
           shade = 15;
 
-        int px = (int)(cx + mPx[kVtVerts - 1] * rx + 0.5f);
-        int py = (int)(cy + mPy[kVtVerts - 1] * ry + 0.5f);
-        for (int i = 0; i < kVtVerts; i++)
+        int px = 0, py = 0;
+        for (int i = 0; i <= kVtVerts; i++)
         {
-          int qx = (int)(cx + mPx[i] * rx + 0.5f);
-          int qy = (int)(cy + mPy[i] * ry + 0.5f);
-          clippedLine(fb, (od::Color)shade, px, py, qx, qy);
+          int k = (i == kVtVerts) ? 0 : i;
+          // rotate the shared unit point, then shear, then project
+          float xr = mPx[k] * ca - mPy[k] * sa;
+          float yr = mPx[k] * sa + mPy[k] * ca;
+          xr += lean * yr;
+          int qx = (int)(cx + xr * rx + 0.5f);
+          int qy = (int)(cy + yr * ry + 0.5f);
+          if (i > 0)
+            clippedLine(fb, (od::Color)shade, px, py, qx, qy);
           px = qx;
           py = qy;
         }

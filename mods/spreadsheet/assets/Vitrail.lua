@@ -119,6 +119,11 @@ function Vitrail:onLoadViews()
       -- See mod ModeSelector notes.
       discrete = true,
       discreteThreshold = 8,
+      -- Routing is 2 halves (series / parallel) x 5 filter-A families x 5
+      -- filter-B partners. Coarse travels one WHOLE FAMILY (5) so it steps
+      -- filter A and lands on set boundaries; fine steps a single entry, so
+      -- it picks the filter-B partner within the current family.
+      discreteCoarseStep = 5,
       -- Parameter carries 0-1; the selector maps to/from the 0-49 index.
       normalized = true
     },

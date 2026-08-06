@@ -274,11 +274,13 @@ namespace stolmine
 
     // ---- Bake the per-block visualization state ------------------------
     // Travel: mean cutoff IS the switched-cap clock rate, so opening the
-    // filter literally flies faster. Scaled to a sane 0.15..3 rings/sec.
+    // filter literally flies faster. 0.45..6 rings/sec - a floor with real
+    // motion in it (a closed filter should still drift, not crawl) under a
+    // ceiling with somewhere to go.
     double kMean = 0.5 * (CLAMP(0.0, 1.0, (double)cutAb[FRAMELENGTH - 1]) +
                           CLAMP(0.0, 1.0, (double)cutBb[FRAMELENGTH - 1]));
     double blockSec = (double)FRAMELENGTH / sr;
-    mVizTravel = (float)wrap01((double)mVizTravel + (0.15 + 2.85 * kMean) * blockSec);
+    mVizTravel = (float)wrap01((double)mVizTravel + (0.45 + 5.55 * kMean) * blockSec);
 
     // Spin: the A/B clock DIFFERENCE, which is the drift beat between the
     // two cores. Converged clocks (Src A or B) barely rotate; Both drifts

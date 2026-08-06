@@ -1632,6 +1632,35 @@ sinf/cosf calls (the swig .o's only trig callers are the pre-existing Seq/PhaseS
 Network/Colmatage graphics), and the 3 SUSPECT NEON hints in that .o are the known pre-existing
 visadhara_pmm::tick2 false positives (planning/filterbank-neon-refactor.md:310), in a file
 untouched since 2026-05-14. Linux pkg installed to emu.
+ITERATION 2 (2026-08-05, spreadsheet 2.8.3.87) - user feedback on the first pass:
+(a) SPEED: floor and ceiling both raised, 0.15..3 -> 0.45..6 rings/sec (a closed filter should
+still drift, not crawl, and the open end needed somewhere to go).
+(b) SHAPE COUNT +30%: kVtRings 8 -> 10.
+(c) EDGES STEP, THEY DO NOT ROUND: replaced the continuous circle<->triangle lerp with a DISCRETE
+ladder - circle / 12-gon / octagon / hexagon / square / triangle, selected by resonance. Every one
+divides 24, so corners land exactly on vertex samples and stay sharp at any rotation; the ladder
+skips the pentagon precisely because 5 does not divide 24. Six profiles x 24 entries, each
+mean-normalised so visual weight holds steady as it steps down.
+(d) SPIRAL + OUT OF PHASE: each ring now carries its own rotation = spin + d*kVtTwist +
+kVtWobble*sin(d*kVtWobFreq + spin/2). The linear twist is the spiral (each ring further down the
+tube turned a little further = one continuous helix); the wobble at a non-ring-multiple rate keeps
+neighbours out of rigid lockstep. CRITICAL: every term is a function of DEPTH, never of the array
+index - rings recycle, so an index-keyed angle would snap on wrap.
+(e) LEAN WAS ONE-DIRECTIONAL: the only strong cue was a SYMMETRIC squash (1 - 0.45*|bend|), which
+reads as the same lean whichever way the imbalance went. Added a SIGNED shear (x += lean*y,
+lean = bend*kVtLean) so it genuinely leans left for negative bend and right for positive; the
+squash stays but is reduced to 0.30 as a supporting cue.
+COST: per-ring rotation would have meant re-sampling 24 interpolated angles per ring, so instead
+the shared unrotated unit shape is built from DIRECT LUT reads (the 24 vertex angles are exactly
+stride 3 through the 72-entry table, no interpolation) and each ring applies a 2x2 rotate. Now 24
+direct reads + 20 interpolated lookups + 240 line() calls per frame.
+(f) ROUTING COARSE/FINE: ModeSelector gained discreteCoarseStep (default 1, so every existing
+consumer is unchanged). Vitrail routing uses 5 - coarse travels one whole filter-A family and
+lands only on set boundaries (verified: stops at 0,5,...,45 plus the clamped 49, and the
+series/parallel split at 25 IS a stop), fine steps a single entry to pick the filter-B partner.
+Both are exact index multiples, so neither can skip an entry or land between sets.
+Both arches build, graphic-virtual lint OK, objdump still shows 0 sinf/cosf from the tunnel, pkg
+installed to emu. STILL UNAUDITIONED.
 OWED: emu audition (does it read as depth at 42x64? is the spin legible? does the bank read as a
 change of heading?), tuning of kVtFocal/kVtBendAmt/kVtSwayAmt by eye, frame-rate check with the
 tunnel on screen, and am335x hardware confirmation."""
