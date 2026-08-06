@@ -13,17 +13,12 @@ plus two character processors, most originally by Chris Johnson (Airwindows):
 kWoodRoom, WoodenBox, CreamCoat, BrightAmbience3, Verbity, Galactic. TickerTape
 and Lacquer are original designs based on his work.
 
-Most of them went through a hybrid-float conversion this cycle -- Cortex-A8 has
-no double-precision NEON, so full-double DSP falls back to scalar VFPv3 and runs
-several times slower than it needs to. kWoodRoom, WoodenBox, Verbity, Lacquer and
-TickerTape's Console0/ChromeOxide chain were converted with the tone verified
-identical against a reference build (1 LSB, correlation 1.0000000), for f64
-operation-count reductions of 75-81%. Galactic and BrightAmbience3 are not yet
-converted and remain heavier.
+Most of them were optimized this cycle with no change to their sound. Galactic
+and BrightAmbience3 have not had that pass yet and remain heavier.
 
 **kWoodRoom** -- Regen / Time / Tone / Reflect / Position / Mix. A 6x6 feedback
 network with cross-feedback inside the matrix, so it is internally stereo. The
-woody, roomy one, and the heaviest of the six before conversion.
+woody, roomy one, and the heaviest of the six.
 
 **WoodenBox** -- Box / Reso / Mix. A 4x4 network with an intentional left/right
 swap through the tank. Small, boxy, resonant; the most obviously "a space" of the
@@ -61,11 +56,10 @@ Original design built from Airwindows parts.
 cores on their own drifting clocks with a shared resonance loop; the aliasing,
 clock combs and breathing self-oscillation emerge from the mechanism rather than
 being tabulated. 50 routing combinations across series and parallel. Its Clock
-Src ply carries a tunnel visualization driven entirely from the DSP: travel
-tracks cutoff (which is the switched-cap clock rate), rotation tracks the A/B
-clock drift, resonance steps the tunnel's cross-section from a circle down
-through a 12-gon, octagon, hexagon and square to a triangle, and cutoff imbalance
-banks the whole thing.
+Src ply carries a tunnel visualization driven from the audio engine rather than
+decoration: cutoff sets how fast you travel, the two clocks drifting against each
+other rotates the tunnel, resonance steps its cross-section from a circle down to
+a triangle, and imbalance between the cutoffs banks the whole thing.
 
 **Expo D** and **Expo AD** (biome) -- simple exponential envelopes with
 continuously variable curve, defaulting to fully exponential. Time controls use
@@ -75,43 +69,30 @@ the built-in ADSR map.
 crossfader.
 
 **Spectrogram 3 / 4 / 6** (scope) -- wide-ply-span spectrum displays. The 4 and 6
-ply units are backed by a 512-point FFT (256 real bins) rather than stretching
-128 bins across a wider canvas.
+ply units use a larger FFT to match, so the extra width is real resolution
+rather than a stretched image.
 
 ## Fixes
 
-**Scope no longer leaks its timebase into the built-in scope.** Adjusting a Scope
-unit's timebase changed the firmware's own signal monitoring, and the change
-persisted after the unit was deleted. The probe is served from a shared pool that
-the firmware's MiniScope also draws from and never re-initialises, so releasing
-it with a modified decimation handed the setting to the next consumer. Scope now
-restores the pool default before releasing.
-
-**Pecto no longer overflows the audio task stack.** Its process() reserved a
-1072-byte stack frame from five per-frame scratch arrays, against an audio task
-stack of 2048 bytes total for the whole chain. This had been present since
-v2.3.0, silently corrupting memory past the stack; recent firmware added the
-canaries that caught it. The buffers moved to the heap and the frame is now 92
-bytes. A build-time check (`tools/check-audio-stack.sh`) now guards the class.
-
-**Fade Mixer's mute and solo work.** They previously did nothing -- the controls
-escaped to the parent chain's mute group where they were unregistered. Mute and
-solo are now unit-local and gate audio per input.
+- Fixed a bug where changing a Scope unit's timebase or gain would alter the
+  built-in scope, and keep affecting it after the unit was deleted.
+- Fixed a crash where Pecto could take down the audio thread after running for a
+  while. Present since v2.3.0.
+- Fixed Fade Mixer's mute and solo buttons, which did nothing.
+- Fixed mid-range mix values losing volume on Network, Fabula, Petrichor and
+  Colmatage.
 
 ## Discrete controls now step consistently
 
-Scrolling through a list of options used to inherit the encoder's acceleration,
-so a fast turn jumped several entries and landing on a specific one was fiddly.
-Every control that addresses a named set -- filter types, shaper types,
-algorithms, patterns, modes, scopes, grids, curves, macros -- now steps one entry
-at a time, acceleration-independent, with the fine setting costing more travel
-rather than a smaller step.
+Picking from a list used to be fiddly: a fast turn would jump several entries
+and overshoot what you wanted. Anything that selects from a named set -- filter
+types, shaper types, algorithms, patterns, modes, curves, macros -- now steps one
+entry per turn regardless of how fast you spin it, on both the faders and the
+sub-display readouts.
 
-This covers 15 controls in spreadsheet and 3 in biome, across both the
-mode-selector faders and the sub-display readouts. Controls that address a
-*count* rather than a set -- step counts, tap counts, ticks, clock divisions,
-semitones -- deliberately keep their old behaviour, because sweeping quickly is
-the point there.
+Controls that set a count rather than pick from a set -- step counts, tap counts,
+ticks, clock divisions, semitones -- are unchanged, since sweeping those quickly
+is the point.
 
 ## Other changes
 
@@ -130,8 +111,6 @@ swings +/-5 V rather than +/-10 V and can invert.
 
 **Mix controls** across every package now share the built-in dial map, so a
 coarse detent moves 0.01. Impasto and Parfait were ten times coarser than that.
-Spreadsheet effects have had their mix fade power laws adjusted for consistent application.
-Mid mix values should no longer drop in volume.
 
 **Ngoma** beyond the engine swap: NEON'd to roughly 10% CPU mono.
 
