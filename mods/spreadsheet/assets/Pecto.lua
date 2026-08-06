@@ -275,7 +275,14 @@ function Pecto:onLoadViews()
       modeNames = {
         [0] = "unif", "fib", "early", "late", "mid", "ess", "flat", "rfib",
         [8] = "r.un", "r.fi", "r.ea", "r.la", "r.mi", "r.es", "r.fl", "r.rf"
-      }
+      },
+      -- Discrete stepping standard (planning/discrete-control-standard-inventory.md):
+      -- coarse = 1 entry at threshold 8, fine = 1 entry at double the travel.
+      -- 16 entries with real structure - [0,7] are the base patterns and [8,15]
+      -- their randomised variants - so shift jumps between the two families.
+      discrete = true,
+      discreteThreshold = 8,
+      discreteJumpStep = 8
     },
     slopeFader = ModeSelector {
       button = "slope",
@@ -287,7 +294,9 @@ function Pecto:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = { [0] = "flat", "rise", "fall", "hump" }
+      modeNames = { [0] = "flat", "rise", "fall", "hump" },
+      discrete = true,
+      discreteThreshold = 8
     },
     resonatorFader = ModeSelector {
       button = "res",
@@ -299,7 +308,9 @@ function Pecto:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = { [0] = "raw", "gtr", "clar", "sitr" }
+      modeNames = { [0] = "raw", "gtr", "clar", "sitr" },
+      discrete = true,
+      discreteThreshold = 8
     },
     inputLevel = GainBias {
       button = "input",

@@ -93,8 +93,10 @@ map value and accelerates. They need the accumulate model in the host control's
 | spreadsheet/VisadharaPitchControl | 2 |
 | catchall/AlembicScanControl | 2 |
 
-`TransformGateControl` is shared by Larets, Pecto, TrackerSeq and MultitapDelay,
-so fixing it once covers four units.
+`TransformGateControl` is shared by **eight** consumers — Etcher, Fabula, Larets,
+Ballot (GateSeq), Pecto, Petrichor (MultitapDelay), Excel (TrackerSeq) and
+RatchetControl — so fixing it once covers all of them. That is the highest
+leverage single file in the worklist, and the widest blast radius.
 
 ### Tier 3 — binary toggles
 
@@ -108,6 +110,17 @@ encoder involved, nothing to standardise. Listed so the audit is complete.
 - `porcelain`, `kryos`, `anamnesis`, `zaum` — not shipping.
 - Integer maps on controls that are **not** user-stepped (internal state,
   serialisation-only parameters).
+
+## Pilot applied 2026-08-05 (spreadsheet 2.8.3.91)
+
+One representative of each category, to prove the standard before any sweep:
+
+| Category | Applied to | Shape |
+|---|---|---|
+| Long selector, internal structure | **Pecto** pattern (16) | coarse 1, threshold 8, **shift jumps 8** between the base and randomised families |
+| Short selectors | **Pecto** slope (4), resonator (4) | coarse 1, threshold 8 |
+| Long flat selector | **Rauschen** algorithm (11) | coarse 1, threshold 8, no shift-jump |
+| Sub-display readout | **TransformGateControl** func | accumulate model open-coded; 8 consumers |
 
 ## Risk
 

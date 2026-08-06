@@ -182,7 +182,12 @@ function Rauschen:onLoadViews(objects, branches)
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 0,
-      modeNames = algoNames
+      modeNames = algoNames,
+      -- Discrete stepping standard: coarse = 1 algorithm at threshold 8, fine =
+      -- the same step at double the travel. Flat 11-entry list with no internal
+      -- grouping, so no shift-jump.
+      discrete = true,
+      discreteThreshold = 8
     },
     viz = vizView {
       dspObject = objects.op

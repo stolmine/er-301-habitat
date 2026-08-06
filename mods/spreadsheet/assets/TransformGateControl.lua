@@ -378,19 +378,52 @@ function TransformGateControl:subReleased(i, shifted)
   return true
 end
 
+-- Step the discrete func readout by whole entries, clamped to funcNames.
+function TransformGateControl:stepFunc(dir)
+  local lo, hi = 0, 0
+  for k in pairs(self.funcNames) do
+    if type(k) == "number" then
+      if k < lo then lo = k end
+      if k > hi then hi = k end
+    end
+  end
+  local cur = math.floor(self.funcReadout:getValueInUnits() + 0.5)
+  local v = cur + dir
+  if v < lo then v = lo end
+  if v > hi then v = hi end
+  if v ~= cur then
+    self.funcReadout:save()
+    self.funcReadout:setValueInUnits(v)
+  end
+  local name = self.funcNames[math.floor(self.funcReadout:getValueInUnits() + 0.5)]
+  if name then self.funcLabel:setText(name) end
+end
+
 function TransformGateControl:encoder(change, shifted)
   if shifted and self.shiftHeld then
     self.shiftUsed = true
   end
+  if self.focusedReadout == self.funcReadout then
+    -- Discrete stepping standard (planning/discrete-control-standard-inventory.md).
+    -- The func readout addresses a NAMED LIST, not a continuous value, so it uses
+    -- the accumulate model rather than the readout's own dial-map stepping: raw
+    -- encoder change is summed and one entry is stepped per threshold, which is
+    -- acceleration-independent. Coarse = threshold 8, fine = double the travel.
+    -- Shared by Etcher / Fabula / Larets / Ballot / Pecto / Petrichor / Excel and
+    -- RatchetControl, so this one change covers EIGHT consumers.
+    local threshold = (self.encoderState == Encoder.Fine) and 16 or 8
+    self.funcSum = (self.funcSum or 0) + change
+    if self.funcSum > threshold then
+      self.funcSum = 0
+      self:stepFunc(1)
+    elseif self.funcSum < -threshold then
+      self.funcSum = 0
+      self:stepFunc(-1)
+    end
+    return true
+  end
   if self.focusedReadout then
     self.focusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
-    if self.focusedReadout == self.funcReadout then
-      local val = math.floor(self.funcReadout:getValueInUnits() + 0.5)
-      local name = self.funcNames[val]
-      if name then
-        self.funcLabel:setText(name)
-      end
-    end
   end
   return true
 end
