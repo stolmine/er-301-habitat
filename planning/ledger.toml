@@ -1464,13 +1464,69 @@ verify = { kind = "manual", ref = "docs/knowledge-base.md 'Dry/wet mix controls'
 note = """Two standards, now documented (docs/knowledge-base.md Conventions -> 'Dry/wet mix controls', + [[feedback_equal_power_drywet_crossfade]]): (1) equal-power sqrt-law crossfade for DECORRELATED dry/wet (tracked separately in [[drywet-crossfade-audit]]); (2) MIX CONTROL COARSE STEP = 0.01 (the 2nd setSteps arg: superCoarse, COARSE, fine, superFine). Inventory (published pkgs): ALREADY 0.01 = Fabula, Colmatage, Larets, Network (spreadsheet), Som, Flakes (catchall), Station X (biome). TO FIX (coarse=0.1) = Pecto, Petrichor(MultitapDelay), Parfait(MultibandSaturator), Impasto(MultibandCompressor) - all spreadsheet, all because their shared floatMap helper uses setSteps(1, 0.1, 0.01, 0.001). FIX: give the MIX control a dedicated map setSteps(0.1, 0.01, 0.001, 0.001) OR a per-control biasCoarseStep=0.01 - do NOT change the shared floatMap globally (it feeds cutoff/feedback/etc. that may want 0.1 coarse). Rings (mi) is a bipolar main/aux balance (Encoder.getMap('[-1,1]')), not a 0..1 dry/wet - out of scope. Fold into the same point release as the crossfade fixes."""
 
 [[item]]
+id = "rate-time-control-octave-maps"
+title = "Rate/time controls on wide-ratio LINEAR dial maps swing far too wide; adopt octave maps"
+status = "todo"
+stamped = "2026-08-05T21:42:49-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "Constant Random's Rate is usable across its whole range - one coarse detent is a musically sensible proportion of the current value at 0.05 Hz as well as at 50 Hz, not a jump clean over the entire slow region. Same for every other rate/time control confirmed to be a real divergence by the audit below." }
+links = { depends_on = ["control-step-standards"] }
+note = """User, 2026-08-05: "constant random's rate increment scaling is awful in use, it swings much
+too wide."
+MEASURED. ConstantRandom.lua:46 is app.LinearDialMap(0.01, 100) with setSteps(10, 1, 0.1, 0.01), i.e.
+LINEAR across four decades. One coarse detent from the 5 Hz default is 5 -> 6 Hz (+20%, fine), but
+one coarse detent from 0.05 Hz is 0.05 -> 1.05 Hz (+2000%). The ENTIRE 0.01..1 Hz region - which is
+the whole point of a slow random CV - is one coarse step wide. superCoarse is +10 Hz, so it crosses
+the useful range in a single detent. The map is linear over a quantity that is perceived
+multiplicatively; that is the bug, not the step VALUES.
+FIX SHAPE: an octave map, per the framework's own standard for this quantity class -
+dialMaps["clockFreq"] = octaveMapWithZero(-5, 5, 2, 1) gives 0.0625..64 Hz at one octave per detent.
+Constant Random wants a wider low end than clockFreq's 0.0625, so either extend the octave range or
+use a matching octaveMapWithZero; do NOT just re-step the linear map.
+IMPORTANT - THIS WAS ALREADY SEEN AND DISMISSED: planning/control-step-standards-inventory.md:191
+lists this exact control and classifies it "(c) no clean analog", so the 2026-07-16 audit looked
+straight at it and left it alone because the built-in `rate` LUT (0/10/100/1000/10000) is not a
+match. That judgement is what real use has now overturned: the absence of an exact built-in analogue
+does not make a four-decade linear map acceptable. Re-audit the other "(c) no clean analog" verdicts
+in that inventory with the same skepticism - "no exact builtin" was being read as "leave as is".
+AUDIT CANDIDATES (crude sweep: every app.LinearDialMap in mods/*/assets/*.lua whose max/min ratio is
+>= 50x - this is a CANDIDATE list, not a fix list, and each needs its quantity class judged):
+  biome     CodescanOsc 0.1..2000, VarishapeOsc 0.1..2000, VarishapeVoice 0.1..2000,
+            ConstantRandom rate 0.01..100, SpectralFollower 20..20000 + 0.0001..0.5 + 0.0001..5,
+            Quantoffset 2..128, Transport 1..300
+  catchall  Lambda 0.1..2000 + 20..20000, Sfera 20..20000, Som 0.001..20 + 0.01..1,
+            SomModControl 0.001..20, SomScanControl 0.01..1
+  spreadsheet BandListControl 20..16000, FilterListControl 20..10000, BandControl 20..20000,
+            DriveControl 50..5000
+COUNTEREXAMPLE, so the sweep is not applied blindly: Transport's 1..300 is BPM, and the framework's
+own dialMaps["tempo"] IS linear (linMap(1, 501, 10, 1, 0.1, 0.01)) - tempo is perceived additively,
+so linear is CORRECT there. Frequency/rate/time are the multiplicative classes; a wide ratio alone
+does not prove a divergence.
+Overlaps the D3 row of [[control-step-standards]] (linear-Hz vs octave for filter/osc cutoff), which
+covers the PITCH side; this item is the RATE/TIME side plus the dismissed-verdict re-audit. Batch
+the fixes into one point release with the rest of the control-standards work - each is a
+shipped-behaviour change that needs an emu audition."""
+
+[[item]]
 id = "control-step-standards"
 title = "Adopt built-in dial-map standards across habitat; inventory every control vs the framework registry"
 status = "todo"
 stamped = "2026-07-16T08:13:07-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "every habitat control's dial map matches the firmware standard for its type (xroot/Encoder.lua dialMaps): normalized 0-1/-1-1 controls use coarse step 0.01; gain uses dB/[-10,10]; cutoff/freq uses octave maps; etc. Divergences fixed or reasoned. Inventory: planning/control-step-standards-inventory.md." }
-note = """User principle (2026-07-16): any 0..1 or -1..1 control should have COARSE step 0.01; more broadly, inventory every control in habitat, find its built-in analogue, and adopt the built-in standard where they differ. CONFIRMED at the framework level: xroot/Encoder.lua dialMaps is the source of truth - default / [-1,1] / [0,1] / unit / [0,2] all use coarse 0.01 (linMap(min,max, superCoarse, COARSE, fine, superFine)); gain = [-10,10] coarse 0.1; volume / gain36dB = decibelMap; filterFreq / oscFreq / clockFreq = octave maps; cents, feedback, int[...], tempo, rate etc. Many habitat units instead roll a private floatMap with setSteps(1, 0.1, 0.01, 0.001) -> coarse 0.1 for normalized controls, diverging. Full inventory (published pkgs, all control types, divergence table + prioritized fixes) dispatched to a Fable 5 agent -> planning/control-step-standards-inventory.md. FIX MECHANISM: private maps shared across many controls can't be globally re-stepped (affects siblings) - use a dedicated map, a per-control step override, or switch to Encoder.getMap. [[mix-control-standards]] is the dry/wet subset (Pecto/Petrichor/Parfait/Impasto at 0.1). Prioritize published packages; batch into a point release. INVENTORY DONE (2026-07-16, planning/control-step-standards-inventory.md, full file:line tables): root cause = a copy-pasted file-local floatMap in two forms - fine (0.1,0.01,...) correct vs coarse (1,0.1,0.01,0.001) = 0.1 coarse. Divergences: D1 normalized-coarse-0.1 (HIGH) = spreadsheet Pecto/Petrichor/Parfait/Impasto/Etcher/Filterbank + biome DJFilter/FadeMixer/Integrator/TiltEQ/CodescanFilter + catchall Alembic; D3 linear-Hz-vs-octave (MED, changes feel) = most osc/cutoff controls; D4 linear-feedback-vs-dB (MED) = Som/Clouds/Mirror/Petrichor/Pecto/Helicase; D2 superFine 0.001-vs-0.0001 (LOW). Clean: peaks/mi/scope (use Encoder.getMap); JF/Visadhara = compliant private-map refs. Fix caveat: D1 units route BOTH normalized + level faders through one floatMap - split into normMap/levelMap or use Encoder.getMap, don't globally re-step. Also found 3 latent range bugs (Colmatage div readout, Etcher SegmentList, DriveControl freqReadout) + 1 unused map (GateSeq scopeMap). Batching: D1+mix+D2 = one mechanical release; D3+D4 = a separate listened-through release (they change parameter feel). D1 DONE (2026-07-16): spreadsheet 2.8.3.3 (Pecto/Petrichor/Parfait/Impasto/Etcher/Filterbank via a normMap helper on strict 0-1/-1-1 controls) + biome 2.2.1.1 (DJFilter cut+q / FadeMixer fade / Integrator leak / TiltEQ tilt / CodescanFilter mix -> framework steps 0.1,0.01,0.001,0.0001). Catchall skipped (unfinished business, not shipped). D3 (linear-Hz->octave) + D4 (linear->dB feedback) remain for the listened-through pass. D3-f0 SUBSET DONE (2026-07-16): the 5 oscillator fundamental controls (spreadsheet Mirror + Helicase, biome VarishapeOsc/VarishapeVoice/CodescanOsc) switched to Encoder.getMap("oscFreq") -> reach 0 Hz + octave/semitone scaling like built-in oscillators (spreadsheet 2.8.3.4 / biome 2.2.1.2, commit a371725). Mirror overview f0 readout repointed to oscFreq to match. Feel-changing (linear-Hz -> octave grid, range now ~0..28 kHz with a 0 Hz point) -> pending hardware audition, folds into the v2.7.1 point release. Mirror/Helicase FORMANT controls left on the linear f0Map (out of scope). Remaining D3: the cutoff/filter-freq controls; plus all of D4."""
+note = """User principle (2026-07-16): any 0..1 or -1..1 control should have COARSE step 0.01; more broadly, inventory every control in habitat, find its built-in analogue, and adopt the built-in standard where they differ. CONFIRMED at the framework level: xroot/Encoder.lua dialMaps is the source of truth - default / [-1,1] / [0,1] / unit / [0,2] all use coarse 0.01 (linMap(min,max, superCoarse, COARSE, fine, superFine)); gain = [-10,10] coarse 0.1; volume / gain36dB = decibelMap; filterFreq / oscFreq / clockFreq = octave maps; cents, feedback, int[...], tempo, rate etc. Many habitat units instead roll a private floatMap with setSteps(1, 0.1, 0.01, 0.001) -> coarse 0.1 for normalized controls, diverging. Full inventory (published pkgs, all control types, divergence table + prioritized fixes) dispatched to a Fable 5 agent -> planning/control-step-standards-inventory.md. FIX MECHANISM: private maps shared across many controls can't be globally re-stepped (affects siblings) - use a dedicated map, a per-control step override, or switch to Encoder.getMap. [[mix-control-standards]] is the dry/wet subset (Pecto/Petrichor/Parfait/Impasto at 0.1). Prioritize published packages; batch into a point release. INVENTORY DONE (2026-07-16, planning/control-step-standards-inventory.md, full file:line tables): root cause = a copy-pasted file-local floatMap in two forms - fine (0.1,0.01,...) correct vs coarse (1,0.1,0.01,0.001) = 0.1 coarse. Divergences: D1 normalized-coarse-0.1 (HIGH) = spreadsheet Pecto/Petrichor/Parfait/Impasto/Etcher/Filterbank + biome DJFilter/FadeMixer/Integrator/TiltEQ/CodescanFilter + catchall Alembic; D3 linear-Hz-vs-octave (MED, changes feel) = most osc/cutoff controls; D4 linear-feedback-vs-dB (MED) = Som/Clouds/Mirror/Petrichor/Pecto/Helicase; D2 superFine 0.001-vs-0.0001 (LOW). Clean: peaks/mi/scope (use Encoder.getMap); JF/Visadhara = compliant private-map refs. Fix caveat: D1 units route BOTH normalized + level faders through one floatMap - split into normMap/levelMap or use Encoder.getMap, don't globally re-step. Also found 3 latent range bugs (Colmatage div readout, Etcher SegmentList, DriveControl freqReadout) + 1 unused map (GateSeq scopeMap). Batching: D1+mix+D2 = one mechanical release; D3+D4 = a separate listened-through release (they change parameter feel). D1 DONE (2026-07-16): spreadsheet 2.8.3.3 (Pecto/Petrichor/Parfait/Impasto/Etcher/Filterbank via a normMap helper on strict 0-1/-1-1 controls) + biome 2.2.1.1 (DJFilter cut+q / FadeMixer fade / Integrator leak / TiltEQ tilt / CodescanFilter mix -> framework steps 0.1,0.01,0.001,0.0001). Catchall skipped (unfinished business, not shipped). D3 (linear-Hz->octave) + D4 (linear->dB feedback) remain for the listened-through pass. D3-f0 SUBSET DONE (2026-07-16): the 5 oscillator fundamental controls (spreadsheet Mirror + Helicase, biome VarishapeOsc/VarishapeVoice/CodescanOsc) switched to Encoder.getMap("oscFreq") -> reach 0 Hz + octave/semitone scaling like built-in oscillators (spreadsheet 2.8.3.4 / biome 2.2.1.2, commit a371725). Mirror overview f0 readout repointed to oscFreq to match. Feel-changing (linear-Hz -> octave grid, range now ~0..28 kHz with a 0 Hz point) -> pending hardware audition, folds into the v2.7.1 point release. Mirror/Helicase FORMANT controls left on the linear f0Map (out of scope). Remaining D3: the cutoff/filter-freq controls; plus all of D4.
+TAXONOMY FRAMING (user, 2026-08-05, prompted by [[rate-time-control-octave-maps]]): the request is
+now explicitly to "classify kinds of controls and then standardize incrementing for them in ticks,
+probably based on similar controls from builtins". That is a stronger form of this item: instead of
+a per-control divergence table, define the CLASSES first (normalized 0-1 / bipolar -1-1 / gain in dB
+/ frequency / rate / time / integer count / discrete selector / tempo / mix), fix the tick behaviour
+per class from the built-in analogue, then assert every habitat control against its class. Two
+lessons already paid for: (1) the quantity class decides LINEAR vs OCTAVE before any step value is
+argued - tempo is legitimately linear, frequency and rate are not; (2) "no exact builtin analogue"
+must not be recorded as "leave as is", which is how ConstantRandom's four-decade linear rate map
+survived the first pass. Discrete selectors are the tick-accumulator axis and live in
+[[controls-discrete-encoder-rollout]]; dry/wet is [[mix-control-standards]].
+"""
 
 [[item]]
 id = "fdn-reverb"
