@@ -11,7 +11,7 @@ This is the deferred follow-up to v2.5.1 — the prior v2.6.0 release was cut an
 Two pieces of headline work plus a pair of safety / robustness fixes:
 
 - **Mirror** — entirely new unit in spreadsheet. A complex oscillator built around the deliberate use of aliasing as the synthesis paradigm. Wavetable formant engine, mod-driven phase threshold sync, four-stage destructive aliasing crusher, true stereo via sync-threshold-derived phase offset, custom Y-axis-reflected phase-space phosphor viz on the overview ply. 6 plies, 8 outlets for self-patching.
-- **Canals** — substantial DSP refresh + **moved from biome to spreadsheet** (removed from biome). The unit that shipped in biome 2.2.0 was a Three Sisters port; the new spreadsheet version is a full rebuild against an external ZDF SVF reference + hardware capture corpus, with audio-rate modulation, 2× oversampling, multi-output picker, and a new 4-input + normalling topology that mirrors the hardware's ALL + per-block input arrangement. Existing biome.Canals patches will need to be re-pointed at spreadsheet.Canals.
+- **Canals** — substantial DSP refresh + **moved from biome to spreadsheet** (removed from biome). The unit that shipped in biome 2.2.0 was an earlier crossover-filter model; the new spreadsheet version is a full rebuild against an external ZDF SVF reference + hardware capture corpus, with audio-rate modulation, 2× oversampling, multi-output picker, and a new 4-input + normalling topology that mirrors the hardware's ALL + per-block input arrangement. Existing biome.Canals patches will need to be re-pointed at spreadsheet.Canals.
 - **Parfait** — safety-clamp fix. The discontinuous if-then-tanh limiter at the post-bandsum stage was generating spectral splatter on every threshold crossing (~0.36-magnitude value-discontinuity); replaced with smooth C∞ pseudo-saturate that asymptotes to the same ±1.5 rail. ~90 dB cleaner above 5 kHz in measurement.
 - **Filterbank** — user-reported "fails to load" bug fix. A single malformed `.scl` file in the front-SD `/scales` directory was throwing inside the Scala parser and killing the whole unit's construction. Parser call now `pcall`-guarded; bad files are silently skipped, all other valid files load normally.
 
@@ -79,7 +79,7 @@ The Shape ply's main graphic is a 96 × 64 phosphor phase-space scope of the L o
 
 ## Canals (DSP refresh + new ownership + 4-input topology, spreadsheet)
 
-The Canals that shipped in biome 2.2.0 was a Three Sisters port living in the wrong package. v2.6.1 retires biome.Canals and ships a full rebuild as spreadsheet.Canals.
+The Canals that shipped in biome 2.2.0 was an earlier crossover-filter model living in the wrong package. v2.6.1 retires biome.Canals and ships a full rebuild as spreadsheet.Canals.
 
 ### What changed (vs the biome version)
 
@@ -94,7 +94,7 @@ The Canals that shipped in biome 2.2.0 was a Three Sisters port living in the wr
 
 ### 4-input + normalling topology (new in this release)
 
-The hardware Three Sisters has separate ALL / LOW / CENTRE / HIGH input jacks with normalling: patching into one of the per-block jacks overrides the ALL feed for that specific block. The new Canals topology mirrors this:
+The reference hardware has separate ALL / LOW / CENTRE / HIGH input jacks with normalling: patching into one of the per-block jacks overrides the ALL feed for that specific block. The new Canals topology mirrors this:
 
 - Main `In1` carries the ALL signal that feeds all three filter blocks by default.
 - Three dedicated audio-rate inlets — `Low In`, `Centre In`, `High In` — act as per-block normalling jacks.
@@ -174,7 +174,7 @@ Fix: `pcall` the per-file `Scala.load` call so a single bad file gets skipped si
 ## Upgrade notes
 
 - Compatible with the firmware that v2.5.1 targeted (`0.7.0-stolmine.9.5.x`). No firmware update required.
-- **biome.Canals patches require migration to spreadsheet.Canals**. The biome version is removed; the spreadsheet version is the canonical Three Sisters port going forward and is the more capable unit.
+- **biome.Canals patches require migration to spreadsheet.Canals**. The biome version is removed; the spreadsheet version is the canonical linked-filter model going forward and is the more capable unit.
 - Two packages have new versions this cycle: **biome (2.2.1)** removes Canals; **spreadsheet (2.8.1)** ships Mirror + Canals + the safety/parse fixes. catchall, mi, peaks, scope unchanged.
 - The user-facing API of every other existing unit is unchanged. No quicksave compatibility concerns outside of biome.Canals.
 

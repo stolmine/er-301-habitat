@@ -26,7 +26,7 @@ Core mechanic: records incoming audio into a circular buffer, then algorithmical
 
 ## New unit: Blanda
 
-Three-input scan mixer in the spreadsheet package. Pure mixer -- no onboard filtering; bring your own Canals / Three Sisters. Each input has a bell-shaped response curve along a global Scan axis; sweeping Scan crossfades between the three inputs, with bell width, position and shape controllable per input.
+Three-input scan mixer in the spreadsheet package. Pure mixer -- no onboard filtering; bring your own Canals or any other resonant filter. Each input has a bell-shaped response curve along a global Scan axis; sweeping Scan crossfades between the three inputs, with bell width, position and shape controllable per input.
 
 Core mechanic: Scan (0..1) picks a point on a shared axis; each input's contribution is that input's bell evaluated at the Scan position. Focus scales all three bell widths together (bipolar). Skew warps the Scan axis so the crossover points between inputs are not evenly spaced. A continuous polyline bell landscape with per-segment shading and territory-based ghost occlusion keeps the visualization clean at bell butt-joints.
 

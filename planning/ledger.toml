@@ -2113,6 +2113,51 @@ truncated (draw-thread stack, safe). The earlier overlap-average/512-FFT interpr
 wrong and was reverted. DONE 2026-07-22 (scope 1.2.3, both arches, 0 hints)."""
 
 [[item]]
+id = "branding-attribution-policy"
+title = "Branding + attribution policy: generic externally, precise internally"
+status = "wip"
+stamped = "2026-08-05T22:38:30-05:00"
+area = "docs"
+attested = """2026-08-05 EXTERNAL PASS DONE (biome 2.2.1.15, spreadsheet 2.8.3.90). User: "i'd like to
+do a pass for any branding related business ... we should have no official or implied association
+with real material, though i wonder if it would be good to attribute designs where we have clean
+roomed or profiled hardware?"
+THE POLICY, decided 2026-08-05. Two categories that must be handled OPPOSITELY:
+ (A) LICENSE-REQUIRED ATTRIBUTION - code actually derived from someone's source. Emilie Gillet (MI
+     ports, MIT), Chris Johnson (Airwindows), Nick Collins (BBCut), Remy Muller (Livecut GPLv2),
+     Tim Churches (DMC). Naming these people is a LICENSE TERM, not a choice. Never remove. Verified
+     intact in README after this pass.
+ (B) CLEAN-ROOM / PROFILED HARDWARE - no code copied, behaviour modelled from measurement. Canals,
+     Petrichor, NR, Ngoma, Visadhara, Larets, Flakes, JF, Vitrail, Plenum. Naming the target is
+     required by nothing and is exactly where implied association lives.
+RULE: category B is GENERIC in every user-facing surface and PRECISE in the internal engineering
+record. The reasoning, which is the part worth remembering: the value of clean-room work is being
+able to DEMONSTRATE nothing was copied, and the planning docs / ledger notes / commits describing
+what was measured and how the laws were fitted ARE that evidence. Scrubbing them would not reduce
+exposure - it would destroy the proof and read as concealment. A product name in a picker keyword
+buys nothing and is precisely what implies endorsement.
+EXTERNAL PASS (done): removed "three sisters" from the Canals picker KEYWORDS (searchable, the most
+exposed surface there is) in spreadsheet + stolmine; NR's visible control description "Numeric
+Repetitor" -> "Pattern"; README's NR row and Petrichor changelog line de-branded; RELEASE-2.3.0 and
+RELEASE-2.6.1 (4 instances) reworded to descriptive language. Verified afterwards: zero brand names
+remain in ANY user-visible string (description/keywords/title/label/setText) across every package.
+DELIBERATELY KEPT (user's scope call, "External only"): planning/*.md, ledger.toml notes, commit
+messages, and C++/Lua COMMENTS naming measurement targets - the clean-room record.
+KNOWN RESIDUALS, flagged not fixed:
+ - `SistersSvf.h` is a FILENAME in 3 packages (biome, spreadsheet, stolmine).
+ - `JF` and `NR` are initialisms of the products they model. Renaming shipped units breaks patches
+   (the biome.Canals -> spreadsheet.Canals class of break), so it was judged not worth the cost.
+ - ~1275 PUSHED commits mention measurement targets; 13 were unpushed at the time of this pass.
+   History was deliberately NOT rewritten - a force-push breaks every clone, and per the policy
+   above the commit record is evidence rather than exposure.
+ - The GitHub RELEASE BODIES are published separately from RELEASE-*.md and still carry the old
+   wording; editing them is an outward-facing action and was not done unprompted."""
+verify = { kind = "manual", ref = "no clean-room/profiled product name appears in any user-visible string, README table, or release note; all license-required author credits remain intact in README acknowledgements" }
+note = """Supersedes the informal rule in [[feedback_no_third_party_branding]] by adding the
+attribution half. Open: whether to edit the published GitHub release bodies to match the reworded
+RELEASE-*.md files."""
+
+[[item]]
 id = "switch-1-to-n-unit"
 title = "1-to-N switch unit: output selection + output count + passthrough, on the multi-out framework"
 status = "todo"

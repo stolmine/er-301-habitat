@@ -75,7 +75,7 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 
 | Package | Unit(s) | Description |
 |---------|---------|-------------|
-| **biome** | NR | Gate sequencer inspired by the Noise Engineering Numeric Repetitor |
+| **biome** | NR | Gate sequencer built on prime-length rhythm patterns with mask, factor and length controls |
 | | 94 Discont | 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush) |
 | | Latch Filter | Switched-capacitor S&H into SVF with V/Oct tracking |
 | | Gesture | Continuous gesture recorder/looper -- 5/10/20s buffer, movement-detected auto-write |
@@ -225,7 +225,7 @@ New catchall package for experimental/WIP units. Bug fixes for SWIG class layout
 - Varishape Voice: simple synth voice with POLYBLEP oscillator (tri/saw/square morph), gate-triggered decay envelope, V/Oct pitch
 
 **New unit: spreadsheet**
-- Petrichor: Rainmaker-inspired multitap delay, 8 taps, 20s int16 buffer, per-tap SVF filtering (LP/BP/HP/notch), granular pitch shift with reverse, grid/stack tap distribution, tap/filter/volume/pan/cutoff/Q/type macro presets, gate-triggered randomization with 21 targets, feedback tone damping, V/Oct pitch, info overview display
+- Petrichor: multitap delay, 8 taps, 20s int16 buffer, per-tap SVF filtering (LP/BP/HP/notch), granular pitch shift with reverse, grid/stack tap distribution, tap/filter/volume/pan/cutoff/Q/type macro presets, gate-triggered randomization with 21 targets, feedback tone damping, V/Oct pitch, info overview display
 
 **Petrichor**
 - fast_tanh Pade approximant replaces tanhf in audio path

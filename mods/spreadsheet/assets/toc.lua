@@ -21,7 +21,7 @@ return {
     { title = "JF",           moduleName = "JF",                  category = "Spreadsheet", keywords = "voice, slope, function, generator, multi, multiout, hex, polyphonic, jf" },
     { title = "Visadhara",    moduleName = "Visadhara",           category = "Spreadsheet", keywords = "drum, percussion, voice, synth, additive, fold, kick, snare, cymbal, bia" },
     { title = "Network",      moduleName = "Network",             category = "Spreadsheet", keywords = "reverb, multitap, delay, spatial, network, geometry, glitch" },
-    { title = "Canals",       moduleName = "Canals",              category = "Spreadsheet", keywords = "filter, resonant, svf, three sisters, crossover, formant, canals" },
+    { title = "Canals",       moduleName = "Canals",              category = "Spreadsheet", keywords = "filter, resonant, svf, crossover, formant, canals" },
     { title = "Mirror",       moduleName = "Mirror",              category = "Spreadsheet", keywords = "oscillator, alias, fold, sync, complex, voice, generator, source, mirror" },
     { title = "Fabula",       moduleName = "Fabula",              category = "Spreadsheet", keywords = "reverb, room, hall, dattorro, algorithmic, tank, allpass, space, freeze, fabula" },
     { title = "Vitrail",      moduleName = "Vitrail",             category = "Spreadsheet", keywords = "filter, switched capacitor, comb, aliasing, resonant, self-oscillation, character, clock, vitrail" },

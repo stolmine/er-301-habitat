@@ -86,7 +86,7 @@ end
 function NR:onLoadViews()
   return {
     circle = NRCircle {
-      description = "Numeric Repetitor",
+      description = "Pattern",
       width       = 2 * app.SECTION_PLY,
       nr          = self.objects.op,
       prime       = self.objects.prime:getParameter("Bias"),
