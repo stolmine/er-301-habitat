@@ -9,6 +9,7 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local ModeSelector = require "spreadsheet.ModeSelector"
+local VitrailClockControl = require "spreadsheet.VitrailClockControl"
 local Encoder = require "Encoder"
 local MenuHeader = require "Unit.MenuControl.Header"
 local OptionControl = require "Unit.MenuControl.OptionControl"
@@ -121,7 +122,10 @@ function Vitrail:onLoadViews()
       -- Parameter carries 0-1; the selector maps to/from the 0-49 index.
       normalized = true
     },
-    clkSrc = ModeSelector {
+    -- Clock Src hosts the tunnel visualization (VitrailClockControl): its
+    -- rotation IS the A/B clock drift, so picture and control agree.
+    clkSrc = VitrailClockControl {
+      op = self.objects.op,
       button = "clk",
       description = "Clock Src",
       branch = self.branches.clkSrc,

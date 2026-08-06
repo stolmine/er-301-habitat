@@ -1599,11 +1599,44 @@ statistically."""
 
 [[item]]
 id = "vitrail-viz"
-title = "Vitrail: visualization (unit has no custom graphic)"
-status = "todo"
-stamped = "2026-08-05T21:27:55-05:00"
+title = "Vitrail: tunnel visualization stacked on the Clock Src control"
+status = "wip"
+stamped = "2026-08-05T21:29:15-05:00"
+attested = """2026-08-05 (spreadsheet 2.8.3.86): FIRST PASS SHIPPED, emu-installed, audition owed.
+Design is the user's: a tunnel you fly down, face morphing round <-> angular, mouth rotating,
+heading shifting. Built as mods/spreadsheet/VitrailTunnelGraphic.h + assets/VitrailClockControl.lua.
+NOT a 3D scene and not a real torus - a stack of 2D polygons scaled by 1/depth drawn far to near
+(the demoscene tunnel), which gives an identical picture for a fraction of the cost; travel is
+depth decrement with the near ring recycling to the far end.
+MAPPING (viz telegraphs the mechanism, not decoration): travel <- mean cutoff (cutoff IS the
+switched-cap clock rate, so opening the filter literally flies faster); spin <- the A/B clock
+DRIFT BEAT (converged clocks barely rotate, Src=Both drifts and the mouth counter-rotates);
+angularity circle->triangle <- RESONANCE (user's pick over routing-type); bend/bank <- CutA-CutB
+imbalance (lateral swing of the far end + ring foreshortening - NOTE the user's original
+"rotate the whole shape on one axis" would only spin the mouth, so heading is done with an
+off-centre vanishing point + squash instead); brightness <- output envelope follower.
+ANIMATION CLOCK LIVES IN THE DSP: Vitrail bakes 5 viz scalars per block (getTravel/getSpin/
+getAngularity/getBend/getLevel) so motion tracks the real SC clocks instead of free-running off
+the UI frame rate; draw() reads plain floats and never touches Internal's doubles.
+am335x discipline: zero runtime trig - reuses FilterResponseGraphic's proven 72-entry LUT +
+lutCos/lutSin ([[feedback_package_trig_lut]]); all virtuals inline
+([[feedback_no_out_of_line_virtuals]], lint OK); vertex arrays are CLASS MEMBERS not stack locals
+([[feedback_neon_intrinsics_drumvoice]]); namespace-scope constants because -std=gnu++11 needs an
+out-of-class definition for an odr-used static constexpr array.
+COST: the 24 unit-shape LUT pairs are hoisted OUT of the ring loop (per-vertex direction is shared
+across rings), leaving 192 line() calls + 24 LUT pairs per frame at 8 rings x 24 verts.
+CLIPPING: od's line() only guards the SCREEN edge, so near rings would scribble across neighbouring
+plies - added Cohen-Sutherland against the graphic's own rect.
+Verified: both arches build, graphic-virtual lint OK, objdump confirms VitrailTunnelGraphic makes NO
+sinf/cosf calls (the swig .o's only trig callers are the pre-existing Seq/PhaseSpace/Helicase/
+Network/Colmatage graphics), and the 3 SUSPECT NEON hints in that .o are the known pre-existing
+visadhara_pmm::tick2 false positives (planning/filterbank-neon-refactor.md:310), in a file
+untouched since 2026-05-14. Linux pkg installed to emu.
+OWED: emu audition (does it read as depth at 42x64? is the spin legible? does the bank read as a
+change of heading?), tuning of kVtFocal/kVtBendAmt/kVtSwayAmt by eye, frame-rate check with the
+tunnel on screen, and am335x hardware confirmation."""
 area = "ui"
-touches = ["mods/spreadsheet/Vitrail.h", "mods/spreadsheet/assets/Vitrail.lua"]
+touches = ["mods/spreadsheet/VitrailTunnelGraphic.h", "mods/spreadsheet/assets/VitrailClockControl.lua", "mods/spreadsheet/Vitrail.h", "mods/spreadsheet/Vitrail.cpp"]
 verify = { kind = "screenshot", ref = "Vitrail shows a custom overview graphic that reads clearly at 128x64 / 4-bit depth, telegraphs the current routing pair and the drifting dual-clock character, and does NOT capture the encoder (draw-path structure, not CPU)" }
 links = { depends_on = ["vitrail-unit"] }
 note = """User, 2026-08-05, alongside the promotion back to spreadsheet: "i want to do viz for

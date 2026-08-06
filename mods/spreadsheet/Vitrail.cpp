@@ -126,6 +126,16 @@ namespace stolmine
     return held;
   }
 
+  // Keep an animation phase in [0,1) without fmod (which would drag libm into
+  // a per-block path). Phases advance by small increments, so a couple of
+  // conditional folds always suffice.
+  static inline double wrap01(double p)
+  {
+    while (p >= 1.0) p -= 1.0;
+    while (p < 0.0) p += 1.0;
+    return p;
+  }
+
   struct Vitrail::Internal
   {
     // core A
@@ -134,6 +144,7 @@ namespace stolmine
     double phB = 0.31, lpB = 0.0, bpB = 0.0, hpB = 0.0, heldB = 0.0, envB = 0.0;
     double fbk = 0.0;        // shared resonance loop (output -> filter inputs)
     double aliasPrev = 0.0;  // alias-HI HF smoothing state
+    double vizEnv = 0.0;     // viz level follower (draw-thread brightness)
     // clock drift
     uint32_t rng = 0x1234567u;
     double driftA = 0.0, driftB = 0.0, driftTgtA = 0.0, driftTgtB = 0.0;
@@ -253,7 +264,32 @@ namespace stolmine
       }
 
       out[i] = (float)y;
+
+      // Level follower for the tunnel's depth-cue brightness. Asymmetric
+      // (fast attack, slow release) so the tunnel pulses with the sound
+      // instead of flickering. Cheap: two multiply-adds per sample.
+      double m = y < 0.0 ? -y : y;
+      I.vizEnv += (m > I.vizEnv ? 0.01 : 0.0006) * (m - I.vizEnv);
     }
+
+    // ---- Bake the per-block visualization state ------------------------
+    // Travel: mean cutoff IS the switched-cap clock rate, so opening the
+    // filter literally flies faster. Scaled to a sane 0.15..3 rings/sec.
+    double kMean = 0.5 * (CLAMP(0.0, 1.0, (double)cutAb[FRAMELENGTH - 1]) +
+                          CLAMP(0.0, 1.0, (double)cutBb[FRAMELENGTH - 1]));
+    double blockSec = (double)FRAMELENGTH / sr;
+    mVizTravel = (float)wrap01((double)mVizTravel + (0.15 + 2.85 * kMean) * blockSec);
+
+    // Spin: the A/B clock DIFFERENCE, which is the drift beat between the
+    // two cores. Converged clocks (Src A or B) barely rotate; Both drifts
+    // and the mouth counter-rotates. Signed, so it reverses with the beat.
+    double beat = (I.driftA - I.driftB) * 40.0;
+    mVizSpin = (float)wrap01((double)mVizSpin + beat * blockSec);
+
+    mVizAngular = CLAMP(0.0f, 1.0f, resb[FRAMELENGTH - 1]);
+    mVizBend = CLAMP(-1.0f, 1.0f, (float)(CLAMP(0.0, 1.0, (double)cutAb[FRAMELENGTH - 1]) -
+                                          CLAMP(0.0, 1.0, (double)cutBb[FRAMELENGTH - 1])));
+    mVizLevel = CLAMP(0.0f, 1.0f, (float)I.vizEnv);
   }
 
 } // namespace stolmine

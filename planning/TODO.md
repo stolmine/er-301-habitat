@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**167 items** — 44 done, 14 wip, 107 todo, 2 blocked. *Rendered 2026-08-05.*
+**167 items** — 44 done, 15 wip, 106 todo, 2 blocked. *Rendered 2026-08-05.*
 
 ## DSP
 
@@ -126,6 +126,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | | id | item | verify |
 |---|---|---|---|
 | ~ | `anamnesis-viz-opt` | Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf) | manual · 2026-07-11 |
+| ~ | `vitrail-viz` | Vitrail: tunnel visualization stacked on the Clock Src control | screenshot: Vitrail shows a custom overview graphic that reads clearly at 128x64 / 4-bit depth, telegraphs the current routing pair and the drifting dual-clock character, and does NOT capture the encoder (draw-path structure, not CPU) *(attested)* · 2026-08-05 |
 |   | `alembic-phase9-polish` | Alembic Phase 9: naming/defaults/mnemonic polish + serial stacked-waveform viz | screenshot: confirm final names/defaults/control labels + sphere-viz refinements, plus a stacked/cascading render of mWavetableLUT[64][256] with active reagent-scan frames lit and neighbors dimmed · 2026-07-09 |
 |   | `control-descriptions-drop-parentheticals` | Shorten Lua control descriptions that include parentheticals (they overflow the allotted space) | manual · 2026-07-22 |
 |   | `control-step-standards` | Adopt built-in dial-map standards across habitat; inventory every control vs the framework registry | manual · 2026-07-16 |
@@ -152,7 +153,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `ui-filterlist-type-label-stale` | FilterListControl type label doesn't refresh when macros change filter type (Tomograph + Petrichor) | manual · 2026-07-09 |
 |   | `ui-subdisplay-selection-indicator` | Sub-display selection indicator missing on paramMode ply-to-ply navigation (PINNED) | manual · 2026-07-09 |
 |   | `units-artsy-visualizers` | Artsy visualizers / generative sound+visual units (Norns/Paratek-inspired eye candy) | screenshot: build generative visual + audio units: glitchy audio/CV-driven visuals and a pseudo-3D serial-wavetable-frame view · 2026-07-09 |
-|   | `vitrail-viz` | Vitrail: visualization (unit has no custom graphic) | screenshot: Vitrail shows a custom overview graphic that reads clearly at 128x64 / 4-bit depth, telegraphs the current routing pair and the drifting dual-clock character, and does NOT capture the encoder (draw-path structure, not CPU) · 2026-08-05 |
 |   | `viz-offscreen-gate-all` | Bring the offscreen-viz gate to all spreadsheet units with a DSP-side visualization | manual · 2026-07-15 |
 | ✗ | `scope-headerless-research` | Scope: research headerless unit display | manual · 2026-07-09 |
 | ✓ | `controls-optioncontrol-hardening` | Controls hardening: OptionControl boolean/indexing fixes, bipolar correctness, passthrough Comparators | manual *(attested)* · 2026-07-09 |

@@ -40,9 +40,27 @@ namespace stolmine
     od::Option mAlias{"Aliasing", 1};          // 1=LO 2=HI
 #endif
 
+    // ---- Visualization state -------------------------------------------
+    // Baked once per block at the end of process() so the draw thread reads
+    // plain floats and never touches Internal's doubles. The tunnel graphic
+    // is driven ENTIRELY by these: the animation clock lives here, in the
+    // DSP, so travel and spin track the real switched-cap clocks instead of
+    // free-running off the UI frame rate.
+    float getTravel() { return mVizTravel; }       // [0,1) forward travel phase
+    float getSpin() { return mVizSpin; }           // [0,1) mouth rotation phase
+    float getAngularity() { return mVizAngular; }  // [0,1] circle -> triangle
+    float getBend() { return mVizBend; }           // [-1,1] A/B cutoff imbalance
+    float getLevel() { return mVizLevel; }         // [0,1] smoothed output level
+
   private:
     struct Internal;
     Internal *mpInternal;
+
+    float mVizTravel = 0.0f;
+    float mVizSpin = 0.0f;
+    float mVizAngular = 0.0f;
+    float mVizBend = 0.0f;
+    float mVizLevel = 0.0f;
   };
 
 } // namespace stolmine

@@ -60,6 +60,7 @@
 // Vitrail: dual switched-capacitor character filter.
 // See planning/vitrail-unit.md.
 #include "Vitrail.h"
+#include "VitrailTunnelGraphic.h"
 // Vivary: 1D cellular-automata granular noise texture (POC).
 // See planning/ca-wavetable-noise-design.md.
 #include "Vivary.h"
@@ -121,6 +122,7 @@
 %include "FabricGraphic.h"
 %include "FDNTank.h"
 %include "Vitrail.h"
+%include "VitrailTunnelGraphic.h"
 %include "Vivary.h"
 %include "Ferrum.h"
 %include "Tessera.h"
