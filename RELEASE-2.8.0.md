@@ -12,8 +12,7 @@ time**. mi and peaks unchanged. Firmware unchanged.
 gone, replaced by a measured modal engine. Presets move to schema 5: old patches
 load, but the laws changed and they will not sound the same. The Clipper default
 also flipped from 1.0 to 0.0, so Ngoma now ships clean and the knob adds heft
-rather than removing it. If you have Ngoma patches you care about, keep a copy of
-the v2.7.0 package.
+rather than removing it.
 
 **Constant Random's Slew is now a time in seconds**, not a 0-1 amount. There is
 no migration path, because the old 0-1 range overlaps valid new second values: a
@@ -115,6 +114,19 @@ coarse detent moves 0.01. Impasto and Parfait were ten times coarser than that.
 
 **Rauschen** gains a Cellular algorithm driven by a 1D cellular automaton, with a
 Reseed action in the unit menu.
+
+## Attribution
+
+The `house` package is built from the work of **Chris Johnson (Airwindows)**,
+whose plugins are released under the MIT licence. kWoodRoom, WoodenBox,
+CreamCoat, BrightAmbience3, Verbity, Galactic, TickerTape and Lacquer are all
+ports of his designs, and his Spiral saturator is reused widely across the rest
+of the catalog. The ports carry his algorithms; any bugs in them are ours.
+
+Elsewhere in this release: the Mutable Instruments units are based on code by
+**Emilie Gillet** (MIT), the Peaks and Dead Man's Catch units on code by
+**Emilie Gillet** and **Tim Churches** (MIT), and Colmatage's cut procedures
+descend from **Nick Collins**' BBCut library by way of **Remy Muller**'s Livecut.
 
 ## Known issues
 
