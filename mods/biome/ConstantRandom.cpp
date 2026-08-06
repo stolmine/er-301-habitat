@@ -26,13 +26,18 @@ namespace stolmine
     // settled.) The old 0.01 floor meant a "paused" unit still drew a new value
     // every 100 seconds.
     float rate = CLAMP(0.0f, 1000.0f, mRate.value());
-    float slew = CLAMP(0.0f, 1.0f, mSlew.value());
+    // Slew is now the built-in slew TIME in seconds, matching the framework's
+    // slewTimes control wholesale, rather than a 0-1 "amount". The old 0-1 law
+    // (coeff = (1-s)*50 + 1) was badly bunched: the whole middle half of the
+    // dial only covered 22..39 ms, and the top of the throw stopped at 1 s.
+    float slewTime = MAX(0.0f, mSlew.value());
     float level = CLAMP(0.0f, 1.0f, mLevel.value());
     float dt = globalConfig.samplePeriod;
 
-    // Slew coefficient: 0 = instant (pure S&H), 1 = very smooth (~50ms)
-    float slewCoeff = (slew > 0.001f) ? (1.0f - slew) * 50.0f + 1.0f : 10000.0f;
-    float alpha = 1.0f - expf(-slewCoeff * dt);
+    // One-pole toward the target with the requested time constant. A time of 0
+    // (or anything under a sample) is a hard jump = pure sample-and-hold, which
+    // preserves what the old slew=0 default did.
+    float alpha = (slewTime > dt) ? (1.0f - expf(-dt / slewTime)) : 1.0f;
 
     float phaseInc = rate * dt;
 

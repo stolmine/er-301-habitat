@@ -15,7 +15,7 @@ namespace stolmine
     virtual void process();
     od::Outlet mOutput{"Out"};
     od::Parameter mRate{"Rate", 5.0f};
-    od::Parameter mSlew{"Slew", 0.0f};
+    od::Parameter mSlew{"Time", 0.003f}; // slew TIME in seconds (built-in slewTimes)
     od::Parameter mLevel{"Level", 1.0f};
 #endif
 

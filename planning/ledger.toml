@@ -1507,7 +1507,23 @@ finishes travelling to the target it was already heading for and then holds ther
 and 0.000e+00 movement over 300 s once settled. Note the held value is the TARGET, not the
 instantaneous value at the moment of pause - if a slow slew was mid-travel it completes first.
 Both arches, ConstantRandom.o 0 NEON suspect hints, pkg installed to emu. Emu audition owed.
-AUDIT CANDIDATES (crude sweep:AUDIT CANDIDATES (crude sweep: every app.LinearDialMap in mods/*/assets/*.lua whose max/min ratio is
+SLEW REPLACED WITH THE BUILT-IN TIME CONTROL 2026-08-05 (biome 2.2.1.11). User: "slew range should
+also be increased, we should just steal the time control wholesale from the builtin slew." Taken
+verbatim from GatedSlewLimiter/ExpoD: biasMap Encoder.getMap("slewTimes") (timeOctaveMap 0.003..1000,
+19 octave steps), biasUnits unitSecs, scaling app.octaveScaling, gainMap Encoder.getMap("gain").
+The private 0-1 "amount" it replaces was worse than just narrow - the law
+coeff = (1-s)*50 + 1 is hyperbolic in s, so the middle HALF of the dial (0.25..0.75) spanned only
+22..39 ms while the last 25% jumped 74 ms -> 1 s. New throw is 3 ms .. 786 s in even octaves.
+DSP: the Parameter is renamed Slew -> Time and now carries SECONDS;
+alpha = (t > dt) ? 1 - exp(-dt/t) : 1, so a time under one sample is a hard jump = pure S&H, which
+preserves what the old slew=0 default did. New default 0.003 (the map floor) keeps the shipped
+character crisp.
+BREAKING FOR EXISTING PATCHES, and unlike the Vitrail move this unit IS publicly released (present in
+the v2.7.0 biome toc): a stored slew of 0.5 used to mean "38 ms" and now means "0.5 seconds". No
+clean migration exists because the old 0-1 range overlaps valid new second values, so old patches
+will load with a much longer slew than intended and need re-dialling. Flagged to the user.
+Both arches, ConstantRandom.o 0 NEON suspect hints, pkg installed to emu.
+AUDIT CANDIDATES (crude sweep:AUDIT CANDIDATES (crude sweep:AUDIT CANDIDATES (crude sweep: every app.LinearDialMap in mods/*/assets/*.lua whose max/min ratio is
 >= 50x - this is a CANDIDATE list, not a fix list, and each needs its quantity class judged):
   biome     CodescanOsc 0.1..2000, VarishapeOsc 0.1..2000, VarishapeVoice 0.1..2000,
             ConstantRandom rate 0.01..100, SpectralFollower 20..20000 + 0.0001..0.5 + 0.0001..5,

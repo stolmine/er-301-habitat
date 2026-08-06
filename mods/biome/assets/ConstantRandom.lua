@@ -3,6 +3,7 @@ local libbiome = require "biome.libbiome"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Encoder = require "Encoder"
 
 local ConstantRandom = Class {}
 ConstantRandom:include(Unit)
@@ -27,8 +28,8 @@ function ConstantRandom:onLoadGraph(channelCount)
   self:addMonoBranch("rate", rate, "In", rate, "Out")
 
   local slew = self:addObject("slew", app.ParameterAdapter())
-  slew:hardSet("Bias", 0.0)
-  tie(op, "Slew", slew, "Out")
+  slew:hardSet("Bias", 0.003)
+  tie(op, "Time", slew, "Out")
   self:addMonoBranch("slew", slew, "In", slew, "Out")
 
   local level = self:addObject("level", app.ParameterAdapter())
@@ -50,12 +51,6 @@ local views = {
 local rateMap = (function()
   local m = app.LinearDialMap(0, 100)
   m:setSteps(1, 0.1, 0.01, 0.001)
-  return m
-end)()
-
-local slewMap = (function()
-  local m = app.LinearDialMap(0, 1)
-  m:setSteps(0.1, 0.01, 0.001, 0.001)
   return m
 end)()
 
@@ -83,16 +78,20 @@ function ConstantRandom:onLoadViews(objects, branches)
     initialBias = 5.0
   }
 
+  -- The built-in slew time control, taken wholesale: slewTimes octave map
+  -- (3 ms .. 1000 s), seconds, octave scaling, standard gain map. Replaces a
+  -- private 0-1 "amount" whose middle half only spanned 22..39 ms.
   controls.slew = GainBias {
     button = "slew",
-    description = "Slew",
+    description = "Slew Time",
     branch = branches.slew,
     gainbias = objects.slew,
     range = objects.slew,
-    biasMap = slewMap,
-    biasUnits = app.unitNone,
-    biasPrecision = 2,
-    initialBias = 0.0
+    biasMap = Encoder.getMap("slewTimes"),
+    biasUnits = app.unitSecs,
+    initialBias = 0.003,
+    scaling = app.octaveScaling,
+    gainMap = Encoder.getMap("gain")
   }
 
   controls.level = GainBias {
