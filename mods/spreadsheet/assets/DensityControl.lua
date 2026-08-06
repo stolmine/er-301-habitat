@@ -2,6 +2,7 @@ local app = app
 local Class = require "Base.Class"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Encoder = require "Encoder"
+local DiscreteStep = require "spreadsheet.DiscreteStep"
 local ShiftHelpers = require "spreadsheet.ShiftHelpers"
 
 local ply = app.SECTION_PLY
@@ -174,6 +175,7 @@ function DensityControl:subReleased(i, shifted)
       else
         readout:save()
         self.paramFocusedReadout = readout
+        DiscreteStep.reset(self)
         self:setSubCursorController(readout)
         if not self:hasFocus("encoder") then self:focus() end
       end
@@ -188,7 +190,18 @@ function DensityControl:encoder(change, shifted)
     self.shiftUsed = true
   end
   if self.paramMode and self.paramFocusedReadout then
-    self.paramFocusedReadout:encoder(change, shifted, self.encoderState == Encoder.Fine)
+    -- pattern / slope / resonator address NAMED LISTS, so they step by whole
+    -- entries under the discrete standard rather than by dial-map value.
+    -- Reachable twice in this unit: here, and as expanded ModeSelector faders.
+    local r = self.paramFocusedReadout
+    if r == self.patternReadout then
+      return DiscreteStep.encoder(self, r, change, 0, 15)
+    elseif r == self.slopeReadout then
+      return DiscreteStep.encoder(self, r, change, 0, 3)
+    elseif r == self.resonatorReadout then
+      return DiscreteStep.encoder(self, r, change, 0, 3)
+    end
+    r:encoder(change, shifted, self.encoderState == Encoder.Fine)
     return true
   end
   return GainBias.encoder(self, change, shifted)

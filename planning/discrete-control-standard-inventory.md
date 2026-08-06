@@ -111,7 +111,26 @@ encoder involved, nothing to standardise. Listed so the audit is complete.
 - Integer maps on controls that are **not** user-stepped (internal state,
   serialisation-only parameters).
 
-## Pilot applied 2026-08-05 (spreadsheet 2.8.3.91)
+## The trap: discrete values are reachable TWICE
+
+Found while piloting. Pecto exposes pattern / slope / resonator on **two
+surfaces**:
+
+- `DensityControl`'s paramMode **sub-display** readouts (`patt` / `slope` / `res`
+  SubButtons) — what you reach first, on the density ply
+- the same three as expanded **`ModeSelector` faders** in the density expansion
+
+Fixing only the `ModeSelector` left the sub-display untouched, so the unit still
+felt broken even though the selectors were correct. **Always check whether a
+discrete value also has a sub-display readout**, and fix both. This is why
+tier 2 is the larger and more important half of the worklist, not the tail.
+
+Shared helper: `spreadsheet/assets/DiscreteStep.lua`. Sub-display hosts call
+`DiscreteStep.encoder(self, readout, change, lo, hi)` from their `encoder()`, and
+`DiscreteStep.reset(self)` when the focused readout changes so a part-turn cannot
+carry across.
+
+## Pilot applied 2026-08-05 (spreadsheet 2.8.3.92)
 
 One representative of each category, to prove the standard before any sweep:
 
@@ -120,7 +139,8 @@ One representative of each category, to prove the standard before any sweep:
 | Long selector, internal structure | **Pecto** pattern (16) | coarse 1, threshold 8, **shift jumps 8** between the base and randomised families |
 | Short selectors | **Pecto** slope (4), resonator (4) | coarse 1, threshold 8 |
 | Long flat selector | **Rauschen** algorithm (11) | coarse 1, threshold 8, no shift-jump |
-| Sub-display readout | **TransformGateControl** func | accumulate model open-coded; 8 consumers |
+| Sub-display readout | **TransformGateControl** func | via `DiscreteStep`; 8 consumers |
+| Sub-display readouts | **DensityControl** pattern/slope/resonator | via `DiscreteStep`; the surface that was still wrong after the first pass |
 
 ## Risk
 
