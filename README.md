@@ -40,11 +40,11 @@ Based on code by Émilie Gillet (MIT License).
 
 | Package | Unit(s) | Description |
 |---------|---------|-------------|
-| **plaits** | Plaits | Macro-oscillator — all 24 synthesis engines, V/Oct, engine selector |
-| **clouds** | Clouds | Granular processor — granular, looping delay, and spectral modes. NEON-optimized pffft FFT, rising-edge trigger control |
+| **plaits** | Plaits | Macro-oscillator -- all 24 synthesis engines, V/Oct, engine selector |
+| **clouds** | Clouds | Granular processor -- granular, looping delay, and spectral modes. NEON-optimized pffft FFT, rising-edge trigger control |
 | **stratos** | Stratos | Clouds reverb engine extracted as standalone effect |
 | **rings** | Rings | Modal/sympathetic string resonator with NEON-vectorized SVF bank, main/aux output mix control |
-| **warps** | Warps | Meta-modulator — 6 crossmodulation algorithms with auto gain compensation |
+| **warps** | Warps | Meta-modulator -- 6 crossmodulation algorithms with auto gain compensation |
 | **grids** | Grids | Topographic drum pattern generator |
 | **commotio** | Commotio | Elements exciter section (bow/blow/strike) at native 48kHz |
 | **marbles** | Marbles T, Marbles X | Random sampler -- probabilistic gate generator (7 models) and random CV generator (beta distribution, deja vu looping, 3 control modes) |
@@ -374,7 +374,7 @@ Compatible with both vanilla ER-301 firmware and er-301-stolmine (TXo) firmware.
 - Density control is now bipolar (-1 gridded, +1 random)
 
 **Rings**
-- Added output mix control — bipolar crossfade between main and aux outputs
+- Added output mix control -- bipolar crossfade between main and aux outputs
 - Mono: -1 = main only, 0 = equal sum, +1 = aux only
 - Stereo: smoothly swaps routing between outlets
 
@@ -409,4 +409,8 @@ Nick Collins - Colmatage's algorithm descends from the BBCut library (ICMC 2002)
 Remy Muller - The Livecut VST (GPLv2) served as the primary C++ reference for the cut procedures
 
 Chris Johnson (Airwindows) - I have ported several of your excellent reverbs and reused Spiral quite a bit, along with other bits and pieces
+
+Kentaro - tonemata is what showed me a cellular automaton could clock grain material. Rauschen's Cellular algorithm went its own way from there, but the idea started with yours
+
+Stephen Wolfram - the elementary cellular automata and the class III/IV behavior that makes some rules sing and others sit still
 
