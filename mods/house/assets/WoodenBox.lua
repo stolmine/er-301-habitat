@@ -10,6 +10,7 @@
 
 local app = app
 local libhouse = require "house.libhouse"
+local Encoder = require "Encoder"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
@@ -88,7 +89,7 @@ function WoodenBox:onLoadViews()
       branch = self.branches.mix,
       gainbias = self.objects.mix,
       range = self.objects.mix,
-      biasMap = zeroOneMap,
+      biasMap = Encoder.getMap("unit"),
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.5

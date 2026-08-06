@@ -194,7 +194,7 @@ function Helicase:onLoadViews()
     branch = self.branches.modMix,
     gainbias = self.objects.modMix,
     range = self.objects.modMix,
-    biasMap = modMixMap,
+    biasMap = Encoder.getMap("unit"),
     biasUnits = app.unitNone,
     biasPrecision = 2,
     initialBias = 0.5

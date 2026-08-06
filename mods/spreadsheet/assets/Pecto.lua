@@ -40,7 +40,6 @@ local sizeMap = (function()
 end)()
 
 local feedbackMap = normMap(-0.99, 0.99)
-local mixMap = normMap(0, 1)
 local inputLevelMap = floatMap(0, 4)
 local outputLevelMap = floatMap(0, 4)
 local tanhMap = normMap(0, 1)
@@ -243,7 +242,7 @@ function Pecto:onLoadViews()
       branch = self.branches.mix,
       gainbias = self.objects.mix,
       range = self.objects.mix,
-      biasMap = mixMap,
+      biasMap = Encoder.getMap("unit"),
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.5,

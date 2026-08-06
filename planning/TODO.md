@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**168 items** — 44 done, 15 wip, 107 todo, 2 blocked. *Rendered 2026-08-05.*
+**168 items** — 44 done, 16 wip, 106 todo, 2 blocked. *Rendered 2026-08-05.*
 
 ## DSP
 
@@ -126,6 +126,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | | id | item | verify |
 |---|---|---|---|
 | ~ | `anamnesis-viz-opt` | Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf) | manual · 2026-07-11 |
+| ~ | `mix-control-standards` | Mix-control standards: detents standardized on the built-in map; crossfade-law half still open | manual *(attested)* · 2026-08-05 |
 | ~ | `vitrail-viz` | Vitrail: tunnel visualization stacked on the Clock Src control | screenshot: Vitrail shows a custom overview graphic that reads clearly at 128x64 / 4-bit depth, telegraphs the current routing pair and the drifting dual-clock character, and does NOT capture the encoder (draw-path structure, not CPU) *(attested)* · 2026-08-05 |
 |   | `alembic-phase9-polish` | Alembic Phase 9: naming/defaults/mnemonic polish + serial stacked-waveform viz | screenshot: confirm final names/defaults/control labels + sphere-viz refinements, plus a stacked/cascading render of mWavetableLUT[64][256] with active reagent-scan frames lit and neighbors dimmed · 2026-07-09 |
 |   | `control-descriptions-drop-parentheticals` | Shorten Lua control descriptions that include parentheticals (they overflow the allotted space) | manual · 2026-07-22 |
@@ -141,7 +142,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `impasto-stereo-option-state` | Impasto: saved stereo option state can disagree with instantiation if toggled without re-insert | manual · 2026-07-09 |
 |   | `larets-stutter-shuffle-viz` | Larets: distinguish stutter vs shuffle viz (both read similar at a glance) | screenshot: confirm stutter telegraphs a boxed fixed-loop window with repeated contour fragments, and shuffle telegraphs rearranged fragment blocks (shifted or source-color-coded) · 2026-07-09 |
 |   | `mirror-step-and-viz` | Mirror: fine/coarse/super step audit on all controls + custom overview-ply viz | screenshot: confirm each fader's coarse/fine/super steps match musical granularity (Hz = octave/cents/sub-Hz; 0..1 = 0.1/0.01/0.001; Mirror knob approaches the Nyquist-flip region smoothly); confirm a custom overview viz (concentric fire wheels / rubber-band sphere / L-vs-R Lissajous) renders · 2026-07-09 |
-|   | `mix-control-standards` | Mix-control standards: equal-power crossfade (decorrelated) + 0.01 coarse step; fix the 0.1-coarse units | manual · 2026-07-16 |
 |   | `mod-gain-default-zero` | Mod gain defaults to 0 on all controls of all units (CV opt-in) - catalog-wide standardization | manual · 2026-07-22 |
 |   | `ngoma-viz-and-docs` | Ngoma: cube viz refinement + documentation refresh | screenshot: confirm cube scaled 0.85x with breathing room, state-driven face-fill textures (Character/Grit/Shape/ampEnv), exaggerated parallax + face-shrink/edge-expand-on-hit; drum-voice.md updated or superseded by the codex reference · 2026-07-09 |
 |   | `peaks-refinements` | Peaks: Tap LFO clock frequency-counter display, PLO continuous phase-increment, step-position viz | manual · 2026-07-09 |

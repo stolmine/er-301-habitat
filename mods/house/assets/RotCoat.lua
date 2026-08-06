@@ -13,6 +13,7 @@
 
 local app = app
 local libhouse = require "house.libhouse"
+local Encoder = require "Encoder"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
@@ -122,7 +123,7 @@ function RotCoat:onLoadViews()
       branch = self.branches.wetness,
       gainbias = self.objects.wetness,
       range = self.objects.wetness,
-      biasMap = zeroOneMap,
+      biasMap = Encoder.getMap("unit"),
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.5

@@ -1,5 +1,6 @@
 local app = app
 local libcatchall = require "catchall.libcatchall"
+local Encoder = require "Encoder"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
@@ -14,7 +15,6 @@ end
 
 local scanMap = floatMap(0, 1)
 local plasticityMap = floatMap(0, 1)
-local mixMap = floatMap(0, 1)
 local parallaxMap = floatMap(-1, 1)
 local modRateMap = (function()
   local m = app.LinearDialMap(0.001, 20)
@@ -157,7 +157,7 @@ function Som:onLoadViews(objects, branches)
     branch = branches.mix,
     gainbias = objects.mix,
     range = objects.mix,
-    biasMap = mixMap,
+    biasMap = Encoder.getMap("unit"),
     biasUnits = app.unitNone,
     biasPrecision = 2,
     initialBias = 0.5

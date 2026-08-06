@@ -24,7 +24,6 @@ local motionMap = floatMap(0, 1)
 local connectivityMap = floatMap(0, 1)
 local decayMap = floatMap(0, 1)
 local glitchMap = floatMap(0, 1)
-local wetMap = floatMap(0, 1)
 local seedMap = (function()
   local m = app.LinearDialMap(0, 1)
   m:setSteps(0.1, 0.01, 0.001, 0.0001)
@@ -182,7 +181,7 @@ function Network:onLoadViews(objects, branches)
       branch = branches.wet,
       gainbias = objects.wet,
       range = objects.wet,
-      biasMap = wetMap,
+      biasMap = Encoder.getMap("unit"),
       biasUnits = app.unitNone,
       biasPrecision = 3,
       initialBias = 0.5

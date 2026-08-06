@@ -1456,11 +1456,43 @@ note = """Network's 'gain loss at Wet=0.5' was a LINEAR dry/wet crossfade dippin
 
 [[item]]
 id = "mix-control-standards"
-title = "Mix-control standards: equal-power crossfade (decorrelated) + 0.01 coarse step; fix the 0.1-coarse units"
-status = "todo"
-stamped = "2026-07-16T08:00:58-05:00"
+title = "Mix-control standards: detents standardized on the built-in map; crossfade-law half still open"
+status = "wip"
+stamped = "2026-08-05T22:11:42-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "docs/knowledge-base.md 'Dry/wet mix controls' standard is documented; every dry/wet mix control across published units has a 0.01 coarse step (2nd setSteps arg); decorrelated dry/wet uses equal-power (per drywet-crossfade-audit); correlated wets stay linear." }
+attested = """2026-08-05 DETENT HALF DONE (spreadsheet 2.8.3.89, biome 2.2.1.13, house 0.1.0.43,
+catchall 0.4.0.1, zaum 0.2.0.65, anamnesis 0.2.0.84). User: "it would be good to standardize mix
+controls in habitat against built in examples, freeverb, say. these have been bugging me" - and
+explicitly scoped to INCREMENT DETENTS, not the crossfade law.
+REFERENCE READ FROM THE FRAMEWORK: core/assets/FreeverbUnit.lua's "wet" control uses
+Encoder.getMap("unit"), which is dialMaps["unit"] = dialMaps["[0,1]"] = linMap(0,1, 0.1, 0.01,
+0.001, 0.0001). So the standard is coarse 0.01 AND superFine 0.0001.
+FIX: 27 mix/wet controls across 6 packages now point at Encoder.getMap("unit") DIRECTLY instead of a
+private map. Taking the built-in wholesale (the same move as Constant Random's slew and level today)
+rather than re-stepping private maps means the standard cannot drift again - there is no local copy
+left to diverge. 8 private maps became dead locals and were deleted.
+WHAT WAS ACTUALLY WRONG, measured rather than assumed:
+  coarse 0.1  (10x too coarse) - Impasto/MultibandCompressor (0.5,0.1,0.01,0.001),
+              Parfait/MultibandSaturator (0.5,0.1,0.01,0.01), Som (1,0.1,0.01,0.001)
+  coarse 0.05 - Anamnesis (0.25,0.05,0.01,0.001)
+  superFine 0.001 vs 0.0001 (16 controls) - all 12 house units, Colmatage, Helicase, Larets,
+              Sujet, Fabula
+  already exact - Pecto, Petrichor/MultitapDelay, Tomograph/Filterbank, Network, Plenum,
+              Station X/CodescanFilter
+THE JULY INVENTORY IS PARTLY STALE: it listed Pecto AND Petrichor as needing the fix, but both have
+since moved to a normMap that already matches exactly. Only Impasto and Parfait remained of that
+group.
+DELIBERATELY UNTOUCHED: Rings (mi) is a bipolar [-1,1] main/aux balance, not a 0..1 dry/wet, and was
+already out of scope; Clouds/Stratos/Kryos/Discont already used Encoder.getMap("[0,1]"), which IS
+the same map object as "unit"; the legacy pre-split `stolmine` package (3 controls) is not among the
+9 shipped packages so it was skipped.
+Verified: every one of the 27 edits lands on exactly one biasMap line under a mix/wet button (audited
+line by line), all 6 packages build both arches, graphic-virtual lint OK, all installed to emu.
+STILL OPEN on this item: the crossfade LAW half (see the note below + [[drywet-crossfade-audit]]).
+Worth recording for that work - the framework's own od::CrossFade is NEITHER linear NOR sqrt: it is
+w_wet = 2x - x^2, w_dry = 1 - x^2, a quadratic pair that sits ~0.5 dB hot at centre for decorrelated
+material instead of the linear law's -3 dB dip, with no sqrt in the per-sample path."""
 note = """Two standards, now documented (docs/knowledge-base.md Conventions -> 'Dry/wet mix controls', + [[feedback_equal_power_drywet_crossfade]]): (1) equal-power sqrt-law crossfade for DECORRELATED dry/wet (tracked separately in [[drywet-crossfade-audit]]); (2) MIX CONTROL COARSE STEP = 0.01 (the 2nd setSteps arg: superCoarse, COARSE, fine, superFine). Inventory (published pkgs): ALREADY 0.01 = Fabula, Colmatage, Larets, Network (spreadsheet), Som, Flakes (catchall), Station X (biome). TO FIX (coarse=0.1) = Pecto, Petrichor(MultitapDelay), Parfait(MultibandSaturator), Impasto(MultibandCompressor) - all spreadsheet, all because their shared floatMap helper uses setSteps(1, 0.1, 0.01, 0.001). FIX: give the MIX control a dedicated map setSteps(0.1, 0.01, 0.001, 0.001) OR a per-control biasCoarseStep=0.01 - do NOT change the shared floatMap globally (it feeds cutoff/feedback/etc. that may want 0.1 coarse). Rings (mi) is a bipolar main/aux balance (Encoder.getMap('[-1,1]')), not a 0..1 dry/wet - out of scope. Fold into the same point release as the crossfade fixes."""
 
 [[item]]

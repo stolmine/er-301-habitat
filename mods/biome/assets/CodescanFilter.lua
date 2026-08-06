@@ -181,7 +181,7 @@ function CodescanFilter:onLoadViews(objects, branches)
     description = "Mix",
     gainbias = objects.mix,
     range = objects.mix,
-    biasMap = mixMap(),
+    biasMap = Encoder.getMap("unit"),
     biasUnits = app.unitNone,
     biasPrecision = 2,
     initialBias = 0.5

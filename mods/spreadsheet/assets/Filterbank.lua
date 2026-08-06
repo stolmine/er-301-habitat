@@ -33,7 +33,6 @@ local function intMap(min, max)
   return map
 end
 
-local mixMap = normMap(0, 1)
 local macroQMap = normMap(0, 1)
 local bandCountMap = intMap(2, 16)
 local rotateMap = intMap(-16, 16)
@@ -347,7 +346,7 @@ function Filterbank:onLoadViews()
       branch = self.branches.mix,
       gainbias = self.objects.mix,
       range = self.objects.mix,
-      biasMap = mixMap,
+      biasMap = Encoder.getMap("unit"),
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.5,

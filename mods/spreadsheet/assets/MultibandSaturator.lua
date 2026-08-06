@@ -47,7 +47,6 @@ local skewMap = (function()
   return map
 end)()
 
-local mixMap = normMap(0, 1)
 local bandLevelMap = floatMap(0, 2)
 local amtMap = normMap(0, 1)
 local biasMap = normMap(-1, 1)
@@ -318,7 +317,7 @@ function MultibandSaturator:onLoadViews()
       branch = self.branches.mix,
       gainbias = self.objects.mix,
       range = self.objects.mix,
-      biasMap = mixMap,
+      biasMap = Encoder.getMap("unit"),
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 1.0,

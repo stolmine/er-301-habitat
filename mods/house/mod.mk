@@ -1,5 +1,5 @@
 PKGNAME ?= house
-PKGVERSION ?= 0.1.0.42
+PKGVERSION ?= 0.1.0.43
 
 include scripts/env.mk
 

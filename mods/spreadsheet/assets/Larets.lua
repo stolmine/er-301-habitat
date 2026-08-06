@@ -1,5 +1,6 @@
 local app = app
 local libspreadsheet = require "spreadsheet.libspreadsheet"
+local Encoder = require "Encoder"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
@@ -26,7 +27,6 @@ local function intMap(min, max)
 end
 
 local skewMap = floatMap(-1, 1)
-local mixMap = floatMap(0, 1)
 local offsetMap = floatMap(-1, 1)
 local clockDivMap = intMap(1, 16)
 local stepCountMap = intMap(1, 16)
@@ -222,7 +222,7 @@ function Larets:onLoadViews()
       branch = self.branches.mix,
       gainbias = self.objects.mix,
       range = self.objects.mix,
-      biasMap = mixMap,
+      biasMap = Encoder.getMap("unit"),
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 1.0,

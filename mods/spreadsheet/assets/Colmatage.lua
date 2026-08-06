@@ -34,7 +34,6 @@ local accelMap = floatMap(0.5, 0.999)
 local dutyMap = floatMap(-1, 1)
 local ampMap = floatMap(0, 1)
 local fadeMap = floatMap(0, 0.1)
-local mixMap = floatMap(0, 1)
 local levelMap = floatMap(0, 4)
 local tanhMap = floatMap(0, 1)
 local phraseMap = intMap(1, 8)
@@ -165,7 +164,7 @@ function Colmatage:onLoadViews()
       branch = self.branches.mix,
       gainbias = self.objects.mix,
       range = self.objects.mix,
-      biasMap = mixMap,
+      biasMap = Encoder.getMap("unit"),
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 1.0,
