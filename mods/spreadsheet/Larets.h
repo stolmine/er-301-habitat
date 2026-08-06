@@ -41,6 +41,7 @@ namespace stolmine
     od::Parameter mEditTicks{"EditTicks", 1.0f};
 
     od::Option mAutoMakeup{"AutoMakeup", 2}; // 1=on, 2=off
+    od::Option mStepMode{"StepMode", 2};     // 1=random, 2=sequential
 #endif
 
     // SWIG-visible
@@ -65,6 +66,9 @@ namespace stolmine
 
     bool isAutoMakeupEnabled();
     void toggleAutoMakeup();
+
+    bool isRandomStep();
+    void toggleStepMode();
 
 #ifndef SWIGLUA
   private:

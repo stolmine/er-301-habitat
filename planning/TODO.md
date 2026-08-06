@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**166 items** — 44 done, 13 wip, 107 todo, 2 blocked. *Rendered 2026-07-23.*
+**166 items** — 44 done, 14 wip, 106 todo, 2 blocked. *Rendered 2026-08-05.*
 
 ## DSP
 
@@ -163,9 +163,9 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+| ~ | `larets-random-step-advance` | Larets: random step-advance mode (sequential/random, never the same step twice in a row) | manual *(attested)* · 2026-08-05 |
 |   | `ballot-gate-width-zero` | Ballot: gate width 0 produces a trigger instead of silence — decide desired behavior | manual · 2026-07-09 |
 |   | `colmatage-xform-ply` | Colmatage: add an xform ply (func + paramA/B/scope) for algorithmic cutting randomization | manual · 2026-07-09 |
-|   | `larets-random-step-advance` | Larets: random step-advance mode (Linear/Random/Brownian) — cross-pollinate to Excel/Ballot/Etcher | manual · 2026-07-09 |
 |   | `seq-101-sequencer` | 101 Sequencer — 64-step SH-101-style CV sequencer with address fader + math transforms | manual · 2026-07-09 |
 |   | `seq-automata-chess` | Automata Sequencer (Chess) — grid sequencer driven by board-game piece movement rules | manual · 2026-07-09 |
 |   | `seq-compass-port` | Compass — port of the Norns generative sequencer (feasibility research first) | manual · 2026-07-09 |

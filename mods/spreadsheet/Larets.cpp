@@ -118,6 +118,8 @@ namespace stolmine
     addParameter(mEditType); addParameter(mEditParam); addParameter(mEditTicks);
     addOption(mAutoMakeup);
     mAutoMakeup.enableSerialization();
+    addOption(mStepMode);
+    mStepMode.enableSerialization();
     mpInternal = new Internal();
     mpInternal->Init();
   }
@@ -152,6 +154,9 @@ namespace stolmine
 
   bool Larets::isAutoMakeupEnabled() { return mAutoMakeup.value() == 1; }
   void Larets::toggleAutoMakeup() { mAutoMakeup.set(isAutoMakeupEnabled() ? 2 : 1); }
+
+  bool Larets::isRandomStep() { return mStepMode.value() == 1; }
+  void Larets::toggleStepMode() { mStepMode.set(isRandomStep() ? 2 : 1); }
 
   static float skewMultiplier(int step, int stepCount, float skew)
   {
@@ -405,6 +410,7 @@ namespace stolmine
     float paramOffset = CLAMP(-1.0f, 1.0f, mParamOffset.value());
     float compAmt = CLAMP(0.0f, 1.0f, mCompressAmt.value());
     bool autoMakeup = mAutoMakeup.value() == 1;
+    bool randomStep = mStepMode.value() == 1;
     bool compActive = compAmt > 0.001f;
 
     // CPR single-band: 0 -> no-op, 1 -> aggressive limiter
@@ -463,7 +469,21 @@ namespace stolmine
           mDivCount = 0;
           if (++mTickCount >= effTicks)
           {
-            mStep = (mStep + 1) % wrapLen;
+            if (randomStep && wrapLen > 1)
+            {
+              // Pick an offset in [1, wrapLen-1] from the current step rather
+              // than an absolute index: the offset can never be 0, so the same
+              // step is never chosen twice in a row, and the choice stays
+              // uniform over the other wrapLen-1 steps. At wrapLen == 1 there
+              // is no other step, so fall through to the sequential advance.
+              int r = (int)(((lRandFloat() + 1.0f) * 0.5f) * (float)(wrapLen - 1));
+              r = CLAMP(0, wrapLen - 2, r);
+              mStep = (mStep + 1 + r) % wrapLen;
+            }
+            else
+            {
+              mStep = (mStep + 1) % wrapLen;
+            }
             mTickCount = 0;
             s.stepProgress = 0.0f;
             s.stepStartPos = s.ch[0].writePos;
