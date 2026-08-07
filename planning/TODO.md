@@ -5,14 +5,13 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**175 items** — 57 done, 13 wip, 103 todo, 2 blocked. *Rendered 2026-08-06.*
+**175 items** — 59 done, 11 wip, 103 todo, 2 blocked. *Rendered 2026-08-06.*
 
 ## DSP
 
 | | id | item | verify |
 |---|---|---|---|
 | ~ | `anamnesis-insert-crash` | Anamnesis am335x insert: data-abort in Event_post (heap corruption from insert path) | manual · 2026-07-12 |
-| ~ | `biome-expo-envelopes` | Biome: simple exponential envelopes - Expo D and Expo AD with expo-variation controls | manual *(attested)* · 2026-07-22 |
 | ~ | `ca-noise-texture` | Cellular-automata granular noise texture source (Vivary) | manual · 2026-07-16 |
 | ~ | `fabula-am335x` | Fabula reverb am335x port: hybrid-float + pow2-mask + zipper-fix | manual · 2026-07-12 |
 | ~ | `fdn-reverb` | NEON FDN reverb (Householder core + per-line filters + spectral flavor overlay) | manual · 2026-07-16 |
@@ -22,7 +21,6 @@ check`): a `done` item must have a real test or its named artifact.*
 | ~ | `ngoma-shape-fm-campaign` | Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping) | manual *(attested)* · 2026-07-22 |
 | ~ | `ngoma-shape0-level-campaign` | Ngoma shape-0 fundamental level structure (oscillator phase coherence at low r) | manual · 2026-07-23 |
 | ~ | `trinity-fm-unit` | Profile Modbap Trinity FM voice + build ER-301 FM drum unit | manual · 2026-07-20 |
-| ~ | `vitrail-unit` | Vitrail - dual switched-capacitor character filter unit | manual · 2026-07-18 |
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
 |   | `alembic-userbias-derivations` | Alembic Phases 7-8: per-region user-bias sub-params + Order 2/3 derivations + sample excitation | manual · 2026-07-09 |
 |   | `biome-utility-dsp-units` | biome DSP utility units: simple allpass, dome filter, frequency shifter, bitcrush/downsample | manual · 2026-07-09 |
@@ -58,6 +56,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `units-2d-wavetable-osc` | 2D/3D Wavetable Oscillator — X/Y-addressable wavetable with stacked pseudo-3D frame viz | manual · 2026-07-09 |
 |   | `units-spectral-processing` | Spectral Mask + Spectral Gate — sidechain-keyed / crossover per-band spectral processors | manual · 2026-07-09 |
 | ✗ | `kryos-load-hang` | Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware | manual · 2026-07-09 |
+| ✓ | `biome-expo-envelopes` | Biome: simple exponential envelopes - Expo D and Expo AD with expo-variation controls | manual *(attested)* · 2026-08-06 |
 | ✓ | `biome-flakes` | Flakes — granular shimmer/freeze feedback looper (C++ rewrite of Shards) | manual *(attested)* · 2026-07-09 |
 | ✓ | `biome-pecto` | Pecto — comb resonator (16 tap patterns, 4 slopes, 4 resonator types, NEON 3-pass, zipper-clean) | manual *(attested)* · 2026-07-09 |
 | ✓ | `fabula-diffusion-makeup` | Fabula: AGC / intelligent gain control to make up volume lost to diffusion | manual *(attested)* · 2026-08-06 |
@@ -82,6 +81,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `spreadsheet-rauschen` | Rauschen — parametric noise, 11 algorithms (White…Lorenz) with SVF morph + phase-space viz | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-visadhara` | Visadhara — clean-room BIA-style drum voice (Skin/Liquid/Metal configs) + Corona viz | manual *(attested)* · 2026-07-09 |
 | ✓ | `tessera-into-ngoma` | Port Tessera's Trinity-derived innovations into Ngoma | manual *(attested)* · 2026-07-22 |
+| ✓ | `vitrail-unit` | Vitrail - dual switched-capacitor character filter unit | manual *(attested)* · 2026-08-06 |
 
 ## Units
 
