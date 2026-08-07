@@ -1368,12 +1368,42 @@ GAINS (x86 proxy): per-sample libm calls 5.16M -> 0.12M per 5 s; field build 849
 there, newlib on Cortex-A8 costs ~100+ cycles/call at ~1M calls/s.
 Both arches, all three lints clean. OWED: hardware CPU% before/after, and at 96 kHz where it doubles.
 NOT DONE: NEON 3-pass gather on the 12 taps + 8 FDN reads (the Pecto pattern) - the next lever if
-hardware still shows heat, but doctrine says measure on device first."""
-
+hardware still shows heat, but doctrine says measure on device first.
+ROUND TWO 2026-08-07 (anamnesis 0.2.0.87). Hardware after round one: the machine went from
+COMPLETELY UNRESPONSIVE to just over 100% CPU with the animation running - real, not yet usable.
+That device reading satisfied the measure-before-NEON doctrine, so NEON was authorized.
+THE MEASUREMENT THAT MATTERED: a libm call counter over 10 s worst-case (Density=1, Diffusion=1)
+showed 62.4M expf + 3.3M sinf, overwhelmingly in the DRAW PATH (band rippleEval crest trains at
+~7k evals/frame x ~6 expf each, plus flow at 3.5k sinf/frame) rather than the audio path. After:
+5.8M expf + 1.6M sinf, and the draw path is now libm-FREE (objdump-confirmed; the only remaining
+libm sites in drawImpl/buildFieldFrame are the one-time Perlin bake cold path). newlib transcendentals
+cost ~100+ cycles each on A8, which is why this is the device-transferable number.
+1. OFFSCREEN VIZ GATE, the item I pointed the agent at ([[viz-offscreen-gate-all]]): Anamnesis had
+   NONE, so the field build and sim ran every frame even with the ply off screen. Fabula vizPing
+   heartbeat pattern (256 blocks). Audio never reads sim state, so zero audio effect BY CONSTRUCTION,
+   verified with bit-identical dumps. The real prize is that it makes the DEVICE the instrument:
+   on-screen vs navigated-away CPU% now gives the true DSP/viz split on hardware, which no x86 proxy
+   can provide. Gated runs measure ZERO libm.
+2. Draw-path fast kernels (fastSin/fastExpNeg) via TEMPLATED TWINS so the exact and fast variants
+   share one formula source - audio-thread physics keeps exact libm, draw uses fast. floorf -> bit-
+   exact int-floor.
+3. NEON 3-pass tap+FDN gather (Pecto pattern). First build emitted 2 quad [sp :64] spills - the
+   documented AlembicVoice trap - fixed by constructing vdupq constants in-loop. Verified 0 suspect
+   hints per-.o AND across the whole .so, which is the scan that catches spills across calls.
+4. LATENT OOB FIXED, present in SHIPPED code: [[feedback_multitap_idx_wrap_ulp]] - rp + len can round
+   to exactly len, giving a one-past-buffer read. Guarded in all paths.
+CHARACTER: audio is bit-identical to the round-one validated output for 5.8 s, then diverges - and
+the divergence IS the OOB fix recirculating, not an algorithm change. Sparse diffs at -68..-93 dBr,
+corr 0.9999999+, clock case zero diffs over 30 s. Viz: 99.89% of pixels identical over 1072
+worst-case frames, 98% of changes a single grey step.
+Both arches, all lints clean (neon 0/0 whole-.so, audio-stack clean, graphic-virtuals clean).
+OWED: on-screen vs off-screen hardware CPU% - the gate now gives that directly.
+REMAINING BIGGEST COST: the exact bubble-physics libm on the audio thread (~0.5-8% depending on
+Density). Deliberately left exact. The fast kernels sit behind a one-line template switch, but
+flipping it changes chaotic trajectories and needs the user's explicit sign-off - not a call to make
+silently on a character unit."""
 verify = { kind = "manual", ref = "emu: no encoder-capture / acceptable frame rate with all plies + bubbles + high Diffusion; responsive on CM4; am335x builds clean + check-graphic-virtual-defs.sh + (if NEON) check-neon-hints.sh" }
 note = "Plan of record: planning/anamnesis-viz-optimization.md. The all-over Pond viz crawls on CM4 (fine on MBA by brute force) because it is drawn by one AnamFieldGraphic PER PLY (kVizPlies=6) and each draw() recomputes the GLOBAL work identically - 28-point drift layer, sub-bump expansion over every bubble, and the per-level metaball field build (O(cells x bumps) expf + 3-octave fbm per cell, x3 levels) - so the heavy work runs ~6x redundantly per frame. Doctrine (planning/neon-opportunities.md): architectural before NEON (Visadhara precompute cache = 50x vs NEON 4x), and NO habitat graphic uses NEON yet (compiles into the SWIG .o at -Os, :64 trap unproven). Plan: (1) shared per-frame field cache on the op keyed on vizPhase - compute the strip-wide field once, plies blit windows (mirrors the RaindropGraphic screensaver it was lifted from); (2) bound the field build to per-bump bboxes (bumps->splat, not cells->all-bumps); (3) LUT the expf + thin fbm; (4) fill only active bbox; (5) single-pass multi-threshold marching squares; (6) NEON only on a measured remaining hotspot, class-member storage + whole-.o hint scan + hardware test. Crash rails: keep every virtual inline (DrumCubeGraphic out-of-line draw crash). Item 1 alone likely fixes the crawl. DSP am335x viability (Stretch the killer) is separate."
-
-# Fragment: anamnesis am335x insert data-abort. Append via scripts/dev ledger-append.
 
 [[item]]
 id = "anamnesis-insert-crash"

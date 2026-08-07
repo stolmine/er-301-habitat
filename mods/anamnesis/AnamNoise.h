@@ -80,11 +80,16 @@ namespace anamnesis
     inline void bake() { (void)lut(); }
 
     // Bilinear, tiling sample. Returns roughly [-1, 1].
+    // fract via (int)-cast floor: bit-identical to floorf for |x| < 2^31
+    // (all callers are far below), and floorf is a libm CALL on am335x
+    // VFPv3 -- two calls per sample at very high call rates otherwise.
     inline float sample(float u, float v)
     {
       const float *L = lut();
-      u = u - floorf(u);
-      v = v - floorf(v);
+      int ui = (int)u; if ((float)ui > u) ui--;
+      int vi = (int)v; if ((float)vi > v) vi--;
+      u = u - (float)ui;
+      v = v - (float)vi;
       float fx = u * (float)kLUT, fy = v * (float)kLUT;
       int x0 = (int)fx, y0 = (int)fy;
       float sx = fx - (float)x0, sy = fy - (float)y0;

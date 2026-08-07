@@ -68,6 +68,10 @@ int main()
 
   // ---- segment 1: DSP process() only ----
   // (input regenerated per block; identical sequence across runs)
+  // PING=1 tops up the offscreen-viz heartbeat every block, so the DSP-side
+  // viz sim (bubble physics / rain) runs as if a ply were on screen; default
+  // is the gated (offscreen) number. Audio output is identical either way.
+  const bool ping = envf("PING", 0.0f) > 0.5f;
   double t0 = now_s();
   double acc = 0.0;
   for (int b = 0; b < nb; b++)
@@ -78,14 +82,15 @@ int main()
       float x = nz() * 0.3f + ((n % 4000 == 0) ? 0.8f : 0.0f);
       iL[i] = x; iR[i] = x * 0.7f;
     }
+    if (ping) op->vizPing();
     op->process();
     if (dumpPath)
       for (int i = 0; i < fr; i++) dump.push_back(oL[i]);
     acc += oL[0];
   }
   double dspT = now_s() - t0;
-  printf("DSP  : %7.1f ms for %ds audio -> %5.2f%% realtime  (sink %.3f)\n",
-         dspT * 1e3, secs, 100.0 * dspT / secs, acc);
+  printf("DSP%s: %7.1f ms for %ds audio -> %5.2f%% realtime  (sink %.3f)\n",
+         ping ? "+v" : "  ", dspT * 1e3, secs, 100.0 * dspT / secs, acc);
 
   if (dumpPath)
   {
@@ -102,6 +107,7 @@ int main()
   for (int b = 0; b < nb; b++)
   {
     for (int i = 0; i < fr; i++) { float x = nz() * 0.3f; iL[i] = x; iR[i] = x * 0.7f; }
+    if (ping) op->vizPing(); // keep sim history identical to pre-gate baselines
     op->process();
     op->ensureFieldFrame(); // phase advanced per block -> one build per block
   }

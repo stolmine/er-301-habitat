@@ -57,6 +57,59 @@ namespace anamnesis
       return t * t * (3.0f - 2.0f * t);
     }
 
+    // ---- polynomial / fast transcendental kernels -------------------------
+    // sin(a) for a in [-pi/2, pi/2]: odd Taylor through x^9, |err| < 4e-6 vs
+    // libm (-108 dB, at the interval ends only). No runtime libm trig in
+    // package DSP on am335x (feedback_package_trig_lut).
+    inline float polySinQ(float a)
+    {
+      const float x2 = a * a;
+      return a * (1.0f + x2 * (-0.16666667f + x2 * (0.00833333333f
+                    + x2 * (-1.98412698e-4f + x2 * 2.75573192e-6f))));
+    }
+    // sin(y) for y in [0, 2*pi (+ a step)]: quadrant-fold onto polySinQ.
+    // The middle branch computes P(pi - y), bit-identical to -P(y - pi)
+    // because P is odd and IEEE subtraction is exactly anti-symmetric.
+    inline float polySin2Pi(float y)
+    {
+      float x;
+      if (y < 1.57079633f)      x = y;
+      else if (y < 4.71238898f) x = 3.14159265f - y;
+      else                      x = y - 6.28318531f;
+      return polySinQ(x);
+    }
+    // sin(y) for ANY finite y (flow-field args reach the thousands): reduce
+    // by floor(y * 1/2pi) then polySin2Pi. At |y| ~ 6500 the float reduction
+    // itself carries ~4e-4 rad of rounding -- on the flow field that moves a
+    // ~100 px wave by ~0.006 px, far below one 4-bit AA quantum (proven by
+    // the framebuffer A/B). DRAW-PATH ONLY.
+    inline float fastSin(float y)
+    {
+      const float r = y * 0.15915494309f; // y / 2pi
+      int k = (int)r; if ((float)k > r) k--;      // floor for either sign
+      return polySin2Pi((r - (float)k) * 6.28318531f);
+    }
+    // e^x for x <= 0 (Gaussian falloffs / decay envelopes): 2^t split into
+    // integer exponent (bit-assembled) + degree-4 mantissa poly. Relative
+    // error < 3.1e-4 (the Vitrail fastExp2 kernel, float form); below -40
+    // returns 0 (e^-40 ~ 4e-18). DRAW-PATH ONLY -- the audio-thread bubble
+    // physics keeps libm expf so its trajectories are bit-untouched.
+    inline float fastExpNeg(float x)
+    {
+      if (x < -40.0f) return 0.0f;
+      const float t = x * 1.44269504f;    // x * log2(e), in (-58, 0]
+      int xi = (int)t; if ((float)xi > t) xi--;   // floor
+      const float f = t - (float)xi;
+      const float p = 1.0f + f * (0.6931472f + f * (0.2402265f
+                        + f * (0.0555041f + f * 0.0096181f)));
+      union { uint32_t u; float f2; } e; e.u = (uint32_t)(xi + 127) << 23;
+      return p * e.f2;
+    }
+    // FAST-selectable wrappers so the exact (audio-thread) and fast
+    // (draw-thread) variants of the field formulas below share ONE source.
+    template <bool FAST> inline float expT(float x)   { return FAST ? fastExpNeg(x) : expf(x); }
+    template <bool FAST> inline float sinT(float y)   { return FAST ? fastSin(y) : sinf(y); }
+
     // Dendrite connectors: per-streamline site count grows with Density; each site
     // fades in over this window past its hash threshold (smooth branch-in).
     static const float kDendriteFade = 0.18f;
@@ -167,22 +220,25 @@ namespace anamnesis
     // A dispersive crest train: the crest COUNT grows with age and the spacing
     // widens outward, so the ring pattern fans out over time (cheap dispersion).
     // Smooth Gaussian crests only (no carrier) -> each passes a point once.
-    inline float crestTrain(float r, float R, float age, float a0, float lam0, float tau)
+    template <bool FAST>
+    inline float crestTrainT(float r, float R, float age, float a0, float lam0, float tau)
     {
       int nc = 2 + (int)(age * kRippleFan);
       if (nc > kRippleMaxCrests) nc = kRippleMaxCrests;
       const float inv2s2 = 1.0f / (2.0f * kRippleSigma * kRippleSigma);
-      const float amp = (a0 / sqrtf(r)) * expf(-age / tau);
+      const float amp = (a0 / sqrtf(r)) * expT<FAST>(-age / tau);
       float h = 0.0f, g = 1.0f, rc = R;
       for (int i = 0; i < nc; i++)
       {
         const float wf = r - rc;
-        h += g * expf(-(wf * wf) * inv2s2);
+        h += g * expT<FAST>(-(wf * wf) * inv2s2);
         g *= kRippleTrail;
         rc -= lam0 * (1.0f + kRippleSpread * (float)i); // next crest back, wider gap
       }
       return amp * h;
     }
+    inline float crestTrain(float r, float R, float age, float a0, float lam0, float tau)
+    { return crestTrainT<false>(r, R, age, a0, lam0, tau); }
 
     // One droplet's effect on a flow-line point at offset (dx,dy): BEND (radial
     // Y push -> geometry) and GLOW (the ring height -> illumination over the
@@ -191,7 +247,8 @@ namespace anamnesis
     // illumination; push = the full RADIAL magnitude (for shoving bubbles in 2D,
     // direction = (dx,dy)/r). bend = push * (dy/r) -> single source of truth.
     struct RippleHit { float bend; float glow; float push; };
-    inline RippleHit rippleEval(float dx, float dy, float age, float c, float tau)
+    template <bool FAST>
+    inline RippleHit rippleEvalT(float dx, float dy, float age, float c, float tau)
     {
       RippleHit out;
       out.bend = 0.0f;
@@ -207,21 +264,30 @@ namespace anamnesis
       if (age < kImpactT) // the plop: crater dips, jet rebounds, then gone
       {
         const float nn = age / kImpactT;
-        const float crater = -expf(-(r * r) / (kImpactCraterW * kImpactCraterW)) * (1.0f - nn);
-        const float jet = expf(-(r * r) / (kImpactJetW * kImpactJetW)) * sinf(3.14159265f * nn);
-        impact = kImpactA * (crater + 0.6f * jet) * expf(-age / kImpactT);
+        const float crater = -expT<FAST>(-(r * r) / (kImpactCraterW * kImpactCraterW)) * (1.0f - nn);
+        // jet arg = pi*nn in [0, pi] -> polySin2Pi is exact-domain for FAST
+        const float jetSin = FAST ? polySin2Pi(3.14159265f * nn) : sinf(3.14159265f * nn);
+        const float jet = expT<FAST>(-(r * r) / (kImpactJetW * kImpactJetW)) * jetSin;
+        impact = kImpactA * (crater + 0.6f * jet) * expT<FAST>(-age / kImpactT);
       }
-      float train = crestTrain(r, R, age, kRippleA0, kRippleLambda, tau); // primary
-      if (age > kSecDelay)                                                // knock-on
+      float train = crestTrainT<FAST>(r, R, age, kRippleA0, kRippleLambda, tau); // primary
+      if (age > kSecDelay)                                                       // knock-on
       {
         const float a2 = age - kSecDelay;
-        train += crestTrain(r, c * a2, a2, kRippleA0 * kSecAmp, kRippleLambda * kSecLam, tau);
+        train += crestTrainT<FAST>(r, c * a2, a2, kRippleA0 * kSecAmp, kRippleLambda * kSecLam, tau);
       }
       out.push = kRippleD * (impact + train);   // radial magnitude (2D bubble shove)
       out.bend = out.push * (dy / r);           // vertical component -> line geometry
       out.glow = train > 0.0f ? train : 0.0f;   // ring crests illuminate
       return out;
     }
+    // Exact form: audio-thread bubble physics (trajectories bit-untouched).
+    inline RippleHit rippleEval(float dx, float dy, float age, float c, float tau)
+    { return rippleEvalT<false>(dx, dy, age, c, tau); }
+    // Fast form: draw-path band bending/glow only (< 3.1e-4 relative on ~8 px
+    // amplitudes = milli-pixels; proven invisible by the framebuffer A/B).
+    inline RippleHit rippleEvalFast(float dx, float dy, float age, float c, float tau)
+    { return rippleEvalT<true>(dx, dy, age, c, tau); }
 
     // Content-stride between ply slices: 42px ply + 1px SpottedStrip gap.
     static const int kStride = 43;
@@ -335,21 +401,35 @@ namespace anamnesis
     static const float kModSpace = 0.010f; // wander spatial freq (low -> broad sway)
     static const float kModRate  = 0.16f;  // wander scroll speed (slow, x flow phase)
     static const float kModExp   = 2.0f;   // exponential throw -> subtle on the low end
-    inline float flow(float cx, float yb, float phase, float size, float mod)
+    template <bool FAST>
+    inline float flowT(float cx, float yb, float phase, float size, float mod)
     {
       const float fsc = kSizeFreqTight + (kSizeFreqWide - kSizeFreqTight) * size;
       const float asc = kSizeAmpMin + (kSizeAmpMax - kSizeAmpMin) * size;
       const float xc = cx - kFlowCenter; // anchor Size scaling at centre (linear -> one-way flow)
       float d = 0.0f;
-      d += 2.6f * sinf(fsc * (0.055f * xc + yb * 0.045f) + phase);
-      d += 1.3f * sinf(fsc * (0.115f * xc + yb * 0.090f) - 0.70f * phase);
-      d += 0.7f * sinf(fsc * (0.210f * xc) + 1.30f * phase);
+      d += 2.6f * sinT<FAST>(fsc * (0.055f * xc + yb * 0.045f) + phase);
+      d += 1.3f * sinT<FAST>(fsc * (0.115f * xc + yb * 0.090f) - 0.70f * phase);
+      d += 0.7f * sinT<FAST>(fsc * (0.210f * xc) + 1.30f * phase);
       float out = d * asc;
       if (mod > 0.0f) // slow organic wander (noise ~[-1,1]); not size-scaled; expo throw
-        out += powf(mod, kModExp) * kModDepth *
+      {
+        // kModExp == 2.0f exactly, so the FAST path's mod*mod is the same
+        // power law (-ffast-math folds the exact path's powf identically).
+        const float modw = FAST ? (mod * mod) : powf(mod, kModExp);
+        out += modw * kModDepth *
                anamnesis::noise::sample(cx * kModSpace, yb * kModSpace + phase * kModRate);
+      }
       return out;
     }
+    // Exact form: audio-thread bubble advection (trajectories bit-untouched).
+    inline float flow(float cx, float yb, float phase, float size, float mod)
+    { return flowT<false>(cx, yb, phase, size, mod); }
+    // Fast form: draw-path band geometry only (phase error ~4e-4 rad at the
+    // largest args = ~0.006 px on a 100 px wave; identical at every seam
+    // because all plies evaluate the same formula on the same global grid).
+    inline float flowFast(float cx, float yb, float phase, float size, float mod)
+    { return flowT<true>(cx, yb, phase, size, mod); }
 
   } // namespace field
 } // namespace anamnesis

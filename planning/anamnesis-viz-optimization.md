@@ -1,6 +1,57 @@
 # Anamnesis viz optimization - plan of record
 
-Status: **implemented through Item 4-lite** (2026-08-06, pkg 0.2.0.86, uncommitted).
+## Round two (2026-08-06, pkg 0.2.0.87, uncommitted)
+
+Hardware after round one: unresponsive -> "just over 100% CPU", animation runs.
+Target another ~2x. Changes, each A/B-proven:
+
+- **Offscreen-viz gate** ([hab:viz-offscreen-gate-all], Fabula vizPing pattern):
+  drawImpl pings a 256-block heartbeat; process() gates the DSP-side viz sim
+  (flow phase, rain, bubble physics) on it. Audio never reads sim state ->
+  zero audio effect. Offscreen, per-sample DSP libm calls measure ZERO and the
+  sim's 5.7M expf + 1.6M sinf per 10 s (worst case) vanish. This also makes
+  the device a measuring instrument: navigate away = DSP-only CPU%.
+- **Draw-path fast transcendental kernels** (field::fastSin / fastExpNeg,
+  templated twins flowFast/rippleEvalFast/crestTrainT so exact + fast share
+  one formula source): the bands' libm storm is gone. Whole-run worst-case
+  libm: 62.4M expf + 3.3M sinf per 10 s -> 5.8M + 1.6M, and the REMAINDER is
+  the audio-thread bubble physics deliberately kept exact (coordinator call:
+  ship slower and correct; its trajectories are bit-untouched, including
+  noise::sample whose floorf->int-floor change is bit-exact). On A8 that is
+  hundreds of M cycles/s off the UI thread. Errors: sin < 4e-6 (small args) /
+  ~4e-4 rad at args ~6500 (0.006 px on a 100 px wave), exp < 3.1e-4 relative
+  = milli-pixels. Framebuffer A/B (1072 worst-case frames, sim history
+  matched via bench PING): 99.89% pixels identical, 98% of changes are 1 gray
+  step, rest are 1-px boundary flips of moving lines (worst frame 38/16384).
+- **NEON 3-pass tap + FDN gather** (Pecto pattern): Pass A computes 12 tap /
+  8 FDN modulated delays 4-wide (vectorized polySin2PiQ, bit-identical
+  quadrant fold), prefetch pre-pass, scalar gather, NEON interp/gain/pan MAC
+  (taps) and mixed/guard/clamp/write (FDN; feedback + output sums kept scalar
+  in the old order = bit-identical). Class-member SoA, NO aligned() claims
+  (plain new is 8-aligned; unhinted vld1 cannot trap). First build emitted 2
+  quad [sp :64] spills (the AlembicVoice trap, feedback_neon_hint_surfaces);
+  fixed by constructing vdupq constants inside the short q-loops. Hint scan
+  now 0 safe / 0 suspect across the whole .so.
+- **Latent OOB fixed** (feedback_multitap_idx_wrap_ulp, present in the
+  SHIPPED readTap/readLine): wr - d + len can round to exactly len -> one
+  past the buffer. Guarded in all paths. Audio A/B vs round one: bit-identical
+  for 5.8 s until the (deterministic) event fires, then sparse -68..-93 dBr
+  diffs = the corrected sample recirculating; corr 0.9999999+; clock case 0
+  diffs in 30 s. A bug fix, not a character change.
+- x86 O3 worst-case: field build 112 -> 99 us, 6-ply draw 864 -> 694 us
+  (x86 undervalues both -- its libm is nearly free; the call-count drop is
+  the device-transferable number).
+- Verify: both arches clean, all three lints clean (audio stack now 0
+  warnings), emu insert smoke test passes on 0.2.0.87.
+- OWED: hardware CPU% on-screen vs off-screen (the gate gives the split).
+  Left alone: bubble-physics exact libm on the audio thread (~0.5-8% A8
+  depending on Density/drops -- the biggest remaining known cost, waiting on
+  the device split), Item 5 single-pass marching squares, band control-grid
+  hoist (~19% dedupe).
+
+## Round one
+
+Status: **implemented through Item 4-lite** (2026-08-06, pkg 0.2.0.86, committed eb85049).
 Item 1 (shared per-frame cache) had already shipped; this pass added the pieces
 below plus the DSP question at the bottom (which turned out to be the meter the
 user was seeing). Measured on the offline bench (`tools/house-bench/anam_bench.cpp`,

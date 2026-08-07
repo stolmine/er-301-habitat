@@ -108,6 +108,13 @@ namespace anamnesis
   static const float kRetrigFadeMs = 4.0f;   // re-trigger crossfade length (ms)
   static const float kEnvFloor = 0.003f;     // Env-mode auto-trigger floor (~-50 dB)
 
+  // Offscreen-viz gate (the Fabula pattern, [hab:viz-offscreen-gate-all]):
+  // every AnamFieldGraphic draw() pings the op; process() counts the heartbeat
+  // down at BLOCK rate and skips the DSP-side viz bookkeeping (flow-phase
+  // advance, rain aging/spawn, bubble physics) when it expires. Those only
+  // ever feed the graphic -- audio is untouched either way. ~0.68 s grace.
+  static const int kVizHeartbeatBlocks = 256;
+
   // Rain-on-pond ripple pool: one droplet spawns per loop cycle (read wrap),
   // drips into the all-over field, bends every ply's flow lines (07-allover-viz.md).
   static const int kVizMaxDrops = 16;
@@ -220,11 +227,18 @@ namespace anamnesis
         mTapGain[i] = expf(-1.8f * (float)i / (float)(kTapN - 1));
         mTapLfoPhase[i] = (float)i * 0.37f;
         mTapLfoHz[i] = 0.30f + 0.08f * (float)i;
+        mTapBaseF[i] = (float)kTapBase[i];
+        mTapIncQ[i] = 0.0f; mTapS0Q[i] = 0.0f; mTapS1Q[i] = 0.0f;
+        mTapFracQ[i] = 0.0f; mTapIdxQ[i] = 0;
       }
       for (int i = 0; i < kFdnN; i++)
       {
         mFdnLfoPhase[i] = (float)i * 0.61f;
         mFdnLfoHz[i] = 0.50f + 0.13f * (float)i;
+        mFdnBaseF[i] = (float)kFdnBase[i];
+        mFdnIncQ[i] = 0.0f; mFdnGQ[i] = 0.0f;
+        mFdnS0Q[i] = 0.0f; mFdnS1Q[i] = 0.0f;
+        mFdnFracQ[i] = 0.0f; mFdnRQ[i] = 0.0f; mFdnIdxQ[i] = 0;
       }
     }
 
@@ -307,6 +321,10 @@ namespace anamnesis
     // rest reuse) into a strip-wide grid; each AnamFieldGraphic samples its
     // window. planning/anamnesis-viz-optimization.md
     void ensureFieldFrame() { if (mVizPhase != mFcLastPhase) { mFcLastPhase = mVizPhase; buildFieldFrame(); } }
+    // Called by every ply graphic on draw(): keeps the DSP-side viz sim alive.
+    // When no ply is on screen the pings stop and process() skips the sim
+    // (block-constant gate, never a per-sample runtime tier).
+    void vizPing() { mVizHeartbeat = kVizHeartbeatBlocks; }
     const float *vizFieldGrid(int L) { return &mFcGrid[L * field::kFieldGW * field::kFieldGH]; }
     bool vizLevelUsed(int L) { return mFcLevelUsed[L]; }
 
@@ -341,11 +359,16 @@ namespace anamnesis
       return ((a * frac - bneg) * frac + c) * frac + x0;
     }
 
+    // NOTE the i0 wrap guard: when rp = wr - d is a tiny negative, rp + len
+    // can ROUND to exactly len, so (int)rp == len = one past the buffer
+    // (feedback_multitap_idx_wrap_ulp -- guard idx0 like idx0+1). frac is 0
+    // there, so the wrapped read returns the correct sample.
     inline float readLine(int i, float d)
     {
       float rp = (float)mWr - d;
       while (rp < 0.0f) rp += (float)kFdnBufLen;
       int i0 = (int)rp; float fr = rp - (float)i0;
+      if (i0 >= kFdnBufLen) i0 -= kFdnBufLen;
       int i1 = i0 + 1; if (i1 >= kFdnBufLen) i1 -= kFdnBufLen;
       return mLine[i][i0] + (mLine[i][i1] - mLine[i][i0]) * fr;
     }
@@ -355,6 +378,7 @@ namespace anamnesis
       float rp = (float)mTapWr - d;
       while (rp < 0.0f) rp += (float)kTapBufLen;
       int i0 = (int)rp; float fr = rp - (float)i0;
+      if (i0 >= kTapBufLen) i0 -= kTapBufLen;
       int i1 = i0 + 1; if (i1 >= kTapBufLen) i1 -= kTapBufLen;
       return mTapBuf[i0] + (mTapBuf[i1] - mTapBuf[i0]) * fr;
     }
@@ -383,31 +407,15 @@ namespace anamnesis
       union { float f; uint32_t u; } m; m.f = 3.0e38f;
       return (b.u & 0x7fffffffu) <= m.u;
     }
-    // sin(a) for a in [-pi/2, pi/2]: odd Taylor through x^9, max |err| vs
-    // libm sinf < 4e-6 (~ -108 dB, at the interval ends only). Replaces
-    // per-step libm sinf (repo convention keeps runtime libm trig out of
-    // package DSP on am335x, feedback_package_trig_lut).
-    static inline float polySinQ(float a)
-    {
-      const float x2 = a * a;
-      return a * (1.0f + x2 * (-0.16666667f + x2 * (0.00833333333f
-                    + x2 * (-1.98412698e-4f + x2 * 2.75573192e-6f))));
-    }
-    // sin(y) for y in [0, 2*pi (+ a step)]: quadrant-fold onto polySinQ.
-    // Used on the LFO phase accumulators so the PHASE TRAJECTORY stays
-    // bit-identical to the shipped sinf version (only the sine evaluation
-    // differs, by < 4e-6). A rotator recurrence was tried and rejected: it
-    // tracks the true frequency more accurately than the float phase
-    // accumulator, so the modulation trajectories drift apart audib-
-    // ly-in-an-A/B over tens of seconds. Faithful > better.
-    static inline float polySin2Pi(float y)
-    {
-      float x, sgn;
-      if (y < 1.57079633f)      { x = y;               sgn = 1.0f; }
-      else if (y < 4.71238898f) { x = y - 3.14159265f; sgn = -1.0f; }
-      else                      { x = y - 6.28318531f; sgn = 1.0f; }
-      return sgn * polySinQ(x);
-    }
+    // The poly sine kernels (polySinQ on [-pi/2,pi/2], polySin2Pi on
+    // [0,2pi]) live in field:: (AnamField.h), shared with the draw-path fast
+    // variants -- ONE source for the formulas. The LFO phase accumulators in
+    // process() keep the shipped sinf trajectory bit-identical; only the
+    // sine EVALUATION is poly (< 4e-6). A rotator recurrence was tried and
+    // rejected: it tracks the true frequency more accurately than the float
+    // phase accumulator, so the modulation trajectories drift apart
+    // audibly-in-an-A/B over tens of seconds. Faithful > better.
+
     // cos(y) for y in [0, pi]: fold to [0, pi/2], even Taylor through x^10,
     // max |err| < 5e-7. Used for the loop-seam raised-cosine declick.
     static inline float polyCosPi(float y)
@@ -434,7 +442,7 @@ namespace anamnesis
     {
       float a = (x < 0.0f ? -x : x) * d;
       if (a > 1.57079633f) a = 1.57079633f;   // pi/2
-      float s = polySinQ(a) / d;
+      float s = field::polySinQ(a) / d;
       return x < 0.0f ? -s : s;
     }
 
@@ -496,7 +504,24 @@ namespace anamnesis
     float mPanL[kTapN], mPanR[kTapN], mTapGain[kTapN];
     float mTapLfoPhase[kTapN], mTapLfoHz[kTapN];
     float mFdnLfoPhase[kFdnN], mFdnLfoHz[kFdnN];
+    // NEON SoA state/scratch for the per-step tap + FDN gather (Pecto's
+    // 3-pass compute/gather/combine pattern, feedback_neon_delay_gather).
+    // CLASS MEMBERS, never stack locals (feedback_neon_intrinsics_drumvoice).
+    // Deliberately NO aligned(16) claims: plain new is only 8-aligned on
+    // am335x, and an unprovable claim invites :64/:128-hinted NEON loads
+    // (the A8 alignment trap); unhinted vld1 costs ~a cycle and cannot trap.
+    // kTapN=12 -> 3 quads, kFdnN=8 -> 2 quads. Also used (as plain arrays)
+    // by the scalar fallback so both paths share the block-rate fills.
+    float   mTapBaseF[kTapN];   // kTapBase as float (ctor)
+    float   mTapIncQ[kTapN];    // per-block LFO phase increments
+    float   mTapS0Q[kTapN], mTapS1Q[kTapN], mTapFracQ[kTapN];
+    int32_t mTapIdxQ[kTapN];
+    float   mFdnBaseF[kFdnN];
+    float   mFdnIncQ[kFdnN], mFdnGQ[kFdnN];
+    float   mFdnS0Q[kFdnN], mFdnS1Q[kFdnN], mFdnFracQ[kFdnN], mFdnRQ[kFdnN];
+    int32_t mFdnIdxQ[kFdnN];
     float mSizeScaleZ, mT60Z, mDiffGZ, mDensityZ, mModZ;
+    int   mVizHeartbeat = 0;   // blocks the viz sim stays live after the last graphic draw
     bool  mInit = false;
     bool  mFzSet = false;
 #endif

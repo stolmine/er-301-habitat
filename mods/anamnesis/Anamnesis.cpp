@@ -12,7 +12,10 @@
 //    only the non-virtual drawImpl lives here (no key-function vtable shift
 //    for the graphic; Anamnesis::process() out-of-line matches every other
 //    od::Object unit in the repo).
-//  - No NEON intrinsics; -fno-tree-vectorize is load-bearing on am335x.
+//  - NEON intrinsics only in the per-step tap/FDN gather (round two, Pecto's
+//    3-pass pattern): hand-written, class-member SoA storage only, no
+//    alignment claims, whole-.o hint scan gates the build.
+//    -fno-tree-vectorize stays load-bearing on am335x (no AUTO-vectorization).
 
 #include <od/config.h>
 #include "atoms/Anamnesis.h"
@@ -20,8 +23,34 @@
 #include <math.h>
 #include <string.h>
 
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 namespace anamnesis
 {
+
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+// 4-lane field::polySin2Pi on phases in [0, 2pi]: the quadrant select uses
+// the P(pi - y) fold, bit-identical per lane to the scalar form (P is odd and
+// IEEE subtraction is exactly anti-symmetric). vmlaq rounds the product then
+// the sum -- the same two roundings as the scalar's separate mul/add on
+// armv7 (no fused contraction there), so lanes match the scalar fallback.
+static inline float32x4_t polySin2PiQ(float32x4_t y)
+{
+  const float32x4_t vPi    = vdupq_n_f32(3.14159265f);
+  const float32x4_t vTwoPi = vdupq_n_f32(6.28318531f);
+  uint32x4_t m1 = vcltq_f32(y, vdupq_n_f32(1.57079633f));
+  uint32x4_t m2 = vcltq_f32(y, vdupq_n_f32(4.71238898f));
+  float32x4_t x = vbslq_f32(m1, y, vbslq_f32(m2, vsubq_f32(vPi, y), vsubq_f32(y, vTwoPi)));
+  float32x4_t x2 = vmulq_f32(x, x);
+  float32x4_t p = vmlaq_f32(vdupq_n_f32(-1.98412698e-4f), x2, vdupq_n_f32(2.75573192e-6f));
+  p = vmlaq_f32(vdupq_n_f32(0.00833333333f), x2, p);
+  p = vmlaq_f32(vdupq_n_f32(-0.16666667f), x2, p);
+  p = vmlaq_f32(vdupq_n_f32(1.0f), x2, p);
+  return vmulq_f32(x, p);
+}
+#endif
 
 void Anamnesis::process()
 {
@@ -108,11 +137,11 @@ void Anamnesis::process()
     const float kFdnWetGain = 0.5f;
     const float kTapWetGain = 0.35f;
 
-    float lfoInc[kTapN];
-    for (int i = 0; i < kTapN; i++) lfoInc[i] = 2.0f * kPi * mTapLfoHz[i] / fs;
+    // Block-rate fills into the SoA members (shared by the NEON and scalar
+    // per-step paths; values identical to the old stack lfoInc arrays).
+    for (int i = 0; i < kTapN; i++) mTapIncQ[i] = 2.0f * kPi * mTapLfoHz[i] / fs;
     const float kJitDepth = 2.5f;
-    float fdnLfoInc[kFdnN];
-    for (int i = 0; i < kFdnN; i++) fdnLfoInc[i] = 2.0f * kPi * mFdnLfoHz[i] / fs;
+    for (int i = 0; i < kFdnN; i++) { mFdnIncQ[i] = 2.0f * kPi * mFdnLfoHz[i] / fs; mFdnGQ[i] = g[i]; }
     const float modDepth = mModZ * 18.0f;
 
     // global CLOCK decimation factor R. Steps mode snaps to the harmonized
@@ -133,17 +162,31 @@ void Anamnesis::process()
     const float clockInc = 1.0f / mRcurZ;
     const float Rcur = mRcurZ;
 
+    // Offscreen-viz gate ([hab:viz-offscreen-gate-all], the Fabula pattern):
+    // the graphics ping the heartbeat on every draw; it counts down here at
+    // BLOCK rate. When no Anamnesis ply is on screen the pings stop and the
+    // whole viz sim below (flow phase, rain, bubble physics -- the flow/
+    // rippleEval/noise transcendental load) is skipped. It only ever feeds
+    // the graphic; the audio path never reads it. Block-constant bool, so no
+    // per-sample runtime tier (feedback_runtime_branched_dsp_dispatch).
+    const bool vizActive = (mVizHeartbeat > 0);
+    if (mVizHeartbeat > 0) mVizHeartbeat--;
+
     // Viz animation phase: the flow-field's "current". Advances per block;
     // speed ~ 1/R so a slower CLOCK slows the whole pond. Shared by every ply's
     // AnamFieldGraphic so the all-over image stays in sync. Wrapped to bound float.
     // Freeze STOPS the flow motion only (the lines hold their shape) -- droplet
     // instancing + influence continue, so a frozen pond keeps being rained on.
     const float vizFreeze = 1.0f - (1.0f - mFreezeZ) * (1.0f - mCaptureHoldZ);
-    mVizPhase += (1.0f - vizFreeze) * (float)FRAMELENGTH / fs * (6.2831853f * 0.20f) / Rcur;
-    if (mVizPhase > 6.2831853f * 1024.0f) mVizPhase -= 6.2831853f * 1024.0f;
+    if (vizActive)
+    {
+      mVizPhase += (1.0f - vizFreeze) * (float)FRAMELENGTH / fs * (6.2831853f * 0.20f) / Rcur;
+      if (mVizPhase > 6.2831853f * 1024.0f) mVizPhase -= 6.2831853f * 1024.0f;
+    }
 
     // Rain: age the active droplets (real seconds), retire the expired, and
     // spawn one per completed loop cycle (read-pointer wrap since last block).
+    if (vizActive)
     {
       const float vizDt = (float)FRAMELENGTH / fs;
       // Decay -> longer ripple life (= 3 * persistence-scaled tau).
@@ -162,12 +205,15 @@ void Anamnesis::process()
       const float curRead = stretchMode ? mStretchHead : mLoopReadPos;
       if (mLoopLenZ > 2.0f && fabsf(curRead - mDropPrevRead) > 0.5f * mLoopLenZ)
         spawnDrop();
-      mDropPrevRead = curRead;
     }
+    // Track the read head even when gated (2 ops) so coming back on screen
+    // does not fake a loop-wrap and spawn a phantom droplet.
+    mDropPrevRead = stretchMode ? mStretchHead : mLoopReadPos;
 
     // Bubbles: float up + drift. SPEED tied to the CLOCK (vdt) like the rest of
     // the sim; COUNT tied to Density; a new bubble sometimes CALVES off an
     // existing one (born beside it, drifting away) so split-offs live on their own.
+    if (vizActive)
     {
       const float vdt = (float)FRAMELENGTH / fs / mRcurZ; // clock-scaled time step
       const float colH = anamnesis::field::kVizColH;
@@ -451,21 +497,80 @@ void Anamnesis::process()
       const float fieldIn = rawIn + mSourceZ * (looperOut - rawIn);
 
       // ================= STAGE 1: sparse feedforward taps =================
+      // Pecto's 3-pass gather (feedback_neon_delay_gather): Pass A computes
+      // the 12 modulated delays / read indices 4-wide, Pass B is the scalar
+      // scatter-gather (no NEON gather load on A8), Pass C is the NEON
+      // interp x gain x pan accumulate. Per-lane math mirrors the scalar
+      // fallback below exactly; the only difference is the L/R accumulation
+      // ORDER (lane-parallel + pairwise vs sequential), a ~1 ulp
+      // reassociation of a 12-term sum.
       mTapBuf[mTapWr] = fieldIn;
       float tapL = 0.0f, tapR = 0.0f;
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+      {
+        // NOTE: the vdupq constants are constructed INSIDE the loop bodies,
+        // not hoisted. Hoisting them made 8+ quads live across the whole
+        // region and gcc spilled q-regs to [sp :64] -- the documented A8
+        // trap (feedback_neon_hint_surfaces, AlembicVoice phase 3a). In-loop
+        // vdup rematerializes in registers; the loops run 3x/2x per step.
+        for (int q = 0; q < kTapN; q += 4)   // ---- Pass A: delays -> idx/frac
+        {
+          const float32x4_t vTwoPi = vdupq_n_f32(2.0f * kPi);
+          float32x4_t ph = vaddq_f32(vld1q_f32(&mTapLfoPhase[q]), vld1q_f32(&mTapIncQ[q]));
+          uint32x4_t wm = vcgtq_f32(ph, vTwoPi);
+          ph = vsubq_f32(ph, vreinterpretq_f32_u32(vandq_u32(wm, vreinterpretq_u32_f32(vTwoPi))));
+          vst1q_f32(&mTapLfoPhase[q], ph);
+          float32x4_t sn = polySin2PiQ(ph);
+          float32x4_t d = vmlaq_f32(vmulq_f32(vld1q_f32(&mTapBaseF[q]), vdupq_n_f32(mSizeScaleZ)),
+                                    sn, vdupq_n_f32(kJitDepth));
+          d = vminq_f32(vmaxq_f32(d, vdupq_n_f32(1.0f)), vdupq_n_f32((float)(kTapBufLen - 2)));
+          float32x4_t rp = vsubq_f32(vdupq_n_f32((float)mTapWr), d);
+          uint32x4_t neg = vcltq_f32(rp, vdupq_n_f32(0.0f));
+          rp = vaddq_f32(rp, vreinterpretq_f32_u32(vandq_u32(neg, vreinterpretq_u32_f32(vdupq_n_f32((float)kTapBufLen)))));
+          int32x4_t idx = vcvtq_s32_f32(rp);            // trunc == floor, rp >= 0
+          vst1q_f32(&mTapFracQ[q], vsubq_f32(rp, vcvtq_f32_s32(idx)));
+          vst1q_s32(&mTapIdxQ[q], idx);
+        }
+        for (int t = 0; t < kTapN; t++)      // prefetch pre-pass (misses overlap)
+          __builtin_prefetch(&mTapBuf[mTapIdxQ[t]], 0, 1);
+        for (int t = 0; t < kTapN; t++)      // ---- Pass B: scalar gather
+        {
+          int i0 = mTapIdxQ[t];
+          if (i0 >= kTapBufLen) i0 -= kTapBufLen; // ulp wrap edge (frac==0 there)
+          int i1 = i0 + 1; if (i1 >= kTapBufLen) i1 -= kTapBufLen;
+          mTapS0Q[t] = mTapBuf[i0];
+          mTapS1Q[t] = mTapBuf[i1];
+        }
+        float32x4_t accL = vdupq_n_f32(0.0f), accR = vdupq_n_f32(0.0f);
+        for (int q = 0; q < kTapN; q += 4)   // ---- Pass C: interp+gain+pan MAC
+        {
+          float32x4_t s0 = vld1q_f32(&mTapS0Q[q]);
+          float32x4_t s1 = vld1q_f32(&mTapS1Q[q]);
+          float32x4_t t = vmlaq_f32(s0, vsubq_f32(s1, s0), vld1q_f32(&mTapFracQ[q]));
+          t = vmulq_f32(t, vld1q_f32(&mTapGain[q]));
+          accL = vmlaq_f32(accL, t, vld1q_f32(&mPanL[q]));
+          accR = vmlaq_f32(accR, t, vld1q_f32(&mPanR[q]));
+        }
+        float32x2_t l2 = vpadd_f32(vadd_f32(vget_low_f32(accL), vget_high_f32(accL)),
+                                   vadd_f32(vget_low_f32(accR), vget_high_f32(accR)));
+        tapL = vget_lane_f32(l2, 0);
+        tapR = vget_lane_f32(l2, 1);
+      }
+#else
       for (int i = 0; i < kTapN; i++)
       {
         // phase accumulation kept BIT-IDENTICAL to the shipped build; only
         // the sine evaluation is poly (< 4e-6, no libm call per step)
-        mTapLfoPhase[i] += lfoInc[i];
+        mTapLfoPhase[i] += mTapIncQ[i];
         if (mTapLfoPhase[i] > 2.0f * kPi) mTapLfoPhase[i] -= 2.0f * kPi;
-        float d = (float)kTapBase[i] * mSizeScaleZ + polySin2Pi(mTapLfoPhase[i]) * kJitDepth;
+        float d = (float)kTapBase[i] * mSizeScaleZ + field::polySin2Pi(mTapLfoPhase[i]) * kJitDepth;
         if (d < 1.0f) d = 1.0f;
         if (d > (float)(kTapBufLen - 2)) d = (float)(kTapBufLen - 2);
         float t = readTap(d) * mTapGain[i];
         tapL += t * mPanL[i];
         tapR += t * mPanR[i];
       }
+#endif
       tapL *= kTapWetGain;
       tapR *= kTapWetGain;
       mTapWr++; if (mTapWr >= kTapBufLen) mTapWr = 0;
@@ -484,12 +589,79 @@ void Anamnesis::process()
         x = y;
       }
 
+      // FDN reads: same 3-pass shape as the taps. The feedback sum s and the
+      // L/R output sums are accumulated SCALAR in index order from the lane
+      // store, so they stay bit-identical to the old sequential loop; only
+      // the per-line delay/interp/write math is lane-parallel (per-lane
+      // identical ops).
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+      float fdnL, fdnR;
+      {
+        for (int q = 0; q < kFdnN; q += 4)   // ---- Pass A: delays -> idx/frac
+        {
+          const float32x4_t vTwoPi = vdupq_n_f32(2.0f * kPi);
+          float32x4_t ph = vaddq_f32(vld1q_f32(&mFdnLfoPhase[q]), vld1q_f32(&mFdnIncQ[q]));
+          uint32x4_t wm = vcgtq_f32(ph, vTwoPi);
+          ph = vsubq_f32(ph, vreinterpretq_f32_u32(vandq_u32(wm, vreinterpretq_u32_f32(vTwoPi))));
+          vst1q_f32(&mFdnLfoPhase[q], ph);
+          float32x4_t sn = polySin2PiQ(ph);
+          float32x4_t d = vmlaq_f32(vmulq_f32(vld1q_f32(&mFdnBaseF[q]), vdupq_n_f32(mSizeScaleZ)),
+                                    vdupq_n_f32(modDepth), sn);
+          d = vminq_f32(vmaxq_f32(d, vdupq_n_f32(1.0f)), vdupq_n_f32((float)(kFdnBufLen - 2)));
+          float32x4_t rp = vsubq_f32(vdupq_n_f32((float)mWr), d);
+          uint32x4_t neg = vcltq_f32(rp, vdupq_n_f32(0.0f));
+          rp = vaddq_f32(rp, vreinterpretq_f32_u32(vandq_u32(neg, vreinterpretq_u32_f32(vdupq_n_f32((float)kFdnBufLen)))));
+          int32x4_t idx = vcvtq_s32_f32(rp);
+          vst1q_f32(&mFdnFracQ[q], vsubq_f32(rp, vcvtq_f32_s32(idx)));
+          vst1q_s32(&mFdnIdxQ[q], idx);
+        }
+        for (int i = 0; i < kFdnN; i++)      // prefetch pre-pass
+          __builtin_prefetch(&mLine[i][mFdnIdxQ[i]], 0, 1);
+        for (int i = 0; i < kFdnN; i++)      // ---- Pass B: scalar gather
+        {
+          int i0 = mFdnIdxQ[i];
+          if (i0 >= kFdnBufLen) i0 -= kFdnBufLen; // ulp wrap edge (frac==0 there)
+          int i1 = i0 + 1; if (i1 >= kFdnBufLen) i1 -= kFdnBufLen;
+          mFdnS0Q[i] = mLine[i][i0];
+          mFdnS1Q[i] = mLine[i][i1];
+        }
+        for (int q = 0; q < kFdnN; q += 4)   // ---- Pass C: interp -> r
+        {
+          float32x4_t s0 = vld1q_f32(&mFdnS0Q[q]);
+          float32x4_t s1 = vld1q_f32(&mFdnS1Q[q]);
+          vst1q_f32(&mFdnRQ[q], vmlaq_f32(s0, vsubq_f32(s1, s0), vld1q_f32(&mFdnFracQ[q])));
+        }
+        // feedback sum in the OLD sequential order (bit-identical)
+        float s = 0.0f;
+        for (int i = 0; i < kFdnN; i++) s += mFdnRQ[i];
+        // ---- Pass D: mixed/write, lane-parallel; guard + clamp branchless
+        union { float f; uint32_t u; } mfin; mfin.f = 3.0e38f;
+        for (int q = 0; q < kFdnN; q += 4)
+        {
+          float32x4_t rq = vld1q_f32(&mFdnRQ[q]);
+          float32x4_t mixed = vsubq_f32(rq, vmulq_f32(vdupq_n_f32(fMixA), vdupq_n_f32(s)));
+          float32x4_t w = vmlaq_f32(vdupq_n_f32(x), vld1q_f32(&mFdnGQ[q]), mixed);
+          // isfinitef bit test per lane (same unsigned compare as the scalar)
+          uint32x4_t fin = vcleq_u32(vandq_u32(vreinterpretq_u32_f32(w), vdupq_n_u32(0x7fffffffu)),
+                                     vdupq_n_u32(mfin.u));
+          w = vreinterpretq_f32_u32(vandq_u32(fin, vreinterpretq_u32_f32(w)));
+          w = vminq_f32(vmaxq_f32(w, vdupq_n_f32(-8.0f)), vdupq_n_f32(8.0f));
+          // scattered per-line stores (8 distinct arrays) -- lane extracts
+          mLine[q + 0][mWr] = vgetq_lane_f32(w, 0);
+          mLine[q + 1][mWr] = vgetq_lane_f32(w, 1);
+          mLine[q + 2][mWr] = vgetq_lane_f32(w, 2);
+          mLine[q + 3][mWr] = vgetq_lane_f32(w, 3);
+        }
+        fdnL = (mFdnRQ[0] + mFdnRQ[1] + mFdnRQ[2] + mFdnRQ[3]) * kFdnWetGain;
+        fdnR = (mFdnRQ[4] + mFdnRQ[5] + mFdnRQ[6] + mFdnRQ[7]) * kFdnWetGain;
+      }
+#else
       float r[kFdnN], s = 0.0f;
       for (int i = 0; i < kFdnN; i++)
       {
-        mFdnLfoPhase[i] += fdnLfoInc[i];
+        mFdnLfoPhase[i] += mFdnIncQ[i];
         if (mFdnLfoPhase[i] > 2.0f * kPi) mFdnLfoPhase[i] -= 2.0f * kPi;
-        float L = (float)kFdnBase[i] * mSizeScaleZ + modDepth * polySin2Pi(mFdnLfoPhase[i]);
+        float L = (float)kFdnBase[i] * mSizeScaleZ + modDepth * field::polySin2Pi(mFdnLfoPhase[i]);
         if (L < 1.0f) L = 1.0f;
         if (L > (float)(kFdnBufLen - 2)) L = (float)(kFdnBufLen - 2);
         r[i] = readLine(i, L);
@@ -505,6 +677,7 @@ void Anamnesis::process()
       }
       float fdnL = (r[0] + r[1] + r[2] + r[3]) * kFdnWetGain;
       float fdnR = (r[4] + r[5] + r[6] + r[7]) * kFdnWetGain;
+#endif
       mWr++; if (mWr >= kFdnBufLen) mWr = 0;
 
       // ============ DENSITY crossfade: sparse taps <-> dense FDN ============
@@ -654,7 +827,9 @@ void Anamnesis::buildFieldFrame()
           for (int i = i0; i <= i1; i++)
           {
             const float dx = (float)(i * C) - sbX[b];
-            row[i] += amp * expf(-(dx * dx + dy * dy) * inv2s2);
+            // fast exp (draw path; < 3.1e-4 relative on a field tested
+            // against a 0.5 threshold -> sub-millicell contour shift)
+            row[i] += amp * field::fastExpNeg(-(dx * dx + dy * dy) * inv2s2);
           }
         }
       }
@@ -709,7 +884,11 @@ void AnamFieldGraphic::drawImpl(od::FrameBuffer &fb)
     // Build the shared strip-wide metaball field ONCE per frame: the first ply
     // that draws this frame does the work (keyed on vizPhase), the rest reuse.
     // Item 1 of planning/anamnesis-viz-optimization.md.
-    if (mpOp) mpOp->ensureFieldFrame();
+    if (mpOp)
+    {
+      mpOp->vizPing();       // keep the DSP-side viz sim alive (idles offscreen)
+      mpOp->ensureFieldFrame();
+    }
 
     // Cache the active rain droplets once (epicenters in content-x / column-y).
     int nd = 0;
@@ -760,14 +939,19 @@ void AnamFieldGraphic::drawImpl(od::FrameBuffer &fb)
       for (int i = 0; i < mctrl; i++)
       {
         const float cx = (float)((g0 + i) * cstep);
-        float y0 = yb0 + field::flow(cx, yb0, phase, size, vmod);
-        float y1 = yb1 + field::flow(cx, yb1, phase, size, vmod);
+        // FAST variants (draw-path only): poly sin / fast exp, milli-pixel
+        // errors on multi-pixel amplitudes, framebuffer-A/B-proven. This is
+        // the band libm storm on am335x (~3.5k sinf + tens of thousands of
+        // expf per frame via libm otherwise). The audio-thread bubble
+        // physics keeps the exact forms.
+        float y0 = yb0 + field::flowFast(cx, yb0, phase, size, vmod);
+        float y1 = yb1 + field::flowFast(cx, yb1, phase, size, vmod);
         float gl0 = 0.0f, gl1 = 0.0f;
         for (int d = 0; d < nd; d++)
         {
-          const field::RippleHit a0 = field::rippleEval(cx - dX[d], y0 - dY[d], dAge[d], dC[d], rtau);
+          const field::RippleHit a0 = field::rippleEvalFast(cx - dX[d], y0 - dY[d], dAge[d], dC[d], rtau);
           y0 += dAmp[d] * a0.bend; gl0 += dAmp[d] * a0.glow;
-          const field::RippleHit a1 = field::rippleEval(cx - dX[d], y1 - dY[d], dAge[d], dC[d], rtau);
+          const field::RippleHit a1 = field::rippleEvalFast(cx - dX[d], y1 - dY[d], dAge[d], dC[d], rtau);
           y1 += dAmp[d] * a1.bend; gl1 += dAmp[d] * a1.glow;
         }
         cY0[i] = y0; cB0[i] = gl0; cY1[i] = y1; cB1[i] = gl1;
@@ -882,7 +1066,9 @@ void AnamFieldGraphic::drawImpl(od::FrameBuffer &fb)
             {
               // Interleaved Gradient Noise (Jimenez) -> smooth gradient dither.
               float ign = 0.06711056f * (float)px + 0.00583715f * (float)py;
-              ign -= floorf(ign); ign = 52.9829189f * ign; ign -= floorf(ign); // -> [0,1)
+              // fract via (int) cast: ign >= 0 here, so trunc == floor exactly
+              // (floorf is a libm call on am335x VFPv3)
+              ign -= (float)(int)ign; ign = 52.9829189f * ign; ign -= (float)(int)ign; // -> [0,1)
               const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + ign);
               if (bv > 0 && bv > fb.readPixel(px, py)) fb.pixel(bv, px, py);
             }

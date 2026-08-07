@@ -127,7 +127,7 @@ namespace anamnesis
       float y = y0 + grad * ((float)ix0 - x0);
       for (int x = ix0; x <= ix1; x++)
       {
-        const int iy = (int)floorf(y);
+        int iy = (int)y; if ((float)iy > y) iy--; // exact floor, no libm call
         const float fy = y - (float)iy;
         if (steep)
         {
