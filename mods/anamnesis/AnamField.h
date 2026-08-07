@@ -38,9 +38,13 @@ namespace anamnesis
     inline float fract(float x) { return x - floorf(x); }
 
     // Stable pseudo-random [0,1) from two ints (dendrite connector sites).
+    // NOTE: the mixing arithmetic must be UNSIGNED. As signed int it overflows
+    // (UB) and gcc -O3 provably exploits it (-Waggressive-loop-optimizations
+    // fired on the buildFieldFrame point loop). Unsigned wraparound is
+    // bit-identical to the two's-complement behavior the -Os builds had.
     inline float hash01(int a, int b)
     {
-      unsigned int x = (unsigned int)(a * 374761393 + b * 668265263);
+      unsigned int x = (unsigned int)a * 374761393u + (unsigned int)b * 668265263u;
       x = (x ^ (x >> 13)) * 1274126177u;
       return (float)((x ^ (x >> 16)) & 0xffffff) / 16777216.0f;
     }

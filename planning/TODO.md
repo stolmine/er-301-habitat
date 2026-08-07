@@ -129,7 +129,7 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
-| ~ | `anamnesis-viz-opt` | Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf) | manual · 2026-07-11 |
+| ~ | `anamnesis-viz-opt` | Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf) | manual *(attested)* · 2026-07-11 |
 |   | `alembic-phase9-polish` | Alembic Phase 9: naming/defaults/mnemonic polish + serial stacked-waveform viz | screenshot: confirm final names/defaults/control labels + sphere-viz refinements, plus a stacked/cascading render of mWavetableLUT[64][256] with active reagent-scan frames lit and neighbors dimmed · 2026-07-09 |
 |   | `control-descriptions-drop-parentheticals` | Shorten Lua control descriptions that include parentheticals (they overflow the allotted space) | manual · 2026-07-22 |
 |   | `control-step-standards` | Adopt built-in dial-map standards across habitat; inventory every control vs the framework registry | manual · 2026-07-16 |

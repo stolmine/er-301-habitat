@@ -1,5 +1,46 @@
 # Anamnesis viz optimization - plan of record
 
+Status: **implemented through Item 4-lite** (2026-08-06, pkg 0.2.0.86, uncommitted).
+Item 1 (shared per-frame cache) had already shipped; this pass added the pieces
+below plus the DSP question at the bottom (which turned out to be the meter the
+user was seeing). Measured on the offline bench (`tools/house-bench/anam_bench.cpp`,
+x86 proxy; worst case Density=1/Diffusion=1):
+
+- ROOT CAUSE FOUND FIRST: the package was SINGLE-TU - all DSP + draw code was
+  emitted in the SWIG wrapper TU at CFLAGS.size (-Os, no -ffast-math), not the
+  speed profile. New `mods/anamnesis/Anamnesis.cpp` carries `process()`,
+  `spawnDrop()`, `buildFieldFrame()` and `AnamFieldGraphic::drawImpl()` at
+  -O3 -ffast-math -fno-tree-vectorize (the DrumVoice pattern; `draw()` itself
+  stays inline per the graphic-virtual rule - it delegates to the non-virtual
+  drawImpl, which creates no key function).
+- DSP: 21.5 per-sample libm sinf (12 tap-LFO + 8 FDN-LFO + spiralSat) + 2
+  floorf are GONE from the sample loop (dynamic count 5.16M -> 0.12M per 5 s,
+  remainder is block-rate bubble physics). LFO phase accumulators kept
+  bit-identical; only the sine EVALUATION is poly (max err 3.7e-6; a more
+  accurate rotator was tried and REJECTED because it diverged from the shipped
+  phase trajectories). Audio A/B over 4 setting sets: corr 1.000000000,
+  diff floor -84..-96 dBr, 88% of samples bit-identical.
+- Viz: buildFieldFrame 849 -> 112 us (7.6x: bump SPLAT with 4.5-sigma cutoff +
+  fbm evaluated only where bumps != 0, which is EXACT since f = bumps*(1+g*nz);
+  decayed cells snap to 0); 6-ply draw 3342 -> 864 us (3.9x, adds the
+  zero-cell fill skip - exact because bloomLo >= 0). Framebuffer A/B over 1072
+  worst-case frames: 20 pixels of 17.5M changed (0.0001%), max delta 2/15.
+- Also fixed en route: field::hash01 signed-overflow UB (gcc -O3 provably
+  exploited it), isfinitef made bit-based (the old v==v form is folded away
+  under -ffast-math -> NaN firewall would have died in the new TU), linux arch
+  gets -fno-tree-vectorize (libmvec _ZGVbN4v_expf dlopen failure, same fix as
+  spreadsheet). Emu insert smoke test: er-301/tests/emu/90-anamnesis-insert-smoke.test.
+- NOT done (in order of likely next value): NEON 3-pass tap gather for the 12
+  sparse taps + 8 FDN reads (measure on hardware first); Item 5 single-pass
+  marching squares (contour loop is small); band control-grid hoist (~18%
+  dedupe only); bubble-physics block-rate expf/sinf on the audio thread (~1%
+  est, exact-output preserved, moving it changes sim timing).
+- OWED: hardware CPU% before/after on am335x (the bench is an x86 proxy; the
+  eliminated per-sample libm calls are worth far more on Cortex-A8 than the
+  x86 numbers show, per feedback_f64_count_poor_cpu_proxy in reverse).
+
+Original plan follows.
+
 Status: **planning** (2026-07-11). Goal: take the all-over "Pond of Recollection"
 viz from "crawls on CM4 / untested on am335x" to "comfortable on CM4, plausibly
 am335x-tier" WITHOUT sacrificing the look, and (per the repo's own NEON doctrine)

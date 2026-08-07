@@ -1,5 +1,5 @@
 PKGNAME ?= anamnesis
-PKGVERSION ?= 0.2.0.85
+PKGVERSION ?= 0.2.0.86
 
 include scripts/env.mk
 
@@ -78,7 +78,13 @@ endif
 CFLAGS += $(CFLAGS.common) $(CFLAGS.$(ARCH)) $(CFLAGS.$(PROFILE))
 CFLAGS += $(addprefix -I,$(INCLUDES))
 CFLAGS += -Wno-unused-variable -Wno-unused-parameter
-ifeq ($(ARCH),am335x)
+# Append -fno-tree-vectorize LAST so it wins against the -ftree-vectorize that
+# CFLAGS.speed added earlier. On am335x this is the TOP-PRIORITY NEON-safety
+# rule (feedback_disable_tree_vectorize_am335x). On linux it also stops -msse4
+# + -ffast-math from auto-vectorizing expf/sinf loops (Anamnesis.cpp field
+# splat) into libmvec calls (_ZGVbN4v_*) that are undefined at dlopen in the
+# emu - same fix as spreadsheet/mod.mk.
+ifneq ($(filter $(ARCH),am335x linux),)
 CFLAGS += -fno-tree-vectorize
 endif
 

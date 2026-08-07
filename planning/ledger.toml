@@ -1333,6 +1333,43 @@ title = "Anamnesis viz: shared per-frame field cache + bounded metaball build (C
 status = "wip"
 stamped = "2026-07-11T23:04:10-05:00"
 area = "ui"
+attested = """2026-08-07 OPTIMIZED (anamnesis 0.2.0.86), hardware CPU% owed. Anamnesis inserted for
+the first time after [hab:anamnesis-insert-crash] and immediately pinned the CPU.
+THE HEADLINE WAS A BUILD-CONFIG BUG, not an algorithm one, and it is worth remembering: anamnesis
+shipped NO .cpp files, so every line of its DSP compiled inside the SWIG wrapper TU at CFLAGS.swig =
+CFLAGS.size = -Os, with NO -ffast-math - while every other package's DSP lives in .cpp files built at
+CFLAGS.speed = -O3 -ftree-vectorize -ffast-math. Verified directly in mod.mk. A header-only unit
+silently opts its own DSP out of the speed profile.
+FIX: process()/spawnDrop()/buildFieldFrame() and the draw BODY moved to a new Anamnesis.cpp at the
+speed profile (the DrumVoice/Pecto/ConstantRandom pattern - out-of-line process() on an od::Object is
+established and safe). CRITICALLY the graphic's virtual draw() STAYS INLINE as a one-liner delegating
+to a non-virtual drawImpl(), so the od::Graphic key-function rule is not tripped
+([[feedback_no_out_of_line_virtuals]]); check-graphic-virtual-defs.sh confirms.
+MEASURED FIRST, per doctrine: am335x disassembly + an LD_PRELOAD libm counter showed ~21.5 sinf calls
+PER SAMPLE (12 tap LFOs + 8 FDN LFOs + spiralSat) plus 2 floorf. Viz: buildFieldFrame ~26% and the
+per-ply fill lambda ~40% of the offline profile, at 119M noise::sample calls - nearly all of it
+per-cell 3-octave fbm computed even where the field is zero.
+CHANGES: LFO sines to quadrant-folded poly with the phase accumulators kept BIT-IDENTICAL; crusher
+floorf to an exact branch-lite floor (0 mismatches over 8M probes); viz bump-splat with a 4.5-sigma
+cutoff and fbm evaluated only where bumps != 0 (algebraically exact, f = bumps*(1+g*nz)); zero-cell
+skip in the fill loop.
+A ROTATOR RECURRENCE WAS TRIED AND REJECTED - it was MORE accurate than the shipped float phase
+accumulator, so trajectories drifted (-23 dB A/B). Faithful beat correct, which is the right call for
+a character unit.
+TWO REAL BUGS FOUND EN ROUTE: (1) isfinitef used the `v == v` idiom, which -ffast-math COMPILES AWAY -
+moving to the speed profile would have silently deleted the NaN firewall; now bit-based. (2) hash01
+had signed-overflow UB that gcc -O3 provably exploited. Also added -fno-tree-vectorize on linux,
+which fixed a real _ZGVbN4v_expf dlopen failure.
+CHARACTER PRESERVED, proven not asserted: audio A/B over 4 setting sets x 30 s at matched flags gives
+correlation 1.000000000, diff floor -84..-96 dBr, 88% of samples bit-identical. Viz A/B over 1072
+worst-case frames (Density=1, Diffusion=1) changes 20 pixels of 17.5M, max delta 2 of 15 grey levels.
+GAINS (x86 proxy): per-sample libm calls 5.16M -> 0.12M per 5 s; field build 849 -> 112 us (7.6x);
+6-ply draw 3342 -> 864 us (3.9x). The x86 proxy UNDERVALUES the DSP win - glibc sinf is nearly free
+there, newlib on Cortex-A8 costs ~100+ cycles/call at ~1M calls/s.
+Both arches, all three lints clean. OWED: hardware CPU% before/after, and at 96 kHz where it doubles.
+NOT DONE: NEON 3-pass gather on the 12 taps + 8 FDN reads (the Pecto pattern) - the next lever if
+hardware still shows heat, but doctrine says measure on device first."""
+
 verify = { kind = "manual", ref = "emu: no encoder-capture / acceptable frame rate with all plies + bubbles + high Diffusion; responsive on CM4; am335x builds clean + check-graphic-virtual-defs.sh + (if NEON) check-neon-hints.sh" }
 note = "Plan of record: planning/anamnesis-viz-optimization.md. The all-over Pond viz crawls on CM4 (fine on MBA by brute force) because it is drawn by one AnamFieldGraphic PER PLY (kVizPlies=6) and each draw() recomputes the GLOBAL work identically - 28-point drift layer, sub-bump expansion over every bubble, and the per-level metaball field build (O(cells x bumps) expf + 3-octave fbm per cell, x3 levels) - so the heavy work runs ~6x redundantly per frame. Doctrine (planning/neon-opportunities.md): architectural before NEON (Visadhara precompute cache = 50x vs NEON 4x), and NO habitat graphic uses NEON yet (compiles into the SWIG .o at -Os, :64 trap unproven). Plan: (1) shared per-frame field cache on the op keyed on vizPhase - compute the strip-wide field once, plies blit windows (mirrors the RaindropGraphic screensaver it was lifted from); (2) bound the field build to per-bump bboxes (bumps->splat, not cells->all-bumps); (3) LUT the expf + thin fbm; (4) fill only active bbox; (5) single-pass multi-threshold marching squares; (6) NEON only on a measured remaining hotspot, class-member storage + whole-.o hint scan + hardware test. Crash rails: keep every virtual inline (DrumCubeGraphic out-of-line draw crash). Item 1 alone likely fixes the crawl. DSP am335x viability (Stretch the killer) is separate."
 

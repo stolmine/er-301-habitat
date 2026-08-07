@@ -37,6 +37,8 @@ namespace od {
     float mValue;
   };
 
+  class Option;
+
   class Object {
   public:
     virtual ~Object() {}
@@ -46,6 +48,7 @@ namespace od {
     void addInput(Inlet &) {}
     void addOutput(Outlet &) {}
     void addParameter(Parameter &p) { mParams.push_back(&p); }
+    void addOption(Option &) {}
     std::vector<Parameter*> mParams;   // registration order, for the offline harness
   };
 
