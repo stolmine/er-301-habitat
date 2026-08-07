@@ -325,6 +325,30 @@ namespace anamnesis
     // When no ply is on screen the pings stop and process() skips the sim
     // (block-constant gate, never a per-sample runtime tier).
     void vizPing() { mVizHeartbeat = kVizHeartbeatBlocks; }
+
+    // ---- Round three: shared strip RASTER ------------------------------------
+    // The whole 258x64 pond is rasterized ONCE per UI frame into a member byte
+    // plane (bands + metaball levels + contours composited in z, all direct
+    // byte writes -- no virtual od::FrameBuffer calls, no per-ply redundancy);
+    // each ply's draw() just BLITS its window. mStripMask records which pixels
+    // the raster actually painted, so the blit reproduces today's exact write
+    // pattern (unwritten pixels never touch the framebuffer -- framework
+    // content beneath, e.g. section dividers in the 1px gaps, stays exactly as
+    // it would with the old per-ply renderer).
+    //
+    // Frame detection without a frame hook: plies draw left-to-right within a
+    // frame, so a draw whose ply index is <= the previous draw's index starts
+    // a new frame. Works with any subset of plies visible (a single visible
+    // ply rebuilds every frame, matching the old per-frame rendering).
+    static const int kStripW = 258;   // field::kVizPlies * field::kStride
+    void ensureStripFrame(int plyIndex)
+    {
+      if (plyIndex <= mStripLastPly) buildStripRaster();
+      mStripLastPly = plyIndex;
+    }
+    const uint8_t *stripCol(int col) const { return &mStripRaster[col << 6]; }
+    uint64_t stripMask(int col) const { return mStripMask[col]; }
+    void buildStripRaster();   // out-of-line (Anamnesis.cpp)
     const float *vizFieldGrid(int L) { return &mFcGrid[L * field::kFieldGW * field::kFieldGH]; }
     bool vizLevelUsed(int L) { return mFcLevelUsed[L]; }
 
@@ -522,6 +546,12 @@ namespace anamnesis
     int32_t mFdnIdxQ[kFdnN];
     float mSizeScaleZ, mT60Z, mDiffGZ, mDensityZ, mModZ;
     int   mVizHeartbeat = 0;   // blocks the viz sim stays live after the last graphic draw
+    // Strip raster plane (column-major, [col*64 + y]) + written-pixel mask.
+    // CLASS MEMBERS (UI-thread scratch lives on the heap object, never the
+    // stack). ~18.5 KB.
+    uint8_t  mStripRaster[kStripW * 64];
+    uint64_t mStripMask[kStripW];
+    int      mStripLastPly = 1000000;  // frame-start detector (see ensureStripFrame)
     bool  mInit = false;
     bool  mFzSet = false;
 #endif

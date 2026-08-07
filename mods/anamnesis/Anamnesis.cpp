@@ -857,111 +857,208 @@ void Anamnesis::buildFieldFrame()
     }
   }
 
-void AnamFieldGraphic::drawImpl(od::FrameBuffer &fb)
+// ---- Round three: strip raster + per-ply blit --------------------------------
+//
+// The old drawImpl rasterized each ply's window independently (6x per frame),
+// through virtual od::FrameBuffer calls per pixel. Now the WHOLE 258x64 pond
+// is composited once per UI frame into Anamnesis::mStripRaster (direct byte
+// writes + a written-pixel mask), and each ply's drawImpl blits its window.
+// The raster is a faithful port of the per-ply renderer: per-column math,
+// z-order compositing, per-ply prev-reset at each 43px boundary, and clip
+// unions all reproduce the old per-window output bit-for-bit (verified by the
+// framebuffer A/B harness). New beyond the port, all output-safe:
+//  - band control grid computed once, strip-wide (was ~19% duplicated);
+//  - marching-squares contour walked once (was 6 overlapping windows);
+//  - per-drop INNER radius: a mature ring is a thin annulus (crest span +
+//    4.5 sigma); points deep inside it get h < ~4e-5 -> bend < 1e-3 px, so
+//    they skip the crest train entirely (A/B-proven invisible);
+//  - per-CELL classification in the metaball fill: all-zero and
+//    all-below-bloom cells skip (bilinear <= max corner, exact), cells with
+//    min corner >= T + kEdgeSoft write solid 0 (cov >= 1, exact);
+//  - the raster read in interior/bloom blending is a direct byte read
+//    (was a virtual readPixel per pixel).
+
+namespace
 {
-    const int w = mWidth;
-    const int h = mHeight;
-    const int left = mWorldLeft;
-    const int bot = mWorldBottom;
-    const int x0 = mIndex * field::kStride; // content-x of this slice's left edge
-
-    const float phase = mpOp ? mpOp->vizPhase() : 0.0f;
-    const float mixN = mpOp ? mpOp->vizMix() : 1.0f;
-    // Base streamline brightness scales with Mix; droplet glow adds on top.
-    const float baseB = field::kBaseDim + (field::kBaseBright - field::kBaseDim) * mixN;
-
-    // Density drives the WEAVE (merge/split), not the line count: a fixed set of
-    // streamlines that converge at drifting merge nodes and diverge after
-    // (wood-grain / dendrite braid). Passed to weaveDispY per control point.
-    float density = mpOp ? mpOp->vizDensity() : 0.5f;
-    if (density < 0.0f) density = 0.0f; else if (density > 1.0f) density = 1.0f;
-    const float size = mpOp ? mpOp->vizSize() : 0.5f; // Size -> flow feature scale
-    const float diffuse = mpOp ? mpOp->vizDiffusion() : 0.0f; // Diffusion -> bubble bloom
-    const float vmod = mpOp ? mpOp->vizMod() : 0.0f; // Mod -> slow flow wander
-    const float rtau = field::rippleTauOf(mpOp ? mpOp->vizDecay() : 0.0f); // Decay -> ripple persistence
-    const int n = field::kStreamN;
-
-    // Build the shared strip-wide metaball field ONCE per frame: the first ply
-    // that draws this frame does the work (keyed on vizPhase), the rest reuse.
-    // Item 1 of planning/anamnesis-viz-optimization.md.
-    if (mpOp)
+  struct StripR
+  {
+    uint8_t *buf;     // column-major [col*64 + y]
+    uint64_t *mask;   // bit y of mask[col] = pixel painted this frame
+  };
+  static inline void srPix(StripR &S, int col, int y, int c)
+  {
+    S.buf[(col << 6) + y] = (uint8_t)c;
+    S.mask[col] |= 1ull << y;
+  }
+  static inline int srRead(const StripR &S, int col, int y)
+  {
+    return S.buf[(col << 6) + y];
+  }
+  // Port of AnamFieldGraphic::drawLinePix into raster space (h = 64).
+  static inline void srLinePix(StripR &S, int col, float y, float glow, float baseB, float &prevY)
+  {
+    float bf = baseB + glow * anamnesis::field::kGlowGain;
+    if (bf < 0.0f) bf = 0.0f; else if (bf > 15.0f) bf = 15.0f;
+    const int bri = (int)(bf + 0.5f);
+    const int yi = (int)y;
+    const float f = y - (float)yi;
+    srPix(S, col, yi, (int)(bri * sqrtf(1.0f - f) + 0.5f));
+    if (yi + 1 < 64) srPix(S, col, yi + 1, (int)(bri * sqrtf(f) + 0.5f));
+    if (prevY > -999.0f)
     {
-      mpOp->vizPing();       // keep the DSP-side viz sim alive (idles offscreen)
-      mpOp->ensureFieldFrame();
+      const int a = (int)(prevY < y ? prevY : y);
+      const int b = (int)(prevY < y ? y : prevY);
+      for (int yy = a + 1; yy < b; yy++) srPix(S, col, yy, bri);
     }
+    prevY = y;
+  }
+  // Port of aaPlot / drawAALineClip. Clip = the strip columns the old per-ply
+  // windows covered (0..256; col 257 was never drawn) x rows 0..63.
+  static inline void srAAPlot(StripR &S, int col, int y, float cov, int color)
+  {
+    if (cov <= 0.0f || col < 0 || col >= 257 || y < 0 || y >= 64) return;
+    int c = (int)((float)color * cov + 0.5f);
+    if (c > 15) c = 15;
+    if (c > 0) srPix(S, col, y, c);
+  }
+  static inline void srAALine(StripR &S, float x0, float y0, float x1, float y1, int color)
+  {
+    float dx = x1 - x0, dy = y1 - y0;
+    const bool steep = (dy < 0 ? -dy : dy) > (dx < 0 ? -dx : dx);
+    if (steep) { float t = x0; x0 = y0; y0 = t; t = x1; x1 = y1; y1 = t; }
+    if (x0 > x1) { float t = x0; x0 = x1; x1 = t; t = y0; y0 = y1; y1 = t; }
+    dx = x1 - x0; dy = y1 - y0;
+    const float grad = (dx == 0.0f) ? 0.0f : dy / dx;
+    const int ix0 = (int)(x0 + 0.5f), ix1 = (int)(x1 + 0.5f);
+    float y = y0 + grad * ((float)ix0 - x0);
+    for (int x = ix0; x <= ix1; x++)
+    {
+      int iy = (int)y; if ((float)iy > y) iy--; // exact floor, no libm call
+      const float fy = y - (float)iy;
+      if (steep)
+      {
+        srAAPlot(S, iy, x, 1.0f - fy, color);
+        srAAPlot(S, iy + 1, x, fy, color);
+      }
+      else
+      {
+        srAAPlot(S, x, iy, 1.0f - fy, color);
+        srAAPlot(S, x, iy + 1, fy, color);
+      }
+      y += grad;
+    }
+  }
+} // anonymous namespace
 
-    // Cache the active rain droplets once (epicenters in content-x / column-y).
+void Anamnesis::buildStripRaster()
+{
+    StripR S;
+    S.buf = mStripRaster;
+    S.mask = mStripMask;
+    memset(mStripRaster, 0, sizeof(mStripRaster));
+    memset(mStripMask, 0, sizeof(mStripMask));
+
+    const int h = 64;
+    const int n = field::kStreamN;
+    const float phase = vizPhase();
+    const float mixN = vizMix();
+    const float baseB = field::kBaseDim + (field::kBaseBright - field::kBaseDim) * mixN;
+    const float size = vizSize();
+    const float diffuse = vizDiffusion();
+    const float vmod = vizMod();
+    const float rtau = field::rippleTauOf(vizDecay());
+
+    ensureFieldFrame(); // metaball grid (still keyed on vizPhase, as shipped)
+
+    // Cache the active rain droplets once, strip-wide (was per ply). Also
+    // precompute each drop's INNER skip radius: the innermost active crest of
+    // either train, minus 4.5 sigma -- inside that disc the crest train sums
+    // to < ~4e-5, i.e. bend < 1e-3 px / glow < 1e-3 gray. During the impact
+    // transient (age < kImpactT) the crater sits at r=0, so no inner skip.
     int nd = 0;
     float dX[kVizMaxDrops], dY[kVizMaxDrops], dAge[kVizMaxDrops];
-    float dC[kVizMaxDrops], dAmp[kVizMaxDrops];
-    if (mpOp)
+    float dC[kVizMaxDrops], dAmp[kVizMaxDrops], dRi2[kVizMaxDrops];
+    for (int i = 0; i < kVizMaxDrops; i++)
     {
-      for (int i = 0; i < kVizMaxDrops; i++)
+      const float age = mDropAge[i];
+      if (age < 0.0f) continue;
+      dX[nd] = mDropX[i];
+      dY[nd] = mDropY[i];
+      dAge[nd] = age;
+      dC[nd] = mDropSpeed[i];
+      dAmp[nd] = mDropAmp[i];
+      float rin = 0.0f;
+      if (age >= field::kImpactT)
       {
-        const float age = mpOp->vizDropAge(i);
-        if (age < 0.0f)
-          continue;
-        dX[nd] = mpOp->vizDropX(i);
-        dY[nd] = mpOp->vizDropY(i);
-        dAge[nd] = age;
-        dC[nd] = mpOp->vizDropSpeed(i);
-        dAmp[nd] = mpOp->vizDropAmp(i);
-        nd++;
+        // innermost crest radius of a train = R - lam0 * sum(1 + spread*i)
+        // over its (nc-1) inter-crest gaps -- mirrors crestTrainT's loop.
+        auto innermost = [](float R, float age2, float lam0) {
+          int nc = 2 + (int)(age2 * field::kRippleFan);
+          if (nc > field::kRippleMaxCrests) nc = field::kRippleMaxCrests;
+          float rc = R;
+          for (int k = 0; k < nc - 1; k++) rc -= lam0 * (1.0f + field::kRippleSpread * (float)k);
+          return rc;
+        };
+        rin = innermost(dC[nd] * age, age, field::kRippleLambda);
+        if (age > field::kSecDelay)
+        {
+          const float a2 = age - field::kSecDelay;
+          const float rin2 = innermost(dC[nd] * a2, a2, field::kRippleLambda * field::kSecLam);
+          if (rin2 < rin) rin = rin2;
+        }
+        rin -= 4.5f * field::kRippleSigma;
+        if (rin < 0.0f) rin = 0.0f;
       }
+      dRi2[nd] = rin * rin;
+      nd++;
     }
 
-    // Each flow line is sampled at control points every kCtrlStep px (the
-    // expensive flow + rain evals), then Catmull-Rom interpolated to per-pixel
-    // y -> smooth curves, cheap enough to scale the line count.
+    // ---- band control grid, computed ONCE for the whole strip ----
+    // Global grid indices g in [-1 .. 66] (68 points): the old per-ply windows
+    // used g0 = x0/cstep - 1 .. (x0+w)/cstep + 2, whose union over the six
+    // plies is exactly this range, with identical per-point values.
     const int cstep = field::kCtrlStep;
-    // GLOBAL control grid: control points sit at multiples of cstep in CONTENT
-    // x, shared by every ply. The 43px ply stride isn't a multiple of cstep, so
-    // a ply-relative grid would misalign at seams and the spline would break
-    // where a ripple bends it. Sharing the grid -> neighbours sample identical
-    // control points at the boundary -> one continuous curve across the seam.
-    const int g0 = x0 / cstep - 1;        // first grid index (one margin before)
-    const int gLast = (x0 + w) / cstep + 2; // covers the 1px bridge column too
-    int mctrl = gLast - g0 + 1;
-    if (mctrl > 40) mctrl = 40;
-    // Bridge the 1px SpottedStrip gap: every ply but the last draws one extra
-    // content column (px = left+w) so the continuous curve crosses into the
-    // next ply with no hairline seam. The last ply stops at its own edge.
-    const int wext = (mIndex < mCount - 1) ? 1 : 0;
-    // Per-BAND renderer: both lines of band b PLUS the negative space between
-    // them FILLED with background, so the band occludes bubbles drawn behind it
-    // (lower z). Invoked in z-order -> bubbles weave through the bands.
+    const int gFirst = -1;
+    const int gCount = (kStripW - 2) / cstep + 4; // 68: covers cols 0..256 (+margins)
+
     auto renderBand = [&](int b)
     {
       const int s0 = 2 * b, s1 = 2 * b + 1;
       const float yb0 = ((float)s0 + 0.5f) * (float)h / (float)n;
       const float yb1 = ((float)s1 + 0.5f) * (float)h / (float)n;
-      float cY0[40], cB0[40], cY1[40], cB1[40];
-      for (int i = 0; i < mctrl; i++)
+      float cY0[68], cB0[68], cY1[68], cB1[68];
+      for (int i = 0; i < gCount; i++)
       {
-        const float cx = (float)((g0 + i) * cstep);
-        // FAST variants (draw-path only): poly sin / fast exp, milli-pixel
-        // errors on multi-pixel amplitudes, framebuffer-A/B-proven. This is
-        // the band libm storm on am335x (~3.5k sinf + tens of thousands of
-        // expf per frame via libm otherwise). The audio-thread bubble
-        // physics keeps the exact forms.
+        const float cx = (float)((gFirst + i) * cstep);
         float y0 = yb0 + field::flowFast(cx, yb0, phase, size, vmod);
         float y1 = yb1 + field::flowFast(cx, yb1, phase, size, vmod);
         float gl0 = 0.0f, gl1 = 0.0f;
         for (int d = 0; d < nd; d++)
         {
-          const field::RippleHit a0 = field::rippleEvalFast(cx - dX[d], y0 - dY[d], dAge[d], dC[d], rtau);
-          y0 += dAmp[d] * a0.bend; gl0 += dAmp[d] * a0.glow;
-          const field::RippleHit a1 = field::rippleEvalFast(cx - dX[d], y1 - dY[d], dAge[d], dC[d], rtau);
-          y1 += dAmp[d] * a1.bend; gl1 += dAmp[d] * a1.glow;
+          const float ddx = cx - dX[d];
+          const float ddy0 = y0 - dY[d];
+          if (ddx * ddx + ddy0 * ddy0 > dRi2[d])
+          {
+            const field::RippleHit a0 = field::rippleEvalFast(ddx, ddy0, dAge[d], dC[d], rtau);
+            y0 += dAmp[d] * a0.bend; gl0 += dAmp[d] * a0.glow;
+          }
+          const float ddy1 = y1 - dY[d];
+          if (ddx * ddx + ddy1 * ddy1 > dRi2[d])
+          {
+            const field::RippleHit a1 = field::rippleEvalFast(ddx, ddy1, dAge[d], dC[d], rtau);
+            y1 += dAmp[d] * a1.bend; gl1 += dAmp[d] * a1.glow;
+          }
         }
         cY0[i] = y0; cB0[i] = gl0; cY1[i] = y1; cB1[i] = gl1;
       }
       float prev0 = -1000.0f, prev1 = -1000.0f;
-      for (int lx = 0; lx < w + wext; lx++)
+      for (int cx = 0; cx < kStripW - 1; cx++)  // cols 0..256, as the old windows
       {
-        const int cx = x0 + lx;
+        // per-ply gap-fill reset: the old renderer reset prevY at each ply's
+        // first column, so steep jumps never gap-fill across a 43px seam.
+        if (cx % field::kStride == 0) { prev0 = -1000.0f; prev1 = -1000.0f; }
         const int seg = cx / cstep;
-        const int idx = seg - g0;
+        const int idx = seg - gFirst;
         const float t = (float)(cx - seg * cstep) / (float)cstep;
         float y0 = field::catmull(cY0[idx - 1], cY0[idx], cY0[idx + 1], cY0[idx + 2], t);
         float y1 = field::catmull(cY1[idx - 1], cY1[idx], cY1[idx + 1], cY1[idx + 2], t);
@@ -969,31 +1066,17 @@ void AnamFieldGraphic::drawImpl(od::FrameBuffer &fb)
         float gl1 = field::catmull(cB1[idx - 1], cB1[idx], cB1[idx + 1], cB1[idx + 2], t);
         if (y0 < 0.0f) y0 = 0.0f; else if (y0 > (float)(h - 1)) y0 = (float)(h - 1);
         if (y1 < 0.0f) y1 = 0.0f; else if (y1 > (float)(h - 1)) y1 = (float)(h - 1);
-        const int px = left + lx;
-        // Fill the negative space between the pair with background -> occlude.
         const int flo = (int)(y0 < y1 ? y0 : y1) + 1;
         const int fhi = (int)(y0 < y1 ? y1 : y0);
-        for (int yy = flo; yy < fhi; yy++) fb.pixel(0, px, bot + yy);
-        drawLinePix(fb, px, bot, h, y0, gl0, baseB, prev0);
-        drawLinePix(fb, px, bot, h, y1, gl1, baseB, prev1);
+        for (int yy = flo; yy < fhi; yy++) srPix(S, cx, yy, 0); // occlusion fill
+        srLinePix(S, cx, y0, gl0, baseB, prev0);
+        srLinePix(S, cx, y1, gl1, baseB, prev1);
       }
     };
 
-    // Bubbles = 2D METABALLS per z-LEVEL (lava-lamp). The pond-wide field (point
-    // drift + sub-bump expansion + per-level grid build + slew) is now built ONCE
-    // per frame, strip-wide, on the shared op (ensureFieldFrame above) -- each ply
-    // just SAMPLES its window of the global grid. Item 1.
     int bubB = (int)(baseB + 2.5f);
     if (bubB > 15) bubB = 15;
-    const int bXlo = left, bXhi = left + w + wext, bYlo = bot, bYhi = bot + h;
 
-    // (Point-drift + sub-bump expansion + the per-level field build moved to
-    // Anamnesis::buildFieldFrame -- computed once per frame, not once per ply.)
-
-    // Marching-squares segment table for OUR convention (config bit1=TL, 2=TR,
-    // 4=BL, 8=BR; edges 0=top,1=right,2=bottom,3=left). Each pair = one segment
-    // between two CROSSING edges. Saddles (6=TR+BL, 9=TL+BR) emit two segments.
-    // (The screensaver's table was for a different ordering -> spurious spikes.)
     static const int kSeg[16][4] = {
         {-1, -1, -1, -1}, // 0
         {0, 3, -1, -1},   // 1  TL
@@ -1012,74 +1095,74 @@ void AnamFieldGraphic::drawImpl(od::FrameBuffer &fb)
         {0, 3, -1, -1},   // 14 TR+BL+BR
         {-1, -1, -1, -1}};// 15
     const int C = field::kMetaCell;
-    const int GW = field::kFieldGW, GH = field::kFieldGH; // shared global grid dims
+    const int GW = field::kFieldGW, GH = field::kFieldGH;
     const float T = field::kMetaThresh;
-    // Diffusion bloom: the field band [bloomLo, T) outside each shape is drawn
-    // as a graded, dithered aura (max-blended over already-drawn lower/equal-z
-    // content). Diffusion sets the RADIUS via an exponential throw (0 -> no
-    // bloom); near-edge brightness = bubB so it joins the contour with no divide.
-    const float bloomBand = field::kBloomBandMax * powf(diffuse, field::kBloomExp); // expo throw
+    const float bloomBand = field::kBloomBandMax * powf(diffuse, field::kBloomExp);
     const bool  bloomOn   = bloomBand > 0.0001f;
     const float bloomLo   = T - bloomBand;
-    const float bloomPeak = (float)bubB * field::kBloomGain; // held -> glow joins contour continuously
-    const float invEdge   = 1.0f / field::kEdgeSoft; // feathered-black AA slope
+    const float bloomPeak = (float)bubB * field::kBloomGain;
+    const float invEdge   = 1.0f / field::kEdgeSoft;
+    // A cell can only light a pixel if its bilinear max (= max corner) clears
+    // the lowest lighting threshold; solid-interior cells (min corner past the
+    // AA knee) write hard 0 without any per-pixel math. Both tests are exact.
+    const float liteLo    = bloomOn ? bloomLo : T;
+    const float solidHi   = T + field::kEdgeSoft;
 
     auto renderBubbleLevel = [&](int L)
     {
-      const float *G = mpOp ? mpOp->vizFieldGrid(L) : (const float *)0; // shared strip-wide grid
-      if (!G) return;
-      // FILL where field > T (occlude lower-z), bloom-dither the band below T.
-      // Restructured per grid-CELL (Item 4-lite): the four corners are loaded
-      // once per 1x3-pixel cell run instead of per pixel, and a cell whose
-      // four corners are all EXACTLY zero is skipped outright -- bilinear of
-      // zeros is zero, which draws nothing (v > T fails; bloom needs
-      // v > bloomLo and bloomLo >= 0 because bloomBand <= 0.5 = T). The
-      // field builder snaps decayed cells to exact zero to make this bite.
-      // Per-pixel arithmetic (gyf/fy forms) is byte-identical to the old loop.
-      const bool zskip = bloomLo >= 0.0f; // insurance: only skip when a zero field truly can't draw
-      for (int lx = 0; lx < w + wext; lx++)
+      const float *G = &mFcGrid[L * GW * GH];
+      // FILL, walked per grid CELL (corners loaded once per cell run).
+      for (int gi = 0; gi * C < kStripW - 1 && gi < GW - 1; gi++)
       {
-        const float gxf = (float)(x0 + lx) / (float)C; // global cell coord (grid origin = content-x 0)
-        const int gi = (int)gxf; if (gi < 0 || gi >= GW - 1) continue;
-        const float fx = gxf - (float)gi;
-        const int px = left + lx;
+        int colA = gi * C;
+        int colB = colA + C; if (colB > kStripW - 1) colB = kStripW - 1; // cols < 257
         for (int gj = 0; gj < GH - 1; gj++)
         {
           const float v00 = G[gj * GW + gi], v10 = G[gj * GW + gi + 1];
           const float v01 = G[(gj + 1) * GW + gi], v11 = G[(gj + 1) * GW + gi + 1];
-          if (zskip && v00 == 0.0f && v10 == 0.0f && v01 == 0.0f && v11 == 0.0f)
-            continue;
-          int pyA = bot + gj * C; if (pyA < bYlo) pyA = bYlo;
-          int pyB = bot + (gj + 1) * C; if (pyB > bYhi) pyB = bYhi;
-          for (int py = pyA; py < pyB; py++)
+          float vmax = v00; if (v10 > vmax) vmax = v10; if (v01 > vmax) vmax = v01; if (v11 > vmax) vmax = v11;
+          if (!(vmax > liteLo)) continue;   // nothing in this cell can light (exact)
+          float vmin = v00; if (v10 < vmin) vmin = v10; if (v01 < vmin) vmin = v01; if (v11 < vmin) vmin = v11;
+          int pyA = gj * C;
+          int pyB = pyA + C; if (pyB > h) pyB = h;
+          if (vmin >= solidHi)
           {
-            const float gyf = (float)(py - bot) / (float)C;
-            const float fy = gyf - (float)gj;
-            const float v = (v00 * (1.0f - fx) + v10 * fx) * (1.0f - fy) + (v01 * (1.0f - fx) + v11 * fx) * fy;
-            if (v > T) // INTERIOR: feathered (AA) black occlusion -- no hard spill past the contour
+            // deep interior: cov >= 1 for every pixel -> hard 0 (exact)
+            for (int col = colA; col < colB; col++)
+              for (int py = pyA; py < pyB; py++) srPix(S, col, py, 0);
+            continue;
+          }
+          for (int col = colA; col < colB; col++)
+          {
+            const float gxf = (float)col / (float)C;   // same form as the old per-pixel loop
+            const float fx = gxf - (float)gi;
+            for (int py = pyA; py < pyB; py++)
             {
-              float cov = (v - T) * invEdge; if (cov > 1.0f) cov = 1.0f; // 0 at edge -> 1 deep inside
-              const int cur = fb.readPixel(px, py);
-              fb.pixel((int)((float)cur * (1.0f - cov) + 0.5f), px, py); // darken toward black
-            }
-            else if (bloomOn && v > bloomLo) // OUTSIDE: held-peak glow, IGN-dithered (the soft glow)
-            {
-              // Interleaved Gradient Noise (Jimenez) -> smooth gradient dither.
-              float ign = 0.06711056f * (float)px + 0.00583715f * (float)py;
-              // fract via (int) cast: ign >= 0 here, so trunc == floor exactly
-              // (floorf is a libm call on am335x VFPv3)
-              ign -= (float)(int)ign; ign = 52.9829189f * ign; ign -= (float)(int)ign; // -> [0,1)
-              const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + ign);
-              if (bv > 0 && bv > fb.readPixel(px, py)) fb.pixel(bv, px, py);
+              const float gyf = (float)py / (float)C;
+              const float fy = gyf - (float)gj;
+              const float v = (v00 * (1.0f - fx) + v10 * fx) * (1.0f - fy) + (v01 * (1.0f - fx) + v11 * fx) * fy;
+              if (v > T)
+              {
+                float cov = (v - T) * invEdge; if (cov > 1.0f) cov = 1.0f;
+                const int cur = srRead(S, col, py);
+                srPix(S, col, py, (int)((float)cur * (1.0f - cov) + 0.5f));
+              }
+              else if (bloomOn && v > bloomLo)
+              {
+                float ign = 0.06711056f * (float)col + 0.00583715f * (float)py;
+                ign -= (float)(int)ign; ign = 52.9829189f * ign; ign -= (float)(int)ign;
+                const int bv = (int)(bloomPeak * (v - bloomLo) / (T - bloomLo) + ign);
+                if (bv > 0 && bv > srRead(S, col, py)) srPix(S, col, py, bv);
+              }
             }
           }
         }
       }
-      // Marching-squares contour over the global cells overlapping this ply's window.
-      int ci0 = x0 / C - 1; if (ci0 < 0) ci0 = 0;
-      int ci1 = (x0 + w + wext) / C + 1; if (ci1 > GW - 1) ci1 = GW - 1;
-      for (int j = 0; j < GH - 1; j++) // marching-squares contour (smooth edges)
-        for (int i = ci0; i < ci1; i++)
+      // Marching-squares contour, walked ONCE over the global cells (the old
+      // per-ply windows re-walked overlapping margin cells with identical
+      // results; the union equals this single pass).
+      for (int j = 0; j < GH - 1; j++)
+        for (int i = 0; i < GW - 1; i++)
         {
           const float v00 = G[j * GW + i], v10 = G[j * GW + i + 1];
           const float v01 = G[(j + 1) * GW + i], v11 = G[(j + 1) * GW + i + 1];
@@ -1098,29 +1181,57 @@ void AnamFieldGraphic::drawImpl(od::FrameBuffer &fb)
           for (int e = 0; e < 4; e += 2)
           {
             if (sg[e] < 0 || sg[e + 1] < 0) continue;
-            const float ax = (float)left + ex[sg[e]] * (float)C - (float)x0;
-            const float ay = (float)bot + ey[sg[e]] * (float)C;
-            const float bx2 = (float)left + ex[sg[e + 1]] * (float)C - (float)x0;
-            const float by2 = (float)bot + ey[sg[e + 1]] * (float)C;
-            drawAALineClip(fb, ax, ay, bx2, by2, bubB, bXlo, bXhi, bYlo, bYhi);
+            srAALine(S, ex[sg[e]] * (float)C, ey[sg[e]] * (float)C,
+                     ex[sg[e + 1]] * (float)C, ey[sg[e + 1]] * (float)C, bubB);
           }
         }
     };
 
-    // Z-ORDER COMPOSITE: bands (randomized z) + bubble-LEVELS (each a metaball
-    // field), drawn back->front so the levels weave through the bands by z.
+    // Z-ORDER COMPOSITE, once for the strip (identical order to the old
+    // per-ply sorts -- the z inputs are global).
     const int nBands = n / 2;
     struct ZItem { float z; int type; int idx; };
     ZItem items[field::kStreamN / 2 + field::kBubLevels];
     int ni = 0;
-    for (int b = 0; b < nBands; b++) { items[ni].z = mpOp ? (float)mpOp->vizBandZ(b) : (float)b; items[ni].type = 0; items[ni].idx = b; ni++; }
+    for (int b = 0; b < nBands; b++) { items[ni].z = (float)mBandZ[b]; items[ni].type = 0; items[ni].idx = b; ni++; }
     for (int L = 0; L < field::kBubLevels; L++)
-      if (mpOp && mpOp->vizLevelUsed(L)) { items[ni].z = ((float)L + 0.5f) * (float)nBands / (float)field::kBubLevels; items[ni].type = 1; items[ni].idx = L; ni++; }
+      if (mFcLevelUsed[L]) { items[ni].z = ((float)L + 0.5f) * (float)nBands / (float)field::kBubLevels; items[ni].type = 1; items[ni].idx = L; ni++; }
     for (int a = 1; a < ni; a++) { ZItem key = items[a]; int j = a - 1; while (j >= 0 && items[j].z > key.z) { items[j + 1] = items[j]; j--; } items[j + 1] = key; }
     for (int it = 0; it < ni; it++)
     {
       if (items[it].type == 0) renderBand(items[it].idx);
       else renderBubbleLevel(items[it].idx);
+    }
+}
+
+void AnamFieldGraphic::drawImpl(od::FrameBuffer &fb)
+{
+    if (!mpOp)
+      return;
+    const int w = mWidth;
+    const int left = mWorldLeft;
+    const int bot = mWorldBottom;
+    const int x0 = mIndex * field::kStride;
+    const int wext = (mIndex < mCount - 1) ? 1 : 0;
+
+    mpOp->vizPing();                 // keep the DSP-side viz sim alive (idles offscreen)
+    mpOp->ensureStripFrame(mIndex);  // first ply of the frame composites the strip
+
+    // Masked blit: only the pixels the raster actually painted are written,
+    // so framework content beneath unpainted pixels is left alone -- exactly
+    // the old per-ply renderer's write pattern. Two 32-bit halves per column
+    // (no 64-bit ctz libcall on armv7).
+    for (int lx = 0; lx < w + wext; lx++)
+    {
+      const int col = x0 + lx;
+      const uint64_t m = mpOp->stripMask(col);
+      if (!m) continue;
+      const uint8_t *cp = mpOp->stripCol(col);
+      const int px = left + lx;
+      uint32_t lo = (uint32_t)m;
+      while (lo) { const int y = __builtin_ctz(lo); lo &= lo - 1; fb.pixel(cp[y], px, bot + y); }
+      uint32_t hi = (uint32_t)(m >> 32);
+      while (hi) { const int y = 32 + __builtin_ctz(hi); hi &= hi - 1; fb.pixel(cp[y], px, bot + y); }
     }
 
     // Impact splashes (front-most): rain flecks for drops in this ply's window.

@@ -1401,10 +1401,46 @@ OWED: on-screen vs off-screen hardware CPU% - the gate now gives that directly.
 REMAINING BIGGEST COST: the exact bubble-physics libm on the audio thread (~0.5-8% depending on
 Density). Deliberately left exact. The fast kernels sit behind a one-line template switch, but
 flipping it changes chaotic trajectories and needs the user's explicit sign-off - not a call to make
-silently on a character unit."""
+silently on a character unit.
+ROUND THREE 2026-08-07 (anamnesis 0.2.0.88) - THE STRUCTURAL FIX. Device split from round two made
+the target unambiguous: offscreen 30% mono (the DSP, accepted by the user), on-screen still at
+encoder-capture levels, so the viz was carrying ~70%+ alone. Per
+[[feedback_viz_encoder_capture_architectural]] that is a draw-path STRUCTURE problem, and two rounds
+of making the per-ply work cheaper had taken it from unusable to smoother-but-unusable. So the
+structure went.
+THE CHANGE: the 6 plies no longer rasterize independently. buildStripRaster() composites the whole
+258x64 pond ONCE per UI frame into a member byte plane plus a written-pixel bitmask (18576 bytes,
+CLASS MEMBER per the stack rule - verified at atoms/Anamnesis.h:552, not a local); each ply's
+drawImpl is then a masked blit of its window, 181 instructions on am335x. Frame detection needs no
+framework hook: a draw whose ply index <= the previous one starts a new frame, which holds for any
+visible subset including a single scrolled-to ply.
+THE INSIGHT THAT MATTERED, and it is one the x86 bench structurally could NOT surface because the
+bench stub's framebuffer was never virtual: every od::FrameBuffer call is a VIRTUAL DISPATCH in the
+firmware. Compositing on plain bytes removes every readPixel virtual call outright and drops pixel
+writes to one per UNIQUE painted pixel - the old path re-wrote overlaps and paid a readPixel besides.
+Hot raster loops are call-free in the objdump.
+Dedupe the per-ply structure had been hiding: one z-sort, one drop cache, one band control grid (was
+~19% duplicated), one marching-squares walk (was 6 overlapping windows). Two volume cuts the strip
+form made natural: per-drop inner-radius skip (a mature ring is a thin annulus; evals down 39% worst
+case) and exact per-cell fill classification.
+Bonus correctness: the strip is now sim-coherent per frame. The old per-ply draws could see the audio
+thread mutate drops/bubbles mid-frame, which could tear at seams. Now impossible.
+SAME PICTURE: 14 pixels of 17.5M changed vs round two, 13 of them by one grey step, 10 of 1072
+worst-case frames affected at <=2 px - and that delta is the bounded inner-skip; the structural port
+itself is pixel-exact. Audio bit-identical (the draw path never touches it).
+Both arches, all three lints clean including the whole-.so NEON scan; draw() still inline delegating
+to drawImpl so the key-function rule holds; buildStripRaster is non-virtual out-of-line.
+AGENT'S PROJECTION, unverified on hardware: viz ~15-30% of the core, total ~45-60% with the accepted
+30% DSP, which should clear capture. Its judgement on the wider question I asked - a 6-ply all-over
+viz is NOT fundamentally over budget; it is now literally one 256-wide 4-bit scene per frame, and the
+floor is the framework's per-pixel virtual interface.
+REMAINING LEVERS IF HARDWARE STILL CAPTURES, in order: halve the strip rebuild rate (~27fps - a
+RICHNESS change, needs user sign-off), single-pass multi-threshold marching squares (~0.5%, measured
+marginal), and direct MainFrameBuffer plane writes bypassing the virtual API (layout-coupled to
+firmware source, documented as a last resort).
+OWED: hardware on-screen CPU%."""
 verify = { kind = "manual", ref = "emu: no encoder-capture / acceptable frame rate with all plies + bubbles + high Diffusion; responsive on CM4; am335x builds clean + check-graphic-virtual-defs.sh + (if NEON) check-neon-hints.sh" }
 note = "Plan of record: planning/anamnesis-viz-optimization.md. The all-over Pond viz crawls on CM4 (fine on MBA by brute force) because it is drawn by one AnamFieldGraphic PER PLY (kVizPlies=6) and each draw() recomputes the GLOBAL work identically - 28-point drift layer, sub-bump expansion over every bubble, and the per-level metaball field build (O(cells x bumps) expf + 3-octave fbm per cell, x3 levels) - so the heavy work runs ~6x redundantly per frame. Doctrine (planning/neon-opportunities.md): architectural before NEON (Visadhara precompute cache = 50x vs NEON 4x), and NO habitat graphic uses NEON yet (compiles into the SWIG .o at -Os, :64 trap unproven). Plan: (1) shared per-frame field cache on the op keyed on vizPhase - compute the strip-wide field once, plies blit windows (mirrors the RaindropGraphic screensaver it was lifted from); (2) bound the field build to per-bump bboxes (bumps->splat, not cells->all-bumps); (3) LUT the expf + thin fbm; (4) fill only active bbox; (5) single-pass multi-threshold marching squares; (6) NEON only on a measured remaining hotspot, class-member storage + whole-.o hint scan + hardware test. Crash rails: keep every virtual inline (DrumCubeGraphic out-of-line draw crash). Item 1 alone likely fixes the crawl. DSP am335x viability (Stretch the killer) is separate."
-
 [[item]]
 id = "anamnesis-insert-crash"
 title = "Anamnesis am335x insert: data-abort in Event_post (heap corruption from insert path)"

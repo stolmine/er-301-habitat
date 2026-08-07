@@ -1,6 +1,59 @@
 # Anamnesis viz optimization - plan of record
 
-## Round two (2026-08-06, pkg 0.2.0.87, uncommitted)
+## Round three (2026-08-06, pkg 0.2.0.88, uncommitted): strip raster + blit
+
+Hardware split from the round-two gate: DSP alone (viz gated) = 30% mono,
+ACCEPTED; on-screen still encoder-capture -> the draw path is ~70% and is the
+entire remaining problem. Authorized: the 6-ply architecture rethink.
+
+**Structure**: the whole 258x64 pond is now composited ONCE per UI frame into
+`Anamnesis::mStripRaster` (a member byte plane + a written-pixel bitmask,
+~18.5 KB) by `buildStripRaster()`; each ply's `drawImpl` is a masked blit of
+its window (plus the front-most rain flecks, unchanged). Frame detection: a
+draw whose ply index <= the previous draw's index starts a new frame (robust
+to any subset of plies being visible). The masked blit writes ONLY pixels the
+raster painted, so framework content under never-painted pixels (section
+dividers in the 1px gaps) is treated exactly as the old per-ply renderer did.
+
+What the structure removes on-device (invisible to the x86 bench, whose stub
+framebuffer was never virtual): ALL od::FrameBuffer virtual readPixel calls
+(raster blending reads its own bytes) and roughly half the virtual pixel
+calls; per-ply z-sorts, drop caches, band control-grid overlap (~19%), and
+the 6 overlapping marching-squares walks collapse to one each. Plus two
+volume cuts the strip form made natural:
+ - per-drop INNER skip radius (a mature ring is a thin annulus = crest span +
+   4.5 sigma; points deep inside get h < 4e-5 -> bend < 1e-3 px): crestTrain
+   evals -39% at worst case;
+ - exact per-CELL classification in the metaball fill: all-below-threshold
+   cells skip (bilinear <= max corner), solid-interior cells (min corner >=
+   T + kEdgeSoft) write hard 0 with no per-pixel math.
+Also strip-coherent by construction: the old per-ply draws could see the sim
+mutate mid-frame (audio thread) -> potential seam tearing; the raster reads
+once.
+
+Proof: framebuffer A/B vs round two = 14 px of 17.5M changed (13 of them by
+1 gray step; 10 of 1072 worst-case frames affected, <= 2 px each) -- that is
+the bounded ripple inner-skip; the structural port itself is pixel-exact.
+Cumulative vs the ORIGINAL pre-session renderer: 0.114% of pixels, 98% by 1
+step. Audio: BIT-identical to round two. x86 O3 worst-case draw 694 -> 563
+us/frame, default 354 us (x86 understates; see above). am335x hot loops are
+call-free (objdump: only per-frame powf x2 / memset x2 + the inlined Perlin
+bake cold path); drawImpl = 181 instructions. Both arches clean, all three
+lints clean, emu insert smoke passes.
+
+Honest device projection: raster math ~1.2-1.7M cycles/frame worst case +
+~10-15k masked virtual pixel writes -> viz should drop from ~70% to roughly
+15-30% of the core at 48k/55fps, i.e. total ~45-60% with the accepted 30%
+DSP. If hardware still shows capture, the remaining levers are (a) halving
+the strip rebuild rate (animation at ~27fps -- a RICHNESS change, needs user
+sign-off), (b) single-pass multi-threshold marching squares (~0.5% est,
+skipped as marginal), (c) direct MainFrameBuffer plane writes for the blit
+(bypasses the virtual pixel API; layout-coupled, kept as a documented
+last resort). A 6-ply all-over viz is NOT inherently over budget: the raster
+is one 258x64 4-bit scene per frame; the framework's per-pixel virtual
+interface is the floor.
+
+## Round two (2026-08-06, pkg 0.2.0.87, committed c92f063)
 
 Hardware after round one: unresponsive -> "just over 100% CPU", animation runs.
 Target another ~2x. Changes, each A/B-proven:
