@@ -734,8 +734,8 @@ void Anamnesis::buildFieldFrame()
     const float phase = mVizPhase;
     // Active bubbles (content-x / column-y / radius / seed / level).
     int nb = 0;
-    float bX[kVizMaxBubbles], bY[kVizMaxBubbles], bR[kVizMaxBubbles], bSeed[kVizMaxBubbles];
-    int bLvl[kVizMaxBubbles];
+    float *bX = mFcBX, *bY = mFcBY, *bR = mFcBR, *bSeed = mFcBSeed;
+    int *bLvl = mFcBLvl;
     for (int L = 0; L < field::kBubLevels; L++) mFcLevelUsed[L] = false;
     for (int i = 0; i < kVizMaxBubbles; i++)
     {
@@ -748,7 +748,7 @@ void Anamnesis::buildFieldFrame()
     }
     // Drifting point layer (content-space, shared).
     const int NP = field::kNumPoints;
-    float ptX[field::kNumPoints], ptY[field::kNumPoints];
+    float *ptX = mFcPtX, *ptY = mFcPtY;
     const float ptt = phase * field::kPointDriftRate;
     const float reacht = phase * field::kReachRate;
     for (int p = 0; p < NP; p++)
@@ -757,8 +757,8 @@ void Anamnesis::buildFieldFrame()
       ptY[p] = 6.0f + field::hash01(p, 2) * 52.0f + field::kPointDrift * anamnesis::noise::sample((float)p * 0.37f + 40.0f, ptt + 7.0f);
     }
     // Expand each bubble into a core bump + latched lobe sub-bumps.
-    float sbX[kFcSBcap], sbY[kFcSBcap], sbR[kFcSBcap], sbAmp[kFcSBcap];
-    int sbLvl[kFcSBcap];
+    float *sbX = mFcSbX, *sbY = mFcSbY, *sbR = mFcSbR, *sbAmp = mFcSbAmp;
+    int *sbLvl = mFcSbLvl;
     int nsb = 0;
     for (int b = 0; b < nb; b++)
     {
@@ -988,8 +988,8 @@ void Anamnesis::buildStripRaster()
     // to < ~4e-5, i.e. bend < 1e-3 px / glow < 1e-3 gray. During the impact
     // transient (age < kImpactT) the crater sits at r=0, so no inner skip.
     int nd = 0;
-    float dX[kVizMaxDrops], dY[kVizMaxDrops], dAge[kVizMaxDrops];
-    float dC[kVizMaxDrops], dAmp[kVizMaxDrops], dRi2[kVizMaxDrops];
+    float *dX = mSrDX, *dY = mSrDY, *dAge = mSrDAge;
+    float *dC = mSrDC, *dAmp = mSrDAmp, *dRi2 = mSrDRi2;
     for (int i = 0; i < kVizMaxDrops; i++)
     {
       const float age = mDropAge[i];
@@ -1038,7 +1038,7 @@ void Anamnesis::buildStripRaster()
       const int s0 = 2 * b, s1 = 2 * b + 1;
       const float yb0 = ((float)s0 + 0.5f) * (float)h / (float)n;
       const float yb1 = ((float)s1 + 0.5f) * (float)h / (float)n;
-      float cY0[68], cB0[68], cY1[68], cB1[68];
+      float *cY0 = mSrCY0, *cB0 = mSrCB0, *cY1 = mSrCY1, *cB1 = mSrCB1;
       for (int i = 0; i < gCount; i++)
       {
         const float cx = (float)((gFirst + i) * cstep);

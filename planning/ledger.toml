@@ -1467,7 +1467,28 @@ on the app/UI thread, and a draw path that monopolises that thread starves it. I
 reliable without any deletion-specific change, that confirms it.
 OWED: hardware - encoder feel, whether the 4-frame stagger is visible as a shear/wipe across the
 pond (Colmatage accepts exactly this tradeoff), and whether deletion is now reliable. kStripSlices is
-one constant if 4 is the wrong number in either direction."""
+one constant if 4 is the wrong number in either direction.
+ROUND FIVE 2026-08-07 (anamnesis 0.2.0.90) - THE DELETE CRASH, and a rebuild storm.
+DELETE CRASH ROOT-CAUSED from /mnt/crash.log report 21: Kind data-abort, Thread **busy**,
+"*** STACK busy BLOWN ***", busy 4096/4096 (100%) canary=BLOWN. Heap fine (19 KB of 20 MB).
+The frames: buildStripRaster 1804 bytes CALLS ensureFieldFrame -> buildFieldFrame 2484 bytes =
+**4288 bytes of chain on a 4096-byte stack**.
+THE RULE THIS TEACHES, and it was not written down anywhere: a redraw can run on the `busy` task
+while the Busy spinner is up during insert/delete. So DRAW-PATH frames must fit the BUSY stack
+(4096), not the app stack (32768). On the app thread the same chain was comfortable (42% of 32768);
+on the busy thread it blew instantly. That is why the crash was specific to deletion.
+FIX: every large draw-path local moved to class members (the Pecto pointer-alias pattern) - the
+bubble/point/sub-bump arrays in buildFieldFrame and the drop/column arrays in buildStripRaster.
+Measured: buildFieldFrame 2484 -> under 200, buildStripRaster 1804 -> 404. Chain now ~600 bytes.
+SECOND BUG FOUND WHILE THERE, and it may be the 140% itself: the round-three frame-start detector was
+`if (plyIndex <= mStripLastPly) buildStripRaster()`. That is ORDER-DEPENDENT. If the framework walks
+plies descending (5,4,3,2,1,0) every single draw satisfies `<=` and rebuilds - SIX rebuilds per
+frame, which costs more than having no cache at all and would swamp the time-slicing win. Replaced
+with a seen-mask (rebuild when a ply repeats), which cannot fail on any draw order or visible subset.
+I have NOT confirmed the framework's draw order, so this is a latent-risk fix rather than a proven
+one - but the user's 140%-with-viz reading is consistent with it firing.
+OWED: re-measure on 0.2.0.90. If 140% drops sharply, the descending-order rebuild storm was the
+cause and the earlier optimisation rounds were being masked by it."""
 verify = { kind = "manual", ref = "emu: no encoder-capture / acceptable frame rate with all plies + bubbles + high Diffusion; responsive on CM4; am335x builds clean + check-graphic-virtual-defs.sh + (if NEON) check-neon-hints.sh" }
 note = "Plan of record: planning/anamnesis-viz-optimization.md. The all-over Pond viz crawls on CM4 (fine on MBA by brute force) because it is drawn by one AnamFieldGraphic PER PLY (kVizPlies=6) and each draw() recomputes the GLOBAL work identically - 28-point drift layer, sub-bump expansion over every bubble, and the per-level metaball field build (O(cells x bumps) expf + 3-octave fbm per cell, x3 levels) - so the heavy work runs ~6x redundantly per frame. Doctrine (planning/neon-opportunities.md): architectural before NEON (Visadhara precompute cache = 50x vs NEON 4x), and NO habitat graphic uses NEON yet (compiles into the SWIG .o at -Os, :64 trap unproven). Plan: (1) shared per-frame field cache on the op keyed on vizPhase - compute the strip-wide field once, plies blit windows (mirrors the RaindropGraphic screensaver it was lifted from); (2) bound the field build to per-bump bboxes (bumps->splat, not cells->all-bumps); (3) LUT the expf + thin fbm; (4) fill only active bbox; (5) single-pass multi-threshold marching squares; (6) NEON only on a measured remaining hotspot, class-member storage + whole-.o hint scan + hardware test. Crash rails: keep every virtual inline (DrumCubeGraphic out-of-line draw crash). Item 1 alone likely fixes the crawl. DSP am335x viability (Stretch the killer) is separate."
 [[item]]

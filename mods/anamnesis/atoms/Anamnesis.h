@@ -342,10 +342,17 @@ namespace anamnesis
     // ply rebuilds every frame, matching the old per-frame rendering).
     static const int kStripSlices = 4;  // columns rebuilt per frame = kStripW/4
     static const int kStripW = 258;   // field::kVizPlies * field::kStride
+    // Frame start = this ply has ALREADY drawn since the last rebuild. That is
+    // order-INDEPENDENT: the previous `plyIndex <= last` test rebuilt on every
+    // draw if the framework walked plies in descending order (5,4,3.. each
+    // satisfies <=), which would rebuild 6x per frame instead of once and cost
+    // MORE than having no cache at all. A seen-mask cannot fail that way.
     void ensureStripFrame(int plyIndex)
     {
-      if (plyIndex <= mStripLastPly) buildStripRaster();
-      mStripLastPly = plyIndex;
+      const uint32_t bit = 1u << (plyIndex & 31);
+      if (mStripSeen & bit) mStripSeen = 0;   // wrapped -> new frame
+      if (mStripSeen == 0) buildStripRaster();
+      mStripSeen |= bit;
     }
     const uint8_t *stripCol(int col) const { return &mStripRaster[col << 6]; }
     uint64_t stripMask(int col) const { return mStripMask[col]; }
@@ -550,10 +557,24 @@ namespace anamnesis
     // Strip raster plane (column-major, [col*64 + y]) + written-pixel mask.
     // CLASS MEMBERS (UI-thread scratch lives on the heap object, never the
     // stack). ~18.5 KB.
+    // DRAW-PATH SCRATCH, on the heap with the object rather than the stack.
+    // A redraw can run on the `busy` task (4096-byte stack) while the Busy
+    // spinner is up during insert/delete -- NOT the 32768-byte app stack. The
+    // buildStripRaster -> ensureFieldFrame -> buildFieldFrame chain needed
+    // 1804 + 2484 = 4288 bytes of frame and blew it, crashing on delete.
+    float    mFcBX[kVizMaxBubbles], mFcBY[kVizMaxBubbles];
+    float    mFcBR[kVizMaxBubbles], mFcBSeed[kVizMaxBubbles];
+    int      mFcBLvl[kVizMaxBubbles];
+    float    mFcPtX[field::kNumPoints], mFcPtY[field::kNumPoints];
+    float    mFcSbX[kFcSBcap], mFcSbY[kFcSBcap], mFcSbR[kFcSBcap], mFcSbAmp[kFcSBcap];
+    int      mFcSbLvl[kFcSBcap];
+    float    mSrDX[kVizMaxDrops], mSrDY[kVizMaxDrops], mSrDAge[kVizMaxDrops];
+    float    mSrDC[kVizMaxDrops], mSrDAmp[kVizMaxDrops], mSrDRi2[kVizMaxDrops];
+    float    mSrCY0[68], mSrCB0[68], mSrCY1[68], mSrCB1[68];
     int      mStripSlice = 0;
     uint8_t  mStripRaster[kStripW * 64];
     uint64_t mStripMask[kStripW];
-    int      mStripLastPly = 1000000;  // frame-start detector (see ensureStripFrame)
+    uint32_t mStripSeen = 0;           // plies drawn since the last rebuild
     bool  mInit = false;
     bool  mFzSet = false;
 #endif
