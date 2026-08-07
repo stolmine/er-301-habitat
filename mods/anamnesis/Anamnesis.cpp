@@ -884,9 +884,11 @@ namespace
   {
     uint8_t *buf;     // column-major [col*64 + y]
     uint64_t *mask;   // bit y of mask[col] = pixel painted this frame
+    int c0, c1;       // active TIME SLICE: only columns [c0,c1) are rebuilt
   };
   static inline void srPix(StripR &S, int col, int y, int c)
   {
+    if (col < S.c0 || col >= S.c1) return;   // outside this frame's slice
     S.buf[(col << 6) + y] = (uint8_t)c;
     S.mask[col] |= 1ull << y;
   }
@@ -955,8 +957,18 @@ void Anamnesis::buildStripRaster()
     StripR S;
     S.buf = mStripRaster;
     S.mask = mStripMask;
-    memset(mStripRaster, 0, sizeof(mStripRaster));
-    memset(mStripMask, 0, sizeof(mStripMask));
+    // TIME SLICE (feedback_viz_encoder_capture_architectural, move 3). Rebuild
+    // only 1/kStripSlices of the columns per frame; the rest KEEP last frame's
+    // pixels, so no single draw() runs the whole recompute and the UI thread
+    // gets back to its event pump. Total work per frame drops by the same
+    // factor. Clears must be slice-scoped or the persisted columns are lost.
+    const int sw = (kStripW + kStripSlices - 1) / kStripSlices;
+    S.c0 = mStripSlice * sw;
+    S.c1 = S.c0 + sw; if (S.c1 > kStripW) S.c1 = kStripW;
+    if (S.c0 >= kStripW) { S.c0 = 0; S.c1 = sw; }
+    mStripSlice = (mStripSlice + 1) % kStripSlices;
+    memset(&mStripRaster[S.c0 << 6], 0, (size_t)(S.c1 - S.c0) << 6);
+    memset(&mStripMask[S.c0], 0, (size_t)(S.c1 - S.c0) * sizeof(uint64_t));
 
     const int h = 64;
     const int n = field::kStreamN;
@@ -1052,7 +1064,7 @@ void Anamnesis::buildStripRaster()
         cY0[i] = y0; cB0[i] = gl0; cY1[i] = y1; cB1[i] = gl1;
       }
       float prev0 = -1000.0f, prev1 = -1000.0f;
-      for (int cx = 0; cx < kStripW - 1; cx++)  // cols 0..256, as the old windows
+      for (int cx = S.c0; cx < kStripW - 1 && cx < S.c1; cx++)  // slice only
       {
         // per-ply gap-fill reset: the old renderer reset prevY at each ply's
         // first column, so steep jumps never gap-fill across a 43px seam.
@@ -1112,9 +1124,10 @@ void Anamnesis::buildStripRaster()
     {
       const float *G = &mFcGrid[L * GW * GH];
       // FILL, walked per grid CELL (corners loaded once per cell run).
-      for (int gi = 0; gi * C < kStripW - 1 && gi < GW - 1; gi++)
+      for (int gi = S.c0 / C; gi * C < kStripW - 1 && gi < GW - 1; gi++)
       {
         int colA = gi * C;
+        if (colA >= S.c1) break;                                        // past the slice
         int colB = colA + C; if (colB > kStripW - 1) colB = kStripW - 1; // cols < 257
         for (int gj = 0; gj < GH - 1; gj++)
         {

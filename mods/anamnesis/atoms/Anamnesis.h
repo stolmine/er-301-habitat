@@ -340,6 +340,7 @@ namespace anamnesis
     // frame, so a draw whose ply index is <= the previous draw's index starts
     // a new frame. Works with any subset of plies visible (a single visible
     // ply rebuilds every frame, matching the old per-frame rendering).
+    static const int kStripSlices = 4;  // columns rebuilt per frame = kStripW/4
     static const int kStripW = 258;   // field::kVizPlies * field::kStride
     void ensureStripFrame(int plyIndex)
     {
@@ -549,6 +550,7 @@ namespace anamnesis
     // Strip raster plane (column-major, [col*64 + y]) + written-pixel mask.
     // CLASS MEMBERS (UI-thread scratch lives on the heap object, never the
     // stack). ~18.5 KB.
+    int      mStripSlice = 0;
     uint8_t  mStripRaster[kStripW * 64];
     uint64_t mStripMask[kStripW];
     int      mStripLastPly = 1000000;  // frame-start detector (see ensureStripFrame)

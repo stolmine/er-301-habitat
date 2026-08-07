@@ -1438,7 +1438,36 @@ REMAINING LEVERS IF HARDWARE STILL CAPTURES, in order: halve the strip rebuild r
 RICHNESS change, needs user sign-off), single-pass multi-threshold marching squares (~0.5%, measured
 marginal), and direct MainFrameBuffer plane writes bypassing the virtual API (layout-coupled to
 firmware source, documented as a last resort).
-OWED: hardware on-screen CPU%."""
+OWED: hardware on-screen CPU%.
+ROUND FOUR 2026-08-07 (anamnesis 0.2.0.89) - TIME SLICING. Hardware after round three: viz runs at
+almost full framerate, but encoder capture PERSISTS. The user pointed at the Perlin screensaver as
+the place this was solved architecturally before, which was the right instinct - the answer was
+already written down in [[feedback_viz_encoder_capture_architectural]] and I had not applied its
+third move.
+THE KEY LINE: "draw and encoder dispatch share the same thread. A single long draw() call blocks
+input events until it returns... If one frame's draw takes multiple frames' worth of time, encoders
+queue and feel captured, REGARDLESS OF TOTAL MHz CONSUMED."
+That is exactly the state round three left us in, and round three arguably made this axis WORSE even
+while cutting total cycles: consolidating six per-ply rasterizations into one strip build meant the
+FIRST ply's draw did 100% of the work synchronously and the other five were near-free blits. Total
+cycles down, worst-case single-draw duration not down. Smooth framerate, captured encoder - the exact
+signature the memory describes.
+FIX (memory's move 3, time slicing): buildStripRaster now rebuilds only 1/kStripSlices (=4) of the
+columns per frame. The raster is a persistent member, so un-rebuilt columns keep last frame's pixels
+until their slice comes up. Implementation is small because the column-major layout and the single
+srPix choke point made it cheap: StripR carries the active [c0,c1); srPix rejects out-of-slice
+columns; the two big column loops (streamlines, metaball fill) are clamped so the WORK is skipped
+rather than just the writes; and the memsets are slice-scoped, which is the load-bearing detail - a
+full clear would wipe the persisted columns every frame.
+Verified: slice width 65, all 258 columns covered in exactly 4 frames with no gap; both arches; all
+three lints clean.
+THE DELETION SYMPTOM the user also reported ("deletion is unreliable, no hang, seems to compete for
+resources") is very likely the SAME root cause and should be re-tested with this: unit deletion runs
+on the app/UI thread, and a draw path that monopolises that thread starves it. If deletion becomes
+reliable without any deletion-specific change, that confirms it.
+OWED: hardware - encoder feel, whether the 4-frame stagger is visible as a shear/wipe across the
+pond (Colmatage accepts exactly this tradeoff), and whether deletion is now reliable. kStripSlices is
+one constant if 4 is the wrong number in either direction."""
 verify = { kind = "manual", ref = "emu: no encoder-capture / acceptable frame rate with all plies + bubbles + high Diffusion; responsive on CM4; am335x builds clean + check-graphic-virtual-defs.sh + (if NEON) check-neon-hints.sh" }
 note = "Plan of record: planning/anamnesis-viz-optimization.md. The all-over Pond viz crawls on CM4 (fine on MBA by brute force) because it is drawn by one AnamFieldGraphic PER PLY (kVizPlies=6) and each draw() recomputes the GLOBAL work identically - 28-point drift layer, sub-bump expansion over every bubble, and the per-level metaball field build (O(cells x bumps) expf + 3-octave fbm per cell, x3 levels) - so the heavy work runs ~6x redundantly per frame. Doctrine (planning/neon-opportunities.md): architectural before NEON (Visadhara precompute cache = 50x vs NEON 4x), and NO habitat graphic uses NEON yet (compiles into the SWIG .o at -Os, :64 trap unproven). Plan: (1) shared per-frame field cache on the op keyed on vizPhase - compute the strip-wide field once, plies blit windows (mirrors the RaindropGraphic screensaver it was lifted from); (2) bound the field build to per-bump bboxes (bumps->splat, not cells->all-bumps); (3) LUT the expf + thin fbm; (4) fill only active bbox; (5) single-pass multi-threshold marching squares; (6) NEON only on a measured remaining hotspot, class-member storage + whole-.o hint scan + hardware test. Crash rails: keep every virtual inline (DrumCubeGraphic out-of-line draw crash). Item 1 alone likely fixes the crawl. DSP am335x viability (Stretch the killer) is separate."
 [[item]]
