@@ -676,11 +676,12 @@ note = "planning/todo-archive.md '## Larets Polish'. Both currently use column-l
 [[item]]
 id = "larets-random-step-advance"
 title = "Larets: random step-advance mode (sequential/random, never the same step twice in a row)"
-status = "wip"
-stamped = "2026-08-05T21:26:10-05:00"
+status = "done"
+stamped = "2026-08-06T20:19:49-05:00"
 area = "seq"
 touches = ["mods/spreadsheet/Larets.cpp", "mods/spreadsheet/Larets.h", "mods/spreadsheet/assets/LaretOverviewControl.lua"]
-attested = """2026-08-05 (spreadsheet 2.8.3.83): SHIPPED, emu-installed, user audition owed.
+attested = """2026-08-06: shipped in v2.8.0, spot-checked on hardware ("spot checks come back quite nice").
+2026-08-05 (spreadsheet 2.8.3.83): SHIPPED, emu-installed, user audition owed.
 Scope narrowed by the user: sequential/random only (Brownian dropped), and "the only
 intelligence I want on the step control is that it should never pick the same step twice
 in a row". Implementation: od::Option mStepMode (1=random, 2=sequential, default
@@ -804,11 +805,12 @@ note = "planning/todo-archive.md '## Controls Audit'. Two unifications: (a) norm
 [[item]]
 id = "modeselector-gain-moves-bias"
 title = "ModeSelector: turning the mod-gain knob moved the mode instead of the gain"
-status = "wip"
-stamped = "2026-08-06T19:57:53-05:00"
+status = "done"
+stamped = "2026-08-06T20:19:49-05:00"
 area = "ui"
 touches = ["mods/spreadsheet/assets/ModeSelector.lua", "mods/biome/assets/ModeSelector.lua"]
-attested = """2026-08-06 FIXED (spreadsheet 2.8.4.1, biome 2.2.2.1), hardware confirmation owed.
+attested = """2026-08-06: shipped in v2.8.1 and confirmed working on hardware by the user.
+2026-08-06 FIXED (spreadsheet 2.8.4.1, biome 2.2.2.1), hardware confirmation owed.
 User: "vitrail got a bug at some point, routing and clock source gain knobs move bias position!"
 CAUSE: GainBias:encoder (xroot/Unit/ViewControl/GainBias.lua:808) routes by focus - gain readout
 focused -> edit gain, otherwise -> edit bias. ModeSelector:encoder intercepted UNCONDITIONALLY on
@@ -1362,8 +1364,9 @@ note = "Branch fabula-am335x. APFTank.h is a Dattorro/Griesinger figure-8 recirc
 [[item]]
 id = "fabula-diffusion-makeup"
 title = "Fabula: AGC / intelligent gain control to make up volume lost to diffusion"
-status = "todo"
-stamped = "2026-07-14T18:37:58-05:00"
+status = "done"
+attested = "2026-08-07: VERIFIED ALREADY SHIPPED. kDiffMakeup (APFTank.h:651) gives up to +5.6 dB at Diffusion=1, folded into wetMixG. Item was never closed."
+stamped = "2026-08-06T20:19:49-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "sweep Diffusion (and Size/Decay): perceived wet level should stay roughly constant instead of dropping as diffusion rises; an AGC/envelope-tracked makeup on the wet compensates the diffusion loss without pumping" }
 note = "Diffusion (and the multi-tap signed sum) costs perceived level. Add an AGC / envelope-tracked makeup on the wet that compensates the loss. Watch interaction with the Freeze makeup (kFreezeMakeup) and the SR/2 tank. See [[project_fabula_am335x]]."
@@ -1371,8 +1374,9 @@ note = "Diffusion (and the multi-tap signed sum) costs perceived level. Add an A
 [[item]]
 id = "fabula-dry-under-hpf"
 title = "Fabula: dry passthrough underneath the 200Hz wet HPF"
-status = "todo"
-stamped = "2026-07-14T18:37:58-05:00"
+status = "done"
+attested = "2026-08-07: VERIFIED ALREADY SHIPPED. APFTank.h:653 passes clean low end from the dry underneath the HPF-d wet, and the corner became a user knob (20-500 Hz, 60 Hz default) rather than the fixed 200 Hz. Item was never closed."
+stamped = "2026-08-06T20:19:49-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "confirm the dry signal's low end passes full-range while the wet stays HPF'd at 200Hz - i.e. the HPF shapes only the reverb, and a dry passthrough preserves lows underneath" }
 note = "The 200Hz kWetHpF/kWetHpA highpass currently shapes the wet. Want a dry passthrough that keeps the low end underneath the HPF'd wet (clarify: full-range dry blend vs a shelved dry). See [[project_fabula_am335x]]."
@@ -1380,8 +1384,9 @@ note = "The 200Hz kWetHpF/kWetHpA highpass currently shapes the wet. Want a dry 
 [[item]]
 id = "fabula-xform"
 title = "Fabula: xform (transform/randomize) control, modeled on Pecto/Petrichor"
-status = "todo"
-stamped = "2026-07-14T18:37:58-05:00"
+status = "done"
+attested = "2026-08-07: VERIFIED ALREADY SHIPPED. Fabula.lua has the xform Comparator, the target selector (xformTargetNames) and APFTank::applyRandomize. Item was never closed."
+stamped = "2026-08-06T20:19:49-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "an xform gate randomizes/morphs a curated set of Fabula params (size/decay/damp/diffusion/early + mod character) into musical new spaces; modeled on Pecto's / Petrichor's xform gate" }
 note = "Add an xform control (gate/trig) that randomizes or morphs a curated param set into new rooms. Model on Pecto's xform (planning/combbody.md) or Petrichor's. Curate which params + ranges stay musical. See [[project_fabula_am335x]]."
@@ -1389,8 +1394,9 @@ note = "Add an xform control (gate/trig) that randomizes or morphs a curated par
 [[item]]
 id = "fabula-overview-caret"
 title = "Fabula overview: default-focus a sub-readout on re-entry WITHOUT breaking navigation (renderer focus==self gate)"
-status = "todo"
-stamped = "2026-07-14T18:54:33-05:00"
+status = "done"
+attested = "2026-08-07 (spreadsheet 2.8.5.1): paramModeDefaultSub was READ on paramMode entry but never ASSIGNED, so it was nil and re-entry focused nothing. Now defaults to the decay readout. Navigation unaffected - sub buttons still retarget freely and paramFocusedReadout stays nil until one is pressed, so the encoder keeps editing the main bias until the user picks a sub."
+stamped = "2026-08-06T20:19:49-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "enter the Fabula overview -> tap-shift to the Decay/Damp/Diff submenu -> navigate to another top-level control -> navigate back: the caret should land on a sub-readout AND the encoder should edit that SAME sub, with normal top-level navigation still working (no cursor grabbing nothing / traversing)" }
 note = "The sub caret renders at subCursorController's coords, and setSubCursorController only pushes to the renderer when the widget already holds encoder focus (Base/Widget.lua). Original bug: on re-entry the caret bled onto self.bias (col3/center4, pixel-identical to the S3/diff readout) while the encoder edited S1 (caret/encoder split). The focusParamSub() fix (0.2.0.52) forced encoder focus via self:focus() on cursor-enter to make the caret render, but that BROKE navigation (cursor grabs nothing / traverses top-level). Reverted onCursorEnter to the STRICT convention (setSubCursorController(nil), encoder edits Size until a SubButton is tapped) - consistent + navigation works, but loses the intended default-edit-Decay-with-caret. Deeper research needed: how do the framework's cursor navigation and encoder focus interact so a paramMode control can present a positive default sub-caret on re-entry without self:focus() hijacking navigation. This is the exact unresolved renderer limitation pinned in feedback_subcursor_inheritance / shift-handling.md:399 ('positive default highlight does not render'). See [[project_fabula_am335x]]."
@@ -1535,11 +1541,12 @@ note = """Network's 'gain loss at Wet=0.5' was a LINEAR dry/wet crossfade dippin
 [[item]]
 id = "mix-control-standards"
 title = "Mix-control standards: detents standardized on the built-in map; crossfade-law half still open"
-status = "wip"
-stamped = "2026-08-05T22:11:42-05:00"
+status = "done"
+stamped = "2026-08-06T20:19:49-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "docs/knowledge-base.md 'Dry/wet mix controls' standard is documented; every dry/wet mix control across published units has a 0.01 coarse step (2nd setSteps arg); decorrelated dry/wet uses equal-power (per drywet-crossfade-audit); correlated wets stay linear." }
-attested = """2026-08-05 DETENT HALF DONE (spreadsheet 2.8.3.89, biome 2.2.1.13, house 0.1.0.43,
+attested = """2026-08-06: detent half shipped in v2.8.0 across 6 packages and confirmed. The crossfade-law half is tracked separately in [[drywet-crossfade-audit]], which stays open.
+2026-08-05 DETENT HALF DONE (spreadsheet 2.8.3.89, biome 2.2.1.13, house 0.1.0.43,
 catchall 0.4.0.1, zaum 0.2.0.65, anamnesis 0.2.0.84). User: "it would be good to standardize mix
 controls in habitat against built in examples, freeverb, say. these have been bugging me" - and
 explicitly scoped to INCREMENT DETENTS, not the crossfade law.
@@ -1828,9 +1835,10 @@ statistically."""
 [[item]]
 id = "vitrail-viz"
 title = "Vitrail: tunnel visualization stacked on the Clock Src control"
-status = "wip"
-stamped = "2026-08-05T21:29:15-05:00"
-attested = """2026-08-05 (spreadsheet 2.8.3.86): FIRST PASS SHIPPED, emu-installed, audition owed.
+status = "done"
+stamped = "2026-08-06T20:19:49-05:00"
+attested = """2026-08-06: shipped in v2.8.0 and confirmed on hardware.
+2026-08-05 (spreadsheet 2.8.3.86): FIRST PASS SHIPPED, emu-installed, audition owed.
 Design is the user's: a tunnel you fly down, face morphing round <-> angular, mouth rotating,
 heading shifting. Built as mods/spreadsheet/VitrailTunnelGraphic.h + assets/VitrailClockControl.lua.
 NOT a 3D scene and not a real torus - a stack of 2D polygons scaled by 1/depth drawn far to near
@@ -2207,11 +2215,12 @@ wrong and was reverted. DONE 2026-07-22 (scope 1.2.3, both arches, 0 hints)."""
 [[item]]
 id = "pecto-audio-stack-overflow"
 title = "Pecto blew the 2048-byte audio task stack: 1072-byte process() frame from 5 stack-local arrays"
-status = "wip"
-stamped = "2026-08-05T23:39:05-05:00"
+status = "done"
+stamped = "2026-08-06T20:19:49-05:00"
 area = "dsp"
 touches = ["mods/spreadsheet/Pecto.cpp"]
-attested = """2026-08-05 FIXED (spreadsheet 2.8.3.93), hardware confirmation owed.
+attested = """2026-08-06: shipped in v2.8.0. Diagnosed from a real crash report; tools/check-audio-stack.sh guards the class going forward.
+2026-08-05 FIXED (spreadsheet 2.8.3.93), hardware confirmation owed.
 EVIDENCE, from /mnt/crash.log (schema 2, see er-301/docs/CRASH_REPORT_FORMAT.md). Reports 18 and 19
 are the same fault with byte-identical registers - Kind: data-abort, Thread: audio,
 "*** STACK audio BLOWN ***", audio 2048/2048 (100%) canary=BLOWN, pc=803dad04 lr=81a5bb24
@@ -2270,11 +2279,12 @@ already written there and still got broken."""
 [[item]]
 id = "scope-probe-pool-leak"
 title = "Scope timebase leaked into the firmware's MiniScope via the shared FifoProbe pool"
-status = "wip"
-stamped = "2026-08-05T23:25:31-05:00"
+status = "done"
+stamped = "2026-08-06T20:19:49-05:00"
 area = "dsp"
 touches = ["mods/scope/ScopeGraphic.h"]
-attested = """2026-08-05 FIXED (scope 1.2.7), hardware confirmation owed. User: "when we adjust
+attested = """2026-08-06: shipped in v2.8.0, user confirmed ("scope bug is fixed").
+2026-08-05 FIXED (scope 1.2.7), hardware confirmation owed. User: "when we adjust
 timescale and gain on scope units the changes can leak to the built in miniscope and persist when
 monitoring signals even after deleting scope unit where we made changes."
 ROOT CAUSE, traced not guessed. od::AudioThread::getFifoProbe() serves from a SHARED ObjectCache
@@ -2305,10 +2315,11 @@ set. See also [[feedback_package_trig_lut]] for the other package/firmware bound
 [[item]]
 id = "release-v2-8-0"
 title = "v2.8.0 release: 7 packages incl. the house debut"
-status = "wip"
-stamped = "2026-08-05T22:47:32-05:00"
+status = "done"
+stamped = "2026-08-06T20:19:49-05:00"
 area = "docs"
-attested = """2026-08-05: matrix written to planning/release-v2.8.0-test-matrix.md, covering every
+attested = """2026-08-06: v2.8.0 published with 7 packages incl. the house debut, followed by the v2.8.1 hotfix. Both live.
+2026-08-05: matrix written to planning/release-v2.8.0-test-matrix.md, covering every
 change since v2.7.0 (2026-07-15) in 4 risk tiers.
 SHIPPED 2026-08-06 as v2.8.0. User decision: publish on SPOT CHECKS, not the full matrix - the
 discrete-stepping work and the scope leak fix were confirmed on hardware, the rest of the matrix was
@@ -2356,10 +2367,11 @@ on insert (fixed in v2.4.1), so insert/delete cycling is called out separately f
 [[item]]
 id = "branding-attribution-policy"
 title = "Branding + attribution policy: generic externally, precise internally"
-status = "wip"
-stamped = "2026-08-05T22:38:30-05:00"
+status = "done"
+stamped = "2026-08-06T20:19:49-05:00"
 area = "docs"
-attested = """2026-08-05 EXTERNAL PASS DONE (biome 2.2.1.15, spreadsheet 2.8.3.90). User: "i'd like to
+attested = """2026-08-06: external pass done across picker keywords, control labels, README, repo release notes and all 20 published GitHub release bodies. Kentaro and Wolfram acknowledged for the Cellular algorithm.
+2026-08-05 EXTERNAL PASS DONE (biome 2.2.1.15, spreadsheet 2.8.3.90). User: "i'd like to
 do a pass for any branding related business ... we should have no official or implied association
 with real material, though i wonder if it would be good to attribute designs where we have clean
 roomed or profiled hardware?"
@@ -2479,11 +2491,12 @@ Package: biome fits the utility character (it already hosts Fade Mixer and Gridl
 [[item]]
 id = "fademixer-snap-mode"
 title = "Fade Mixer: Smooth/Snap config option so the family works as N-to-1 switches too"
-status = "wip"
-stamped = "2026-08-05T22:15:38-05:00"
+status = "done"
+stamped = "2026-08-06T20:19:49-05:00"
 area = "units"
 touches = ["mods/biome/FadeMixer.cpp", "mods/biome/FadeMixer.h", "mods/biome/assets/FadeMixerFactory.lua"]
-attested = """2026-08-05 SHIPPED (biome 2.2.1.14), hardware audition owed. User: "i'd like to add a
+attested = """2026-08-06: shipped in v2.8.0.
+2026-08-05 SHIPPED (biome 2.2.1.14), hardware audition owed. User: "i'd like to add a
 config option that selects between smooth and 'snap' so that they can be faders as well as simple
 N > 1 switches." All three variants (4/6/8) get it from the shared factory.
 od::Option mMode (1 = Smooth default, 2 = Snap) per [[feedback_option_vs_parameter]], exposed as an

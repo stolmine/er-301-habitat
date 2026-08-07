@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**175 items** — 44 done, 22 wip, 107 todo, 2 blocked. *Rendered 2026-08-06.*
+**175 items** — 57 done, 13 wip, 103 todo, 2 blocked. *Rendered 2026-08-06.*
 
 ## DSP
 
@@ -21,8 +21,6 @@ check`): a `done` item must have a real test or its named artifact.*
 | ~ | `ngoma-grit-tuning` | Ngoma grit: noise phase-mod too weak below 0.8 - re-fit depth vs re-pinned hardware | manual · 2026-07-23 |
 | ~ | `ngoma-shape-fm-campaign` | Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping) | manual *(attested)* · 2026-07-22 |
 | ~ | `ngoma-shape0-level-campaign` | Ngoma shape-0 fundamental level structure (oscillator phase coherence at low r) | manual · 2026-07-23 |
-| ~ | `pecto-audio-stack-overflow` | Pecto blew the 2048-byte audio task stack: 1072-byte process() frame from 5 stack-local arrays | manual *(attested)* · 2026-08-05 |
-| ~ | `scope-probe-pool-leak` | Scope timebase leaked into the firmware's MiniScope via the shared FifoProbe pool | manual *(attested)* · 2026-08-05 |
 | ~ | `trinity-fm-unit` | Profile Modbap Trinity FM voice + build ER-301 FM drum unit | manual · 2026-07-20 |
 | ~ | `vitrail-unit` | Vitrail - dual switched-capacitor character filter unit | manual · 2026-07-18 |
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
@@ -32,9 +30,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `canals-response-tuning` | Canals: SPAN/volume/low-band/Q/soft-clip response tuning against hardware capture corpus | manual · 2026-07-09 |
 |   | `compound-dsp-voice-profile` | Profile + emulate on-hand compound DSP module (workflow shakedown) | manual · 2026-07-17 |
 |   | `drywet-crossfade-audit` | Audit all wet/dry units for the linear-crossfade center dip; switch decorrelated wets to equal-power | manual · 2026-07-15 |
-|   | `fabula-diffusion-makeup` | Fabula: AGC / intelligent gain control to make up volume lost to diffusion | manual · 2026-07-14 |
-|   | `fabula-dry-under-hpf` | Fabula: dry passthrough underneath the 200Hz wet HPF | manual · 2026-07-14 |
-|   | `fabula-xform` | Fabula: xform (transform/randomize) control, modeled on Pecto/Petrichor | manual · 2026-07-14 |
 |   | `flakes-shards-fidelity` | Flakes: tune self-modulation engine to Shards, steeper LP on feedback, evaluate manual-loops fidelity | manual · 2026-07-09 |
 |   | `fx-delay-units` | Combined Petrichor+Pecto (CPU-efficient) + character-forward Lofi delay | manual · 2026-07-09 |
 |   | `helicase-sync-polyblep` | Helicase: PolyBLEP at the carrier reset discontinuity on hard sync | manual · 2026-07-09 |
@@ -65,11 +60,16 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✗ | `kryos-load-hang` | Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware | manual · 2026-07-09 |
 | ✓ | `biome-flakes` | Flakes — granular shimmer/freeze feedback looper (C++ rewrite of Shards) | manual *(attested)* · 2026-07-09 |
 | ✓ | `biome-pecto` | Pecto — comb resonator (16 tap patterns, 4 slopes, 4 resonator types, NEON 3-pass, zipper-clean) | manual *(attested)* · 2026-07-09 |
+| ✓ | `fabula-diffusion-makeup` | Fabula: AGC / intelligent gain control to make up volume lost to diffusion | manual *(attested)* · 2026-08-06 |
+| ✓ | `fabula-dry-under-hpf` | Fabula: dry passthrough underneath the 200Hz wet HPF | manual *(attested)* · 2026-08-06 |
+| ✓ | `fabula-xform` | Fabula: xform (transform/randomize) control, modeled on Pecto/Petrichor | manual *(attested)* · 2026-08-06 |
 | ✓ | `fx-tilt-djfilter` | Tilt EQ + DJ Filter shipped (bipolar LP/HP sweep with resonance) | manual *(attested)* · 2026-07-09 |
 | ✓ | `house-aw-reverbs` | House package — 6 faithful Airwindows reverb ports (kWoodRoom…Galactic), hardware-validated | manual *(attested)* · 2026-07-09 |
 | ✓ | `house-rotcoat` | RotCoat (codename) — first original-design reverb: multi-world per-line reduced-rate FDN | manual *(attested)* · 2026-07-09 |
 | ✓ | `network-gain-compensation` | Gain compensation for Network (Fabula's makeup model, tap-weight-energy basis) | manual *(attested)* · 2026-07-15 |
 | ✓ | `ngoma-hardware-hang` | Ngoma hangs hardware on load (post-2.5.1 regression) — am335x-specific, bisect pending hardware test | manual *(attested)* · 2026-07-22 |
+| ✓ | `pecto-audio-stack-overflow` | Pecto blew the 2048-byte audio task stack: 1072-byte process() frame from 5 stack-local arrays | manual *(attested)* · 2026-08-06 |
+| ✓ | `scope-probe-pool-leak` | Scope timebase leaked into the firmware's MiniScope via the shared FifoProbe pool | manual *(attested)* · 2026-08-06 |
 | ✓ | `spreadsheet-canals` | Canals — Three Sisters clone, DSP refresh + 4-input normalling topology; moved biome→spreadsheet | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-filterbank` | Filterbank (FFB/Tomograph) — parallel fixed filter bank, 2-16 bands, Scala scales, radial viz | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-helicase` | Helicase — 2-op FM oscillator (OPL3 waveforms, discontinuity folder, phase-receptivity sync) | manual *(attested)* · 2026-07-09 |
@@ -87,7 +87,6 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
-| ~ | `fademixer-snap-mode` | Fade Mixer: Smooth/Snap config option so the family works as N-to-1 switches too | manual *(attested)* · 2026-08-05 |
 |   | `bionic-lester-clone` | Profiling-informed clone of a switched-capacitor dual filter (target: Bionic Lester Mk1) | manual · 2026-07-15 |
 |   | `blanda-scan-mixer` | Blanda — 3-input scan mixer (Morph-4-style continuous bell-scan, not a crossover) | manual · 2026-07-09 |
 |   | `etcher-io-range-and-presets` | Etcher: change I/O ranges to ±1V + add sine/triangle/user presets + hardware deviation verify | manual · 2026-07-09 |
@@ -118,6 +117,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `catchall-alembic` | Alembic — sample-trained SOM 4-op PMM matrix synth (dual FM filter, comb, Ferment chaos macro) | manual *(attested)* · 2026-07-09 |
 | ✓ | `fabula-promote-spreadsheet` | Promote Fabula from the zaum package to the spreadsheet package | manual *(attested)* · 2026-07-14 |
 | ✓ | `fade-mixer` | Fade Mixer — 4-input equal-power crossfader with BranchMeter gain/solo/mute controls | manual *(attested)* · 2026-07-09 |
+| ✓ | `fademixer-snap-mode` | Fade Mixer: Smooth/Snap config option so the family works as N-to-1 switches too | manual *(attested)* · 2026-08-06 |
 | ✓ | `mi-ports-shipped` | Mutable Instruments port suite: Plaits/Clouds/Rings/Grids/Warps/Stratos/Commotio/Marbles T+X | manual *(attested)* · 2026-07-09 |
 | ✓ | `peaks-dmc-ports` | Peaks/DMC port suite: 14 drum/modulation/sequencer/generator units with clock+reset refinements | manual *(attested)* · 2026-07-09 |
 | ✓ | `porcelain-chime-v0` | Chime v0 — first porcelain (microsound/electroacoustic) unit: coupled pulse-excited resonator bank | manual *(attested)* · 2026-07-09 |
@@ -130,9 +130,6 @@ check`): a `done` item must have a real test or its named artifact.*
 | | id | item | verify |
 |---|---|---|---|
 | ~ | `anamnesis-viz-opt` | Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf) | manual · 2026-07-11 |
-| ~ | `mix-control-standards` | Mix-control standards: detents standardized on the built-in map; crossfade-law half still open | manual *(attested)* · 2026-08-05 |
-| ~ | `modeselector-gain-moves-bias` | ModeSelector: turning the mod-gain knob moved the mode instead of the gain | manual *(attested)* · 2026-08-06 |
-| ~ | `vitrail-viz` | Vitrail: tunnel visualization stacked on the Clock Src control | screenshot: Vitrail shows a custom overview graphic that reads clearly at 128x64 / 4-bit depth, telegraphs the current routing pair and the drifting dual-clock character, and does NOT capture the encoder (draw-path structure, not CPU) *(attested)* · 2026-08-05 |
 |   | `alembic-phase9-polish` | Alembic Phase 9: naming/defaults/mnemonic polish + serial stacked-waveform viz | screenshot: confirm final names/defaults/control labels + sphere-viz refinements, plus a stacked/cascading render of mWavetableLUT[64][256] with active reagent-scan frames lit and neighbors dimmed · 2026-07-09 |
 |   | `control-descriptions-drop-parentheticals` | Shorten Lua control descriptions that include parentheticals (they overflow the allotted space) | manual · 2026-07-22 |
 |   | `control-step-standards` | Adopt built-in dial-map standards across habitat; inventory every control vs the framework registry | manual · 2026-07-16 |
@@ -141,7 +138,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `controls-fader-response-audit` | Repo-wide fader response audit (dial-map shape, coarse/fine steps, encoder velocity, bias range) | manual · 2026-07-09 |
 |   | `controls-shift-audit-impl` | Shift-button behavior audit — implementation phase (spec locked in planning/shift-handling.md) | manual · 2026-07-09 |
 |   | `controls-subdisplay-and-viz` | Sub-display readout audit for expansion-only controls + bias indicator line on visualizer plies | manual · 2026-07-09 |
-|   | `fabula-overview-caret` | Fabula overview: default-focus a sub-readout on re-entry WITHOUT breaking navigation (renderer focus==self gate) | manual · 2026-07-14 |
 |   | `filterbank-defaults-and-randomize-gates` | Filterbank: better default gain/Q for immediate audibility + band-list randomize gate controls | manual · 2026-07-09 |
 |   | `helicase-polish` | Helicase: wider carrier-shape set, more-reactive overview viz, am335x CPU profile | manual · 2026-07-09 |
 |   | `impasto-stereo-option-state` | Impasto: saved stereo option state can disagree with instantiation if toggled without re-insert | manual · 2026-07-09 |
@@ -162,15 +158,18 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `viz-offscreen-gate-all` | Bring the offscreen-viz gate to all spreadsheet units with a DSP-side visualization | manual · 2026-07-15 |
 | ✗ | `scope-headerless-research` | Scope: research headerless unit display | manual · 2026-07-09 |
 | ✓ | `controls-optioncontrol-hardening` | Controls hardening: OptionControl boolean/indexing fixes, bipolar correctness, passthrough Comparators | manual *(attested)* · 2026-07-09 |
+| ✓ | `fabula-overview-caret` | Fabula overview: default-focus a sub-readout on re-entry WITHOUT breaking navigation (renderer focus==self gate) | manual *(attested)* · 2026-08-06 |
+| ✓ | `mix-control-standards` | Mix-control standards: detents standardized on the built-in map; crossfade-law half still open | manual *(attested)* · 2026-08-06 |
+| ✓ | `modeselector-gain-moves-bias` | ModeSelector: turning the mod-gain knob moved the mode instead of the gain | manual *(attested)* · 2026-08-06 |
 | ✓ | `scope-spectrogram` | Spectrogram — inline spectrum analyzer (256-pt pffft, peak-hold + RMS gradient, 2-ply) | manual *(attested)* · 2026-07-09 |
 | ✓ | `scope-units` | Scope unit family — inline passthrough scopes with timebase, Y-gain, and voltmeter readout | manual *(attested)* · 2026-07-09 |
 | ✓ | `vitrail-ux-fixes` | Vitrail UX: cutoff-mod-gain default + routing-control encoder tick scaling | manual *(attested)* · 2026-07-22 |
+| ✓ | `vitrail-viz` | Vitrail: tunnel visualization stacked on the Clock Src control | screenshot: Vitrail shows a custom overview graphic that reads clearly at 128x64 / 4-bit depth, telegraphs the current routing pair and the drifting dual-clock character, and does NOT capture the encoder (draw-path structure, not CPU) *(attested)* · 2026-08-06 |
 
 ## Sequencing / timing
 
 | | id | item | verify |
 |---|---|---|---|
-| ~ | `larets-random-step-advance` | Larets: random step-advance mode (sequential/random, never the same step twice in a row) | manual *(attested)* · 2026-08-05 |
 |   | `ballot-gate-width-zero` | Ballot: gate width 0 produces a trigger instead of silence — decide desired behavior | manual · 2026-07-09 |
 |   | `colmatage-xform-ply` | Colmatage: add an xform ply (func + paramA/B/scope) for algorithmic cutting randomization | manual · 2026-07-09 |
 |   | `seq-101-sequencer` | 101 Sequencer — 64-step SH-101-style CV sequencer with address fader + math transforms | manual · 2026-07-09 |
@@ -179,6 +178,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `seq-drum-kit` | Drum Kit Sequencer ('Kit') — drum-role-tagged monophonic CV sequencer for a mono drum voice | manual · 2026-07-09 |
 |   | `seq-excel-ballot-improvements` | Excel/Ballot improvements: xform context view, viz polish, output-scope visibility, variants, snap-scale, gate-seq | manual · 2026-07-09 |
 |   | `seq-ratchet-strum` | Ratchet / Strum — gate-burst generator from a single trigger (count/spacing/accel/velocity/gate-length) | manual · 2026-07-09 |
+| ✓ | `larets-random-step-advance` | Larets: random step-advance mode (sequential/random, never the same step twice in a row) | manual *(attested)* · 2026-08-06 |
 | ✓ | `seq-ballot-gateseq` | Ballot — gate sequencer with ratchet (RatchetLen/Vel/Mult) persistence | manual *(attested)* · 2026-07-09 |
 | ✓ | `seq-excel-tracker` | Excel — 64-step CV tracker sequencer (per-step offset/length/deviation, xform gate, V/Oct out) | manual *(attested)* · 2026-07-09 |
 | ✓ | `seq-gesture-recorder` | Gesture Sequencer — continuous gesture recorder/looper with od::Sample buffer + waveform viz | manual *(attested)* · 2026-07-09 |
@@ -197,12 +197,12 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
-| ~ | `branding-attribution-policy` | Branding + attribution policy: generic externally, precise internally | manual *(attested)* · 2026-08-05 |
-| ~ | `release-v2-8-0` | v2.8.0 release: 7 packages incl. the house debut | manual *(attested)* · 2026-08-05 |
 |   | `diffusion-makeup-model-notate` | Notate Fabula's diffusion-makeup gain model as a reusable pattern for tap-based units (main target: Network) | manual · 2026-07-14 |
 |   | `docs-intro-video` | Intro video for Habitat packages | manual · 2026-07-09 |
+| ✓ | `branding-attribution-policy` | Branding + attribution policy: generic externally, precise internally | manual *(attested)* · 2026-08-06 |
 | ✓ | `control-expansion-views-pattern` | Canonical pattern: control expansion views (expand sub-params to full faders on ENTER) | manual *(attested)* · 2026-07-14 |
 | ✓ | `readme-airwindows-attribution` | Add an attribution line in the README for Airwindows' creator Chris Johnson | manual *(attested)* · 2026-07-14 |
+| ✓ | `release-v2-8-0` | v2.8.0 release: 7 packages incl. the house debut | manual *(attested)* · 2026-08-06 |
 
 ## Infrastructure
 

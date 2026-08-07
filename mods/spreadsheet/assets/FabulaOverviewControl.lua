@@ -63,6 +63,13 @@ function FabulaOverviewControl:init(args)
   self.dampReadout = makeReadout(args.dampParam, col2)
   self.diffReadout = makeReadout(args.diffusionParam, col3)
 
+  -- Sub1 (decay) is the default cursor target on paramMode entry, so re-entering
+  -- the ply lands on a readout instead of nothing. Navigation is unaffected: the
+  -- sub buttons still retarget freely, and paramFocusedReadout stays nil until a
+  -- button is actually pressed, so the encoder keeps editing the main bias until
+  -- the user picks a sub. (feedback_subcursor_inheritance)
+  self.paramModeDefaultSub = self.decayReadout
+
   local desc = app.Label("Decay / Damp / Diff", 10)
   desc:fitToText(3)
   desc:setSize(ply * 3, desc.mHeight)
