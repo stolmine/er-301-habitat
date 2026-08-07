@@ -134,6 +134,7 @@ end
 function TransferCurveControl:setFocusedReadout(readout)
   if readout then readout:save() end
   self.focusedReadout = readout
+  DiscreteStep.reset(self)
   self:setSubCursorController(readout)
 end
 

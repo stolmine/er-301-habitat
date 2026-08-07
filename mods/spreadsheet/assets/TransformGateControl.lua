@@ -240,6 +240,7 @@ function TransformGateControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
   self.focusedReadout = nil
+  DiscreteStep.reset(self)
   self:setSubCursorController(nil)
   if enabled then
     self.subGraphic = self.paramSubGraphic
@@ -252,6 +253,7 @@ end
 function TransformGateControl:setFocusedReadout(readout)
   if readout then readout:save() end
   self.focusedReadout = readout
+  DiscreteStep.reset(self)
   self:setSubCursorController(readout)
 end
 
@@ -274,6 +276,7 @@ function TransformGateControl:onCursorLeave(spot)
   -- Decision 7: paramMode persists across leave/return. Clear only the
   -- per-session focus so the user has to deliberately re-focus to edit.
   self.focusedReadout = nil
+  DiscreteStep.reset(self)
   self:setSubCursorController(nil)
   self:releaseFocus("shiftPressed", "shiftReleased")
   Base.onCursorLeave(self, spot)
@@ -414,6 +417,7 @@ end
 function TransformGateControl:upReleased(shifted)
   if self.focusedReadout then
     self.focusedReadout = nil
+    DiscreteStep.reset(self)
     self:setSubCursorController(nil)
     return true
   elseif self:hasFocus("encoder") then

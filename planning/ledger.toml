@@ -830,8 +830,27 @@ focused gain never matches and falls through correctly. Verified.
 SHIPPED IN v2.8.0 - this is a live defect in the released packages."""
 verify = { kind = "manual", ref = "on Vitrail's Routing and Clock Src: focus the gain readout, turn the encoder, and confirm the gain moves and the mode does NOT. Repeat on a second selector (Rauschen algorithm) and confirm the bias still steps normally when the gain is not focused." }
 note = """Class of bug: a ViewControl subclass overriding encoder() must respect which readout the base
-class considers focused, or it edits the wrong parameter. Worth checking any other GainBias subclass
-that intercepts encoder() unconditionally."""
+class considers focused, or it edits the wrong parameter.
+SWEEP DONE 2026-08-06, three shapes checked across every package:
+ (1) GainBias subclasses overriding encoder() - 48 of them. ModeSelector was the ONLY one that
+     intercepted without respecting focus; every other either tests focusedReadout/paramFocusedReadout
+     or falls through to GainBias.encoder. The 13 sub-display controls converted this cycle compare
+     against a SPECIFIC readout, so a focused gain never matches them.
+ (2) The adjacent handlers - zeroPressed / cancelReleased / upReleased / enterReleased across the same
+     subclasses. All clean: each checks focus or delegates.
+ (3) The 22 DiscreteStep call sites - target field assigned, focusable, bounds sane. All sound.
+FALSE POSITIVE worth recording so it is not re-investigated: scope's SpectrogramFactory looks like a
+blind intercept (no gain check, no fallthrough) but is a plain ViewControl with ZERO gain readouts, so
+there is no parameter to steal from; its focusedSlot is only ever "freq" or "amp" and S3 returns early
+as read-only. Not a bug, deliberately not "fixed".
+SECOND REAL BUG FOUND BY THE SWEEP (fixed, spreadsheet 2.8.4.2): 11 of the DiscreteStep hosts never
+called DiscreteStep.reset on focus change, because the regex that added it only matched
+`self.focusedReadout = self.<name>Readout` and these assign via a helper (`= readout`) or clear with
+`= nil`. Consequence: a part-turn accumulated on one readout carried into the next one focused - turn
+5 ticks on `type`, focus `freq`, and it steps after 3 instead of 8. Reset now fires on EVERY focus
+assignment including nil. Hosts fixed: BandControl, BandListControl, DelayInfoControl,
+FilterListControl, LaretStepListControl, RaindropControl, SegmentListControl, SeqInfoControl,
+TimeControl, TransferCurveControl, TransformGateControl."""
 
 [[item]]
 id = "controls-discrete-encoder-rollout"

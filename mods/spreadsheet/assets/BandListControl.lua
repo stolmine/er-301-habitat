@@ -150,6 +150,7 @@ end
 function BandListControl:setFocusedReadout(readout)
   if readout then readout:save() end
   self.focusedReadout = readout
+  DiscreteStep.reset(self)
   self:setSubCursorController(readout)
 end
 
@@ -243,6 +244,7 @@ end
 function BandListControl:upReleased(shifted)
   if self.focusedReadout then
     self.focusedReadout = nil
+    DiscreteStep.reset(self)
     self:setSubCursorController(nil)
     return true
   elseif self:hasFocus("encoder") then

@@ -148,6 +148,7 @@ end
 function SegmentListControl:setFocusedReadout(readout)
   if readout then readout:save() end
   self.focusedReadout = readout
+  DiscreteStep.reset(self)
   self:setSubCursorController(readout)
 end
 
@@ -245,6 +246,7 @@ function SegmentListControl:upReleased(shifted)
   if self.focusedReadout then
     -- Step 1: readout focused -> return to list scroll mode
     self.focusedReadout = nil
+    DiscreteStep.reset(self)
     self:setSubCursorController(nil)
     return true
   elseif self:hasFocus("encoder") then

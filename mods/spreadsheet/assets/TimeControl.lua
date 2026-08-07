@@ -81,6 +81,7 @@ function TimeControl:setParamMode(enabled)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = enabled
   self.paramFocusedReadout = nil
+  DiscreteStep.reset(self)
   self:setSubCursorController(nil)
 
   if enabled then
@@ -103,6 +104,7 @@ end
 function TimeControl:onCursorLeave(spot)
   if self.paramMode then
     self.paramFocusedReadout = nil
+    DiscreteStep.reset(self)
     self:setSubCursorController(nil)
   end
   self:releaseFocus("shiftPressed", "shiftReleased")
@@ -140,6 +142,7 @@ end
 function TimeControl:spotReleased(spot, shifted)
   if self.paramMode then
     self.paramFocusedReadout = nil
+    DiscreteStep.reset(self)
     self:setSubCursorController(nil)
     self:setParamMode(false)
   end
@@ -159,6 +162,7 @@ function TimeControl:subReleased(i, shifted)
       else
         readout:save()
         self.paramFocusedReadout = readout
+        DiscreteStep.reset(self)
         self:setSubCursorController(readout)
         if not self:hasFocus("encoder") then self:focus() end
       end

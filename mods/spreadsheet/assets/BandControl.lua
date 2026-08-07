@@ -145,6 +145,7 @@ function BandControl:setParamMode(mode)
   self:removeSubGraphic(self.subGraphic)
   self.paramMode = mode
   self.paramFocusedReadout = nil
+  DiscreteStep.reset(self)
   self:setSubCursorController(nil)
 
   if mode == 1 then
@@ -169,6 +170,7 @@ end
 function BandControl:onCursorLeave(spot)
   if self.paramMode ~= 0 then
     self.paramFocusedReadout = nil
+    DiscreteStep.reset(self)
     self:setSubCursorController(nil)
   end
   self:releaseFocus("shiftPressed", "shiftReleased")
@@ -208,6 +210,7 @@ end
 function BandControl:spotReleased(spot, shifted)
   if self.paramMode ~= 0 then
     self.paramFocusedReadout = nil
+    DiscreteStep.reset(self)
     self:setSubCursorController(nil)
     self:setParamMode(0)
   end
@@ -227,6 +230,7 @@ function BandControl:subReleased(i, shifted)
       else
         readout:save()
         self.paramFocusedReadout = readout
+        DiscreteStep.reset(self)
         self:setSubCursorController(readout)
         if not self:hasFocus("encoder") then self:focus() end
       end
@@ -244,6 +248,7 @@ function BandControl:subReleased(i, shifted)
       else
         readout:save()
         self.paramFocusedReadout = readout
+        DiscreteStep.reset(self)
         self:setSubCursorController(readout)
         if not self:hasFocus("encoder") then self:focus() end
       end

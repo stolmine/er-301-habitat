@@ -158,6 +158,7 @@ end
 function FilterListControl:setFocusedReadout(readout)
   if readout then readout:save() end
   self.focusedReadout = readout
+  DiscreteStep.reset(self)
   self:setSubCursorController(readout)
 end
 
@@ -226,6 +227,7 @@ end
 function FilterListControl:upReleased(shifted)
   if self.focusedReadout then
     self.focusedReadout = nil
+    DiscreteStep.reset(self)
     self:setSubCursorController(nil)
     return true
   elseif self:hasFocus("encoder") then

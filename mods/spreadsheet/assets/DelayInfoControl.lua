@@ -95,6 +95,7 @@ function DelayInfoControl:init(args)
 
   self.subGraphic = subGraphic
   self.focusedReadout = nil
+  DiscreteStep.reset(self)
 end
 
 function DelayInfoControl:subReleased(i, shifted)
@@ -105,6 +106,7 @@ function DelayInfoControl:subReleased(i, shifted)
   if readout then
     readout:save()
     self.focusedReadout = readout
+    DiscreteStep.reset(self)
     self:setSubCursorController(readout)
     if not self:hasFocus("encoder") then self:focus() end
     return true
@@ -114,6 +116,7 @@ end
 
 function DelayInfoControl:spotReleased(spot, shifted)
   self.focusedReadout = nil
+  DiscreteStep.reset(self)
   self:setSubCursorController(nil)
   return Base.spotReleased(self, spot, shifted)
 end
