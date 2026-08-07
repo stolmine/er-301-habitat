@@ -1488,7 +1488,28 @@ with a seen-mask (rebuild when a ply repeats), which cannot fail on any draw ord
 I have NOT confirmed the framework's draw order, so this is a latent-risk fix rather than a proven
 one - but the user's 140%-with-viz reading is consistent with it firing.
 OWED: re-measure on 0.2.0.90. If 140% drops sharply, the descending-order rebuild storm was the
-cause and the earlier optimisation rounds were being masked by it."""
+cause and the earlier optimisation rounds were being masked by it.
+ROUND SIX 2026-08-07 (anamnesis 0.2.0.91) - THE SLICING WAS INCOMPLETE, which is why it barely moved.
+User after 0.2.0.90: deletion works great (busy-stack fix CONFIRMED), encoder capture and slowdown
+persist.
+MY ROUND-FOUR TIME SLICING ONLY CLAMPED TWO LOOPS - the streamline fill and the metaball cell fill.
+The two genuinely expensive loops were still running FULL WIDTH every frame:
+ (a) the band CONTROL GRID: gCount=68 grid points x nd drops x TWO rippleEvalFast each. Round two
+     measured this family at ~7k evals/frame. Untouched by the slice.
+ (b) the MARCHING-SQUARES walk over GW-1 cell columns. Untouched by the slice.
+So the slice was cutting the cheap half and leaving the expensive half at 100%. Both are now clamped
+to the active column range (with a 1-2 cell margin so contours and streamlines still join across
+slice seams). cY*/cB* are members, so out-of-slice control points keep last frame's values.
+NEON ASSESSMENT, since the user asked me to try it - CONTRAINDICATED on the hot kernel, and worth
+recording so it is not attempted again: rippleEvalT is branch-heavy with an EARLY-OUT CULL
+("if (age >= kImpactT && r2 > rhi*rhi) return out" - ahead of the wavefront) plus a second divergent
+branch for the impact/plop path. Most evaluations take the cull. Going 4-wide would compute all four
+lanes including the ones the cull would have skipped, so NEON could be SLOWER than scalar here. The
+viable NEON target in this viz is the metaball CELL FILL (contiguous columns, no per-pixel branch)
+and secondarily the masked blit - not the ripple kernel. Deferred until 0.2.0.91 is measured, because
+4x on work that should not be running is the wrong trade.
+OWED: measure 0.2.0.91. The unsliced expensive loops are the strongest explanation yet for why three
+rounds of optimisation kept failing to move the encoder."""
 verify = { kind = "manual", ref = "emu: no encoder-capture / acceptable frame rate with all plies + bubbles + high Diffusion; responsive on CM4; am335x builds clean + check-graphic-virtual-defs.sh + (if NEON) check-neon-hints.sh" }
 note = "Plan of record: planning/anamnesis-viz-optimization.md. The all-over Pond viz crawls on CM4 (fine on MBA by brute force) because it is drawn by one AnamFieldGraphic PER PLY (kVizPlies=6) and each draw() recomputes the GLOBAL work identically - 28-point drift layer, sub-bump expansion over every bubble, and the per-level metaball field build (O(cells x bumps) expf + 3-octave fbm per cell, x3 levels) - so the heavy work runs ~6x redundantly per frame. Doctrine (planning/neon-opportunities.md): architectural before NEON (Visadhara precompute cache = 50x vs NEON 4x), and NO habitat graphic uses NEON yet (compiles into the SWIG .o at -Os, :64 trap unproven). Plan: (1) shared per-frame field cache on the op keyed on vizPhase - compute the strip-wide field once, plies blit windows (mirrors the RaindropGraphic screensaver it was lifted from); (2) bound the field build to per-bump bboxes (bumps->splat, not cells->all-bumps); (3) LUT the expf + thin fbm; (4) fill only active bbox; (5) single-pass multi-threshold marching squares; (6) NEON only on a measured remaining hotspot, class-member storage + whole-.o hint scan + hardware test. Crash rails: keep every virtual inline (DrumCubeGraphic out-of-line draw crash). Item 1 alone likely fixes the crawl. DSP am335x viability (Stretch the killer) is separate."
 [[item]]

@@ -1039,7 +1039,13 @@ void Anamnesis::buildStripRaster()
       const float yb0 = ((float)s0 + 0.5f) * (float)h / (float)n;
       const float yb1 = ((float)s1 + 0.5f) * (float)h / (float)n;
       float *cY0 = mSrCY0, *cB0 = mSrCB0, *cY1 = mSrCY1, *cB1 = mSrCB1;
-      for (int i = 0; i < gCount; i++)
+      // SLICE the control grid too. This is the expensive one - two
+      // rippleEvalFast per drop per grid point - and it was running FULL WIDTH
+      // every frame, which is why slicing the fill loops alone barely moved the
+      // needle. cY*/cB* are members, so out-of-slice points keep last frame's
+      // values and the streamline fill still finds what it needs.
+      const int gi0 = (S.c0 / cstep) - gFirst - 1, gi1 = (S.c1 / cstep) - gFirst + 2;
+      for (int i = (gi0 < 0 ? 0 : gi0); i < gCount && i < gi1; i++)
       {
         const float cx = (float)((gFirst + i) * cstep);
         float y0 = yb0 + field::flowFast(cx, yb0, phase, size, vmod);
@@ -1174,8 +1180,9 @@ void Anamnesis::buildStripRaster()
       // Marching-squares contour, walked ONCE over the global cells (the old
       // per-ply windows re-walked overlapping margin cells with identical
       // results; the union equals this single pass).
+      const int mi0 = (S.c0 / C) - 1, mi1 = (S.c1 / C) + 1;
       for (int j = 0; j < GH - 1; j++)
-        for (int i = 0; i < GW - 1; i++)
+        for (int i = (mi0 < 0 ? 0 : mi0); i < GW - 1 && i < mi1; i++)
         {
           const float v00 = G[j * GW + i], v10 = G[j * GW + i + 1];
           const float v01 = G[(j + 1) * GW + i], v11 = G[(j + 1) * GW + i + 1];
