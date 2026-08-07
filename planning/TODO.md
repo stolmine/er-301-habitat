@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**174 items** — 44 done, 21 wip, 107 todo, 2 blocked. *Rendered 2026-08-06.*
+**175 items** — 44 done, 22 wip, 107 todo, 2 blocked. *Rendered 2026-08-06.*
 
 ## DSP
 
@@ -131,6 +131,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 | ~ | `anamnesis-viz-opt` | Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf) | manual · 2026-07-11 |
 | ~ | `mix-control-standards` | Mix-control standards: detents standardized on the built-in map; crossfade-law half still open | manual *(attested)* · 2026-08-05 |
+| ~ | `modeselector-gain-moves-bias` | ModeSelector: turning the mod-gain knob moved the mode instead of the gain | manual *(attested)* · 2026-08-06 |
 | ~ | `vitrail-viz` | Vitrail: tunnel visualization stacked on the Clock Src control | screenshot: Vitrail shows a custom overview graphic that reads clearly at 128x64 / 4-bit depth, telegraphs the current routing pair and the drifting dual-clock character, and does NOT capture the encoder (draw-path structure, not CPU) *(attested)* · 2026-08-05 |
 |   | `alembic-phase9-polish` | Alembic Phase 9: naming/defaults/mnemonic polish + serial stacked-waveform viz | screenshot: confirm final names/defaults/control labels + sphere-viz refinements, plus a stacked/cascading render of mWavetableLUT[64][256] with active reagent-scan frames lit and neighbors dimmed · 2026-07-09 |
 |   | `control-descriptions-drop-parentheticals` | Shorten Lua control descriptions that include parentheticals (they overflow the allotted space) | manual · 2026-07-22 |

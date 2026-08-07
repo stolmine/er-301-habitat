@@ -90,7 +90,11 @@ function ModeSelector:stepDiscrete(dir)
 end
 
 function ModeSelector:encoder(change, shifted)
-  if self.discrete then
+  -- Only the BIAS carries the mode index. If the GAIN readout is focused the
+  -- user is editing CV depth, so fall through to GainBias and let it edit what
+  -- they are actually looking at. Intercepting unconditionally meant turning
+  -- the gain knob moved the mode instead.
+  if self.discrete and self.focusedReadout ~= self.gain then
     -- Three resolutions, expressed as (step size, travel per step) because a
     -- discrete list has no fractional positions to reach for:
     --   shift  -> jump a whole group (discreteJumpStep), for crossing a long list

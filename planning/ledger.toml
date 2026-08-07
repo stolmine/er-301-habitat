@@ -802,6 +802,38 @@ verify = { kind = "manual", ref = "catalog per Pattern-A/B + GainBias control: b
 note = "planning/todo-archive.md '## Controls Audit'. Two unifications: (a) normalize bias to 0..1/-1..1 with internal quadratic/log mapping (broader reach, changes feel); or (b) expand per-control gainMap defaults to match bias range. Ngoma Sweep/SweepTime/Decay/Hold/Attack gains already set proportionally (commit eab4e98); repo-wide still pending."
 
 [[item]]
+id = "modeselector-gain-moves-bias"
+title = "ModeSelector: turning the mod-gain knob moved the mode instead of the gain"
+status = "wip"
+stamped = "2026-08-06T19:57:53-05:00"
+area = "ui"
+touches = ["mods/spreadsheet/assets/ModeSelector.lua", "mods/biome/assets/ModeSelector.lua"]
+attested = """2026-08-06 FIXED (spreadsheet 2.8.4.1, biome 2.2.2.1), hardware confirmation owed.
+User: "vitrail got a bug at some point, routing and clock source gain knobs move bias position!"
+CAUSE: GainBias:encoder (xroot/Unit/ViewControl/GainBias.lua:808) routes by focus - gain readout
+focused -> edit gain, otherwise -> edit bias. ModeSelector:encoder intercepted UNCONDITIONALLY on
+`if self.discrete then` and always called stepDiscrete(), which writes self.bias. So with the gain
+readout focused, turning the encoder stepped the MODE.
+Fix: take the discrete path only when `self.focusedReadout ~= self.gain`; otherwise fall through to
+GainBias, which edits what the user is looking at.
+HONEST PROVENANCE: the unconditional intercept is ORIGINAL to the class - v2.7.0's ModeSelector has
+the same shape, so any discrete selector has had this since discrete mode was added. I did not
+introduce it, but I did two things that surfaced it: (1) the rollout took the discrete selector count
+from 2 (Parfait, Vitrail) to 15 across both packages; (2) normalizing Vitrail's routing to 0-1 was
+done specifically to make it CV-modulatable, which is exactly what makes someone reach for the
+mod-gain knob for the first time. So the bug is old and the exposure is mine.
+AFFECTED (all now fixed by the one change, since both ModeSelector copies are identical): Canals,
+Pecto, Filterbank, Vitrail, Etcher, MultitapDelay, TrackerSeq, Rauschen, MultibandSaturator
+(spreadsheet); Discont, LatchFilter (biome).
+NOT AFFECTED: the DiscreteStep sub-display controls compare focus against a SPECIFIC readout, so a
+focused gain never matches and falls through correctly. Verified.
+SHIPPED IN v2.8.0 - this is a live defect in the released packages."""
+verify = { kind = "manual", ref = "on Vitrail's Routing and Clock Src: focus the gain readout, turn the encoder, and confirm the gain moves and the mode does NOT. Repeat on a second selector (Rauschen algorithm) and confirm the bias still steps normally when the gain is not focused." }
+note = """Class of bug: a ViewControl subclass overriding encoder() must respect which readout the base
+class considers focused, or it edits the wrong parameter. Worth checking any other GainBias subclass
+that intercepts encoder() unconditionally."""
+
+[[item]]
 id = "controls-discrete-encoder-rollout"
 title = "Discrete-control stepping standard: one feel for every integer/discrete control (surveyed)"
 status = "todo"
