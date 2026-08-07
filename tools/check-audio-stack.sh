@@ -14,9 +14,16 @@
 # planning/ledger.toml [hab:pecto-audio-stack-overflow] and CONTEXT.md
 # "Audio Thread: Small stack -- use heap for work buffers in process()."
 #
-# ONLY process() is checked. draw(), constructors and Lua-invoked analysis run
-# on the UI/draw thread, whose app stack is 32768 bytes -- a 2 KB frame there
-# is unremarkable and is NOT a finding.
+# process() AND EVERYTHING IT CALLS is checked. Restricting this to process()
+# itself was exactly how [hab:anamnesis-insert-crash] hid: Anamnesis::process is
+# a harmless 276 bytes, but reached noise::lut() two hops down, and lut held a
+# 2048-byte `int perm[512]` stack local that blew the whole audio stack and wrote
+# a Perlin permutation over the BIOS audio Task_Object. The walk below follows
+# relocations out of process() transitively.
+#
+# draw(), constructors and Lua-invoked analysis are not reachable from process()
+# and so are not flagged: they run on the UI thread, whose app stack is 32768
+# bytes, where a 2 KB frame is unremarkable.
 #
 # Usage: tools/check-audio-stack.sh [dir ...]      (default: testing/am335x)
 #        BUDGET=512 WARN=256 tools/check-audio-stack.sh
@@ -59,20 +66,43 @@ for o in "${objs[@]}"; do
   # `sub sp, sp, #imm` when the value doesn't fit one rotated immediate, so
   # taking only the first would under-report. Window is the first 24
   # instructions, which is comfortably past any real prologue.
-  out="$("$OBJDUMP" -d -C "$o" 2>/dev/null | awk '
-    /^[0-9a-f]+ <.*>:/ {
-      sym = $0; sub(/^[0-9a-f]+ </, "", sym); sub(/>:$/, "", sym)
-      inproc = (sym ~ /::process\(\)$/); n = 0; total = 0; next
-    }
-    inproc && /^ / {
-      n++
-      if (n > 24) { if (total > 0) print total "\t" sym; inproc = 0; next }
-      if ($0 ~ /sub[[:space:]]+sp, sp, #/) {
-        match($0, /#[0-9]+/); total += substr($0, RSTART+1, RLENGTH-1)
-      }
-    }
-    inproc && /^$/ { if (total > 0) print total "\t" sym; inproc = 0 }
-  ')" || true
+  # Frame size per symbol + the call graph from relocations, then a transitive
+  # walk out of every ::process(). Built on MANGLED names deliberately: demangled
+  # symbols contain spaces (e.g. "lut() [clone .part.42]") which breaks field
+  # splitting and silently produces an empty graph. Demangle only for display.
+  out="$("$OBJDUMP" -dr "$o" 2>/dev/null | python3 -c '
+import sys, re, collections, subprocess
+frame, calls, cur, n = {}, collections.defaultdict(set), None, 0
+for line in sys.stdin:
+    m = re.match(r"^[0-9a-f]+ <(.+)>:", line)
+    if m:
+        cur, n = m.group(1), 0
+        frame.setdefault(cur, 0)
+        continue
+    if cur is None:
+        continue
+    if "R_ARM_" in line and re.search(r"R_ARM_(CALL|JUMP24|THM_CALL)", line):
+        calls[cur].add(line.split()[-1])
+        continue
+    if line.startswith(" "):
+        n += 1
+        if n <= 24:
+            s = re.search(r"sub\s+sp, sp, #(\d+)", line)
+            if s:
+                frame[cur] += int(s.group(1))
+seen = {s for s in frame if s.endswith("7processEv")}
+q = list(seen)
+while q:
+    for c in calls.get(q.pop(0), ()):
+        if c not in seen:
+            seen.add(c); q.append(c)
+hits = [(frame[s], s) for s in seen if frame.get(s, 0) > 0]
+if hits:
+    dem = subprocess.run(["c++filt"] + [s for _, s in hits],
+                         capture_output=True, text=True).stdout.split("\n")
+    for (b, _), d in zip(hits, dem):
+        print("%d\t%s" % (b, d.strip()))
+')" || true
 
   while IFS=$'\t' read -r bytes sym; do
     [[ -z "${bytes:-}" ]] && continue

@@ -1344,6 +1344,37 @@ title = "Anamnesis am335x insert: data-abort in Event_post (heap corruption from
 status = "wip"
 stamped = "2026-07-12T12:06:43-05:00"
 area = "dsp"
+attested = """2026-08-07 ROOT-CAUSED AND FIXED (anamnesis 0.2.0.85), hardware verification owed.
+THE WRITE: AnamNoise.h lut() held `int perm[512]` as a STACK LOCAL - a 2048-byte frame - in the
+one-time Perlin LUT bake. On hardware the first caller is Anamnesis::process() on the 2048-byte
+SYS/BIOS audio task stack, so the bake frame alone consumed the entire stack and the Fisher-Yates
+fill wrote a permutation of 0..255 straight through the stack base into the audio Task_Object and
+audio Event allocated just below it. The next EDMA completion ISR then walked the wrecked pend queue
+and aborted in Event_post.
+PROVEN, not inferred. Verified independently of the agent that found it:
+ - frame size, measured: 2048 bytes before, 36 after.
+ - reachability: a relocation BFS over the .o gives process() -> field::flow() -> noise::sample() ->
+   noise::lut() [clone .part.42]. Not an inlining guess.
+ - THE FINGERPRINT. The RNG seed is the compile-time constant 0x1234567, so the permutation is
+   FIXED, which is why three captures on three firmware builds were byte-identical. Recomputing that
+   exact Fisher-Yates shows every "garbage" value in the crash reports is a member of it:
+   Task.stack=0x1c(28), Task.stackSize=167, pendQ->next=157 (reports 17+20), pendQ->next=74 (the
+   older 9.5.2.56 capture). And the fault address falls out arithmetically:
+   157 + 0x18 (offsetof Event_PendElem.matchingEvents) = 0xb5, and 74 + 0x18 = 0x62 - exactly the
+   two dfar values observed, with r0 holding the permutation value each time.
+FIX: `perm` is now function-local static (.bss), and the Anamnesis ctor calls a new noise::bake() so
+the one-time fill happens at insert on the 32 KB app stack - the audio thread never bakes. Nothing
+was stripped.
+WHY EVERY PRIOR PASS MISSED IT: ASan on x86 - a 2 KB frame on an 8 MB pthread stack is legal; the
+member-write audits - `perm` is in bounds OF perm, and is not a member; check-audio-stack.sh - it
+only measured functions named ::process(), and the killer frame is two hops down a callee chain
+(process itself is 276 bytes, exactly as it reported); the crash report's missing `audio` stack line
+- enumeration died at the clobbered Task_Object before reaching it.
+DISPROVEN by this: the planning doc's "843 KB footprint collision" model, and the firmware doc's
+heap-exhaustion note (report 20 shows 85 KB of a 20 MB ceiling and no last-alloc-fail).
+OWED: hardware verify - insert repeatedly with diagnostics armed, expect `insert-ok Anamnesis`, all
+~14 stacks listed, and `audio canary=ok`."""
+
 verify = { kind = "manual", ref = "insert Anamnesis in the emu (ASan-clean if built with -fsanitize=address) AND repeatedly on am335x hardware with crash diagnostics armed -> no Event_post data-abort / no corruption" }
 note = "Full report: planning/anamnesis-insert-crash.md. HW capture fw 9.5.2.56: data-abort in ti_sysbios_knl_Event_post, dfar=0x62 dfsr=0x5 (near-null deref, NOT alignment/NEON), thread=hwi from the audio EDMA ISR, flight-recorder 'insert Anamnesis' 0.2s prior -> a stray heap WRITE from Anamnesis's insert path clobbers the audio Event pend-queue pointer. AUDIT (2026-07-12): every member-array write in the ctor (memsets + init loops: mLoopBuf/mLine/mAp/mTapBuf/mHannLut/mGrain*/mDrop*/mBub*/mBandZ/pan-tap-fdn tables) and in process() (mLoopBuf[mLoopWr] Lint<=kLoopBufLen; mTapBuf[mTapWr]; mAp[k][idx] idx<kApLen<=kApMax; mLine[i][mWr]; bubble/drop/grain spawns all slot-in-range) is BOUNDED on a correctly-sized object -- no obvious index OOB found. anamnesis is SINGLE-TU (only the SWIG wrapper .o), so the classic stale-wrapper sizeof-MISMATCH cannot apply (a stale wrapper is consistently stale). So: either a subtle path not yet found (buildFieldFrame mFcGrid verified in-bounds too) or build/state/am335x-specific. NEXT: build the .so with -fsanitize=address + LD_PRELOAD libasan, insert in headless emu (ASan names the exact store), and re-capture on hardware with the CLEAN 0.2.0.83 build (original capture's build provenance unknown)."
 

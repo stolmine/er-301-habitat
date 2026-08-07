@@ -137,6 +137,12 @@ namespace anamnesis
   public:
     Anamnesis()
     {
+      // Pre-bake the Perlin LUT on the (32 KB) app stack at insert. Without
+      // this the first noise::sample() call comes from process() on the
+      // 2048-byte audio task stack, and the bake used to overflow it -- the
+      // [hab:anamnesis-insert-crash] data-abort. See AnamNoise.h lut().
+      anamnesis::noise::bake();
+
       addInput(mInL);
       addInput(mInR);
       addInput(mFreeze);

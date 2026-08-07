@@ -304,6 +304,58 @@ heap check at insert (free bytes in the kernel `HeapMem` vs the 843 KB request, 
 whether the returned block's extent overlaps the task/Event region). Either confirms
 the budget-collision model directly.
 
+## Update 2026-08-06: ROOT CAUSE FOUND AND FIXED (0.2.0.85) -- one-time Perlin LUT bake ran `int perm[512]` on the 2048-byte audio task stack
+
+The fresh reports 17/20 in `/mnt/crash.log` (identical signatures on fw 9.5.2.58
+AND 9.6.0: `dfar=0xb5`, `r0=0x9d`, corrupted audio Task_Object showing
+`base=0x1c size=167`) cracked it. **All the "written small ints" are values of
+the identity permutation / Fisher-Yates shuffle in `AnamNoise.h lut()`**:
+
+- `anamnesis::noise::lut()` bakes its LUT on FIRST USE with `int perm[512]` --
+  a **2048-byte stack local** (plus pushes: 2072-byte frame, confirmed by
+  `sub sp, sp, #2048` in the built `.so`, symbol `lut.part.42`).
+- The first caller on hardware is **`Anamnesis::process()`** on the **2048-byte
+  audio task stack**: block 1 spawns a bubble (density default 0.5), block 2's
+  bubble physics calls `field::flow()` -> `noise::sample()` -> `lut()` bake.
+  Reachability `process -> flow -> sample -> lut.part.42` is proven by the
+  relocation records in `libanamnesis.so`.
+- SP dives straight through the stack base into the **audio Task_Object + audio
+  Event** (the boot-time HeapMem allocations sitting immediately below the audio
+  stack), and `perm[i] = i` + the shuffle fill that region with a **fixed
+  pseudorandom permutation of 0..255** (RNG seed is the constant 0x1234567).
+- That single fact explains EVERY fingerprint across all three captures:
+  Task.stack=0x1c (28), Task.stackSize=167, pendQ->next=157 -> deref at
+  `+0x18` (offsetof matchingEvents) = **dfar 0xb5**; the 9.5.2.56 capture's
+  pendQ->next=74 (`r0=0x4a`) -> **dfar 0x62**. Identical garbage in every
+  crash because the permutation is seed-fixed and the object layout below the
+  audio stack is firmware-stable.
+- Why every prior tool missed it: ASan/x86 -- a 2 KB frame on an 8 MB pthread
+  stack is legal; the member-write audits -- `perm` is a header-inline STACK
+  local, every store in-bounds *of perm*; `tools/check-audio-stack.sh` -- it
+  only measures functions named `::process()`, and the killer frame is in a
+  **callee** (`lut.part.42`), so process showed a healthy 276 bytes; the
+  9.5.2.58 stack section -- the audio stack line never printed because task
+  enumeration died at the clobbered Task_Object. The ~220 ms delay is just the
+  insert machinery: process() starts near the end of insert (compare Fabula's
+  insert->insert-ok 226 ms), crash 2 blocks later, before `insert-ok`.
+
+**Fix (0.2.0.85):**
+1. `AnamNoise.h`: `perm` is now `static` (package .bss, not the stack). The
+   bake frame drops from 2072 bytes to ~24 (verified in the rebuilt `.so`).
+2. `atoms/Anamnesis.h` ctor: calls new `noise::bake()` so the one-time fill
+   runs at insert on the 32 KB app stack -- the audio thread never bakes at
+   all (also removes the one-block CPU spike and the audio/display bake race).
+
+Both arches build; neon-hints clean; check-audio-stack OK (no frame >= 512
+reachable check: the only remaining big frames -- buildFieldFrame 2388, draw
+712 -- are app/display-task by design). **Lint gap worth closing separately:**
+`check-audio-stack.sh` measures only `::process()` frames, not callees; this
+bug lived in a callee.
+
+**Verify on hardware:** insert Anamnesis repeatedly with crash diagnostics
+armed -> no data-abort, `insert-ok Anamnesis` appears, stacks section lists all
+~14 tasks with `audio ... canary=ok`.
+
 ## Provenance
 
 Captured by the er-301-stolmine crash-diagnostics facility (fw 9.5.2.56 for the

@@ -11,7 +11,7 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
-| ~ | `anamnesis-insert-crash` | Anamnesis am335x insert: data-abort in Event_post (heap corruption from insert path) | manual · 2026-07-12 |
+| ~ | `anamnesis-insert-crash` | Anamnesis am335x insert: data-abort in Event_post (heap corruption from insert path) | manual *(attested)* · 2026-07-12 |
 | ~ | `ca-noise-texture` | Cellular-automata granular noise texture source (Vivary) | manual · 2026-07-16 |
 | ~ | `fabula-am335x` | Fabula reverb am335x port: hybrid-float + pow2-mask + zipper-fix | manual · 2026-07-12 |
 | ~ | `fdn-reverb` | NEON FDN reverb (Householder core + per-line filters + spectral flavor overlay) | manual · 2026-07-16 |

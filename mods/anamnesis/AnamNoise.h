@@ -39,13 +39,22 @@ namespace anamnesis
     }
 
     // The baked LUT (filled with 4 periods so it tiles at the boundaries).
+    //
+    // HARDWARE CONSTRAINT [hab:anamnesis-insert-crash]: `perm` MUST be static.
+    // As a stack local it is a 2048-byte frame, and the first caller of lut()
+    // on am335x is process() (bubble physics -> field::flow -> noise::sample)
+    // on the 2048-byte SYS/BIOS audio task stack: the bake frame alone blows
+    // the whole stack and Fisher-Yates writes the 0..255 permutation over the
+    // audio Task_Object + audio Event just below it (data-abort in Event_post,
+    // dfar=0xb5). The Anamnesis ctor also pre-bakes (bake()) so the one-time
+    // fill runs at insert on the 32 KB app stack, never on the audio thread.
     inline const float *lut()
     {
       static float L[kLUT * kLUT];
       static bool baked = false;
       if (!baked)
       {
-        int perm[512];
+        static int perm[512]; // .bss, NOT the (tiny) audio task stack
         for (int i = 0; i < 256; i++) perm[i] = i;
         uint32_t rng = 0x1234567u;
         for (int i = 255; i > 0; i--)
@@ -65,6 +74,10 @@ namespace anamnesis
       }
       return L;
     }
+
+    // Force the one-time LUT bake NOW (call from a construction-time / UI-thread
+    // context). Keeps the bake cost + its writes off the audio thread entirely.
+    inline void bake() { (void)lut(); }
 
     // Bilinear, tiling sample. Returns roughly [-1, 1].
     inline float sample(float u, float v)
