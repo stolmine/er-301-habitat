@@ -952,7 +952,7 @@ namespace
   }
 } // anonymous namespace
 
-void Anamnesis::buildStripRaster()
+void Anamnesis::buildStripRaster(int rc0, int rc1)
 {
     StripR S;
     S.buf = mStripRaster;
@@ -962,11 +962,7 @@ void Anamnesis::buildStripRaster()
     // pixels, so no single draw() runs the whole recompute and the UI thread
     // gets back to its event pump. Total work per frame drops by the same
     // factor. Clears must be slice-scoped or the persisted columns are lost.
-    const int sw = (kStripW + kStripSlices - 1) / kStripSlices;
-    S.c0 = mStripSlice * sw;
-    S.c1 = S.c0 + sw; if (S.c1 > kStripW) S.c1 = kStripW;
-    if (S.c0 >= kStripW) { S.c0 = 0; S.c1 = sw; }
-    mStripSlice = (mStripSlice + 1) % kStripSlices;
+    S.c0 = rc0; S.c1 = rc1;
     memset(&mStripRaster[S.c0 << 6], 0, (size_t)(S.c1 - S.c0) << 6);
     memset(&mStripMask[S.c0], 0, (size_t)(S.c1 - S.c0) * sizeof(uint64_t));
 

@@ -351,12 +351,26 @@ namespace anamnesis
     {
       const uint32_t bit = 1u << (plyIndex & 31);
       if (mStripSeen & bit) mStripSeen = 0;   // wrapped -> new frame
-      if (mStripSeen == 0) buildStripRaster();
+      if (mStripSeen == 0)
+      {
+        // ROLLING slice. A static 4-way split parks its seams at the same four
+        // columns forever, which reads as fixed vertical tears. Advancing the
+        // window by sw every frame makes the boundaries PRECESS instead (4*65 =
+        // 260 vs a 258-wide strip, so each cycle lands 2px further along) and no
+        // seam sits still long enough to register. The window wraps, so the
+        // build runs as two ranges when it straddles the end.
+        const int sw = (kStripW + kStripSlices - 1) / kStripSlices;
+        const int c0 = mStripRoll;
+        int c1 = c0 + sw;
+        if (c1 <= kStripW) buildStripRaster(c0, c1);
+        else { buildStripRaster(c0, kStripW); buildStripRaster(0, c1 - kStripW); }
+        mStripRoll = (mStripRoll + sw) % kStripW;
+      }
       mStripSeen |= bit;
     }
     const uint8_t *stripCol(int col) const { return &mStripRaster[col << 6]; }
     uint64_t stripMask(int col) const { return mStripMask[col]; }
-    void buildStripRaster();   // out-of-line (Anamnesis.cpp)
+    void buildStripRaster(int c0, int c1);   // out-of-line (Anamnesis.cpp)
     const float *vizFieldGrid(int L) { return &mFcGrid[L * field::kFieldGW * field::kFieldGH]; }
     bool vizLevelUsed(int L) { return mFcLevelUsed[L]; }
 
@@ -574,6 +588,7 @@ namespace anamnesis
     int      mStripSlice = 0;
     uint8_t  mStripRaster[kStripW * 64];
     uint64_t mStripMask[kStripW];
+    int      mStripRoll = 0;           // rolling slice base (precesses each frame)
     uint32_t mStripSeen = 0;           // plies drawn since the last rebuild
     bool  mInit = false;
     bool  mFzSet = false;

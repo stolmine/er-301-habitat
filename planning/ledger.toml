@@ -1509,7 +1509,31 @@ viable NEON target in this viz is the metaball CELL FILL (contiguous columns, no
 and secondarily the masked blit - not the ripple kernel. Deferred until 0.2.0.91 is measured, because
 4x on work that should not be running is the wrong trade.
 OWED: measure 0.2.0.91. The unsliced expensive loops are the strongest explanation yet for why three
-rounds of optimisation kept failing to move the encoder."""
+rounds of optimisation kept failing to move the encoder.
+ROUND SEVEN 2026-08-07 (anamnesis 0.2.0.92) - USABLE, and the mechanisms are banked.
+User verdict: usable at last, deletion solid, "incredible strides as it was not working there
+either". Remaining and ACCEPTED as the current state: the UI thread still chugs, the viz does not
+always run at full rate, encoder capture returns on some settings, bubbles update sluggishly (a
+direct consequence of column slicing - a bubble only redraws when its column's slice comes up). The
+unit is now understood to be a CM4 target rather than am335x.
+ROLLING SLICE (the user's own suggestion, and it was the right one): the static 4-way split parked
+its boundaries at the same four columns forever, reading as two fixed vertical tears. The window now
+advances by sw every frame and WRAPS (build runs as two ranges when it straddles the end). Because
+4*65=260 against a 258-wide strip the boundaries precess 2px per cycle for free. Verified: all 258
+columns rebuilt within 40 frames, seams never park.
+NOVEL MECHANISMS BANKED TO MEMORY, as requested - both are reusable well beyond this unit:
+ - feedback_draw_path_busy_stack: draw-path call chains must fit the 4096-byte `busy` stack, not the
+   32768-byte app stack, because a redraw is serviced on `busy` while the spinner is up during
+   insert/delete. Presents as a DELETE-ONLY crash with everything else healthy. Includes the
+   objdump recipe and the pointer-alias fix.
+ - feedback_strip_raster_rolling_slice: the shared strip raster + rolling time slice + mask-blit
+   pattern, the order-independent frame-start detector, the "scope the clears" and "slice the loops
+   that actually cost" traps, and the finding that od::FrameBuffer calls are VIRTUAL - which is why
+   an x86 bench with a non-virtual stub could not see the dominant cost for three rounds.
+STILL OPEN if this is picked up again: NEON on the metaball cell fill and the masked blit (both
+branch-free and contiguous; the ripple kernel is contraindicated, see round six); bubble update rate
+under slicing; and whether kStripSlices=4 is the right tradeoff between per-frame cost and how stale
+a column may be."""
 verify = { kind = "manual", ref = "emu: no encoder-capture / acceptable frame rate with all plies + bubbles + high Diffusion; responsive on CM4; am335x builds clean + check-graphic-virtual-defs.sh + (if NEON) check-neon-hints.sh" }
 note = "Plan of record: planning/anamnesis-viz-optimization.md. The all-over Pond viz crawls on CM4 (fine on MBA by brute force) because it is drawn by one AnamFieldGraphic PER PLY (kVizPlies=6) and each draw() recomputes the GLOBAL work identically - 28-point drift layer, sub-bump expansion over every bubble, and the per-level metaball field build (O(cells x bumps) expf + 3-octave fbm per cell, x3 levels) - so the heavy work runs ~6x redundantly per frame. Doctrine (planning/neon-opportunities.md): architectural before NEON (Visadhara precompute cache = 50x vs NEON 4x), and NO habitat graphic uses NEON yet (compiles into the SWIG .o at -Os, :64 trap unproven). Plan: (1) shared per-frame field cache on the op keyed on vizPhase - compute the strip-wide field once, plies blit windows (mirrors the RaindropGraphic screensaver it was lifted from); (2) bound the field build to per-bump bboxes (bumps->splat, not cells->all-bumps); (3) LUT the expf + thin fbm; (4) fill only active bbox; (5) single-pass multi-threshold marching squares; (6) NEON only on a measured remaining hotspot, class-member storage + whole-.o hint scan + hardware test. Crash rails: keep every virtual inline (DrumCubeGraphic out-of-line draw crash). Item 1 alone likely fixes the crawl. DSP am335x viability (Stretch the killer) is separate."
 [[item]]
