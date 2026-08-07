@@ -123,6 +123,16 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 
 ## Changelog
 
+### v2.8.1
+
+**Hotfix for two control bugs.** See [RELEASE-2.8.1.md](RELEASE-2.8.1.md).
+spreadsheet v2.8.4 -> v2.8.5; biome v2.2.2 -> v2.2.3; all other packages
+unchanged. Firmware unchanged.
+
+Fixed a mode selector's CV gain knob moving the selected mode instead of the
+gain, and a partial encoder turn carrying over to the next sub-display readout
+you selected.
+
 ### v2.8.0
 
 **New `house` package + Vitrail + 4 more new units, two breaking changes.** See

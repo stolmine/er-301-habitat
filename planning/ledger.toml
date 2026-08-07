@@ -827,7 +827,10 @@ Pecto, Filterbank, Vitrail, Etcher, MultitapDelay, TrackerSeq, Rauschen, Multiba
 (spreadsheet); Discont, LatchFilter (biome).
 NOT AFFECTED: the DiscreteStep sub-display controls compare focus against a SPECIFIC readout, so a
 focused gain never matches and falls through correctly. Verified.
-SHIPPED IN v2.8.0 - this is a live defect in the released packages."""
+FIXED IN v2.8.1 (2026-08-06, spreadsheet 2.8.5 / biome 2.2.3), shipped as a hotfix alongside the
+DiscreteStep accumulator carry-over. Provenance corrected for the release notes: the gain bug is NOT
+a v2.8.0 regression - Parfait's saturation selector shipped discrete in v2.6.2, so it has been live
+there for two releases. v2.8.0 widened the exposure from 2 controls to 11."""
 verify = { kind = "manual", ref = "on Vitrail's Routing and Clock Src: focus the gain readout, turn the encoder, and confirm the gain moves and the mode does NOT. Repeat on a second selector (Rauschen algorithm) and confirm the bias still steps normally when the gain is not focused." }
 note = """Class of bug: a ViewControl subclass overriding encoder() must respect which readout the base
 class considers focused, or it edits the wrong parameter.
