@@ -1,7 +1,7 @@
-# Scope (`scope`) — v1.2.7
+# Scope (`scope`) v1.2.7
 
 Inline signal visualization. Every unit in this package is a transparent passthrough
-that draws what is flowing through it — three oscilloscope variants and four
+that draws what is flowing through it: three oscilloscope variants and four
 spectrum-analyzer variants of increasing display width. Nothing here alters the
 signal; drop one anywhere in a chain to look at it.
 
@@ -20,16 +20,16 @@ audio-rate waveform inspection.
 
 **Controls**
 
-The main display is the scope trace itself — there are no dial controls. All
+The main display is the scope trace itself; there are no dial controls. All
 adjustment happens on the sub-display.
 
 | Control | Type | Range / Options | Default | What it does |
 |---|---|---|---|---|
 | `time` | stepped selector (sub-display button 1) | `1x`, `2x`, `4x`, `8x`, `16x`, `32x`, `64x` | `2x` | Timebase. Sets the capture probe's decimation, so higher values show a longer window of time in the same width. `2x` matches the firmware's built-in scope. Changing it briefly blanks the trace while the buffer refills at the new rate. |
-| `gain` | stepped selector (sub-display button 2) | `0.25x`, `0.5x`, `1x`, `2x`, `4x` | `1x` | Vertical scale on the trace only. Purely cosmetic — it does not touch the audio. |
-| `volt` | read-only readout (sub-display button 3) | −9.999 … 9.999 V, 3 decimals | — | Rolling mean of the visible buffer, scaled to volts (full scale = 10 V). Stable for DC and V/Oct, sits near 0 for AC signals. Pressing button 3 does nothing — it is not editable. |
+| `gain` | stepped selector (sub-display button 2) | `0.25x`, `0.5x`, `1x`, `2x`, `4x` | `1x` | Vertical scale on the trace only. Purely cosmetic: it does not touch the audio. |
+| `volt` | read-only readout (sub-display button 3) | −9.999 … 9.999 V, 3 decimals | n/a | Rolling mean of the visible buffer, scaled to volts (full scale = 10 V). Stable for DC and V/Oct, sits near 0 for AC signals. Pressing button 3 does nothing; it is not editable. |
 
-**Sub-display / expanded** — Three columns: `time`, `gain`, `volt`. The two
+**Sub-display / expanded**: three columns, `time`, `gain`, `volt`. The two
 editable values sit inside a border that renders dotted when idle and solid when
 that slot has the encoder; the voltmeter has no border, which is how read-only
 values are distinguished. Press button 1 or 2 to move the encoder to that slot,
@@ -38,12 +38,12 @@ then turn to step through the choices. Both selections are saved with the preset
 On Scope Stereo one `time` / `gain` pair drives both traces, and the voltmeter
 follows the left channel.
 
-**Menu** — none.
+**Menu**: none.
 
-**I/O** — Stereo-aware passthrough. `In1` → `Out1`; on a stereo chain `In2` →
+**I/O**: stereo-aware passthrough. `In1` → `Out1`; on a stereo chain `In2` →
 `Out2` as well. The single trace always displays the left channel. Integration
 window for the voltmeter is buffer depth × decimation, roughly 0.33 s at `2x` and
-about 10 s at `64x`. No V/Oct, gate, or trigger inlets — triggering is internal.
+about 10 s at `64x`. No V/Oct, gate, or trigger inlets; triggering is internal.
 
 ---
 
@@ -61,7 +61,7 @@ instead of one, for twice the horizontal detail. Same passthrough, same
 
 *mnemonic: SS* · Category: Measurement
 
-Two plies wide, but split into two half-width traces side by side — left channel on
+Two plies wide, but split into two half-width traces side by side: left channel on
 the left, right on the right, each labelled `L` and `R`. Use it to eyeball
 correlation, channel balance, or a stereo widener's effect. On a mono chain it
 degrades gracefully to a single full-width trace of the left channel.
@@ -84,24 +84,24 @@ frequency and amplitude mappings and reports the loudest frequency it can see.
 
 **Controls**
 
-The main display is the spectrum itself — there are no dial controls.
+The main display is the spectrum itself; there are no dial controls.
 
 | Control | Type | Range / Options | Default | What it does |
 |---|---|---|---|---|
 | `freq` | stepped selector (sub-display button 1) | `log`, `lin` | `log` | Frequency axis. `log` gives equal octaves per pixel (EQ-style); `lin` gives equal Hz per pixel, which crowds everything musical into the left edge but is useful for harmonic-series inspection. |
 | `amp` | stepped selector (sub-display button 2) | `log`, `lin`, `exp` | `log` | Vertical mapping. `log` is a 60 dB dB-scale; `lin` is raw magnitude, where loud peaks dominate; `exp` is a square-root curve that lifts quiet detail into view. |
-| `peak` | read-only readout (sub-display button 3) | — | — | The greatest-energy frequency (Hz, or `x.xxk` above 1 kHz) on the upper line and its level in dB below. Interpolated between bins for sub-bin accuracy. DC is excluded. Pressing button 3 does nothing. |
+| `peak` | read-only readout (sub-display button 3) | n/a | n/a | The greatest-energy frequency (Hz, or `x.xxk` above 1 kHz) on the upper line and its level in dB below. Interpolated between bins for sub-bin accuracy. DC is excluded. Pressing button 3 does nothing. |
 
-**Sub-display / expanded** — Three columns: `freq`, `amp`, `peak`. Same
-dotted/solid border convention as the Scope units — editable slots have a border,
+**Sub-display / expanded**: three columns, `freq`, `amp`, `peak`. Same
+dotted/solid border convention as the Scope units: editable slots have a border,
 the read-only peak readout does not. Press button 1 or 2 to grab the slot, then
 turn the encoder. The encoder accumulates ticks and steps once per threshold, so a
 fast spin does not overshoot a two- or three-entry list. Both selections are saved
 with the preset.
 
-**Menu** — none.
+**Menu**: none.
 
-**I/O** — Stereo-aware passthrough: `In1` → `Out1`, and on a stereo chain
+**I/O**: stereo-aware passthrough. `In1` → `Out1`, and on a stereo chain
 `In2` → `Out2`. Analysis is on the mono sum of both inputs, so a stereo source is
 analyzed as a whole. 256-point FFT (128 bins), Hann window, recomputed every 4
 audio frames, with per-bin peak decay and smoothed RMS. No V/Oct, gate, or trigger
@@ -113,7 +113,7 @@ inlets.
 
 *mnemonic: S3* · Category: Measurement
 
-Three plies wide. Same analysis as the base Spectrogram — a 256-point FFT — drawn
+Three plies wide. Same analysis as the base Spectrogram (a 256-point FFT), drawn
 across more horizontal space, so the extra width is smoother interpolation of the
 same 128 bins rather than added resolution. Identical `freq` / `amp` / `peak`
 sub-display, identical defaults and I/O.
@@ -136,8 +136,8 @@ sub-display, defaults, and passthrough I/O.
 
 *mnemonic: S6* · Category: Measurement
 
-Six plies wide — nearly the full display — also backed by the 512-point FFT. The
-widest and most detailed view in the package; useful when you want to read a
+Six plies wide (nearly the full display), also backed by the 512-point FFT. It is
+the widest and most detailed view in the package, useful when you want to read a
 spectrum rather than glance at it. Otherwise identical to Spectrogram 4.
 
 ---
@@ -155,7 +155,7 @@ Discrepancies found:
   FFT"); the brief was not. Documented per source.
 
 - README.md line 118 lists the scope package as containing only "Scope, Scope 2x,
-  Scope Stereo" — the four Spectrogram units are missing from the package table
+  Scope Stereo"; the four Spectrogram units are missing from the package table
   entirely, even though Spectrogram shipped in v2.3.0 and 3/4/6 in v2.8.0. README
   is stale.
 
@@ -181,7 +181,7 @@ Verified from source:
 - 20 Hz - Nyquist span and the log/lin, log/lin/exp mappings:
   SpectrogramGraphic::draw and ampNorm() in mods/scope/Spectrogram.h. The dB scale
   is a fixed 60 dB range (dbNorm).
-- No unit in this package defines onLoadMenu or onShowMenu — confirmed by grep;
+- No unit in this package defines onLoadMenu or onShowMenu, confirmed by grep;
   no menus documented.
 - Sample rate is read from globalConfig for the peak readout but hardcoded to
   48000 in the graphic's axis math; at 48 kHz these agree, so "Nyquist = 24 kHz"
