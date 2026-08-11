@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**175 items** — 59 done, 11 wip, 103 todo, 2 blocked. *Rendered 2026-08-06.*
+**193 items** — 59 done, 11 wip, 121 todo, 2 blocked. *Rendered 2026-08-10.*
 
 ## DSP
 
@@ -23,7 +23,9 @@ check`): a `done` item must have a real test or its named artifact.*
 | ~ | `trinity-fm-unit` | Profile Modbap Trinity FM voice + build ER-301 FM drum unit | manual · 2026-07-20 |
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
 |   | `alembic-userbias-derivations` | Alembic Phases 7-8: per-region user-bias sub-params + Order 2/3 derivations + sample excitation | manual · 2026-07-09 |
+|   | `biome-discont-mix-left-only` | Biome 94 Discont: Mix is tied only to the left DSP instance in a stereo chain | manual · 2026-08-10 |
 |   | `biome-utility-dsp-units` | biome DSP utility units: simple allpass, dome filter, frequency shifter, bitcrush/downsample | manual · 2026-07-09 |
+|   | `biome-varishape-sync-inert` | Biome Varishape Osc / Voice: Sync inlet is connected but never read | manual · 2026-08-10 |
 |   | `canals-audiorate-and-cpu` | Canals: audio-rate Span-sweep aliasing (halfband decimator) + hardware CPU/NEON pass | manual · 2026-07-09 |
 |   | `canals-response-tuning` | Canals: SPAN/volume/low-band/Q/soft-clip response tuning against hardware capture corpus | manual · 2026-07-09 |
 |   | `compound-dsp-voice-profile` | Profile + emulate on-hand compound DSP module (workflow shakedown) | manual · 2026-07-17 |
@@ -51,6 +53,8 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `petrichor-stereo-and-crossfeed` | Petrichor/Pecto: shared-buffer stereo optimization + cross-feedback matrix (stretch) | manual · 2026-07-09 |
 |   | `research-audiorate-param-mod` | Research: how firmware native units accept clean audio-rate parameter modulation | manual · 2026-07-09 |
 |   | `spectrum-ply-versions` | Spectrum (Spectrogram) 2/3/4/6-ply versions with higher spectral resolution | manual · 2026-07-21 |
+|   | `spreadsheet-impasto-attack-release-inert` | Spreadsheet Impasto: per-band Attack/Release plies appear inert | manual · 2026-08-10 |
+|   | `spreadsheet-petrichor-randomize-clamp` | Spreadsheet Petrichor: Randomize gate clamps target index to 16 of 21 | manual · 2026-08-10 |
 |   | `station-x-character` | Station X (codescan FIR): improve output character (currently mostly noise-like filtering) | manual · 2026-07-09 |
 |   | `stolmine-original-units` | stolmine originals backlog: X-op FM voice + additional monokit filter models | manual · 2026-07-09 |
 |   | `units-2d-wavetable-osc` | 2D/3D Wavetable Oscillator — X/Y-addressable wavetable with stacked pseudo-3D frame viz | manual · 2026-07-09 |
@@ -87,8 +91,12 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `biome-codescan-emu-autoload` | Biome Bletchley Park / Station X: auto-load libbiome.so on emulator, silent on hardware | manual · 2026-08-10 |
+|   | `biome-quantoffset-ignores-chain-input` | Biome Quantoffset: never connects its chain input | manual · 2026-08-10 |
 |   | `bionic-lester-clone` | Profiling-informed clone of a switched-capacitor dual filter (target: Bionic Lester Mk1) | manual · 2026-07-15 |
 |   | `blanda-scan-mixer` | Blanda — 3-input scan mixer (Morph-4-style continuous bell-scan, not a crossover) | manual · 2026-07-09 |
+|   | `catchall-flakes-wrong-module-require` | Catchall Flakes: requires biome.libcatchall, which does not exist — unit cannot load | manual · 2026-08-10 |
+|   | `catchall-sfera-spin-inert` | Catchall Sfera: Spin is visual-only; V/Oct inlet has no control; qScale branch orphaned | manual · 2026-08-10 |
 |   | `etcher-io-range-and-presets` | Etcher: change I/O ranges to ±1V + add sine/triangle/user presets + hardware deviation verify | manual · 2026-07-09 |
 |   | `fademixer-6-8-plus-mutesolo-fix` | FadeMixer 6/8-input versions + fix broken mute/solo | manual · 2026-07-21 |
 |   | `jf-phase6-ship` | JF Phase 6: polish + ship (trig-LUT audit, CPU profile, test procedures, vanilla-compat, FM consolidation) | manual · 2026-07-09 |
@@ -98,10 +106,16 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `multiout-framework-quadlfo` | Multi-output framework + Quadrature LFO proof-of-concept driver + candidate audit refresh | manual · 2026-07-09 |
 |   | `multiout-generative-units` | Multi-output generative units: poly clocked burst, coupled CV+gate env, multichannel seq, + candidates | manual · 2026-07-09 |
 |   | `ngoma-preset-library` | Ngoma: per-drum preset library (kick/snare/hat/tom) + default tuning | manual · 2026-07-09 |
+|   | `peaks-bytebeats-formula-speed-backwards` | Peaks ByteBeats: 'Formula' is the clock rate and 'Speed' is the equation selector | manual · 2026-08-10 |
+|   | `peaks-fmlfo-wsmlfo-swapped-labels` | Peaks FM LFO / WSM LFO: Amount and Rate labels are swapped | manual · 2026-08-10 |
+|   | `peaks-highhat-no-controls` | Peaks High Hat: exposes no parameter dials at all | manual · 2026-08-10 |
+|   | `peaks-taplfo-rate-sets-level` | Peaks Tap LFO: 'Rate' control sets output level, not rate | manual · 2026-08-10 |
+|   | `peaks-wsm-plo-wrong-preset-table` | Peaks WSM LFO / PLO: Shape indexes the Lfo preset table instead of wsmlfo_presets | manual · 2026-08-10 |
 |   | `polyphonic-sample-playback` | Polyphonic sample playback unit(s) - synth-style poly + drum-machine-style per-voice sample loader | manual · 2026-07-15 |
 |   | `porcelain-microsound-family` | Porcelain microsound/electroacoustic family — DSP kernel set (Raster-Noton + Plumbutter) | manual · 2026-07-09 |
 |   | `port-gplv3-cleanroom` | GPLv3 algorithm-reference clean-room reimplementations (reference only, not code ports) | manual · 2026-07-09 |
 |   | `port-mit-direct` | MIT-compatible direct ports backlog: Stages LFO, Loom, Open303, Faust reverb, ProCo Rat, AW-remaining | manual · 2026-07-09 |
+|   | `spreadsheet-larets-compressamt-tie-mismatch` | Spreadsheet Larets: Lua ties 'CompressAmt' but C++ registers the parameter as 'TanhAmt' | manual · 2026-08-10 |
 |   | `switch-1-to-n-unit` | 1-to-N switch unit: output selection + output count + passthrough, on the multi-out framework | manual · 2026-08-05 |
 |   | `units-4ms-smr` | 4ms Spectral Multiband Resonator port — 6 resonant bandpass filters with rotation/spread | manual · 2026-07-09 |
 |   | `units-buffer-shuffler` | Buffer Shuffler / Groovebox — BBCut-style beat-slicing buffer manipulation | manual · 2026-07-09 |
@@ -142,6 +156,9 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `helicase-polish` | Helicase: wider carrier-shape set, more-reactive overview viz, am335x CPU profile | manual · 2026-07-09 |
 |   | `impasto-stereo-option-state` | Impasto: saved stereo option state can disagree with instantiation if toggled without re-insert | manual · 2026-07-09 |
 |   | `larets-stutter-shuffle-viz` | Larets: distinguish stutter vs shuffle viz (both read similar at a glance) | screenshot: confirm stutter telegraphs a boxed fixed-loop window with repeated contour fragments, and shuffle telegraphs rearranged fragment blocks (shifted or source-color-coded) · 2026-07-09 |
+|   | `mi-clouds-quality-labels-misleading` | MI Clouds: Quality labels normal/hifi describe stereo-vs-mono, not fidelity | manual · 2026-08-10 |
+|   | `mi-grids-circle-view-unreachable` | MI Grids: the `circle` view holding all 7 controls is never switched to | manual · 2026-08-10 |
+|   | `mi-plaits-unexposed-cv-params` | MI Plaits: FM/Timbre/Morph CV-amount params and 4 modulation branches have no control | manual · 2026-08-10 |
 |   | `mirror-step-and-viz` | Mirror: fine/coarse/super step audit on all controls + custom overview-ply viz | screenshot: confirm each fader's coarse/fine/super steps match musical granularity (Hz = octave/cents/sub-Hz; 0..1 = 0.1/0.01/0.001; Mirror knob approaches the Nyquist-flip region smoothly); confirm a custom overview viz (concentric fire wheels / rubber-band sphere / L-vs-R Lissajous) renders · 2026-07-09 |
 |   | `mod-gain-default-zero` | Mod gain defaults to 0 on all controls of all units (CV opt-in) - catalog-wide standardization | manual · 2026-07-22 |
 |   | `ngoma-viz-and-docs` | Ngoma: cube viz refinement + documentation refresh | screenshot: confirm cube scaled 0.85x with breathing room, state-driven face-fill textures (Character/Grit/Shape/ampEnv), exaggerated parallax + face-shrink/edge-expand-on-hit; drum-voice.md updated or superseded by the codex reference · 2026-07-09 |
@@ -151,6 +168,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `rate-time-control-octave-maps` | Rate/time controls on wide-ratio LINEAR dial maps swing far too wide (Constant Random fixed; audit open) | manual · 2026-08-05 |
 |   | `scope-channel-focus` | Scope: channel focus display switching (show L or R by channel-button selection) | manual · 2026-07-09 |
 |   | `scope-goniometer` | Goniometer / Lissajous — XY stereo-field scope with correlation readout | screenshot: insert; confirm goniometer (L+R vs L-R) or arbitrary-XY Lissajous display with a +1..-1 correlation readout; negligible DSP · 2026-07-09 |
+|   | `spreadsheet-rauschen-voct-unreachable` | Spreadsheet Rauschen: V/Oct branch is built and used by the DSP but bound to no control | manual · 2026-08-10 |
 |   | `ui-editmode-border-expanded` | Edit-mode border vanishes on expanded-graphic + M-hold (user report, needs repro) | manual · 2026-07-09 |
 |   | `ui-filterlist-type-label-stale` | FilterListControl type label doesn't refresh when macros change filter type (Tomograph + Petrichor) | manual · 2026-07-09 |
 |   | `ui-subdisplay-selection-indicator` | Sub-display selection indicator missing on paramMode ply-to-ply navigation (PINNED) | manual · 2026-07-09 |

@@ -16,10 +16,10 @@ ln -s /path/to/er-301 er-301
 
 ```bash
 # Emulator (macOS/Linux)
-make plaits
+make mi
 
 # Hardware
-make plaits ARCH=am335x
+make mi ARCH=am335x
 
 # Build all packages
 make
@@ -34,25 +34,69 @@ Copy `.pkg` to `~/.od/rear/` (emulator) or the ER-301's front SD card `ER-301/pa
 
 ## Packages
 
-### Mutable Instruments Ports
+Seven packages ship publicly as of **v2.8.1**, totalling 87 units. Each builds to
+a single `.pkg`; the package name is the prefix you'll see in the unit browser.
 
-Based on code by Émilie Gillet (MIT License).
+Full per-unit control reference: [docs/reference/](docs/reference/README.md).
 
-| Package | Unit(s) | Description |
-|---------|---------|-------------|
-| **plaits** | Plaits | Macro-oscillator -- all 24 synthesis engines, V/Oct, engine selector |
-| **clouds** | Clouds | Granular processor -- granular, looping delay, and spectral modes. NEON-optimized pffft FFT, rising-edge trigger control |
-| **stratos** | Stratos | Clouds reverb engine extracted as standalone effect |
-| **rings** | Rings | Modal/sympathetic string resonator with NEON-vectorized SVF bank, main/aux output mix control |
-| **warps** | Warps | Meta-modulator -- 6 crossmodulation algorithms with auto gain compensation |
-| **grids** | Grids | Topographic drum pattern generator |
-| **commotio** | Commotio | Elements exciter section (bow/blow/strike) at native 48kHz |
-| **marbles** | Marbles T, Marbles X | Random sampler -- probabilistic gate generator (7 models) and random CV generator (beta distribution, deja vu looping, 3 control modes) |
-| **kryos** | Kryos | Spectral freeze (WIP) -- do not install |
+| Package | Version | Units | What's in it |
+|---------|---------|-------|--------------|
+| **mi** | 1.0.4 | 9 | Mutable Instruments ports |
+| **peaks** | 1.0.0 | 14 | Peaks / Dead Man's Catch ports |
+| **spreadsheet** | 2.8.5.1 | 21 | Original units -- the flagship package |
+| **biome** | 2.2.3 | 23 | Original units -- utilities, sequencers, small voices |
+| **scope** | 1.2.7 | 7 | Inline visualization |
+| **house** | 0.1.1 | 8 | Airwindows reverb and character ports |
+| **catchall** | 0.4.1 | 5 | Experimental / WIP |
 
-### Peaks / Dead Man's Catch
+### mi -- Mutable Instruments Ports
 
-Based on code by Émilie Gillet and Tim Churches (MIT License). These still need some testing for hardware parity. If you're willing, just sound off.
+Based on code by Émilie Gillet (MIT License). All nine units ship in the single
+`mi` package.
+
+| Unit | Description |
+|------|-------------|
+| **Plaits** | Macro-oscillator -- all 24 synthesis engines, V/Oct, engine selector |
+| **Clouds** | Granular processor -- granular, looping delay, and spectral modes. NEON-optimized pffft FFT, rising-edge trigger control |
+| **Rings** | Modal/sympathetic string resonator with NEON-vectorized SVF bank, main/aux output mix control |
+| **Grids** | Topographic drum pattern generator |
+| **Warps** | Meta-modulator -- 6 crossmodulation algorithms with auto gain compensation |
+| **Stratos** | Clouds reverb engine extracted as a standalone effect |
+| **Commotio** | Elements exciter section (bow/blow/strike) at native 48kHz |
+| **Marbles T** | Probabilistic gate generator -- 7 models |
+| **Marbles X** | Random CV generator -- beta distribution, deja vu looping, 3 control modes |
+
+**Known issues.**
+
+- **Grids** -- only the pattern display is reachable. Its `circle` view holds
+  Channel, Reset, Map X, Map Y, Density, Chaos and Width, but nothing calls
+  `switchView("circle")`, so none of those controls can be brought on screen.
+- **Clouds** -- the Quality labels are misleading. `normal` is 16-bit stereo and
+  `hifi` is 16-bit *mono* -- a longer buffer, not higher fidelity.
+- **Plaits** -- the FM / Timbre / Morph CV-amount parameters and the four
+  modulation inlet branches exist in the DSP but have no on-screen control.
+
+### peaks -- Peaks / Dead Man's Catch
+
+Based on code by Émilie Gillet and Tim Churches (MIT License). All 14 are mono
+generators -- single output, no audio input, no V/Oct. These still need some
+testing for hardware parity. If you're willing, just sound off.
+
+**Known control-labelling bugs.** Several units have Lua labels that don't match
+what the parameter actually drives. Verified against the DSP, not yet fixed:
+
+- **Tap LFO** -- "Rate" sets output *level*. In sync mode the clock ratio is
+  fixed and `set_rate` is never called.
+- **FM LFO** -- "FM Amount" and "FM Rate" are swapped (they feed `set_fm_rate`
+  and `set_fm_depth` respectively).
+- **WSM LFO** -- "WSM Amount" and "WSM Rate" are swapped the same way.
+- **WSM LFO / PLO** -- Shape indexes the *Lfo* preset table instead of
+  `wsmlfo_presets`, so several slots duplicate and the Noise shape is
+  unreachable.
+- **ByteBeats** -- "Formula" is the clock rate; "Speed" is the equation
+  selector.
+- **High Hat** -- exposes no dials at all. The DSP's four parameters sit at 0.5,
+  which leaves ~50% pitch/decay randomisation permanently on.
 
 | Unit | Category | Description |
 |------|----------|-------------|
@@ -65,61 +109,145 @@ Based on code by Émilie Gillet and Tim Churches (MIT License). These still need
 | Mini Sequencer | Peaks | 4-step CV sequencer |
 | Number Station | Peaks | Radio transmission noise generator |
 | Randomised Envelope | Dead Man's Catch | Stochastic AD envelope |
-| Mod Sequencer | Dead Man's Catch | Extended step sequencer |
+| Mod Sequencer | Dead Man's Catch | 8-step sequencer -- steps 5-8 are inversions of steps 1-4 |
 | FM LFO | Dead Man's Catch | LFO with FM modulation |
 | WSM LFO | Dead Man's Catch | LFO with waveshape modulation |
-| PLO | Dead Man's Catch | Phase-locked oscillator |
+| PLO | Dead Man's Catch | Phase-locked oscillator -- takes its pitch from the clock, not V/Oct |
 | ByteBeats | Dead Man's Catch | Algorithmic bytebeat generator |
 
-### Original Units
+### spreadsheet -- Original Units
 
-| Package | Unit(s) | Description |
-|---------|---------|-------------|
-| **biome** | NR | Gate sequencer built on prime-length rhythm patterns with mask, factor and length controls |
-| | 94 Discont | 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush) |
-| | Latch Filter | Switched-capacitor S&H into SVF with V/Oct tracking |
-| | Gesture | Continuous gesture recorder/looper -- 5/10/20s buffer, movement-detected auto-write |
-| | Gated Slew | Slew limiter with gate-controlled activation |
-| | Tilt EQ | One-knob spectral tilt filter |
-| | DJ Filter | Bipolar LP/HP sweep filter |
-| | Gridlock | Priority gate router with latching output |
-| | Integrator | Running accumulator with leak and reset |
-| | Spectral Follower | Adaptive threshold envelope follower with bandpass detector |
-| | Quantoffset | Quantizer with CV offset |
-| | PSR | Pingable scaled random |
-| | Bletchley Park | Codescan wavetable oscillator -- reads arbitrary binary files as waveforms |
-| | Station X | Codescan FIR filter -- reads binary files as filter kernels |
-| | Fade Mixer | 4-input crossfader with BranchMeter controls |
-| | Varishape Voice | Simple synth voice -- POLYBLEP oscillator (tri/saw/square), gate-triggered decay envelope |
-| | Varishape Osc | Raw POLYBLEP oscillator -- continuously variable sine/tri/saw/square/pulse, V/Oct, sync |
-| | Transport | Gated clock generator -- BPM control, 4 ppqn (16th note) output, toggle run/stop with phase reset |
-| **spreadsheet** | Excel | 64-step CV tracker sequencer with math transforms |
-| | Ballot | 64-step gate sequencer with chaselight display and algorithmic transforms |
-| | Etcher | CV-addressed piecewise transfer function -- 8 depth-controlled transforms, CV gate input |
-| | Tomograph | Parallel resonant filter bank with scale distribution |
-| | Petrichor | Multitap delay -- 8 taps, per-tap SVF/pitch, granular reverse, drift, grid/stack distribution, macro presets, gate-triggered randomization |
-| | Parfait | 3-band multiband saturator -- 7 shapers per band, SVF morph filter, compressor, per-band FFT spectrum display |
-| | Rauschen | Parametric noise and chaos generator -- 11 algorithms (White, Pink, Dust, Particle, Crackle, Logistic, Henon, Clocked, Velvet, Gendy, Lorenz), post-generator SVF morph filter with V/Oct, 3D phase space visualization |
-| | Impasto | 3-band multiband compressor -- per-band FFT spectrum with GR ceiling contour, sidechain input, G-Bus speed control, auto makeup |
-| | Helicase | 2-op FM oscillator -- OPL3 carrier + modulator with 16 fold shapes, JF-style phase-receptivity sync, lin/expo FM, lo-fi/hi-fi toggle, k-means phase-space viz |
-| | Larets | Stepped multi-effect -- 10 effects (stutter/reverse/bitcrush/downsample/filter/pitch shift/distortion/shuffle/delay/comb) with clock-locked buffer tricks, true-stereo per-channel buffers, linked CPR single-band compressor, bipolar global param offset, 16-step sequencer with xform gate |
-| | Colmatage | Clock-driven breakbeat cutter -- WarpCut-derived algorithm with parameterized block size, repeat count, accel/ritard geometric series, bipolar duty cycle (reverse on negative), tanh saturation. Based on Nick Collins' BBCut library via Livecut |
-| | Pecto | Comb resonator -- 16 tap patterns, 4 resonator types (raw/guitar/clarinet/sitar), V/Oct, xform gate randomization |
-| | Ngoma | Macro drum voice -- single-macro character morph across kick/snare/tom/cymbal territory, NEON voice bus, audio-reactive cube overview graphic |
-| | JF | Hex-voiced slope engine -- 6 harmonically-coupled function generators (Just-Friends-style), per-voice ramp/envelope/oscillator behavior, multi-output |
-| | Visadhara | Additive percussion macro voice -- 6-voice NEON additive synthesis (BIA-derived) with Spread / Harmonic / Morph / Decay / Level, trigger-fired AR |
-| | Network | Macro spatial reverb -- 32-tap stereo with virtual-reflector room geometry, orbiting listener motion, per-tap azimuth panning |
-| | Canals | Linked resonant filter -- Three-Sisters-style crossover/formant modes, 4-input normalling topology (Low/Centre/High/All), self-oscillation, 2x oversampling |
-| | Mirror | Aliasing oscillator -- Nyquist-folding synthesis, variable fold/sync, complex-oscillator voice |
-| | Vitrail | Dual switched-capacitor character filter -- two cores on independently drifting clocks with a shared resonance loop, 50 series/parallel routing pairs, DSP-driven tunnel visualization |
-| | Fabula | Algorithmic room reverb -- SR/2 Dattorro/Griesinger figure-8 allpass tank, organic Brownian delay modulation, discrete early-reflection network, Living Freeze hold, tunable wet highpass, xform room re-roll gate |
-| **house** | kWoodRoom, WoodenBox, CreamCoat, BrightAmbience3, Verbity, Galactic | Airwindows reverb ports -- room, box, plate and ambience character, hybrid-float optimized for Cortex-A8 |
-| | TickerTape, Lacquer | Airwindows character processors -- console/tape saturation and lo-fi derez |
-| **scope** | Scope, Scope 2x, Scope Stereo | Inline signal visualization -- stereo-aware passthrough with waveform display, user-controllable timebase (1x-64x) and Y-axis gain (0.25x-4x) |
-| | Spectrogram | Inline FFT spectrum analyzer -- 256-point pffft, stereo passthrough, peak hold + RMS gradient |
-| **catchall** | Sfera | Z-plane morphing filter -- 32 configs, audio-reactive ferrofluid visualization (experimental) |
-| | Lambda | Seeded procedural synth -- PRNG wavetable + filter bank generation (experimental) |
-| | Flakes | Granular shimmer/freeze -- feedback looper with self-modulating delay (experimental) |
+| Unit | Description |
+|------|-------------|
+| **Excel** | 64-step CV tracker sequencer with math transforms |
+| **Ballot** | 64-step gate sequencer with chaselight display and algorithmic transforms |
+| **Etcher** | CV-addressed piecewise transfer function -- 8 depth-controlled transforms, CV gate input |
+| **Tomograph** | Parallel resonant filter bank with scale distribution |
+| **Petrichor** | Multitap delay -- 8 taps, per-tap SVF/pitch, granular reverse, drift, grid/stack distribution, macro presets, gate-triggered randomization |
+| **Parfait** | 3-band multiband saturator -- 7 shapers per band, SVF morph filter, compressor, per-band FFT spectrum display |
+| **Rauschen** | Parametric noise and chaos generator -- 12 algorithms (White, Pink, Dust, Particle, Crackle, Logistic, Henon, Clocked, Velvet, Gendy, Lorenz, Cellular), post-generator SVF morph filter, 3D phase space visualization, menu re-roll for Cellular's field |
+| **Impasto** | 3-band multiband compressor -- per-band FFT spectrum with GR ceiling contour, sidechain input, G-Bus speed control, auto makeup |
+| **Helicase** | 2-op FM oscillator -- OPL3 carrier + modulator with 16 fold shapes, JF-style phase-receptivity sync, lin/expo FM, lo-fi/hi-fi toggle, k-means phase-space viz |
+| **Larets** | Stepped multi-effect -- 10 effects (stutter/reverse/bitcrush/downsample/filter/pitch shift/distortion/shuffle/delay/comb) with clock-locked buffer tricks, true-stereo per-channel buffers, linked CPR single-band compressor, bipolar global param offset, 16-step sequencer with xform gate |
+| **Blanda** | Three-input scan mixer -- a global Scan axis sweeps through per-input bell response curves, with bipolar Focus for bell width and per-input Weight and Offset |
+| **Colmatage** | Clock-driven breakbeat cutter -- WarpCut-derived algorithm with parameterized block size, repeat count, accel/ritard geometric series, bipolar duty cycle (reverse on negative), tanh saturation. Based on Nick Collins' BBCut library via Livecut |
+| **Pecto** | Comb resonator -- 16 tap patterns, 4 resonator types (raw/guitar/clarinet/sitar), V/Oct, xform gate randomization |
+| **Ngoma** | Macro drum voice -- 16-mode modal lattice with a single-macro character morph across kick/snare/tom/cymbal territory, NEON voice bus, audio-reactive cube overview graphic (preset schema 6) |
+| **JF** | Hex-voiced slope engine -- 6 harmonically-coupled function generators (Just-Friends-style), per-voice ramp/envelope/oscillator behavior, multi-output |
+| **Visadhara** | Additive percussion macro voice -- 8-voice NEON additive synthesis with Spread / Harmonic / Morph / Decay / Level, Skin/Liquid/Metal mode crossfade, trigger-fired AR |
+| **Network** | Macro spatial reverb -- up to 64 stereo taps with virtual-reflector room geometry, orbiting listener motion, per-tap azimuth panning, and a glitch macro that probabilistically assigns each tap one of mute/stutter/crush/scrub/reverse |
+| **Canals** | Linked resonant filter -- Three-Sisters-style crossover/formant modes, 4-input normalling topology (Low/Centre/High/All), self-oscillation, 2x oversampling |
+| **Mirror** | Aliasing oscillator -- Nyquist-folding synthesis, variable fold/sync, complex-oscillator voice |
+| **Fabula** | Algorithmic room reverb -- SR/2 Dattorro/Griesinger figure-8 allpass tank, organic Brownian delay modulation, discrete early-reflection network, Living Freeze hold, tunable wet highpass, xform room re-roll gate |
+| **Vitrail** | Dual switched-capacitor character filter -- two cores on independently drifting clocks with a shared resonance loop, 50 series/parallel routing pairs, DSP-driven tunnel visualization |
+
+Canals moved here from `biome` in v2.6.1; patches referencing `biome.Canals`
+must be re-pointed at `spreadsheet.Canals`.
+
+**Known issues.**
+
+- **Rauschen** -- the V/Oct branch is built and the DSP uses it, but no control
+  is ever placed in a view, so it cannot be patched or serialized.
+- **Petrichor** -- the Randomize gate clamps its target index to 16 of 21, so
+  `stack`, `grid`, `count` and `reset` cannot be fired.
+- **Impasto** -- the per-band Attack and Release plies appear inert; attack and
+  release derive solely from `Speed`.
+- **Larets** -- the Lua ties `CompressAmt` while the C++ registers the parameter
+  as `TanhAmt`, so the `comp` readout and its CV branch may not bind.
+
+### biome -- Original Units
+
+| Unit | Description |
+|------|-------------|
+| **NR** | Gate sequencer built on prime-length rhythm patterns with mask, factor and length controls |
+| **94 Discont** | 7-mode waveshaper (fold, tanh, softclip, hardclip, sqrt, rectify, crush) |
+| **Latch Filter** | Switched-capacitor S&H into SVF with V/Oct tracking |
+| **Gesture** | Continuous gesture recorder/looper -- 5/10/20s buffer, movement-detected auto-write |
+| **Gated Slew** | Slew limiter with gate-controlled activation |
+| **Tilt EQ** | One-knob spectral tilt filter |
+| **DJ Filter** | Bipolar LP/HP sweep filter |
+| **Gridlock** | Priority gate router with latching output |
+| **Integrator** | Running accumulator with leak and reset |
+| **Spectral Follower** | Adaptive threshold envelope follower with bandpass detector |
+| **Quantoffset** | Quantizer driven by its own Offset control and CV branch. Note it does not process the chain input |
+| **PSR** | Pingable scaled random |
+| **Bletchley Park** | Codescan wavetable oscillator -- reads arbitrary binary files as waveforms |
+| **Station X** | Codescan FIR filter -- reads binary files as filter kernels |
+| **Fade Mixer** | 4-input crossfader with BranchMeter controls, mute and solo |
+| **Fade Mixer 6** | As Fade Mixer, 6 inputs |
+| **Fade Mixer 8** | As Fade Mixer, 8 inputs |
+| **Varishape Voice** | Simple synth voice -- POLYBLEP oscillator (tri/saw/square), gate-triggered decay envelope. Uses Émilie Gillet's variable-shape oscillator (MIT) |
+| **Varishape Osc** | Raw POLYBLEP oscillator -- continuously variable tri/saw/square/pulse via Shape, V/Oct |
+| **Transport** | Gated clock generator -- BPM control, 4 ppqn (16th note) output, toggle run/stop with phase reset |
+| **Constant Random** | Random CV per trigger -- Rate down to 0 Hz (paused) and a Slew Time in seconds that reaches a true 0 ms sample-and-hold |
+| **Expo D** | Trigger-fired decay envelope -- bipolar Curve morphs the contour concave/linear/convex |
+| **Expo AD** | Trigger-fired attack-decay envelope -- separate bipolar Attack Curve and Decay Curve, fire-and-forget (gate length ignored) |
+
+**Known issues.**
+
+- **Varishape Osc / Varishape Voice** -- the Sync inlet is declared and patched
+  but never read by `process()`. Sync does nothing.
+- **Quantoffset** -- never connects its chain input; only the Offset control and
+  its branch reach the quantizer.
+- **94 Discont** -- in a stereo chain, Mix is tied only to the left DSP instance.
+- **Bletchley Park / Station X** -- on the emulator both auto-load
+  `testing/linux/libbiome.so` as their source file. On hardware they stay silent
+  until you choose a file.
+- **PSR** -- Quant Levels has no effect at 0 or 1.
+- **Latch Filter** -- hard-codes 48 kHz rather than reading the global sample
+  rate.
+
+### scope -- Visualization
+
+| Unit | Description |
+|------|-------------|
+| **Scope**, **Scope 2x**, **Scope Stereo** | Inline signal visualization -- stereo-aware passthrough with waveform display, user-controllable timebase (1x-64x), Y-axis gain (0.25x-4x) and a 3-decimal voltmeter readout. 2x and Stereo differ in display width and channel handling |
+| **Spectrogram** | Inline FFT spectrum analyzer -- 256-point pffft, stereo passthrough, peak hold + RMS gradient |
+| **Spectrogram 3** | Wider 3-ply span, 256-point FFT |
+| **Spectrogram 4**, **Spectrogram 6** | Wider spans backed by a 512-point FFT |
+
+### house -- Airwindows Ports
+
+Six reverb ports based on code by Chris Johnson (Airwindows), shipping under
+their upstream names. TickerTape and Lacquer are original designs built from
+Airwindows-derived parts. Most are hybrid-float optimized for Cortex-A8 --
+Galactic and BrightAmbience3 have not had that pass and are the heavy ones.
+
+All eight are plain GainBias controls with CV branches, stereo-capable with a
+mono fallback. None have V/Oct, gate, or trigger inputs.
+
+| Unit | Description |
+|------|-------------|
+| **kWoodRoom** | 6x6 feedback network with cross-feedback inside the matrix, so it is internally stereo. The woody, roomy one |
+| **WoodenBox** | 4x4 network with an intentional left/right swap through the tank. Small, boxy, resonant |
+| **CreamCoat** | Bright ambience with the engine's divisor mechanic exposed as a DeRez knob. Submix-style wet/dry -- Wetness at 0.5 sums full wet and full dry rather than crossfading |
+| **BrightAmbience3** | Sparse prime-tap delay summation with resonant filter feedback -- a bright gated halo. Size is the CPU dial, summing up to 487 sparse taps at the top |
+| **Verbity** | Three cascaded 4x4 networks with a sub-low "thunder" chase underneath. The most conventionally hall-like, and the one that goes darkest |
+| **Galactic** | Three cascaded networks with detune and vibrato -- the big, lush, modulated one. Replace is inverted (higher = less feedback), and its DryWet is a plain crossfade, unlike the submix wet/dry on CreamCoat and Verbity |
+| **TickerTape** | Console/tape saturation and glue |
+| **Lacquer** | Lo-fi derez and polish -- vinyl/tape character |
+
+### catchall -- Experimental
+
+Everything here is unfinished and may change or break between releases. Install
+at your own risk.
+
+| Unit | Description |
+|------|-------------|
+| **Sfera** | Z-plane morphing filter -- 128 configs (32 authored plus 96 generated), audio-reactive ferrofluid visualization |
+| **Lambda** | Seeded procedural synth -- PRNG wavetable + filter bank generation |
+| **Flakes** | Shimmer/freeze -- an interpolated delay tap with feedback and self-modulation. **Currently fails to load** (see below) |
+| **Som** | Self-organizing-map scanner -- a learned feature map you scan through, with plasticity, neighborhood radius and learning rate exposed |
+| **Alembic** | Scan-driven 4-op phase-modulation matrix voice -- V/Oct, sync, comb, and a Scan Position that blends a weighted window of preset slots into the live voice |
+
+**Known issues.**
+
+- **Flakes does not load.** `Flakes.lua:2` requires `biome.libcatchall`, but the
+  catchall SWIG module is `catchall_libcatchall` and biome ships no such library.
+- **Sfera** -- Spin is visual only and has no effect on the audio; the V/Oct
+  inlet has no on-screen control.
+- **Som** -- Decay only fades the visualizer, not the map's memory; Output Level
+  is defined but on no view; learned weights are not serialized.
 
 ## Changelog
 

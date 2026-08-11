@@ -3094,3 +3094,175 @@ Mechanisms solved + docs: shape-fm / character / shape0-level / grit-tuning / gr
 in planning/. All hardware work needs the rig RE-PINNED first (drift varies session to session:
 +71/+67/+45c across the recent campaigns). The several ngoma-* wip items are shipped-pending-device
 ear-check, now parked in that state."""
+
+# ---------------------------------------------------------------------------
+# Public-unit reference audit, 2026-08-10. Seven research agents read every
+# shipping unit's Lua + C++ to build docs/reference/*.md. These are the defects
+# that audit surfaced. ALL ARE UNCONFIRMED ON DEVICE — each was found by reading
+# source, and several were spot-checked against the DSP in the same session, but
+# none has been reproduced on hardware or the emulator. Verify before fixing;
+# some may be intentional. Fixes that relabel a control will change how existing
+# patches behave, so they are release-note material.
+# ---------------------------------------------------------------------------
+
+[[item]]
+id = "peaks-taplfo-rate-sets-level"
+title = "Peaks Tap LFO: 'Rate' control sets output level, not rate"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "units"
+verify = { kind = "manual", ref = "instantiate peaks.Tap LFO; sweep Rate and confirm whether output amplitude or frequency changes" }
+note = "peaks/modulations/lfo.h:90 — in the synced branch parameter[0] feeds set_level; set_rate is only called in the unsynced branch (line 96). TapLfo.lua:68 labels it 'Rate'. Clock ratio appears fixed in sync mode. Found by the 2026-08-10 reference audit."
+
+[[item]]
+id = "peaks-fmlfo-wsmlfo-swapped-labels"
+title = "Peaks FM LFO / WSM LFO: Amount and Rate labels are swapped"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "units"
+verify = { kind = "manual", ref = "on peaks.FM LFO and peaks.WSM LFO, confirm the 'Amount' ply changes modulation rate and 'Rate' changes depth" }
+note = "lfo.h:192-193 maps parameter[2]->set_fm_rate and parameter[3]->set_fm_depth; FmLfo.lua:69,75 labels p3 'FM Amount' and p4 'FM Rate'. WsmLfo is the same inversion at lfo.h:310-311. One-line Lua label swap, but it changes the meaning of saved patches."
+
+[[item]]
+id = "peaks-wsm-plo-wrong-preset-table"
+title = "Peaks WSM LFO / PLO: Shape indexes the Lfo preset table instead of wsmlfo_presets"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "units"
+verify = { kind = "manual", ref = "step Shape through all 7 slots on WSM LFO and PLO; confirm whether slots duplicate and whether a Noise shape is reachable" }
+note = "Reported by the reference audit, NOT independently confirmed. Claim: both index the Lfo `presets` table rather than the `wsmlfo_presets` table defined above it, so slots resolve to Folded sine / Folded power sine / Folded power sine / Overdriven sine / Triangle / Square / Square and Noise is unreachable."
+
+[[item]]
+id = "peaks-bytebeats-formula-speed-backwards"
+title = "Peaks ByteBeats: 'Formula' is the clock rate and 'Speed' is the equation selector"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "units"
+verify = { kind = "manual", ref = "on peaks.ByteBeats confirm the Formula ply changes pitch/rate and the Speed ply changes which of the 8 equations plays" }
+note = "bytebeats.h:53 maps parameter[0]->set_frequency and :56 parameter[3]->set_p2 (equation select via p2_ >> 13). ByteBeats.lua:57,75 labels them 'Formula' and 'Speed'."
+
+[[item]]
+id = "peaks-highhat-no-controls"
+title = "Peaks High Hat: exposes no parameter dials at all"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "units"
+verify = { kind = "manual", ref = "instantiate peaks.High Hat; confirm only a Gate ply is present and decide whether to expose the four DSP params" }
+note = "HighHat.lua:35 — expanded = { 'gate' }. The DSP takes four parameters which sit at 0.5, leaving ~50% pitch/decay randomisation permanently on. Every other Peaks drum exposes its params."
+
+[[item]]
+id = "mi-grids-circle-view-unreachable"
+title = "MI Grids: the `circle` view holding all 7 controls is never switched to"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "instantiate mi.Grids; confirm Channel/Reset/Map X/Map Y/Density/Chaos/Width cannot be brought on screen" }
+note = "Grids.lua:163 sets expanded = { 'circle' } and views.circle (line 164) lists the 7 controls, but nothing calls switchView('circle') anywhere in the package. Plaits.lua:197,200 does exactly this, so the mechanism works — it is just not wired. Grids is effectively display-only."
+
+[[item]]
+id = "mi-clouds-quality-labels-misleading"
+title = "MI Clouds: Quality labels normal/hifi describe stereo-vs-mono, not fidelity"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "confirm Clouds Quality index 1 gives 16-bit mono (longer buffer) rather than higher fidelity; relabel" }
+note = "Clouds.h:35 — od::Option mQuality{\"Quality\", 0}; // 0=16bit stereo, 1=16bit mono. Clouds.lua:120 labels these { 'normal', 'hifi' }. Hardware Clouds has 4 quality settings; ours has 2. Relabelling is safe (Option index is what serializes)."
+
+[[item]]
+id = "mi-plaits-unexposed-cv-params"
+title = "MI Plaits: FM/Timbre/Morph CV-amount params and 4 modulation branches have no control"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "confirm the CV-amount attenuverters are unreachable on mi.Plaits; decide whether to expose or remove" }
+note = "Found by the reference audit. Low severity — the params exist in the DSP and default sanely, so this is missing capability rather than breakage."
+
+[[item]]
+id = "biome-varishape-sync-inert"
+title = "Biome Varishape Osc / Voice: Sync inlet is connected but never read"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "patch a gate into Varishape Osc's sync branch; confirm no hard-sync occurs" }
+note = "VarishapeOsc.h:20 declares od::Inlet mSync{\"Sync\"} and nothing in process() reads it. VarishapeOsc.lua:47 connects sync -> op 'Sync' and the branch exists, but sync is in no view either. README advertised sync until the 2026-08-10 audit; that claim is now removed."
+
+[[item]]
+id = "biome-quantoffset-ignores-chain-input"
+title = "Biome Quantoffset: never connects its chain input"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "units"
+verify = { kind = "manual", ref = "feed CV into a Quantoffset in a chain; confirm the input is ignored and only Offset drives the quantizer" }
+note = "Quantoffset.lua:24-25 — the only connects are offset->quantizer->Out1. There is no connect(self, 'In1', ...). Either wire the input through or rename the unit; 'quantizer with CV offset' implied it quantizes incoming CV."
+
+[[item]]
+id = "biome-discont-mix-left-only"
+title = "Biome 94 Discont: Mix is tied only to the left DSP instance in a stereo chain"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "run 94 Discont in a stereo chain; confirm whether Mix affects the right channel" }
+note = "Reported by the reference audit, NOT independently confirmed. Contradicts the documented 'shared params' behavior for the stereo case."
+
+[[item]]
+id = "biome-codescan-emu-autoload"
+title = "Biome Bletchley Park / Station X: auto-load libbiome.so on emulator, silent on hardware"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "units"
+verify = { kind = "manual", ref = "instantiate both units on hardware with no file chosen; confirm silence/bypass, then on emu confirm the libbiome.so autoload" }
+note = "Both default their scan source to testing/linux/libbiome.so, which only exists on the emulator. On hardware they stay silent until a file is chosen, with no on-screen indication of why. Documentation gap at minimum; a default-file or empty-state hint would be better."
+
+[[item]]
+id = "catchall-flakes-wrong-module-require"
+title = "Catchall Flakes: requires biome.libcatchall, which does not exist — unit cannot load"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "units"
+verify = { kind = "manual", ref = "instantiate catchall.Flakes; confirm it fails to load, then confirm the fix after changing the require to catchall.libcatchall" }
+note = "Flakes.lua:2 — require \"biome.libcatchall\". catchall.cpp.swig:1 declares %module catchall_libcatchall, and biome ships libbiome only. Looks like a one-line fix, but confirm the unit actually works once it loads — it may have bit-rotted behind the load failure. Highest-severity item in this batch: the unit is dead on arrival."
+
+[[item]]
+id = "catchall-sfera-spin-inert"
+title = "Catchall Sfera: Spin is visual-only; V/Oct inlet has no control; qScale branch orphaned"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "units"
+verify = { kind = "manual", ref = "sweep Sfera's Spin and confirm no audible change; confirm V/Oct cannot be patched" }
+note = "Reported by the reference audit. Catchall is the experimental tier, so this is low priority — but Spin reading as an audio control when it only drives the ferrofluid visualization is a real trap."
+
+[[item]]
+id = "spreadsheet-rauschen-voct-unreachable"
+title = "Spreadsheet Rauschen: V/Oct branch is built and used by the DSP but bound to no control"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "confirm Rauschen's V/Oct cannot be patched or serialized, then confirm filter-cutoff tracking works once a Pitch control is added" }
+note = "Rauschen.lua requires Unit.ViewControl.Pitch (line 5), builds the tune ConstantOffset (79-82), connects it to op 'V/Oct', and adds the mono branch (133) — but never instantiates the control, and expanded (268) omits it. The DSP does use V/Oct: it transposes the filter cutoff and Particle's bandpass centre. README advertised V/Oct until the 2026-08-10 audit."
+
+[[item]]
+id = "spreadsheet-petrichor-randomize-clamp"
+title = "Spreadsheet Petrichor: Randomize gate clamps target index to 16 of 21"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "select the stack/grid/count/reset randomize targets and fire the gate; confirm nothing happens" }
+note = "Reported by the reference audit, NOT independently confirmed. Claim: MultitapDelay.cpp:477 (applyRandomize) clamps to 16, so the last 4 of the 21 Lua-handled targets — stack, grid, count, reset — are unreachable from the gate."
+
+[[item]]
+id = "spreadsheet-impasto-attack-release-inert"
+title = "Spreadsheet Impasto: per-band Attack/Release plies appear inert"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "sweep a band's Attack and Release against a transient source; confirm no change in envelope behavior" }
+note = "Reported by the reference audit, NOT independently confirmed. Claim: plies wire to BandAttack{i}/BandRelease{i} but the DSP never reads mBandBias[b][3]/[4]; attack and release derive solely from Speed. Same audit also notes BandWeight0..2 set the crossovers with no on-screen control."
+
+[[item]]
+id = "spreadsheet-larets-compressamt-tie-mismatch"
+title = "Spreadsheet Larets: Lua ties 'CompressAmt' but C++ registers the parameter as 'TanhAmt'"
+status = "todo"
+stamped = "2026-08-10T22:31:04-05:00"
+area = "units"
+verify = { kind = "manual", ref = "confirm whether the Larets comp readout tracks and whether its CV branch modulates anything" }
+note = "Reported by the reference audit, NOT independently confirmed. Ties resolve by string name, so a mismatch would silently fail to bind rather than error."

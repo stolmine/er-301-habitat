@@ -12,3 +12,10 @@ docs/dev-rig-procedures.md
 # Python bytecode cache (reference harnesses)
 __pycache__/
 *.pyc
+
+# Claude Code agent-local memory — session state, not repo content
+.claude/memory/
+
+# Stray local artifacts (druid REPL log, scratch archive)
+planning/druid.log
+planning/Archive.zip
