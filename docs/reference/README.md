@@ -13,7 +13,7 @@ a verification block at the foot of each page.
 |------|---------|---------|-------|
 | [mi.md](mi.md) | `mi` | 1.0.4 | 9 (Mutable Instruments ports) |
 | [peaks.md](peaks.md) | `peaks` | 1.0.0 | 14 (Peaks / Dead Man's Catch ports) |
-| [spreadsheet-voices.md](spreadsheet-voices.md) | `spreadsheet` | 2.8.5.1 | 9 (sources, voices, sequencers) |
+| [spreadsheet-generators.md](spreadsheet-generators.md) | `spreadsheet` | 2.8.5.1 | 9 (sources, voices, sequencers) |
 | [spreadsheet-effects.md](spreadsheet-effects.md) | `spreadsheet` | 2.8.5.1 | 12 (effects) |
 | [biome.md](biome.md) | `biome` | 2.2.3 | 23 (utilities, sequencers, small voices) |
 | [scope.md](scope.md) | `scope` | 1.2.7 | 7 (inline visualization) |

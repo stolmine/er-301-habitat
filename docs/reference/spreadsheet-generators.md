@@ -1,4 +1,4 @@
-# Spreadsheet: Sources, Voices & Sequencers (`spreadsheet`), v2.8.5.1
+# Spreadsheet: Generators (`spreadsheet`), v2.8.5.1
 
 The generative half of the `spreadsheet` package: three pattern/shape sequencers
 (Excel, Ballot, Etcher), two synthesis sources (Rauschen, Helicase), and four
