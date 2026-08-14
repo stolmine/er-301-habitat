@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**202 items** — 59 done, 7 wip, 135 todo, 1 blocked. *Rendered 2026-08-13.*
+**208 items** — 59 done, 7 wip, 141 todo, 1 blocked. *Rendered 2026-08-14.*
 
 ## DSP
 
@@ -28,9 +28,11 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `canals-audiorate-and-cpu` | Canals: audio-rate Span-sweep aliasing (halfband decimator) + hardware CPU/NEON pass | manual · 2026-07-09 |
 |   | `canals-response-tuning` | Canals: SPAN/volume/low-band/Q/soft-clip response tuning against hardware capture corpus | manual · 2026-07-09 |
 |   | `compound-dsp-voice-profile` | Profile + emulate on-hand compound DSP module (workflow shakedown) | manual · 2026-07-17 |
+|   | `dross-trash-compressor` | Dross: character 'trash' compressor - feedback detector, no threshold/ratio, vinyl grit | manual · 2026-08-14 |
 |   | `drywet-crossfade-audit` | Audit all wet/dry units for the linear-crossfade center dip; switch decorrelated wets to equal-power | manual · 2026-07-15 |
 |   | `flakes-shards-fidelity` | Flakes: tune self-modulation engine to Shards, steeper LP on feedback, evaluate manual-loops fidelity | manual · 2026-07-09 |
 |   | `fx-delay-units` | Combined Petrichor+Pecto (CPU-efficient) + character-forward Lofi delay | manual · 2026-07-09 |
+|   | `gesso-glue-compressor` | Gesso: SSL-G-style glue bus compressor on an Airwindows Pressure6 engine (MIT) | manual · 2026-08-14 |
 |   | `helicase-sync-polyblep` | Helicase: PolyBLEP at the carrier reset discontinuity on hard sync | manual · 2026-07-09 |
 |   | `house-atom-library` | House: AW tone-shaping atom library (first-15) + RotCoat/composition component atoms | manual · 2026-07-09 |
 |   | `house-harness-patterns` | House: harness patterns — Channel-Buss containment, envelope-driver, reduced-rate domain, kWoodRoom atom refactor | manual · 2026-07-09 |
@@ -43,6 +45,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `mirror-promotion` | Mirror: final habitat name + Voss-McCartney 1/f drift + wavetable frame-inventory audition | manual · 2026-07-09 |
 |   | `multimode-drum-voice-profile` | Profile + emulate multi-engine digital drum voice (per mode) | manual · 2026-07-17 |
 |   | `multiout-nlc-chaos` | NLC chaotic modulation sources (clean-room): Sloth, Chua, Hyperchaos, Squid Axon, + lower-pri | manual · 2026-07-09 |
+|   | `nacre-quadrature-width` | Nacre: quadrature stereo width + image rotation + frequency shift on one Hilbert pair | manual · 2026-08-14 |
 |   | `ngoma-character-campaign` | Pin down Ngoma Character control - mechanism from firmware, fix the engine to match hardware | manual · 2026-08-13 |
 |   | `ngoma-cpu-optimization` | Ngoma: CPU optimization round 2 (~33% mono Cortex-A8 idle is steep) | manual · 2026-07-09 |
 |   | `ngoma-grit-noise-persistence` | Grit noise bed decays too fast vs hardware - separate short envelope (60ms fixed / 150ms cap) | manual · 2026-08-13 |
@@ -104,6 +107,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `blanda-scan-mixer` | Blanda — 3-input scan mixer (Morph-4-style continuous bell-scan, not a crossover) | manual · 2026-07-09 |
 |   | `catchall-flakes-wrong-module-require` | Catchall Flakes: requires biome.libcatchall, which does not exist — unit cannot load | manual · 2026-08-10 |
 |   | `catchall-sfera-spin-inert` | Catchall Sfera: Spin is visual-only; V/Oct inlet has no control; qScale branch orphaned | manual · 2026-08-10 |
+|   | `diptych-mid-side` | Diptych: stereo-only mid/side splitter with a processing branch per side | manual · 2026-08-14 |
 |   | `etcher-io-range-and-presets` | Etcher: change I/O ranges to ±1V + add sine/triangle/user presets + hardware deviation verify | manual · 2026-07-09 |
 |   | `fademixer-6-8-plus-mutesolo-fix` | FadeMixer 6/8-input versions + fix broken mute/solo | manual · 2026-07-21 |
 |   | `jf-phase6-ship` | JF Phase 6: polish + ship (trig-LUT audit, CPU profile, test procedures, vanilla-compat, FM consolidation) | manual · 2026-07-09 |
@@ -123,7 +127,9 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `porcelain-microsound-family` | Porcelain microsound/electroacoustic family — DSP kernel set (Raster-Noton + Plumbutter) | manual · 2026-07-09 |
 |   | `port-gplv3-cleanroom` | GPLv3 algorithm-reference clean-room reimplementations (reference only, not code ports) | manual · 2026-07-09 |
 |   | `port-mit-direct` | MIT-compatible direct ports backlog: Stages LFO, Loom, Open303, Faust reverb, ProCo Rat, AW-remaining | manual · 2026-07-09 |
+|   | `sill-window-comparator` | Sill: dual window comparator + logic section on the multi-out framework (Compare 2 reference) | manual · 2026-08-14 |
 |   | `spreadsheet-larets-compressamt-tie-mismatch` | Spreadsheet Larets: Lua ties 'CompressAmt' but C++ registers the parameter as 'TanhAmt' | manual · 2026-08-10 |
+|   | `strata-channel-strip` | Strata: 7-section channel strip on the house atom bin, with a reusable SectionGate control | manual · 2026-08-14 |
 |   | `switch-1-to-n-unit` | 1-to-N switch unit: output selection + output count + passthrough, on the multi-out framework | manual · 2026-08-05 |
 |   | `units-4ms-smr` | 4ms Spectral Multiband Resonator port — 6 resonant bandpass filters with rotation/spread | manual · 2026-07-09 |
 |   | `units-device-randomizer-control-forge` | Device Randomizer + Control Forge-alike — chain-neighbor randomizer and multistage envelope | manual · 2026-07-09 |
