@@ -71,6 +71,8 @@
 #include "Tessera.h"
 // Moire: moving intermod-lattice voice (original, r-animated lattice).
 #include "Moire.h"
+#include "Sediment.h"
+#include "Breccia.h"
 #define SWIGLUA
 %}
 
@@ -127,3 +129,5 @@
 %include "Ferrum.h"
 %include "Tessera.h"
 %include "Moire.h"
+%include "Sediment.h"
+%include "Breccia.h"

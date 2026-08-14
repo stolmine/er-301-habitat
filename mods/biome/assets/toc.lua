@@ -26,6 +26,8 @@ return {
     { title = "Transport",     moduleName = "Transport",            category = "Biome", keywords = "clock, transport, gate, trigger, utility" },
     { title = "Constant Random", moduleName = "ConstantRandom",  category = "Biome", keywords = "random, noise, cv, utility, modulation, sample and hold, lfo" },
     { title = "Expo D",       moduleName = "ExpoD",                category = "Biome", keywords = "envelope, decay, exponential, trigger, eg, percussion, modulation" },
-    { title = "Expo AD",      moduleName = "ExpoAD",               category = "Biome", keywords = "envelope, attack, decay, exponential, trigger, eg, modulation" }
+    { title = "Expo AD",      moduleName = "ExpoAD",               category = "Biome", keywords = "envelope, attack, decay, exponential, trigger, eg, modulation" },
+    { title = "Mordant",      moduleName = "Mordant",              category = "Biome", keywords = "voice, bass, acid, synth, oscillator, filter, resonant, mono, generator" },
+    { title = "Spectral Freeze", moduleName = "SpectralFreeze",    category = "Biome", keywords = "freeze, spectral, fft, phase vocoder, texture, sustain, drone, effect, ice, kryos" }
   }
 }

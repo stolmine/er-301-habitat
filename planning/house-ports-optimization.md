@@ -202,3 +202,35 @@ hardware first; the FLOP reduction is real but irrelevant when the loop is load-
 
 Decision: ship the 7 shipped conversions as-is (tone-identical, harmless, minor win), do NOT
 convert Galactic/BA3 (not worth the effort/risk for ~1%). Release house as-is soon.
+
+## CORRECTION (2026-08-11): the sin-cost figures in §2 step 5 and §4.1 are wrong
+
+Surfaced during the Airwindows batch-2 hotspot pass
+(`planning/airwindows-batch2-port-plan.md` §8b), which had built a plan on top of
+them. Both corrections were verified against source and disassembly.
+
+1. **Galactic has 2 `sin()` per sample, not 4.** `mods/house/atoms/Galactic.h:215-216`
+   are the only call sites and they sit inside a single stereo loop (`:192`) -
+   `offsetML` and `offsetMR` are both derived once per frame from the same
+   `vibM`. The comment at `Galactic.h:53` ("2 per sample per channel = 4 sin/sample
+   total") mis-describes its own code. **Fix that comment next time anyone edits
+   the file.**
+2. **A double `sin()` costs ~300-500 ns on am335x, not the ~50 ns in that same
+   comment.** STATIC: the newlib fdlibm this build links has `__kernel_sin` at 13
+   f64 ops, 9 of them FMAC-class, and the |x| <= pi/4 fast path does not apply to
+   the feedback shapers, which take `__ieee754_rem_pio2` on top. Against A8
+   VFPLite timings (non-pipelined, FMACD ~18-19 cy) that is ~250-300 cycles
+   small-arg and ~450-550 with reduction. Cross-check: `ChromeOxide.h:17` records
+   its shipped poly swap as "~20x faster than libm sin".
+   - The two numbers in the old comment were also internally inconsistent with
+     each other: 4 x 50 ns is ~1% of a 20.8 us sample period, not 10%.
+
+**Net effect on this document.** Step 5's "~10% CPU floor -> ~2%" for Galactic
+overstates the win. The real sin floor there is **~3-5%**, so the poly swap buys
+~2-4 points, not ~8. Same correction applies to step 7 for BrightAmbience3 (also
+2 sin/sample). Combined with the 2026-07-22 OUTCOME above - these reverbs are
+gather-bound, and the user already declined the poly swap on both as a character
+change - **steps 5 and 7 are downgraded to optional appendix work.** They are not
+the amortization case for a shared fast-sin atom; the compute-bound plugins in
+batch 2 are (Creature reaches 68 sin/sample at max Depth, where a poly is a
+feasibility gate rather than an optimization).

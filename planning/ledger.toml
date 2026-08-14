@@ -475,13 +475,29 @@ verify = { kind = "manual", ref = "toggle Impasto's mono/stereo menu option with
 note = "planning/todo-archive.md 'Bugs/Impasto'. The label re-labels mono/stereo but the persisted state may not match the live dual-instance topology unless re-inserted."
 
 [[item]]
+id = "kryos-spectral-freeze-rebuild"
+title = "Kryos: replace the biquad-bank engine with a phase-vocoder spectral freeze, single voice"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "freeze sustains a full spectrum rather than 12 partials; Movement audibly differs across all 5 modes; lowering Ether tends the result toward a few pure tones per the reference behaviour; am335x CPU measured and recorded; no user-facing string names any third-party product" }
+note = """Design: planning/kryos-spectral-freeze.md (2026-08-13). User goal: ape the Disting EX Spectral Freeze, SINGLE VOICE (the 4-voice structure is explicitly not wanted). Read from the disting EX user manual 1.26 chapter 24 pp.171-176.
+THE CURRENT ENGINE IS NOT A SPECTRAL FREEZE. mods/kryos/Kryos.cpp has NO FFT at all: it is 12 fixed biquad bandpass bands, an envelope follower each, and one held sine per band on freeze. That is a 12-partial static additive resynth. The manual explicitly names this failure mode ('a completely static sound ... doesn't give you the sort of textural sustain that is often wanted') for the case of a single captured frame, and the current unit is weaker than that. Replace the engine; keep the name, the Lua shell and the package.
+ATTRIBUTION MUST CHANGE WITH IT: assets/toc.lua credits 'Emilie Gillet / ER-301 port by stolmine' and Kryos.cpp:2 says 'inspired by Mutable Instruments Clouds, code by Emilie Gillet'. Once the biquad bank is gone that is false and would misattribute work. Rewrite both. Never use the deadname.
+FEASIBILITY IS GOOD, the scaffolding exists: Sediment.h already runs an am335x STFT at kFFT 1024 / kHop 256 / pffft / COLA overlap-add, est 2-4% CPU, and pffft already ships in spreadsheet. A freeze is CHEAPER than Sediment because while frozen there is no analysis FFT, only synthesis.
+TWO HARD CONSTRAINTS. (1) Trig: a textbook phase vocoder does polar-to-rect per bin per hop, ~192k sin/cos per second at 512 bins and 187.5 hops/s, unaffordable at the measured 300-500 ns am335x sin. Escape: for a FREEZE the per-bin phase advance is CONSTANT, so precompute one complex rotation per bin at construction and advance by a single complex multiply per bin per hop - no trig in the loop, SoA and NEON-friendly. (2) Memory forces a scope cut: the reference stores up to 128 frames, which as complex spectra is 512 KB against a 256 KB L2. Use MAGNITUDE-ONLY history at 32 frames = 64 KB = ~170 ms, so Depth maps 1-32 not 1-128. Magnitude-only is the mechanism, not a compromise: regenerated phase is what makes the loop wrap interpolated rather than a splice.
+ETHERIZATION IS THE SIGNATURE FEATURE, not a trim - it is what gives the algorithm its identity. Manual defines behaviour only: lowering it 'progressively drops out components judged to be transient', tending 'towards a small number of pure tones which represent the strongest harmonics'. Method: per-bin steadiness score across the history frames (temporal mean over variation), threshold swept by the control. Runs ONCE PER FREEZE over 32x512, not per sample, so it is free.
+DROPPED: 4 voices, Freeze target/Auto, per-voice gain/pan/shift, MIDI notes, and the built-in delay+reverb (Fabula/Petrichor/Network already cover those).
+MOVED INTO BIOME 2026-08-13 as the unit "Spectral Freeze" (moduleName SpectralFreeze), biome 2.2.4.1; the standalone kryos package is RETIRED and mods/kryos deleted (recoverable from git). Class is now stolmine::SpectralFreeze in mods/biome/SpectralFreeze.{h,cpp}; harness moved to tools/spectral-freeze-test; emu test is now er-301/tests/emu/94-spectral-freeze-insert-smoke.test. The old name "kryos" survives ONLY as a toc search keyword per the index-vs-identity rule. Moving it required three things biome lacked: pffft vendored in, a .c build rule, and -fno-tree-vectorize extended to LINUX (biome had it for am335x only, and without it the double-sin LUT vectorizes into libmvec and the .so will not load). Also added -MMD -MP header deps to biome while there. Was built as kryos 1.0.0.5 (1.0.0.4 + energy preservation): ENERGY PRESERVATION was needed because Ether and Shift were both secretly LEVEL controls - measured -4.1 dB across the Ether sweep and an 11.4 dB SWING across Shift (-7.2 dB at -24 ST, +4.2 dB at +24 ST, asymmetric because a downshift reads from the quieter top of the spectrum and loses content off the end while an upshift stretches loud low content over more bins). Fix accumulates frame energy before and after gate+shift and scales by sqrt(ratio), capped 8x and one-pole smoothed ~30 ms. Now -1.8 dB and 2.2 dB respectively. THIS IS ALSO THE BLOOM: holding total energy while discarding all but a few bins necessarily makes the survivors much louder, so they fill the space the transients vacated rather than leaving a hole - the wanted behaviour falls out of the normalization and needed no separate mechanism. Original 1.0.0.4 notes: engine replaced wholesale with an STFT phase vocoder, pffft copied into the package, biquad bank gone, Lua rebuilt around Freeze/Depth/Rate/Offset/Ether/Attack/Release/Shift/Mix plus a Movement menu option. Functional harness tools/kryos-test (7 checks) all passing; both arches build; NEON hints clean; emu insert smoke passes. STEP 7 (hardware CPU + listening pass) IS THE ONLY THING LEFT. Three bugs the harness caught, all recorded in the design doc: (1) the freeze collapsed to EXACT silence when input stopped, because analysis kept overwriting the magnitude history while frozen - fix is that the FFT still runs every hop but the history ring is written only while NOT frozen; (2) -fno-tree-vectorize was missing for LINUX, so GCC vectorized the double-sin LUT loop into libmvec (_ZGVbN2v_sin) and the .so failed to load with undefined symbol on insert; (3) kryos had no -MMD -MP header dep tracking at all. Also: editing mod.mk does not invalidate objects, and make kryos-clean deletes the WHOLE testing/<arch> tree not just the package. STEP 0 DONE 2026-08-13, tools/kryos-proto/freeze.py, results in the design doc section 6a. Four measured decisions that bind the C++: (a) store TRUE instantaneous frequency per bin at capture, +2 KB once - bin-centre rotation measured 3.6x worse envelope wobble (0.615 vs 0.172) because adjacent bins of one partial beat; (b) Ether must score steadiness*LEVEL not steadiness alone - the steadiness-only version was completely inert because 492 of 513 bins are noise floor inside a 0.039-wide score band; corrected it goes 56 partials to 1 with harmonic share 0.23 to 0.76; (c) all 5 Movement modes verified distinct; (d) pitch remaps magnitude AND rotation together with out-of-range bins silenced, worst error 0.50 ST. ORIGINAL BUILD ORDER: 0 offline Python prototype FIRST (Etherization and the 5 Movement modes are sound questions - this was right for Sediment and Breccia), 1 lift Sediment's STFT scaffolding, 2 capture + rotation table, 3 envelope/mix/gate = first audible milestone, 4 Movement/Rate/Depth/Offset, 5 Etherization, 6 pitch shift, 7 hardware CPU + listening."""
+
+[[item]]
 id = "kryos-load-hang"
 title = "Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware"
-status = "blocked"
-stamped = "2026-07-09T20:59:09-05:00"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "insert Kryos in the emulator first: if it hangs there it's a DSP bug; if only hardware hangs it's am335x-specific. Then fix and confirm clean insertion on hardware" }
-note = "planning/todo-archive.md 'Bugs/Kryos', '## Kryos'. Blocked pending emu-vs-hardware isolation (needs hardware test). High priority: blocks a multiband spectral-freeze unit (per-band freeze gates on the crossover engine)."
+note = "planning/todo-archive.md 'Bugs/Kryos', '## Kryos'. High priority: blocks a multiband spectral-freeze unit (per-band freeze gates on the crossover engine). DOES NOT REPRODUCE: user ran it on hardware 2026-08-13 and the unit loads and runs fine. Keep the emu test as a regression guard; if it ever returns, the crash-diagnostics procedure below is the route. ISOLATION DONE 2026-08-13, no longer blocked. Emulator is CLEAN: new test er-301/tests/emu/94-kryos-insert-smoke.test installs the package, inserts the unit, runs 360 frames and removes it, all passing. So this is am335x-specific, not a DSP bug. Static pass also came back clean and RULES OUT the usual suspects: -fno-tree-vectorize IS applied in mods/kryos/mod.mk; check-neon-hints clean on both Kryos.o and kryos_swig.o; the shipped libkryos.so is byte-identical to a forced clean rebuild so it is not a stale-object sizeof bug; process() has NO unbounded loops (every loop is b<NUM_BANDS or i<FRAMELENGTH, no while, no recursion) so a spin in the DSP is ruled out by control flow; Internal is ~12 bands of scalars (no FFT despite the 'spectral' label, ~800 B) so it is not an allocation-size problem; Kryos.lua uses only stock GainBias/Gate with no custom graphic. NEXT STEP is a hardware capture, not more code reading: arm BOTH toggles in Admin > Settings > General ('Enable crash diagnostics?' AND the separate 'Enable UI hang detection?', both default OFF), reproduce, then read Admin > Crash Reports and run tools/symbolize_crash.py. The facility covers this exact failure class - audio-thread heartbeat plus am335x watchdog for freezes the exception hook never sees, naming the spinning PC, with a package-bounded module map so a Kryos address symbolizes. UNVERIFIED LEAD, do not treat as diagnosis: heldEnv decays exponentially toward zero and am335x links -nostdlib -nodefaultlibs, so the crtfastmath.o that normally sets FTZ is absent and denormal ops may trap to slow support code. ALSO PIN DOWN what 'on load' means - insert, first audio, or first freeze gate - since the emu survives insert plus 360 frames of audio."
 
 [[item]]
 id = "ui-editmode-border-expanded"
@@ -1105,11 +1121,11 @@ note = "planning/todo-archive.md '### Device Randomizer', '### Control Forge-ali
 [[item]]
 id = "units-buffer-shuffler"
 title = "Buffer Shuffler / Groovebox — BBCut-style beat-slicing buffer manipulation"
-status = "todo"
-stamped = "2026-07-09T20:59:09-05:00"
+status = "wip"
+stamped = "2026-08-13T23:51:41-05:00"
 area = "units"
 verify = { kind = "manual", ref = "insert; confirm buffer record/assign, transient-or-grid slicing, per-slice reverse/repeat/pitch/level, algorithmic BBCut-style shuffle modes, clock-synced playback with gate-triggered stutter/glitch" }
-note = "planning/todo-archive.md '## Buffer Shuffler / Groovebox', bbcut.md. Could evolve into a groovebox framework (seq + slices + effects)."
+note = "planning/todo-archive.md '## Buffer Shuffler / Groovebox', bbcut.md. Could evolve into a groovebox framework (seq + slices + effects). BUILT 2026-08-13 as BRECCIA in spreadsheet 2.8.5.4 (rock formed from angular fragments cemented together). Deliberately minimal per user: a card-loaded buffer cut into N slices, played back continuously through a rearrangement, with a gate that reshuffles. Controls are Size + Shuffle + Level, nothing else. KEY CHOICE - SLICE COUNT, NOT LENGTH (user's own instinct): count is length-agnostic, the buffer always divides into exactly N pieces whatever its duration, the loop period stays equal to the buffer, and every slice plays exactly once per cycle so playback is a true PERMUTATION with content preserved. Length would make the count drift with duration and leave a ragged remainder. Size and order changes are adopted only at slice boundaries so neither jumps mid-slice; Fisher-Yates via od::Random::generateFloat; 3 ms equal-power splices from a precomputed LUT (never runtime sinf/cosf, feedback_package_trig_lut); file-rate vs engine-rate compensation retained. VERIFIED: both arches build, three lints clean, Breccia.o NEON-clean, emu insert/delete smoke passes, and the per-sample loop calls ONLY the two readSource reads - sin/cos are the crossfade LUT and Random is the shuffle, both outside it. Python replica measures the permutation at -0.009 dB total energy change (the deficit is the splices). This supersedes the kaleidoscope-slicer and lane-shear-sorter directions as the thing being built; both stay documented. OWED: hardware test, and the listening pass on slice count. SIZE MODE OPTION added 2026-08-13 (spreadsheet 2.8.5.6): user reported 'we appear to always get quite large chunks'. ROOT CAUSE: Size was a slice COUNT capped at 64 on a LINEAR map, so slice duration = buffer/N and a 30 s sample bottomed out at 469 ms even maxed. Fixed in three steps: ceiling 64 -> 1024; Size map made exponential (each detent roughly halves the slice); and a new Size Mode option - 1 = count (length-agnostic, musical divisions line up, duration scales with the buffer) or 2 = length (absolute slice duration, count follows from the buffer), loosely after the sampler slice-mapping idiom (VariSpeed's CV-to-Slice Mapping nearest/index/12TET - same shape of choice, different axis). ALSO FIXED a real bug found while in there: changing Size called identity(), silently UN-SHUFFLING the unit every time the size knob moved, so the shuffle gate appeared broken; it now rebuilds a permutation at the new count while keeping the shuffled state, and snaps to the nearest boundary of the new grid instead of jumping the playhead to the top of the buffer."
 
 [[item]]
 id = "units-poly-sample-player"
@@ -1319,19 +1335,84 @@ note = "planning/todo-archive.md '## Video', video.md."
 [[item]]
 id = "open303-port"
 title = "Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit"
-status = "todo"
-stamped = "2026-07-11T22:08:06-05:00"
+status = "wip"
+attested = """2026-08-10 PHASE 1+2 LANDED, emu-verified; hardware CPU% and listening pass owed.
+Ships as MORDANT in biome 2.2.3.1 (user call: biome, not catchall->spreadsheet). Vendored engine
+under mods/biome/open303/, attribution preserved, LICENSE-Open303.txt carried.
+FIDELITY, A/B vs the pristine upstream engine built from ~/repos/Open303: raw correlation reads low
+purely because the halfband cascade adds a fixed group delay the elliptic IIR did not (22 output
+samples at 4x, 14 at 2x). Aligned for that lag, correlation is 0.9997 (4x) and 0.9995 (2x); on
+spectral bins within 60 dB of peak the median difference is -0.32 dB; the first 8 harmonics match
+within 0.1 dB.
+FOOTPRINT, the point of the exercise: sizeof(MipMappedWaveTable) 213,472 -> 33,296 B and
+sizeof(Open303) 431,800 -> 67,952 B. The voice now sits in a quarter of the 256 KB L2 instead of
+overflowing it by 175 KB.
+CPU (x86, ns/sample): upstream 171.5, port 4x 194.2, port 2x 120.4. Stated honestly - the 4x tier is
+SLOWER than upstream on x86, because a 63-tap halfband cascade is ~51 MACs against the elliptic's
+~12, and x86 has fast doubles and enough cache to hide 385 KB of tables. The shipping am335x tier is
+2x, faster than upstream even on the arch that flatters upstream most.
+THREE PLAN ITEMS DIED ON CONTACT WITH THE SOURCE, all struck through in place in the doc:
+ - B3 (derive square from saw) WITHDRAWN: the 303 square is -tanh(70*saw + 4.37) circular-shifted,
+   band-limited by FFT AFTER the nonlinearity, not a saw-minus-saw difference. Not reachable from
+   the saw's levels at runtime. Costs nothing - B2 alone clears L2.
+ - C's approx-coeffs item is a NO-OP: setCutoff already calls calculateCoefficientsApprox4.
+ - the elliptic decimator is RETIRED ON BOTH TIERS, not just at 2x: a 12th-order Direct Form II IIR
+   with a06=308 against b00=1.4e-4 is ill-conditioned in single precision, and keeping it in double
+   would put a double IIR on the per-oversampled-sample path. Replaced by O3Halfband, a 63-tap
+   Kaiser(9.0) polyphase halfband (DC gain 1.000000, -103 dB stopband, -68.5 dB worst alias-band
+   rejection), one stage at 2x and two cascaded at 4x.
+TWO BUGS FOUND AND FIXED IN MY OWN PORT WORK, both recorded because both were silent:
+ - mPrevOsc/mOsBuf, the new out-of-loop oscillator state, were never initialized. The resonant
+   ladder took a garbage interpolation step and diverged from sample 0 with sign-alternating growth.
+   It looked fine in the first smoke test only because that heap happened to hold benign values.
+ - the am335x oversampling tier never engaged: o3_config.h tested `defined(am335x)`, and nothing in
+   this build defines that macro, so hardware silently took the heavier 4x path. The tier is now set
+   explicitly in mod.mk (-DO3_OVERSAMPLING=2 under ARCH=am335x) and verified on the compile line.
+VERIFY: both arches build clean; all three lints clean (libbiome.so 0 safe / 0 suspect NEON hints,
+no out-of-line virtuals, Mordant::process() frame 52 B against a 512 B budget); emu insert smoke
+test er-301/tests/emu/91-mordant-insert-smoke.test passes - install, register, insert, 360 frames of
+audio+draw, clean removal.
+OWED: am335x hardware CPU% + insert; the Phase 3 listening pass against reference recordings; the
+Phase 4 Devil Fish aux controls. NOTE the wavetables are still generated at construction with
+double sin/cos via the FFT - feedback_package_trig_lut is confirmed for sinf/cosf only, so the
+double path is probably fine, but it is unverified on hardware and a wrong table would be silent
+in the emu.
+
+2026-08-11 DEVICE DEFECTS FIXED + HOT-SPOT PASS (biome 2.2.3.3).
+(1) EXTREMELY QUIET: Level mapped 0..1 -> -60..0 dB, so the default bias 0.5 sat at -30 dB (measured
+peak 0.033). User confirmed independently that Level 1.0 sounded normal. Level is now a linear
+0..1 output gain (peak 0.525 at default). Note the voice exceeds full scale with resonance up -
+peak 1.055 at Level 0.5 / Resonance 0.7 - that is the instrument being loud, not a bug.
+(2) SLIDE KILLED THE NOTE: a rising gate with Slide high called slideToNote(), which never touches
+the amp envelope because upstream only slid mid-legato. With a modular gate falling between steps
+the envelope had already released -> silence (measured peak 0.0000). Slide now selects glide vs jump
+and a note sounds on every rising edge; triggerNote() took a `glide` arg that skips the slew-limiter
+force-set. Measured glide 55->110 Hz: 143/158/172/186/196/206/212/215 Hz monotonic.
+HOT SPOTS, four applied: setNoteNumber's double exp() ran EVERY sample (now change-guarded); the
+live TB_303 coefficient branch used bare double literals (31 f64 ops/sample incl vdiv.f64, now
+f-suffixed); a 12th- and an 8th-order polynomial were computed then DISCARDED per sample in TB_303
+mode (now early-return); nine double members on the per-sample path retyped to o3Float. Plus a
+latent UB fixed: O3Halfband::mPos was a signed int advanced 2x per output and never reset,
+overflowing after ~2 h - the anamnesis field::hash01 UB class. Now unsigned.
+VERIFIED: A/B vs pre-opt corr 0.999998, -53 dBr; x86 2x tier 120.4 -> 91.6 ns/sample (24% faster),
+4x 194.2 -> 155.9 (now beats upstream's 171.5). Both arches clean, three lints clean, emu smoke ok.
+INVESTIGATED, NOT A PROBLEM: the approx4 "valid to pi/4" warning belongs to the polynomials that are
+dead in TB_303 mode; a Goertzel probe of the live fit puts a commanded 20 kHz at 19,930 Hz (6 cents)
+with no instability at the 2x tier. NEON NO-GO now evidenced, not estimated: the budget is serial
+feedback recursions with a one-sample dependency; the only SIMD-able kernel is under 10% of cost.
+STILL OWED: am335x hardware CPU% + insert, and the Phase 3 listening pass."""
+stamped = "2026-08-13T23:51:41-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "emu audition A/B vs an Open303 reference render; bench-verify on am335x for CPU load + NEON/AAPCS stability" }
-note = "Plan of record: planning/open303-port.md (supersedes open303-port-scoping.md; part of the port-mit-direct backlog). MIT confirmed (License.txt, (c) 2009 Robin Schmidt; attribution kept). Voice = rosic::Open303 with the internal AcidSequencer stripped (run it OFF), driven by ER-301 trig / V-oct / accent / slide inlets. Target: am335x-shippable spreadsheet flagship alongside Ngoma; prototype in catchall, promote after listening. Engine audit: the port is NOT free - ~385KB double wavetables (8 mip-gathers/sample, blows 256KB L2), per-sample pow2 on cutoff, 4x oversampling. Optimization plan (see doc): float + pull the oscillator OUT of the 4x loop + shrinking mip pyramid + derive square from one saw table (-> ~30KB tables) + fast exp2 + approx filter coeffs + 2x(am335x)/4x(CM4) tiers. User-facing name stays generic (no Roland/303)."
+note = "Plan of record: planning/open303-port.md (supersedes open303-port-scoping.md; part of the port-mit-direct backlog). MIT confirmed (License.txt, (c) 2009 Robin Schmidt; attribution kept). Voice = rosic::Open303 with the internal AcidSequencer stripped (run it OFF), driven by ER-301 trig / V-oct / accent / slide inlets. Target: am335x-shippable spreadsheet flagship alongside Ngoma; prototype in catchall, promote after listening. Engine audit: the port is NOT free - ~385KB double wavetables (8 mip-gathers/sample, blows 256KB L2), per-sample pow2 on cutoff, 4x oversampling. Optimization plan (see doc): float + pull the oscillator OUT of the 4x loop + shrinking mip pyramid + derive square from one saw table (-> ~30KB tables) + fast exp2 + approx filter coeffs + 2x(am335x)/4x(CM4) tiers. User-facing name stays generic (no Roland/303). REVISED 2026-08-10 (user): ships in BIOME, not catchall->spreadsheet; Phases 1+2 merged since the am335x target was chosen up front. Two plan items died on source verification - B3 (derive square from saw) WITHDRAWN, the 303 square is a tanh-shaped saw band-limited after the nonlinearity, not a saw difference; and C's approx-coeffs item is a NO-OP, setCutoff already calls calculateCoefficientsApprox4. Target still holds: B2 (shrinking mip pyramid) alone takes the tables 385KB -> ~33KB."
 
 # Fragment: anamnesis viz optimization. Append via scripts/dev ledger-append.
 
 [[item]]
 id = "anamnesis-viz-opt"
 title = "Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf)"
-status = "wip"
-stamped = "2026-07-11T23:04:10-05:00"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
 area = "ui"
 attested = """2026-08-07 OPTIMIZED (anamnesis 0.2.0.86), hardware CPU% owed. Anamnesis inserted for
 the first time after [hab:anamnesis-insert-crash] and immediately pinned the CPU.
@@ -1535,12 +1616,12 @@ branch-free and contiguous; the ripple kernel is contraindicated, see round six)
 under slicing; and whether kStripSlices=4 is the right tradeoff between per-frame cost and how stale
 a column may be."""
 verify = { kind = "manual", ref = "emu: no encoder-capture / acceptable frame rate with all plies + bubbles + high Diffusion; responsive on CM4; am335x builds clean + check-graphic-virtual-defs.sh + (if NEON) check-neon-hints.sh" }
-note = "Plan of record: planning/anamnesis-viz-optimization.md. The all-over Pond viz crawls on CM4 (fine on MBA by brute force) because it is drawn by one AnamFieldGraphic PER PLY (kVizPlies=6) and each draw() recomputes the GLOBAL work identically - 28-point drift layer, sub-bump expansion over every bubble, and the per-level metaball field build (O(cells x bumps) expf + 3-octave fbm per cell, x3 levels) - so the heavy work runs ~6x redundantly per frame. Doctrine (planning/neon-opportunities.md): architectural before NEON (Visadhara precompute cache = 50x vs NEON 4x), and NO habitat graphic uses NEON yet (compiles into the SWIG .o at -Os, :64 trap unproven). Plan: (1) shared per-frame field cache on the op keyed on vizPhase - compute the strip-wide field once, plies blit windows (mirrors the RaindropGraphic screensaver it was lifted from); (2) bound the field build to per-bump bboxes (bumps->splat, not cells->all-bumps); (3) LUT the expf + thin fbm; (4) fill only active bbox; (5) single-pass multi-threshold marching squares; (6) NEON only on a measured remaining hotspot, class-member storage + whole-.o hint scan + hardware test. Crash rails: keep every virtual inline (DrumCubeGraphic out-of-line draw crash). Item 1 alone likely fixes the crawl. DSP am335x viability (Stretch the killer) is separate."
+note = "Plan of record: planning/anamnesis-viz-optimization.md. The all-over Pond viz crawls on CM4 (fine on MBA by brute force) because it is drawn by one AnamFieldGraphic PER PLY (kVizPlies=6) and each draw() recomputes the GLOBAL work identically - 28-point drift layer, sub-bump expansion over every bubble, and the per-level metaball field build (O(cells x bumps) expf + 3-octave fbm per cell, x3 levels) - so the heavy work runs ~6x redundantly per frame. Doctrine (planning/neon-opportunities.md): architectural before NEON (Visadhara precompute cache = 50x vs NEON 4x), and NO habitat graphic uses NEON yet (compiles into the SWIG .o at -Os, :64 trap unproven). Plan: (1) shared per-frame field cache on the op keyed on vizPhase - compute the strip-wide field once, plies blit windows (mirrors the RaindropGraphic screensaver it was lifted from); (2) bound the field build to per-bump bboxes (bumps->splat, not cells->all-bumps); (3) LUT the expf + thin fbm; (4) fill only active bbox; (5) single-pass multi-threshold marching squares; (6) NEON only on a measured remaining hotspot, class-member storage + whole-.o hint scan + hardware test. Crash rails: keep every virtual inline (DrumCubeGraphic out-of-line draw crash). Item 1 alone likely fixes the crawl. DSP am335x viability (Stretch the killer) is separate. PARKED 2026-08-07 (user): Anamnesis is deferred until the move to CM4. It is understood as a CM4 target, not am335x - see the 0.2.0.92 commit body for the accepted-for-now residuals (UI thread chugs, viz does not always hit full rate, encoder capture returns on some settings, bubbles update sluggishly as a consequence of column slicing). Resume when CM4 is the platform."
 [[item]]
 id = "anamnesis-insert-crash"
 title = "Anamnesis am335x insert: data-abort in Event_post (heap corruption from insert path)"
-status = "wip"
-stamped = "2026-07-12T12:06:43-05:00"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
 area = "dsp"
 attested = """2026-08-07 ROOT-CAUSED AND FIXED (anamnesis 0.2.0.85), hardware verification owed.
 THE WRITE: AnamNoise.h lut() held `int perm[512]` as a STACK LOCAL - a 2048-byte frame - in the
@@ -1574,7 +1655,7 @@ OWED: hardware verify - insert repeatedly with diagnostics armed, expect `insert
 ~14 stacks listed, and `audio canary=ok`."""
 
 verify = { kind = "manual", ref = "insert Anamnesis in the emu (ASan-clean if built with -fsanitize=address) AND repeatedly on am335x hardware with crash diagnostics armed -> no Event_post data-abort / no corruption" }
-note = "Full report: planning/anamnesis-insert-crash.md. HW capture fw 9.5.2.56: data-abort in ti_sysbios_knl_Event_post, dfar=0x62 dfsr=0x5 (near-null deref, NOT alignment/NEON), thread=hwi from the audio EDMA ISR, flight-recorder 'insert Anamnesis' 0.2s prior -> a stray heap WRITE from Anamnesis's insert path clobbers the audio Event pend-queue pointer. AUDIT (2026-07-12): every member-array write in the ctor (memsets + init loops: mLoopBuf/mLine/mAp/mTapBuf/mHannLut/mGrain*/mDrop*/mBub*/mBandZ/pan-tap-fdn tables) and in process() (mLoopBuf[mLoopWr] Lint<=kLoopBufLen; mTapBuf[mTapWr]; mAp[k][idx] idx<kApLen<=kApMax; mLine[i][mWr]; bubble/drop/grain spawns all slot-in-range) is BOUNDED on a correctly-sized object -- no obvious index OOB found. anamnesis is SINGLE-TU (only the SWIG wrapper .o), so the classic stale-wrapper sizeof-MISMATCH cannot apply (a stale wrapper is consistently stale). So: either a subtle path not yet found (buildFieldFrame mFcGrid verified in-bounds too) or build/state/am335x-specific. NEXT: build the .so with -fsanitize=address + LD_PRELOAD libasan, insert in headless emu (ASan names the exact store), and re-capture on hardware with the CLEAN 0.2.0.83 build (original capture's build provenance unknown)."
+note = "Full report: planning/anamnesis-insert-crash.md. HW capture fw 9.5.2.56: data-abort in ti_sysbios_knl_Event_post, dfar=0x62 dfsr=0x5 (near-null deref, NOT alignment/NEON), thread=hwi from the audio EDMA ISR, flight-recorder 'insert Anamnesis' 0.2s prior -> a stray heap WRITE from Anamnesis's insert path clobbers the audio Event pend-queue pointer. AUDIT (2026-07-12): every member-array write in the ctor (memsets + init loops: mLoopBuf/mLine/mAp/mTapBuf/mHannLut/mGrain*/mDrop*/mBub*/mBandZ/pan-tap-fdn tables) and in process() (mLoopBuf[mLoopWr] Lint<=kLoopBufLen; mTapBuf[mTapWr]; mAp[k][idx] idx<kApLen<=kApMax; mLine[i][mWr]; bubble/drop/grain spawns all slot-in-range) is BOUNDED on a correctly-sized object -- no obvious index OOB found. anamnesis is SINGLE-TU (only the SWIG wrapper .o), so the classic stale-wrapper sizeof-MISMATCH cannot apply (a stale wrapper is consistently stale). So: either a subtle path not yet found (buildFieldFrame mFcGrid verified in-bounds too) or build/state/am335x-specific. NEXT: build the .so with -fsanitize=address + LD_PRELOAD libasan, insert in headless emu (ASan names the exact store), and re-capture on hardware with the CLEAN 0.2.0.83 build (original capture's build provenance unknown). PARKED 2026-08-07 (user): Anamnesis deferred until the move to CM4. The insert data-abort and the later delete busy-stack crash are both fixed and user-confirmed on device; what remains owed is the armed-diagnostics am335x insert verification, which is moot while the target is CM4. Revisit or close when CM4 work resumes."
 
 # Fragment: Fabula (Dattorro figure-8 APF-tank reverb) am335x port.
 # Append via: scripts/dev ledger-append planning/fragments/fabula-am335x.toml
@@ -2214,8 +2295,8 @@ hardware sanity. NEXT: the viz ([[vitrail-viz]]).
 [[item]]
 id = "trinity-fm-unit"
 title = "Profile Modbap Trinity FM voice + build ER-301 FM drum unit"
-status = "wip"
-stamped = "2026-07-20T16:17:40-05:00"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
 area = "dsp"
 touches = ["mods/spreadsheet/*"]
 verify = { kind = "manual", ref = "unit hits A/B against Trinity capture set; 2-op FM laws (ratio/index/pitch/envelopes) reproduced" }
@@ -2382,7 +2463,8 @@ bytes). Caught by the arbitration pass. The failure was in the relay, not the or
 NEXT: clean-room + am335x-optimized implementation of the settled mechanisms (grit regimes,
 grit->dec_time law, cubed-ramp decay, no attack ramp), then Character's register, s1, and
 e_hi's mechanism.
-"""
+
+PARKED 2026-08-07 (user): the FM drum voice may come later. Firmware RE findings stand as recorded; no further profiling or implementation for now."""
 
 [[item]]
 id = "tessera-into-ngoma"
@@ -2875,8 +2957,8 @@ silently exempt). Bias/static default is unchanged; only the CV-depth gain defau
 [[item]]
 id = "ngoma-shape-fm-campaign"
 title = "Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping)"
-status = "wip"
-stamped = "2026-07-22T22:26:18-05:00"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
 attested = """2026-07-22: Fable campaign agent dispatched. TWO coupled asks (user): (1) set Ngoma's
 Clipper DEFAULT to 0 (ship clean, not the corpus-heft 1.0) - this also frees Shape, since the
 limiting regime muddies it; revisit the equal-loudness makeup reference now that 0 is home. (2)
@@ -2899,7 +2981,9 @@ Shape evidently does more (candidate: an inter-mode / cross-partial FM the addit
 capture; cf. the Moire coupled-FM experiments and the firmware findings). User's call: SEPARATE
 CAMPAIGN. Likely wants a fresh Trinity-hardware capture campaign targeting Shape specifically, read
 against the firmware (reference_trinity_firmware_re, ~/repos/trinity-midi-harness,
-~/Downloads/Trinity2_0_Firmware/re/findings-*.md). Not a port bug - a modeling frontier."""
+~/Downloads/Trinity2_0_Firmware/re/findings-*.md). Not a port bug - a modeling frontier.
+
+PARKED 2026-08-07 (user): Ngoma is parked. No further hardware campaigns for now."""
 
 [[item]]
 id = "biome-expo-envelopes"
@@ -2974,8 +3058,8 @@ value ranges) - restructure those rather than delete."""
 [[item]]
 id = "ngoma-character-campaign"
 title = "Pin down Ngoma Character control - mechanism from firmware, fix the engine to match hardware"
-status = "wip"
-stamped = "2026-07-23T09:07:23-05:00"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
 area = "dsp"
 touches = ["mods/spreadsheet/DrumVoice.*"]
 verify = { kind = "manual", ref = "Character sweep on Ngoma reproduces the Trinity hardware's timbral fold behavior; harmC residuals (were +-9..14 dB after the Shape campaign) close; regression on Shape/decay/grit holds" }
@@ -2990,13 +3074,15 @@ corrected two-folded-osc understanding. Resolve WHICH BLOCK arg is Character (s1
 the 7-arg map; s2=Shape). CRITICAL PRECONDITION: the rig had ~+0.75 semitone tuning drift and stored
 corpus fits share the nominal-fc assumption - RE-PIN the rig tuning and validate the instrument BEFORE
 interpreting any Character data (see reference_trinity_firmware_re, feedback_validate_the_instrument_first,
-feedback_pin_every_cc_hardware_profiling). Fable campaign dispatched 2026-07-23."""
+feedback_pin_every_cc_hardware_profiling). Fable campaign dispatched 2026-07-23.
+
+PARKED 2026-08-07 (user): Ngoma is parked. No further hardware campaigns for now."""
 
 [[item]]
 id = "ngoma-shape0-level-campaign"
 title = "Ngoma shape-0 fundamental level structure (oscillator phase coherence at low r)"
-status = "wip"
-stamped = "2026-07-23T09:59:27-05:00"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
 area = "dsp"
 touches = ["mods/spreadsheet/DrumVoice.*"]
 verify = { kind = "manual", ref = "at shape~0 the model's fundamental level matches the hardware's measured 1.67x-coherent structure across notes and Character; onset stays click-free; regression on Shape/Character/decay/grit holds" }
@@ -3013,13 +3099,15 @@ RESOLVE FROM FIRMWARE: how BLOCK sets oscillator start phases per trigger (Shape
 are 'deterministic but extraction is noise-limited') AND how it avoids the onset click WITHOUT varied
 phases (candidate: the onset envelope / fold does it). Then use the hardware's real start-phase scheme.
 PRECONDITION: re-pin the +71-73 cent rig drift + validate the instrument BEFORE interpreting data
-(reference_trinity_firmware_re, feedback_validate_the_instrument_first). Fable dispatched 2026-07-23."""
+(reference_trinity_firmware_re, feedback_validate_the_instrument_first). Fable dispatched 2026-07-23.
+
+PARKED 2026-08-07 (user): Ngoma is parked. No further hardware campaigns for now."""
 
 [[item]]
 id = "ngoma-grit-tuning"
 title = "Ngoma grit: noise phase-mod too weak below 0.8 - re-fit depth vs re-pinned hardware"
-status = "wip"
-stamped = "2026-07-23T10:40:02-05:00"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
 area = "dsp"
 touches = ["mods/spreadsheet/DrumVoice.cpp"]
 verify = { kind = "manual", ref = "grit's common-mode noise phase-mod is audibly present and building through ~50% travel (matching the hardware), not near-silent until the 0.8 noise bed; hit-to-hit decorrelation still tracks hardware; regression on other mechanisms holds" }
@@ -3032,13 +3120,15 @@ hear. CRITICAL: grit was characterized BEFORE the +67-73 cent rig-drift was disc
 original depth fit may be compromised - RE-CAPTURE on the re-pinned rig (per-partial instantaneous
 FREQUENCY, phase-domain, feedback_phase_domain_measurement) and re-fit kGritKappa/kGritDepthTrim so
 the phase-mod is present through ~50% travel AND still matches hardware hit-to-hit decorrelation (the
-two must be consistent). Not a mechanism change - a depth/shape re-fit. Fable dispatched 2026-07-23."""
+two must be consistent). Not a mechanism change - a depth/shape re-fit. Fable dispatched 2026-07-23.
+
+PARKED 2026-08-07 (user): Ngoma is parked. No further hardware campaigns for now."""
 
 [[item]]
 id = "ngoma-grit-noise-persistence"
 title = "Grit noise bed decays too fast vs hardware - separate short envelope (60ms fixed / 150ms cap)"
-status = "wip"
-stamped = "2026-07-23T14:01:25-05:00"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
 area = "dsp"
 touches = ["mods/spreadsheet/DrumVoice.cpp"]
 verify = { kind = "manual", ref = "the grit noise bed (>0.8 regime) persists as long as it does on the Trinity hardware, not the current short fixed decay; measure hardware noise-bed persistence vs Decay and refit noiseTau" }
@@ -3065,7 +3155,9 @@ grit-independent) -> noiseTau = 0.88*tauC^0.809, 150ms cap + 60ms fix deleted. B
 plateau from CC88 (pitch-scaled); the ~CC114 "step" is the VOICE being gate-killed, so the
 (1-noiseMix*0.5) trim + tauEff collapse are replaced by the firmware cubed gate env. Validated:
 persistence ratio 0.92-1.11 across grit x decay, bed +-0.9 dB, grit-0 bit-identical. Remaining:
-the manual device ear-check vs the Trinity (checklist in the campaign doc)."""
+the manual device ear-check vs the Trinity (checklist in the campaign doc).
+
+PARKED 2026-08-07 (user): Ngoma is parked. No further hardware campaigns for now."""
 
 [[item]]
 id = "ngoma-known-residuals"
@@ -3266,3 +3358,79 @@ stamped = "2026-08-10T22:31:04-05:00"
 area = "units"
 verify = { kind = "manual", ref = "confirm whether the Larets comp readout tracks and whether its CV branch modulates anything" }
 note = "Reported by the reference audit, NOT independently confirmed. Ties resolve by string name, so a mismatch would silently fail to bind rather than error."
+
+[[item]]
+id = "aw-batch2-ports"
+title = "Airwindows batch 2: 11-plugin survey + port (Dynamics3/EverySlew/Mackity first, shared fast-sin atom as the gate)"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "per unit: both arches build, three lints clean, offline A/B vs the unmodified upstream plugin, emu insert smoke test, and hardware CPU% before any optimization number is claimed" }
+note = "Plan of record: planning/airwindows-batch2-port-plan.md (surveyed 2026-08-11). Batch: Mackity, Suzan, Dynamics3, TakeCare, ShortBuss, CloudCoat, SubTight, Creature, EverySlew, OrbitKick, PowerSag2. NOTE 'SubTight Redux' does not exist in the Airwindows repo - SubTight surveyed in its place, confirm intent. TWO CROSS-CUTTING FINDINGS: (1) per-sample double sin() is SAFE on am335x - Galactic already ships 4 sin/sample on hardware and feedback_package_trig_lut is sinf/cosf-specific by its own text - so the batch is a CPU question, not a correctness one; a shared fast-sin atom gates 6 of 11 and retro-improves Galactic + BrightAmbience3. (2) strip AW's per-sample 32-bit dither (frexpf + pow) from all 11, free. KEY DISTINCTION: the 2026-07-22 'hybrid float is low-value' outcome in house-ports-optimization.md was measured on GATHER-BOUND reverbs and does NOT transfer to the 8 buffer-less compute-bound plugins here, where libm and double math really are the loop; it DOES apply to CloudCoat and TakeCare. Step 0 is blocking: port ShortBuss exact, measure on hardware, swap in fast sin, measure again - size the batch off that number, not off the ~10% estimate. SubTight and Creature are the SAME algorithm (SubTight's own comment says 'modified Creature code') - one engine, two voicings. OrbitKick is a generator (a kick synth triggered by input transients), so it earns a standalone unit rather than an atom. Deferred: CloudCoat (7th AW reverb, overlaps CreamCoat), TakeCare (2.25 MB of delay lines). HOTSPOT REVIEW 2026-08-11 (pre-code, corrections verified against source, see plan doc 8b): Galactic has 2 sin/sample NOT 4 (Galactic.h:215-216 in one stereo loop; its own :53 comment is wrong and internally inconsistent), and a double sin costs ~300-500ns not 50ns (newlib fdlibm disasm vs A8 VFPLite timings), so 4 sin/sample is ~6-10% and Galactic's sin floor is ~3-5%. PHASE 2 RETROFIT JUSTIFICATION WITHDRAWN - the fast-sin atom's real customer is Creature/SubTight, where it is a FEASIBILITY GATE: Creature hits 68 sin/sample at max Depth = ~90-150% CPU (unusable), collapsing to ~10-20% with a poly. THREE BAD DEFAULTS: ShortBuss is a bit-exact IDENTITY at default (sbScale = pow((A*2)-1,3)*0.001 = 0 at A=0.5); EverySlew's default IS its max cost (stages is the loop START index, knob inverted); neither CloudCoat nor TakeCare gets undersampling relief at 48k (cycleEnd=1, derez gate open), so TakeCare re-estimated ~40-80% with a 4.7MB double working set. LANDMINES: TakeCare's Rando needs the fpd RNG the port template drops; NaN persists forever in the recursive sin-feedback units (Suzan corner needs a sweep); OrbitKick decays into denormals (emu CPU spike, not an am335x hazard). Creature/SubTight share topology but NOT the per-stage kernel - one formula source, two compile-time instantiations, never a runtime branch. STEP 0 REVISED: hardware sin-cost calibration atom FIRST (N chained sins, N=0..68, measure the slope on-device), then offline fidelity, then the ShortBuss port at A!=0.5."
+links = { depends_on = ["house-atom-library"] }
+
+[[item]]
+id = "spectral-sort-unit"
+title = "Spectral sort unit - pixel-sorting for audio: sample player that permutes the spectrogram along frequency or time"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "offline Python prototype settles axis/key/phase by ear FIRST; then per phase: both arches build, three lints clean, emu insert smoke test, hardware CPU%, and attach/detach/quicksave clean on hardware" }
+note = "Design: planning/spectral-sort-unit.md (2026-08-11). Pixel sorting is mask -> spans -> sort by key, and it is a PERMUTATION (histogram preserved). The STFT magnitude matrix is literally the image, so every pixel-sorting control maps 1:1. TRAP: do NOT sort raw time-domain samples - that yields a monotonic ramp = a sawtooth at the span rate for any input, a waveshaper not a rearrangement. ARCHITECTURE (user calls): (a) buffered, both axes; (b) file handling follows the built-in sample players with core/assets/Player/VariSpeed.lua as the reference - attach from card/pool, slicing view, waveform, serializeSample - NOT record-into-buffer. KEY DESIGN MOVE: separate the permutation from the audio. A sort is a permutation, so the macro recomputes INDEX ARRAYS only (counting sort, no FFT, no audio touched) and resynthesis happens at playback, one inverse FFT per hop reading each bin through the permutation. That makes the macro real-time and CV-modulatable rather than a render button. MEMORY: analyzing the whole sample is DEAD once files come from the card (~385 KB/sec magnitude-only, so a 3-min sample is ~69 MB); instead a bounded ROLLING WINDOW tracks the playhead, which is better anyway because the window IS the sort span and becomes a control (short = local shimmer, long = phrase reordering). Slices are a free second span source. am335x: counting sort on quantized magnitudes (comparison-free, branch-light) NOT a comparison sort per feedback_runtime_branched_dsp_dispatch; pffft already proven on device; playback gather sized at ~1% (ESTIMATED, ~513 scattered reads per 256-sample hop). Energy conserved for free since a permutation preserves the per-frame histogram. RISK: kryos-load-hang is the one existing spectral-resynthesis unit and it hangs hardware, unexplained - resolve or hardware-test early. v1 is trigger/slice/1x playback: variable speed through STFT resynthesis is phase-vocoder time-stretch and a separate feature. Overlaps/synthesizes units-spectral-processing and units-buffer-shuffler. MVP BUILT 2026-08-12 as unit SEDIMENT in spreadsheet 2.8.5.2, frequency axis only (sorting bins within a frame needs no analysis matrix, so the rolling window turned out to be purely a time-axis feature and the MVP is far smaller than the design implies). Verified offline before hardware: pffft real packing confirmed empirically; work=NULL uses the STACK (4KB vs a 2048B audio stack) so the work buffer is heap; Hann^2 at 4x overlap sums to exactly 1.5 and the STFT/OLA replica reconstructs at -140 dBr; counting sort orders 170 dB in 96 buckets with a 0.900 dB worst inversion. Both arches, three lints, emu insert/delete smoke all clean. Fable review found and I fixed: loop-wrap ~13ms fade to -39 dB (wrap inside the gather); control law bunched (86.7% of bins in one span at macro=0.01) so threshold is now dB-linear and the crossfade saturates early; trigger faded the attack in (pre-roll added); no sample-rate compensation so 44.1k files played +1.5 semitones sharp; Options not serialized; setSample did not stop playback; per-span bucket clear was ~680KB/hop worst case. REJECTED the review's top finding (make it header-only for the out-of-line-virtual rule): four shipping units do the same with identical vtable linkage per nm, and header-only would put the DSP in the SWIG TU at -Os - the anamnesis trap. feedback_no_out_of_line_virtuals corrected to graphics-only. OWED: hardware test, listening pass on the -60 dB threshold constant, then the time axis. PARKED 2026-08-12 (user): the spectral-permutation sound is 'quite dirty' and not what was wanted; attention moved to a clean slice-based kaleidoscope unit (see spectral-kaleidoscope). Sediment stays in the tree fully built, reviewed and emu-verified at spreadsheet 2.8.5.2, never hardware-tested. Resume if the harsh spectral character turns out to be wanted on its own terms; the boiling is intrinsic to permuting FFT bins (it destroys inter-frame phase coherence), not a polish problem, so temporal coherence in the permutation is the first thing to try if it resumes. SUPPRESSED FROM THE PICKER 2026-08-12: toc entry commented out (the Plenum pattern) - the unit still builds and ships in the package, only the picker entry is withdrawn. Its emu test 92-sediment-insert-smoke.test was RETIRED at the same time because it asserted Sediment appears in the factory list, which suppression makes false; re-add it when un-suppressing."
+links = { depends_on = ["units-spectral-processing", "kryos-load-hang"] }
+
+[[item]]
+id = "kaleidoscope-slicer"
+title = "Kaleidoscope slicer (working name Millefiori) - shard + mirrored folds + transposition fan over a card-loaded sample"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
+area = "units"
+verify = { kind = "manual", ref = "offline Python prototype settles fold semantics/mirror/Prism law by ear FIRST; then both arches build, three lints clean, emu insert smoke, attach/detach/quicksave clean on hardware, and a listening pass confirming it reads as ordered and clean rather than glitchy" }
+note = "Design: planning/kaleidoscope-unit.md (2026-08-12). Meld of Manual Loops and a slice rearranger, three macros: Window (shard = Loop Start/Length), Fold (reflection count), Prism (transposition spread across folds). Source is a CARD-LOADED SAMPLE (user call) so file handling lifts verbatim from Sediment's Lua, which already implements the VariSpeed/ManualLoops pattern. CENTRAL DESIGN POINT: a kaleidoscope is NOT a shuffler - a shuffler rearranges N slices into N slots and the catalog already has that (Larets); a kaleidoscope takes ONE shard and reflects it into a symmetric pattern. So the middle macro is REFLECTION COUNT, not shuffle order. Fold semantics keep the loop PERIOD CONSTANT (raising Fold shrinks the shard to Length/N and plays it N times in the same duration) so the macro does not become an accidental tempo control; mirror comes free from playing odd folds reversed. Sequential folds for v1, not layered: one interpolated read per sample vs N voices, and layering is a different instrument (shimmer/chord) worth auditioning later. Transposition is by RESAMPLING (artifact-free, preserves wave shape); the duration mismatch is absorbed by the slot - transposed up repeats inside its slot, transposed down truncates, and do NOT time-scale to fit. Equal-power crossfades at every fold boundary and the loop wrap are mandatory for 'clean' - Sediment's 13ms loop-wrap dip is the cautionary tale. CLEAN BY CONSTRUCTION where Sediment was dirty: intact waveform per slice, so only ordering changes. Compute-light: no FFT, no transcendentals, no pffft, and therefore no exposure to the unexplained kryos-load-hang. Supersedes the direction of spectral-sort-unit (parked) and is units-buffer-shuffler with a symmetry aesthetic. PROTOTYPE VERIFIED 2026-08-12 (tools/kaleidoscope-proto/kaleido.py, all MEASURED): loop period constant at 4.000s across folds 1-8 with only the shard shrinking; mirror exact (corr of fold0 vs reversed fold1 = +1.0000 against -0.85 unreversed); Prism law accurate within 0.2 semitones out to +36 st; no clicks (boundary step 0.41 vs 0.73 typical). TWO FINDINGS FOR THE C++: mirror folds are inherently click-free because reflection makes fold f end on the sample fold f+1 starts on, so the crossfade is insurance for the transposed case only and pure-mirror is seamless for free; and the crossfade default should be 3 ms - equal-power level holds to -0.24 dB at 3 ms but dips -1.05 dB at 1 ms, too short to average a low-frequency period. MEASUREMENT CAUTION: the first click test used decaying material whose fold boundaries all landed in near-silence, so it reported clean at a 1-sample crossfade and showed no dependence on crossfade length at all; only sustained loud material made the test meaningful. Listening set at /tmp/kal_*.wav. SUPERSEDED 2026-08-13: user called the whole literal-sorting direction too clever ('trying to be too clever and leaning too hard into literal sorting'). Millefiori was DELETED, not suppressed - it was unshipped, unreleased and hours old, and its skeleton (file handling, slice playback, equal-power splices, rate ratio) was reused directly for Breccia. See units-buffer-shuffler."
+links = { supersedes = ["units-buffer-shuffler"] }
+
+[[item]]
+id = "psr-level-control"
+title = "PSR (biome): output level control - currently full scale by default, needs the Constant Random treatment"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "insert PSR fresh: default output swings +/-5 V not +/-10 V; negative level inverts; existing saved patches keep their previous value; both arches build and lints clean" }
+note = "User report 2026-08-12: PSR outputs FULL SCALE by default. Confirmed in source: PingableScaledRandom.cpp:47 does mHeldValue = r * scale + offset with r bipolar -1..+1 and mScale defaulting to 1.0 (PingableScaledRandom.h:19, Lua initialBias 1.0), so a fresh insert swings +/-10 V. FINDING THAT SHAPES THE FIX: PSR already HAS a level control, it is just called Scale and has the wrong default and map. Adding a second multiplier called Level would be redundant and confusing. So the fix is almost certainly to give the EXISTING Scale the Constant Random treatment rather than add a control: biasMap Encoder.getMap('[-1,1]') and initialBias 0.5, matching the built-in oscillator Level convention that ConstantRandom.lua adopted verbatim (every core oscillator - Sine, SingleCycle, AliasingTriangle, AliasingSaw - uses [-1,1] at 0.5; 0.5 = +/-5 V which is what a modulation source is expected to swing, 1.0 is still reachable, and bipolar additionally allows a NEGATIVE level = inverted random, which a 0-1 map forbids). DECISIONS FOR THE USER: (a) re-map Scale in place vs add a separate Level and leave Scale as a pre-quantize gain; (b) whether to rename Scale to Level for catalog consistency, which is a cosmetic break. Note the default change only affects NEW instances - saved patches serialize the bias, so existing ones grandfather at 1.0. Same family as mix-control-standards and mod-gain-default-zero."
+
+[[item]]
+id = "bletchley-static-when-settled"
+title = "Bletchley Park (biome): interesting only while Scan MOVES, static once it settles - single-cycle window has no internal structure"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "park Scan at a fixed position and the output should still evolve rather than sitting on one static timbre; sweeping Scan should reach materially more of the loaded file than 4 KB" }
+note = "User report 2026-08-12: 'the interest always comes from moving the data slider, when it settles the interest fades. perhaps our window is too small to hit interesting loops there?' MECHANISM CONFIRMED in CodescanOsc.cpp: windowSize is hardcoded 256 bytes and mPhase 0..1 maps across exactly that window, so the unit is a SINGLE-CYCLE WAVETABLE oscillator reading 256 signed bytes. A settled Scan is therefore one fixed single-cycle waveform looping at f0 - static timbre BY DEFINITION, ~9 ms per cycle at 110 Hz. The interest while moving is the wavetable morphing as the 256-byte read offset slides. So the diagnosis is right in spirit: at 256 bytes the window IS exactly one cycle, leaving no room for structure longer than a cycle. TRAP TO AVOID, this is the obvious first implementation and it is WRONG: simply enlarging windowSize while keeping 'phase 0..1 maps across the window' does not add richness, it DROPS THE PITCH - a 4096-byte window at the same phase rate is a 16x longer cycle, i.e. 4 octaves down. Window length and cycle length have to be decoupled first. Candidate directions: (1) treat the window as N consecutive 256-byte single-cycles and have the oscillator advance/morph through sub-tables over time, which is wavetable scanning and adds motion at a fixed Scan; (2) a slow internal drift/auto-scan on the scan position so it never fully settles - cheapest fix, directly targets the symptom, could be a Drift control; (3) both. SECOND, SEPARATE LIMITATION found while reading: scanRange is hardcoded 4096 bytes from a randomized mRegionStart (seeded per file load, CodescanOsc.cpp:104), so Scan only ever explores 4 KB of the loaded file - about 0.4% of a 1 MB binary - and the rest is unreachable until reload. Worth a coarse/fine two-tier scan over the whole file."
+
+[[item]]
+id = "mi-rename-generic"
+title = "Rename mi package units to generic functional names, Audible Instruments style, to avoid branding friction with Mutable"
+status = "todo"
+stamped = "2026-08-13T23:51:41-05:00"
+area = "docs"
+verify = { kind = "manual", ref = "no Mutable product name appears in any user-facing string in the mi package (toc titles, unit titles, control descriptions, keywords, README); attribution to Emilie Gillet remains explicit; existing patches still load" }
+note = "User call 2026-08-12: rename to avoid scuffles with Mutable proper over branding, following VCV's Audible Instruments precedent (which ships the same DSP under functional names). This EXTENDS the already-done branding-attribution-policy - generic externally, precise internally - which swept other packages but evidently not mi. NAMES NEEDING CHANGE (product names): Plaits, Clouds, Rings, Grids, Warps, Marbles T, Marbles X. ALREADY GENERIC, leave alone: Stratos (habitat's name for the extracted Clouds reverb engine), Commotio (habitat's name for the Elements exciter section), Kryos. Audible Instruments mapping for reference: Braids=Macro Oscillator, Plaits=Macro Oscillator 2, Clouds=Texture Synthesizer, Rings=Resonator, Elements=Modal Synthesizer, Warps=Meta Modulator, Marbles=Random Sampler, Grids=Topographic Drum Generator, Tides=Tidal Modulator, Stages=Segment Generator. CARE REQUIRED: (a) the toc moduleName is what patches serialize against, so changing the TITLE is safe but changing moduleName breaks saved patches - rename titles only, or provide an alias; (b) keywords should keep the old names as search terms so users can still find them, which is a usability point NOT a branding one - confirm that reading is acceptable; (c) attribution to Emilie Gillet must stay explicit and must never use the deadname (CONTEXT.md); (d) sweep control descriptions and the README too, not just titles. Pairs with tooling-keyword-metadata-audit. RE-RAISED by user 2026-08-13 (unprompted, second time), so treat as wanted rather than speculative; RESOLVED 2026-08-13 by user on (b): product names MAY remain as search keywords - 'as long as we do not use them -as- branding'. Operational rule: a product name is allowed where it functions as an INDEX or as factual provenance (toc keywords, attribution lines naming the original engine), and forbidden where it functions as the unit's IDENTITY (toc title, unit title, control descriptions, header text, release-note headlines). So Plaits stays findable by typing 'plaits' while the unit reads 'Macro Oscillator 2'."
+
+[[item]]
+id = "lane-shear-sorter"
+title = "Lane-shear sorter: filterbank pixel sorting - independently permute correlated frequency lanes in time"
+status = "wip"
+stamped = "2026-08-13T23:51:41-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "listening verdict on the pure-shear falsification renders FIRST; if it reads, then per-band segmentation + RMS-keyed rank emission, both arches, three lints, emu smoke, hardware CPU" }
+note = "Design: planning/lane-shear-sorter.md (user's design, 2026-08-13). THE INSIGHT BOTH EARLIER ATTEMPTS MISSED: pixel sorting's signature comes from independently permuting many parallel HIGHLY CORRELATED lanes - adjacent rows are nearly identical, so differential displacement shears a vertical edge into a ragged one. Sediment aligned interval boundaries across every lane so everything displaced together (no tear); Millefiori violated the permutation invariant outright (repitching changes the values, and a sort never does). Note the spectral-sort doc already contained the right shape as its time-axis option; the MVP shipped the wrong half. FAITHFUL MAPPING: lanes = 8-24 frequency bands via FILTERBANK not FFT (narrowband within a band means splices at band-local zero crossings, so the click problem evaporates and no phase management is needed); sort axis = time over ~10-30 ms segments; key = segment RMS; intervals CONTENT-DERIVED AND PER BAND with sub-threshold regions passing through untouched, because the alternation between melted and intact is what makes it legible; permutation only, no gain/pitch/repetition. Latency bounded by max interval length, so fixed lookahead and cap intervals. Granular is the right substrate but the scheduler must be a SORT not a cloud. TWO VARIANTS: streaming (fixed per-band delay L, emit in rank order from a running window, no interval detection) and imprinting (derive mask+rank from input B, apply the permutation to A - order transfer, not spectral transfer). FALSIFICATION RUN 2026-08-13 (tools/shear-proto/shear.py, pure per-band circular rotation, no sorting): permutation exact (0.00e+00 deviation); filterbank reconstructs at -329 dB using DIFFERENCES OF LOWPASSES, which telescope - independent Butterworth bandpasses do NOT sum flat, measured -27 dB, and that matters because untouched regions cannot be untouched if the bank colors them. REAL FINDING: differentially shifting bands combs their overlapping skirts, scaling with crossover count and cured by steeper filters - at 16 bands, order 2 gives -5.31 dB median but order 8 gives -0.88 dB and order 12 gives -0.47 dB. ORDER 8 IS THE KNEE; habitat's existing LR4 (Impasto) is 4th order and marginal at 16+ bands. Could NOT establish the perceptual dislocation numerically (an 80%-energy transient-width metric came out 0.97-1.07x source and is useless) - that verdict is a listening one on the renders. DENSE-COLLAGE CORRECTION 2026-08-13 (user): the target material is a dense collage, NOT hits. The first falsification used sparse percussive hits with silence between, the wrong regime - a pixel-sorted image is dense, and the smear comes from continuously present correlated content. Re-run on synthesized dense collage with 100% band occupancy in all 16 bands. LOAD-BEARING FINDING: an ABSOLUTE RMS threshold does not work on dense material - runs never close (median 190 segments = 3.8 s against a 500 ms cap), so every interval hits the cap and the structure degenerates into exactly the uniform grid the design rejects. A RELATIVE mask fixes it: band RMS vs a ~1 s local moving average at ~1.2x gives 20% melted with runs of 6-12 segments (120-250 ms) - content-derived, inside any sane lookahead, and long enough for the sort to have something to permute. Spectral flux also bounds well but leaves ~2 elements per run, too few for a rank ordering to read. Coloration on dense material matches the sparse case (16 bands: -2.54 dB at order 4, -0.79 dB at order 8)."
+
+[[item]]
+id = "breccia-slice-glitch"
+title = "Breccia: port Network's per-tap glitch effects as PER-SLICE glitch effects"
+status = "wip"
+stamped = "2026-08-13T23:51:41-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "Glitch at 0 is bit-identical to the plain shuffler; raising it introduces at most one effect per slice; the pattern holds between shuffles and re-rolls on the gate; both arches, three lints, emu smoke, hardware CPU" }
+note = "User goal 2026-08-13. Source: mods/spreadsheet/Network.h, which already ships this machinery for delay taps. PORT MAP - the item becomes a SLICE instead of a tap, and all five effects arguably suit slices better than taps: NETWORK_TAP_MUTE -> slice plays silence; STUTTER -> slice repeats a sub-fragment (play the first 1/k of the slice k times); CRUSH -> bitcrush and/or decimate, Network picks one of 3 sub-modes by hash with bit depth from powf(2, 12 - p*9.5) and a separate decimate factor; SCRUB -> modulate read position within the slice (tape-scrub wobble); REVERSE -> play the slice backwards (Network does this with mTapReadAdvance = -1). ARCHITECTURE TO COPY (Network.h:862-905): a single Glitch macro 0..1 scales per-effect probabilities against fixed kMaxMute/kMaxStutter/kMaxCrush/kMaxScrub/kMaxReverse ceilings; cumulative thresholds in 0..65535 unsigned space; per-item mode chosen from a hashed LCG (mGlitchLcg XOR item*2654435761 then LCG-stepped, taking bits 16-31); modes are MUTUALLY EXCLUSIVE per item, at most one effect each. Sub-parameters come from further independent hashes with different XOR masks so they decorrelate. RESEED POLICY: Network reseeds mGlitchLcg on walker wrap so the pattern holds for a cycle then shuffles. For Breccia the natural hook is the SHUFFLE GATE - the same gate that reorders slices re-rolls the glitch assignment - which keeps the control surface at Size + Shuffle + Glitch. Consider a separate reseed later if they want to decouple. CAUTION: feedback_runtime_branched_dsp_dispatch - a runtime switch on a per-item mode inside a per-sample loop has hung A8 before; Network gets away with it by hoisting the mode decision to block rate and keeping the per-sample work branch-light. Follow that structure, and check the objdump for what lands in the sample loop the way Breccia's own build was checked. Glitch=0 must be a bit-identical bypass. BUILT 2026-08-13 in spreadsheet 2.8.5.8. Five effects ported from Network's per-tap glitch as PER-SLICE: MUTE (gain 0), STUTTER (2-7 repeats of the slice head), CRUSH (3-12 bit reduction and/or 2-31x decimation, one of 3 sub-modes by hash), SCRUB (read-position wobble inside the slice), REVERSE. One Glitch macro 0..1 scales probabilities against fixed ceilings summing to ~0.95; cumulative thresholds in 16-bit space; hashed LCG picks AT MOST ONE effect per slice. Hashed on PLAYBACK POSITION not source slice, so effects land at consistent points in the loop; re-rolls on the SHUFFLE GATE, keeping the surface at Size + Shuffle + Glitch. TWO DIVERGENCES FROM NETWORK, both forced by objdump: (1) coefficients computed LAZILY for the slice being entered, O(1), not all N up front - the bulk assigner was O(N) with a powf inside and reachable from the sample loop, so at 1024 slices it put a thousand-iteration burst into one sample slot; also removed ~28 KB of arrays. (2) per-sample path is BRANCHLESS coefficient application, not a mode switch, per feedback_runtime_branched_dsp_dispatch. THREE libm calls found and removed from the sample loop by audit: powf (integer shift for bit depth), floorf in the crush quantizer (magic-number rounding 1.5*2^23), and two double floor() in the stutter wrap and scrub phase (truncation + wrapped accumulator). Final: NO libm in the sample path. Also fixed a clamp that bit at Glitch=0 and would have broken the bypass. CAVEAT: bit-identity at Glitch=0 is established BY CONSTRUCTION (each coefficient takes its identity value and every term degenerates), not by an empirical A/B - worth a null test. PROCESS NOTE: the am335x build check had been grepping ' error' while gcc emits colourized 'error:', so a FAILING ARM build reported 0 errors; use exit codes."
+links = { depends_on = ["units-buffer-shuffler"] }

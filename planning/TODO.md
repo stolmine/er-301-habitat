@@ -5,27 +5,26 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**193 items** — 59 done, 11 wip, 121 todo, 2 blocked. *Rendered 2026-08-10.*
+**202 items** — 59 done, 7 wip, 135 todo, 1 blocked. *Rendered 2026-08-13.*
 
 ## DSP
 
 | | id | item | verify |
 |---|---|---|---|
-| ~ | `anamnesis-insert-crash` | Anamnesis am335x insert: data-abort in Event_post (heap corruption from insert path) | manual *(attested)* · 2026-07-12 |
+| ~ | `breccia-slice-glitch` | Breccia: port Network's per-tap glitch effects as PER-SLICE glitch effects | manual · 2026-08-13 |
 | ~ | `ca-noise-texture` | Cellular-automata granular noise texture source (Vivary) | manual · 2026-07-16 |
 | ~ | `fabula-am335x` | Fabula reverb am335x port: hybrid-float + pow2-mask + zipper-fix | manual · 2026-07-12 |
 | ~ | `fdn-reverb` | NEON FDN reverb (Householder core + per-line filters + spectral flavor overlay) | manual · 2026-07-16 |
-| ~ | `ngoma-character-campaign` | Pin down Ngoma Character control - mechanism from firmware, fix the engine to match hardware | manual · 2026-07-23 |
-| ~ | `ngoma-grit-noise-persistence` | Grit noise bed decays too fast vs hardware - separate short envelope (60ms fixed / 150ms cap) | manual · 2026-07-23 |
-| ~ | `ngoma-grit-tuning` | Ngoma grit: noise phase-mod too weak below 0.8 - re-fit depth vs re-pinned hardware | manual · 2026-07-23 |
-| ~ | `ngoma-shape-fm-campaign` | Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping) | manual *(attested)* · 2026-07-22 |
-| ~ | `ngoma-shape0-level-campaign` | Ngoma shape-0 fundamental level structure (oscillator phase coherence at low r) | manual · 2026-07-23 |
-| ~ | `trinity-fm-unit` | Profile Modbap Trinity FM voice + build ER-301 FM drum unit | manual · 2026-07-20 |
+| ~ | `lane-shear-sorter` | Lane-shear sorter: filterbank pixel sorting - independently permute correlated frequency lanes in time | manual · 2026-08-13 |
+| ~ | `open303-port` | Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit | manual *(attested)* · 2026-08-13 |
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
 |   | `alembic-userbias-derivations` | Alembic Phases 7-8: per-region user-bias sub-params + Order 2/3 derivations + sample excitation | manual · 2026-07-09 |
+|   | `anamnesis-insert-crash` | Anamnesis am335x insert: data-abort in Event_post (heap corruption from insert path) | manual *(attested)* · 2026-08-13 |
+|   | `aw-batch2-ports` | Airwindows batch 2: 11-plugin survey + port (Dynamics3/EverySlew/Mackity first, shared fast-sin atom as the gate) | manual · 2026-08-13 |
 |   | `biome-discont-mix-left-only` | Biome 94 Discont: Mix is tied only to the left DSP instance in a stereo chain | manual · 2026-08-10 |
 |   | `biome-utility-dsp-units` | biome DSP utility units: simple allpass, dome filter, frequency shifter, bitcrush/downsample | manual · 2026-07-09 |
 |   | `biome-varishape-sync-inert` | Biome Varishape Osc / Voice: Sync inlet is connected but never read | manual · 2026-08-10 |
+|   | `bletchley-static-when-settled` | Bletchley Park (biome): interesting only while Scan MOVES, static once it settles - single-cycle window has no internal structure | manual · 2026-08-13 |
 |   | `canals-audiorate-and-cpu` | Canals: audio-rate Span-sweep aliasing (halfband decimator) + hardware CPU/NEON pass | manual · 2026-07-09 |
 |   | `canals-response-tuning` | Canals: SPAN/volume/low-band/Q/soft-clip response tuning against hardware capture corpus | manual · 2026-07-09 |
 |   | `compound-dsp-voice-profile` | Profile + emulate on-hand compound DSP module (workflow shakedown) | manual · 2026-07-17 |
@@ -38,28 +37,35 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `house-hybrid-float-retrofits` | House: hybrid-float retrofits for kWoodRoom (29%→~12-15%) and WoodenBox (14%→~6-8%) | manual · 2026-07-09 |
 |   | `house-suppress-customs-optimize-ports` | House: suppress the original units, keep + optimize (NEON) the ports | manual · 2026-07-21 |
 |   | `house-xyz-engine` | XYZ engine — cryptic 3-param original reverb (X morph, Y saturate+undersample, Z meta-routing) | manual · 2026-07-09 |
+|   | `kryos-load-hang` | Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware | manual · 2026-08-13 |
+|   | `kryos-spectral-freeze-rebuild` | Kryos: replace the biquad-bank engine with a phase-vocoder spectral freeze, single voice | manual · 2026-08-13 |
 |   | `mi-clouds-warps-improvements` | MI: Clouds gain-comp + further NEON (Clouds ShyFFT/SRC, Rings sympathetic/FM); Warps vocoder + drive | manual · 2026-07-09 |
 |   | `mirror-promotion` | Mirror: final habitat name + Voss-McCartney 1/f drift + wavetable frame-inventory audition | manual · 2026-07-09 |
 |   | `multimode-drum-voice-profile` | Profile + emulate multi-engine digital drum voice (per mode) | manual · 2026-07-17 |
 |   | `multiout-nlc-chaos` | NLC chaotic modulation sources (clean-room): Sloth, Chua, Hyperchaos, Squid Axon, + lower-pri | manual · 2026-07-09 |
+|   | `ngoma-character-campaign` | Pin down Ngoma Character control - mechanism from firmware, fix the engine to match hardware | manual · 2026-08-13 |
 |   | `ngoma-cpu-optimization` | Ngoma: CPU optimization round 2 (~33% mono Cortex-A8 idle is steep) | manual · 2026-07-09 |
+|   | `ngoma-grit-noise-persistence` | Grit noise bed decays too fast vs hardware - separate short envelope (60ms fixed / 150ms cap) | manual · 2026-08-13 |
+|   | `ngoma-grit-tuning` | Ngoma grit: noise phase-mod too weak below 0.8 - re-fit depth vs re-pinned hardware | manual · 2026-08-13 |
 |   | `ngoma-known-residuals` | Ngoma parked 2026-07-23 (2.8.3.82): stands on its own, ~10% mono - three known misses vs hardware | manual · 2026-07-23 |
+|   | `ngoma-shape-fm-campaign` | Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping) | manual *(attested)* · 2026-08-13 |
+|   | `ngoma-shape0-level-campaign` | Ngoma shape-0 fundamental level structure (oscillator phase coherence at low r) | manual · 2026-08-13 |
 |   | `ngoma-sound-tuning` | Ngoma: careful sound-tuning pass (param cross-couplings, per-partial decay, mode ratios, sub-octave) | manual · 2026-07-09 |
-|   | `open303-port` | Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit | manual · 2026-07-11 |
 |   | `parfait-shaper-oversampling` | Parfait: per-band shaper oversampling to kill aliasing audible as mix is lowered at high drive | manual · 2026-07-09 |
 |   | `pecto-control-refinements` | Pecto: Doppler slew sub-param, bipolar feedback, density cap at 12 | manual · 2026-07-09 |
 |   | `pecto-neon-gather-opt` | Pecto: further NEON gather optimization for greedy comb mode | manual · 2026-07-09 |
 |   | `petrichor-audio-quality` | Petrichor: audio-quality/feedback overhaul + grid-independent skew + tap-timing analysis | manual · 2026-07-09 |
 |   | `petrichor-stereo-and-crossfeed` | Petrichor/Pecto: shared-buffer stereo optimization + cross-feedback matrix (stretch) | manual · 2026-07-09 |
 |   | `research-audiorate-param-mod` | Research: how firmware native units accept clean audio-rate parameter modulation | manual · 2026-07-09 |
+|   | `spectral-sort-unit` | Spectral sort unit - pixel-sorting for audio: sample player that permutes the spectrogram along frequency or time | manual · 2026-08-13 |
 |   | `spectrum-ply-versions` | Spectrum (Spectrogram) 2/3/4/6-ply versions with higher spectral resolution | manual · 2026-07-21 |
 |   | `spreadsheet-impasto-attack-release-inert` | Spreadsheet Impasto: per-band Attack/Release plies appear inert | manual · 2026-08-10 |
 |   | `spreadsheet-petrichor-randomize-clamp` | Spreadsheet Petrichor: Randomize gate clamps target index to 16 of 21 | manual · 2026-08-10 |
 |   | `station-x-character` | Station X (codescan FIR): improve output character (currently mostly noise-like filtering) | manual · 2026-07-09 |
 |   | `stolmine-original-units` | stolmine originals backlog: X-op FM voice + additional monokit filter models | manual · 2026-07-09 |
+|   | `trinity-fm-unit` | Profile Modbap Trinity FM voice + build ER-301 FM drum unit | manual · 2026-08-13 |
 |   | `units-2d-wavetable-osc` | 2D/3D Wavetable Oscillator — X/Y-addressable wavetable with stacked pseudo-3D frame viz | manual · 2026-07-09 |
 |   | `units-spectral-processing` | Spectral Mask + Spectral Gate — sidechain-keyed / crossover per-band spectral processors | manual · 2026-07-09 |
-| ✗ | `kryos-load-hang` | Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware | manual · 2026-07-09 |
 | ✓ | `biome-expo-envelopes` | Biome: simple exponential envelopes - Expo D and Expo AD with expo-variation controls | manual *(attested)* · 2026-08-06 |
 | ✓ | `biome-flakes` | Flakes — granular shimmer/freeze feedback looper (C++ rewrite of Shards) | manual *(attested)* · 2026-07-09 |
 | ✓ | `biome-pecto` | Pecto — comb resonator (16 tap patterns, 4 slopes, 4 resonator types, NEON 3-pass, zipper-clean) | manual *(attested)* · 2026-07-09 |
@@ -91,6 +97,7 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+| ~ | `units-buffer-shuffler` | Buffer Shuffler / Groovebox — BBCut-style beat-slicing buffer manipulation | manual · 2026-08-13 |
 |   | `biome-codescan-emu-autoload` | Biome Bletchley Park / Station X: auto-load libbiome.so on emulator, silent on hardware | manual · 2026-08-10 |
 |   | `biome-quantoffset-ignores-chain-input` | Biome Quantoffset: never connects its chain input | manual · 2026-08-10 |
 |   | `bionic-lester-clone` | Profiling-informed clone of a switched-capacitor dual filter (target: Bionic Lester Mk1) | manual · 2026-07-15 |
@@ -100,6 +107,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `etcher-io-range-and-presets` | Etcher: change I/O ranges to ±1V + add sine/triangle/user presets + hardware deviation verify | manual · 2026-07-09 |
 |   | `fademixer-6-8-plus-mutesolo-fix` | FadeMixer 6/8-input versions + fix broken mute/solo | manual · 2026-07-21 |
 |   | `jf-phase6-ship` | JF Phase 6: polish + ship (trig-LUT audit, CPU profile, test procedures, vanilla-compat, FM consolidation) | manual · 2026-07-09 |
+|   | `kaleidoscope-slicer` | Kaleidoscope slicer (working name Millefiori) - shard + mirrored folds + transposition fan over a card-loaded sample | manual · 2026-08-13 |
 |   | `larets-effect-breakout` | Break out Larets effects into individual units where the catalog lacks standalone coverage | manual · 2026-07-15 |
 |   | `larets-feature-additions` | Larets: add reset input, random step selection, ring-mod + chorus effects, width + panning effects | manual · 2026-07-15 |
 |   | `mi-commotio-marbles` | MI: Commotio split-units + sample loading + UI + NEON; Marbles T model picker (7 models, 3 visible) | manual · 2026-07-09 |
@@ -118,7 +126,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `spreadsheet-larets-compressamt-tie-mismatch` | Spreadsheet Larets: Lua ties 'CompressAmt' but C++ registers the parameter as 'TanhAmt' | manual · 2026-08-10 |
 |   | `switch-1-to-n-unit` | 1-to-N switch unit: output selection + output count + passthrough, on the multi-out framework | manual · 2026-08-05 |
 |   | `units-4ms-smr` | 4ms Spectral Multiband Resonator port — 6 resonant bandpass filters with rotation/spread | manual · 2026-07-09 |
-|   | `units-buffer-shuffler` | Buffer Shuffler / Groovebox — BBCut-style beat-slicing buffer manipulation | manual · 2026-07-09 |
 |   | `units-device-randomizer-control-forge` | Device Randomizer + Control Forge-alike — chain-neighbor randomizer and multistage envelope | manual · 2026-07-09 |
 |   | `units-external-comm` | External communication units: I2C output to Crow + clock-sync derived from audio | manual · 2026-07-09 |
 |   | `units-ffb-scale-family` | FFB-scale-distribution family: Tone Cluster / Drone, Comb Bank, Harmonic Series Manipulator, Waveguide | manual · 2026-07-09 |
@@ -143,8 +150,8 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
-| ~ | `anamnesis-viz-opt` | Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf) | manual *(attested)* · 2026-07-11 |
 |   | `alembic-phase9-polish` | Alembic Phase 9: naming/defaults/mnemonic polish + serial stacked-waveform viz | screenshot: confirm final names/defaults/control labels + sphere-viz refinements, plus a stacked/cascading render of mWavetableLUT[64][256] with active reagent-scan frames lit and neighbors dimmed · 2026-07-09 |
+|   | `anamnesis-viz-opt` | Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf) | manual *(attested)* · 2026-08-13 |
 |   | `control-descriptions-drop-parentheticals` | Shorten Lua control descriptions that include parentheticals (they overflow the allotted space) | manual · 2026-07-22 |
 |   | `control-step-standards` | Adopt built-in dial-map standards across habitat; inventory every control vs the framework registry | manual · 2026-07-16 |
 |   | `controls-bias-modrange-audit` | Bias + mod-input range audit across all packages (CV can't reach full param range at 10x gainMap) | manual · 2026-07-09 |
@@ -165,6 +172,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `peaks-refinements` | Peaks: Tap LFO clock frequency-counter display, PLO continuous phase-increment, step-position viz | manual · 2026-07-09 |
 |   | `pecto-expansion-views` | Pecto: add per-control expansion views so submenu params open as full faders on enter (impasto pattern) | manual · 2026-07-14 |
 |   | `petrichor-tap-macros` | Petrichor: CV-modulatable macro filter-cutoff offset + tap-pitch macro + xform spread param | manual · 2026-07-09 |
+|   | `psr-level-control` | PSR (biome): output level control - currently full scale by default, needs the Constant Random treatment | manual · 2026-08-13 |
 |   | `rate-time-control-octave-maps` | Rate/time controls on wide-ratio LINEAR dial maps swing far too wide (Constant Random fixed; audit open) | manual · 2026-08-05 |
 |   | `scope-channel-focus` | Scope: channel focus display switching (show L or R by channel-button selection) | manual · 2026-07-09 |
 |   | `scope-goniometer` | Goniometer / Lissajous — XY stereo-field scope with correlation readout | screenshot: insert; confirm goniometer (L+R vs L-R) or arbitrary-XY Lissajous display with a +1..-1 correlation readout; negligible DSP · 2026-07-09 |
@@ -217,6 +225,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 |   | `diffusion-makeup-model-notate` | Notate Fabula's diffusion-makeup gain model as a reusable pattern for tap-based units (main target: Network) | manual · 2026-07-14 |
 |   | `docs-intro-video` | Intro video for Habitat packages | manual · 2026-07-09 |
+|   | `mi-rename-generic` | Rename mi package units to generic functional names, Audible Instruments style, to avoid branding friction with Mutable | manual · 2026-08-13 |
 | ✓ | `branding-attribution-policy` | Branding + attribution policy: generic externally, precise internally | manual *(attested)* · 2026-08-06 |
 | ✓ | `control-expansion-views-pattern` | Canonical pattern: control expansion views (expand sub-params to full faders on ENTER) | manual *(attested)* · 2026-07-14 |
 | ✓ | `readme-airwindows-attribution` | Add an attribution line in the README for Airwindows' creator Chris Johnson | manual *(attested)* · 2026-07-14 |

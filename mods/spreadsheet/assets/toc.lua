@@ -27,5 +27,12 @@ return {
     { title = "Vitrail",      moduleName = "Vitrail",             category = "Spreadsheet", keywords = "filter, switched capacitor, comb, aliasing, resonant, self-oscillation, character, clock, vitrail" },
     -- Plenum (FDN reverb) suppressed pending the wardrobe voicing pass; the
     -- unit still builds and ships in the package (FDNTank.h + Plenum.lua).
+    --
+    -- Sediment (spectral sort) suppressed 2026-08-12: the spectral-permutation
+    -- character is not what was wanted (see [hab:spectral-sort-unit], parked).
+    -- The unit still builds and ships in the package (Sediment.h/.cpp +
+    -- Sediment.lua) and is emu-verified; only the picker entry is withdrawn.
+    -- { title = "Sediment",   moduleName = "Sediment",            category = "Spreadsheet", keywords = "spectral, sort, fft, player, sample, glitch, texture, effect" },
+    { title = "Breccia",      moduleName = "Breccia",             category = "Spreadsheet", keywords = "slice, shuffle, buffer, rearrange, loop, sample, player, glitch, collage, granular" }
   }
 }

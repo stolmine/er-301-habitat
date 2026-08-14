@@ -1,5 +1,5 @@
 PKGNAME ?= spreadsheet
-PKGVERSION ?= 2.8.5.1
+PKGVERSION ?= 2.8.5.26
 
 include scripts/env.mk
 
@@ -118,20 +118,28 @@ $(PACKAGE_FILE): $(LIB_FILE) $(ASSETS)
 	@cd $(ASSET_DIR) && zip -rq $(abspath $@) *
 	@zip -jq $@ $(LIB_FILE)
 
+# -MMD -MP: emit per-object .d dependency files so a HEADER edit rebuilds the
+# objects that include it. Without this, only the SWIG wrapper tracked headers
+# (SWIG_HEADER_DEPS below), so a header-only edit rebuilt the wrapper but NOT
+# the unit's .o - the two halves then disagreed about sizeof(class) and the
+# heap corrupted on hardware (feedback_swig_header_dep). The .d files land
+# next to the .o and are folded in by the -include at the bottom.
+DEPFLAGS = -MMD -MP
+
 $(OUT_DIR)/%.o: %.cpp
 	@echo [C++ $<]
 	@mkdir -p $(@D)
-	@$(CPP) $(CFLAGS) -std=gnu++11 -c $< -o $@
+	@$(CPP) $(CFLAGS) $(DEPFLAGS) -std=gnu++11 -c $< -o $@
 
 $(OUT_DIR)/%.o: %.cc
 	@echo [C++ $<]
 	@mkdir -p $(@D)
-	@$(CPP) $(CFLAGS) -std=gnu++11 -c $< -o $@
+	@$(CPP) $(CFLAGS) $(DEPFLAGS) -std=gnu++11 -c $< -o $@
 
 $(OUT_DIR)/%.o: %.c
 	@echo [CC $<]
 	@mkdir -p $(@D)
-	@$(CC) $(CFLAGS) -std=gnu11 -c $< -o $@
+	@$(CC) $(CFLAGS) $(DEPFLAGS) -std=gnu11 -c $< -o $@
 
 # SWIG re-runs when the .swig file OR any %include'd header changes.
 # Without the header deps, editing e.g. VisadharaCoronaGraphic.h
@@ -148,7 +156,7 @@ $(SWIG_WRAPPER): $(SWIG_SOURCE) $(SWIG_HEADER_DEPS)
 $(SWIG_OBJECT): $(SWIG_WRAPPER) $(SWIG_HEADER_DEPS)
 	@echo [C++ SWIG $<]
 	@mkdir -p $(@D)
-	@$(CPP) $(CFLAGS.swig) -std=gnu++11 -I$(MOD_DIR) -c $< -o $@
+	@$(CPP) $(CFLAGS.swig) $(DEPFLAGS) -std=gnu++11 -I$(MOD_DIR) -c $< -o $@
 
 clean:
 	rm -rf $(OUT_DIR)
@@ -157,3 +165,6 @@ install: $(PACKAGE_FILE)
 	cp $(PACKAGE_FILE) $(HOME)/.od/rear/
 
 .PHONY: all clean install
+
+# Auto-generated header dependencies (see DEPFLAGS above).
+-include $(OBJECTS:%.o=%.d)

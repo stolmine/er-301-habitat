@@ -84,7 +84,7 @@ namespace clouds_unit
     float *outR = mOutR.buffer();
 
     // Set playback mode (only on change to avoid heavy reinit in Prepare)
-    // 0=granular, 1=delay (spectral moved to Kryos unit)
+    // 0=granular, 1=delay (spectral lives in biome's Spectral Freeze unit)
     static const clouds::PlaybackMode modeMap[] = {
         clouds::PLAYBACK_MODE_GRANULAR,      // 0
         clouds::PLAYBACK_MODE_LOOPING_DELAY, // 1
