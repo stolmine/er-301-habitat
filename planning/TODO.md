@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**208 items** — 59 done, 7 wip, 141 todo, 1 blocked. *Rendered 2026-08-14.*
+**214 items** — 59 done, 7 wip, 147 todo, 1 blocked. *Rendered 2026-08-14.*
 
 ## DSP
 
@@ -20,6 +20,8 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
 |   | `alembic-userbias-derivations` | Alembic Phases 7-8: per-region user-bias sub-params + Order 2/3 derivations + sample excitation | manual · 2026-07-09 |
 |   | `anamnesis-insert-crash` | Anamnesis am335x insert: data-abort in Event_post (heap corruption from insert path) | manual *(attested)* · 2026-08-13 |
+|   | `anneal-resonance-suppressor` | Anneal: dynamic resonance suppression (soothe-style), self-keyed against a local spectral average | manual · 2026-08-14 |
+|   | `assay-audio-listener` | Assay: audio analysis to CV (env, pitch, centroid, flatness, transient) on the multi-out framework | manual · 2026-08-14 |
 |   | `aw-batch2-ports` | Airwindows batch 2: 11-plugin survey + port (Dynamics3/EverySlew/Mackity first, shared fast-sin atom as the gate) | manual · 2026-08-13 |
 |   | `biome-discont-mix-left-only` | Biome 94 Discont: Mix is tied only to the left DSP instance in a stereo chain | manual · 2026-08-10 |
 |   | `biome-utility-dsp-units` | biome DSP utility units: simple allpass, dome filter, frequency shifter, bitcrush/downsample | manual · 2026-07-09 |
@@ -33,6 +35,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `flakes-shards-fidelity` | Flakes: tune self-modulation engine to Shards, steeper LP on feedback, evaluate manual-loops fidelity | manual · 2026-07-09 |
 |   | `fx-delay-units` | Combined Petrichor+Pecto (CPU-efficient) + character-forward Lofi delay | manual · 2026-07-09 |
 |   | `gesso-glue-compressor` | Gesso: SSL-G-style glue bus compressor on an Airwindows Pressure6 engine (MIT) | manual · 2026-08-14 |
+|   | `gyre-feedback-matrix` | Gyre: an N-by-N feedback matrix as a playable instrument (no-input-mixer in a unit) | manual · 2026-08-14 |
 |   | `helicase-sync-polyblep` | Helicase: PolyBLEP at the carrier reset discontinuity on hard sync | manual · 2026-07-09 |
 |   | `house-atom-library` | House: AW tone-shaping atom library (first-15) + RotCoat/composition component atoms | manual · 2026-07-09 |
 |   | `house-harness-patterns` | House: harness patterns — Channel-Buss containment, envelope-driver, reduced-rate domain, kWoodRoom atom refactor | manual · 2026-07-09 |
@@ -60,11 +63,13 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `petrichor-audio-quality` | Petrichor: audio-quality/feedback overhaul + grid-independent skew + tap-timing analysis | manual · 2026-07-09 |
 |   | `petrichor-stereo-and-crossfeed` | Petrichor/Pecto: shared-buffer stereo optimization + cross-feedback matrix (stretch) | manual · 2026-07-09 |
 |   | `research-audiorate-param-mod` | Research: how firmware native units accept clean audio-rate parameter modulation | manual · 2026-07-09 |
+|   | `spectral-cross-synthesis` | Palimpsest: spectral cross-synthesis - vocoder, spectral morph and formant shift on one control | manual · 2026-08-14 |
 |   | `spectral-sort-unit` | Spectral sort unit - pixel-sorting for audio: sample player that permutes the spectrogram along frequency or time | manual · 2026-08-13 |
 |   | `spectrum-ply-versions` | Spectrum (Spectrogram) 2/3/4/6-ply versions with higher spectral resolution | manual · 2026-07-21 |
 |   | `spreadsheet-impasto-attack-release-inert` | Spreadsheet Impasto: per-band Attack/Release plies appear inert | manual · 2026-08-10 |
 |   | `spreadsheet-petrichor-randomize-clamp` | Spreadsheet Petrichor: Randomize gate clamps target index to 16 of 21 | manual · 2026-08-10 |
 |   | `station-x-character` | Station X (codescan FIR): improve output character (currently mostly noise-like filtering) | manual · 2026-07-09 |
+|   | `stft-frontend-atom` | Shared STFT front end atom: one analysis/resynthesis stage for the six units that now want one | manual · 2026-08-14 |
 |   | `stolmine-original-units` | stolmine originals backlog: X-op FM voice + additional monokit filter models | manual · 2026-07-09 |
 |   | `trinity-fm-unit` | Profile Modbap Trinity FM voice + build ER-301 FM drum unit | manual · 2026-08-13 |
 |   | `units-2d-wavetable-osc` | 2D/3D Wavetable Oscillator — X/Y-addressable wavetable with stacked pseudo-3D frame viz | manual · 2026-07-09 |
@@ -119,6 +124,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `multiout-generative-units` | Multi-output generative units: poly clocked burst, coupled CV+gate env, multichannel seq, + candidates | manual · 2026-07-09 |
 |   | `ngoma-preset-library` | Ngoma: per-drum preset library (kick/snare/hat/tom) + default tuning | manual · 2026-07-09 |
 |   | `peaks-bytebeats-formula-speed-backwards` | Peaks ByteBeats: 'Formula' is the clock rate and 'Speed' is the equation selector | manual · 2026-08-10 |
+|   | `peaks-cleanup-sweep` | Peaks cleanup sweep: land the five label/routing defects in one release, with a preset-breakage policy | manual · 2026-08-14 |
 |   | `peaks-fmlfo-wsmlfo-swapped-labels` | Peaks FM LFO / WSM LFO: Amount and Rate labels are swapped | manual · 2026-08-10 |
 |   | `peaks-highhat-no-controls` | Peaks High Hat: exposes no parameter dials at all | manual · 2026-08-10 |
 |   | `peaks-taplfo-rate-sets-level` | Peaks Tap LFO: 'Rate' control sets output level, not rate | manual · 2026-08-10 |
