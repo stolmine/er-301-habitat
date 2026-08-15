@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**214 items** — 59 done, 7 wip, 147 todo, 1 blocked. *Rendered 2026-08-14.*
+**219 items** — 59 done, 7 wip, 152 todo, 1 blocked. *Rendered 2026-08-14.*
 
 ## DSP
 
@@ -57,12 +57,15 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `ngoma-shape-fm-campaign` | Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping) | manual *(attested)* · 2026-08-13 |
 |   | `ngoma-shape0-level-campaign` | Ngoma shape-0 fundamental level structure (oscillator phase coherence at low r) | manual · 2026-08-13 |
 |   | `ngoma-sound-tuning` | Ngoma: careful sound-tuning pass (param cross-couplings, per-partial decay, mode ratios, sub-octave) | manual · 2026-07-09 |
+|   | `ochre-character-eq` | Ochre: characterful four-band EQ on a shared parametric-band atom (SSL 611 reference) | manual · 2026-08-14 |
 |   | `parfait-shaper-oversampling` | Parfait: per-band shaper oversampling to kill aliasing audible as mix is lowered at high drive | manual · 2026-07-09 |
 |   | `pecto-control-refinements` | Pecto: Doppler slew sub-param, bipolar feedback, density cap at 12 | manual · 2026-07-09 |
 |   | `pecto-neon-gather-opt` | Pecto: further NEON gather optimization for greedy comb mode | manual · 2026-07-09 |
 |   | `petrichor-audio-quality` | Petrichor: audio-quality/feedback overhaul + grid-independent skew + tap-timing analysis | manual · 2026-07-09 |
 |   | `petrichor-stereo-and-crossfeed` | Petrichor/Pecto: shared-buffer stereo optimization + cross-feedback matrix (stretch) | manual · 2026-07-09 |
+|   | `poly-voice-allocator-atom` | Polyphonic voice-allocation atom: the layer habitat has none of, wanted by three ledgered items | manual · 2026-08-14 |
 |   | `research-audiorate-param-mod` | Research: how firmware native units accept clean audio-rate parameter modulation | manual · 2026-07-09 |
+|   | `shaper-cross-pollination` | Cross-pollinate 94 Discont and Parfait shaper types, via a shared shaper atom | manual · 2026-08-14 |
 |   | `spectral-cross-synthesis` | Palimpsest: spectral cross-synthesis - vocoder, spectral morph and formant shift on one control | manual · 2026-08-14 |
 |   | `spectral-sort-unit` | Spectral sort unit - pixel-sorting for audio: sample player that permutes the spectrogram along frequency or time | manual · 2026-08-13 |
 |   | `spectrum-ply-versions` | Spectrum (Spectrogram) 2/3/4/6-ply versions with higher spectral resolution | manual · 2026-07-21 |
@@ -74,6 +77,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `trinity-fm-unit` | Profile Modbap Trinity FM voice + build ER-301 FM drum unit | manual · 2026-08-13 |
 |   | `units-2d-wavetable-osc` | 2D/3D Wavetable Oscillator — X/Y-addressable wavetable with stacked pseudo-3D frame viz | manual · 2026-07-09 |
 |   | `units-spectral-processing` | Spectral Mask + Spectral Gate — sidechain-keyed / crossover per-band spectral processors | manual · 2026-07-09 |
+|   | `vulgate-gm-poly-voice` | Vulgate: polyphonic General MIDI voice (Expert Sleepers General CV reference) | manual · 2026-08-14 |
 | ✓ | `biome-expo-envelopes` | Biome: simple exponential envelopes - Expo D and Expo AD with expo-variation controls | manual *(attested)* · 2026-08-06 |
 | ✓ | `biome-flakes` | Flakes — granular shimmer/freeze feedback looper (C++ rewrite of Shards) | manual *(attested)* · 2026-07-09 |
 | ✓ | `biome-pecto` | Pecto — comb resonator (16 tap patterns, 4 slopes, 4 resonator types, NEON 3-pass, zipper-clean) | manual *(attested)* · 2026-07-09 |
@@ -114,6 +118,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `catchall-sfera-spin-inert` | Catchall Sfera: Spin is visual-only; V/Oct inlet has no control; qScale branch orphaned | manual · 2026-08-10 |
 |   | `diptych-mid-side` | Diptych: stereo-only mid/side splitter with a processing branch per side | manual · 2026-08-14 |
 |   | `etcher-io-range-and-presets` | Etcher: change I/O ranges to ±1V + add sine/triangle/user presets + hardware deviation verify | manual · 2026-07-09 |
+|   | `facet-macro-controller` | Facet: normalled macro controller on the multi-out framework (Cold Mac / Ladik J-011 reference) | manual · 2026-08-14 |
 |   | `fademixer-6-8-plus-mutesolo-fix` | FadeMixer 6/8-input versions + fix broken mute/solo | manual · 2026-07-21 |
 |   | `jf-phase6-ship` | JF Phase 6: polish + ship (trig-LUT audit, CPU profile, test procedures, vanilla-compat, FM consolidation) | manual · 2026-07-09 |
 |   | `kaleidoscope-slicer` | Kaleidoscope slicer (working name Millefiori) - shard + mirrored folds + transposition fan over a card-loaded sample | manual · 2026-08-13 |
