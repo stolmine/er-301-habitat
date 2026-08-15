@@ -1,12 +1,11 @@
-# Design note: Ochre - a characterful four-band EQ
+# Design note: Parametric EQ - a characterful four-band EQ
 
 Status: design note / not started. Ledger item `ochre-character-eq`.
 
 User request 2026-08-14: characterful EQ, with a stated interest in the SSL 611.
 
-Named **Ochre**: an earth pigment. The two circuits this draws on are known by
-the colour of their knob caps, so a pigment name is the right register, and it
-sits with Gesso, Impasto and Parfait.
+Name: **Parametric EQ**. Units outside spreadsheet take descriptive, factual names (user direction 2026-08-14), matching how house already names things (WoodenBox, BrightAmbience3, TickerTape). The poetic working title *Ochre* is retired; evocative names stay in spreadsheet.
+It also distinguishes itself from biome's one-knob Tilt EQ and the firmware's EQ3.
 
 Package: **house** - see the open question at the end.
 
@@ -102,13 +101,13 @@ Habitat has **no EQ atom at all** - only biome's one-knob Tilt EQ and the
 firmware's EQ3. Meanwhile `strata-channel-strip` needs an EQ section and
 currently names SmoothEQ3 or BiquadStack as candidates.
 
-So: build **one parametric-band atom**, and let both consume it. Ochre is the
-standalone four-band unit; Strata's EQ section is the same atom instantiated
+So: build **one parametric-band atom**, and let both consume it. Parametric EQ is the
+standalone four-band unit; Channel Strip's EQ section is the same atom instantiated
 three or four times. That is the `house-atom-library` pattern - components by
 default, with a composition that gives them standalone value - applied properly
 rather than duplicating an EQ.
 
-If only one gets built, build the atom and Ochre. Strata is a much larger job and
+If only one gets built, build the atom and Parametric EQ. Channel Strip is a much larger job and
 would inherit the EQ for free.
 
 ## Controls
@@ -131,7 +130,7 @@ per band is exactly right for an EQ.
 ## Cautions
 
 - **Coefficients in double, recursion in float.** The `aw-batch2-ports` finding
-  and the Strata note both land here: float is safe except for the
+  and the Channel Strip note both land here: float is safe except for the
   lowest-frequency biquads, and LF reaching 30 Hz is exactly that case.
 - **Gain = 0 on every band must be a bit-identical bypass.** Subtractive EQ
   designs get this for free; check it rather than assuming.
@@ -139,7 +138,7 @@ per band is exactly right for an EQ.
   See the 48 kHz findings in `strata-channel-strip` - Channel9's ultrasonic
   biquads bypass entirely at 48 kHz for two of five models, and that class of bug
   is easy to inherit.
-- **Do not claim emulation.** Describe Ochre as SSL-informed, name the reference,
+- **Do not claim emulation.** Describe Parametric EQ as SSL-informed, name the reference,
   and let the Colour labels be Brown and Black rather than borrowed model
   numbers.
 - **`feedback_runtime_branched_dsp_dispatch`** for Colour and the two shape
@@ -155,11 +154,11 @@ unit. Keeping an atom and its consumers in one package avoids the cross-package
 sharing problem already flagged in `stft-frontend-atom`.
 
 The tension is that `house-suppress-customs-optimize-ports` directs house to keep
-and optimise the *ports* while suppressing the house *originals*. Ochre is
+and optimise the *ports* while suppressing the house *originals*. Parametric EQ is
 BiquadStack-derived rather than an original in the RotCoat sense, so this reads
 as within the directive - but it is a judgement call and worth confirming rather
 than assuming. The alternative is spreadsheet, next to Impasto, Parfait and
-Gesso, at the cost of splitting the atom from Strata.
+Gesso, at the cost of splitting the atom from Channel Strip.
 
 ## Phases
 
@@ -167,11 +166,11 @@ Gesso, at the cost of splitting the atom from Strata.
    level-dependent nonlinearity. Verified against a swept measurement, with the
    log-symmetric claim actually checked - ±3 dB points at a constant octave
    interval across gain settings.
-2. **Ochre four-band.** Band layout, ranges, shelf/bell switching, 6 dB/oct
+2. **Parametric EQ four-band.** Band layout, ranges, shelf/bell switching, 6 dB/oct
    shelves. Null test at all gains zero.
 3. **Colour.** Q law, gain range and drive character switched together.
 4. **Band interaction.** The experimental part; A/B against independent cascaded
    bands and keep it only if it earns itself.
 5. **Hardware**: A8 CPU with all four bands active, zipper check on sweeps,
    serialization of every option.
-6. **Retrofit** Strata's EQ section onto the atom.
+6. **Retrofit** Channel Strip's EQ section onto the atom.

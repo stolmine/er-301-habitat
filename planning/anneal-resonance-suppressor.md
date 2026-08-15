@@ -86,7 +86,7 @@ different.
 ## Cautions
 
 - **Latency.** STFT hop latency is unavoidable and must be documented. Unlike
-  Assay this is an insert effect, so the latency is in the audio path.
+  Audio Analyzer this is an insert effect, so the latency is in the audio path.
 - **`log2_poly`/`exp2_poly` from `util/neon_math.h`** for any dB-domain work; no
   libm in the loop.
 - **Depth = 0 must be a bit-identical bypass**, which for an STFT unit means the

@@ -8,7 +8,7 @@ would otherwise be three units.
 
 Named **Nacre**: mother-of-pearl gets its colour from phase interference between
 thin layers, not from pigment. That is exactly what this unit does, and it sits
-with Breccia, Sediment and Sill.
+with Breccia, Sediment and Window Comparator.
 
 Package: **spreadsheet**, with the effects. Biome is the alternative since the
 frequency-shifter face is a utility, but the unit as a whole is a creative
@@ -118,7 +118,7 @@ unit.
   not two mono instances. M/S needs both channels inside one object. Getting this
   wrong is `biome-discont-mix-left-only` again.
 - **Stereo-only.** `channelCount = 2` in toc.lua plus the `onLoadGraph` guard,
-  same as Diptych and `SpreadDelayUnit`.
+  same as Mid Side and `SpreadDelayUnit`.
 - **`drywet-crossfade-audit`**: the wet path is *correlated* with the dry (it is
   built from the same M), so linear crossfade is correct here and equal-power
   would be wrong. Note it so the audit does not "fix" it later.

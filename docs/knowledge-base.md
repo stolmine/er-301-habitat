@@ -332,6 +332,10 @@ Do not use copyrighted product names anywhere -- not in source code, comments, p
 **Why:** User wants to avoid any association with trademarked names throughout the entire codebase, not just in user-facing text.
 **How to apply:** Use original names for units (e.g., "Pecto" not "Rainmaker Comb", "Petrichor" not "Rainmaker Delay"). When referencing inspiration, use generic descriptions ("multiband saturation", "comb resonator") rather than product names. This applies to toc.lua entries, Lua titles, C++ comments, planning docs, commit messages, and README descriptions.
 
+Unit names outside the spreadsheet package must be descriptive and factual, not poetic.
+**Why:** User direction 2026-08-14. spreadsheet is the package where evocative one-word names live (Breccia, Sediment, Impasto, Parfait, Fabula, Nacre, Anneal); every other package already names units for what they do, and mixing the two registers makes the picker harder to read.
+**How to apply:** In biome, house, scope, catchall, peaks, mi and any new package, name the unit after its function -- "Mid Side", "Window Comparator", "Audio Analyzer", "Macro Controller", "Channel Strip", "Parametric EQ" -- matching the existing precedent (Fade Mixer, Tilt EQ, Gated Slew, Spectral Follower, WoodenBox, Spectrogram). Poetic working titles used while designing are fine, but retire them before the unit ships and before the ledger title is written. A unit that moves package may need renaming.
+
 ### Dry/wet mix controls -- STANDARD (both apply to every dry/wet mix)
 
 **1. Equal-power (sqrt-law) crossfade for DECORRELATED wets.** A reverb/delay/chorus/granular wet is decorrelated from the dry, so a LINEAR crossfade `dry*(1-mix) + wet*mix` dips ~3 dB at mix=0.5 (the "gain loss at 50% that recovers at 100%" bug). Use `dryGain = sqrtf(1-mix)`, `wetGain = sqrtf(mix)` (so `dryGain^2 + wetGain^2 = 1` -> constant power), computed at BLOCK rate, clamped before the sqrt. Fold any wet makeup into `wetGain`. This is the default for all decorrelated dry/wet.

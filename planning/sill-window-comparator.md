@@ -1,4 +1,4 @@
-# Design note: Sill - dual window comparator on the multi-out framework
+# Design note: Window Comparator - dual window comparator on the multi-out framework
 
 Status: design note / not started. Ledger item `sill-window-comparator`.
 
@@ -8,12 +8,13 @@ controls if they earn their place.
 
 Fills the logic/comparator gap - no gate logic, no comparator, no window
 detector exists in the collection *or* in the firmware, so a patch that needs one
-currently cannot get one. Named **Sill**: a window sill, and a geological sill,
-which puts it beside Breccia and Sediment.
+currently cannot get one.
+
+Name: **Window Comparator**. Units outside spreadsheet take descriptive, factual names (user direction 2026-08-14), matching how biome already names things (Fade Mixer, Tilt EQ, Gated Slew, Spectral Follower). The poetic working title *Sill* is retired; evocative names stay in spreadsheet.
 
 Package: **biome**, with the CV utilities (Gridlock, Integrator, Quantoffset,
 PSR). Biome's naming is otherwise functional, so "Window Comparator" is the
-fallback if Sill reads as too cute next to Tilt EQ.
+fallback if Window Comparator reads as too cute next to Tilt EQ.
 
 ## The reference, from the manual
 

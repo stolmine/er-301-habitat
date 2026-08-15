@@ -1,4 +1,4 @@
-# Design note: Strata - a channel strip on the house atom bin
+# Design note: Channel Strip - a channel strip on the house atom bin
 
 Status: design note / not started. Ledger item `strata-channel-strip`.
 
@@ -6,7 +6,7 @@ User request 2026-08-14: a channel strip built on sub-controls - top level is
 bypass gates per section, parameters underneath - with nonlinearity throughout,
 sourced from Airwindows.
 
-Named **Strata**: layers laid down in order, which is what a strip is.
+Name: **Channel Strip**. Units outside spreadsheet take descriptive, factual names (user direction 2026-08-14), matching how house already names things (WoodenBox, BrightAmbience3, TickerTape). The poetic working title *Strata* is retired; evocative names stay in spreadsheet.
 
 Package: **house**. The atoms are already there, and this is the composition
 consumer that `house-atom-library` and `house-harness-patterns` were staged for.
@@ -14,7 +14,7 @@ consumer that `house-atom-library` and `house-harness-patterns` were staged for.
 ## The argument for building it
 
 `house-atom-library` is ledgered as "component-only by default (no Lua unit/toc)
-**until standalone value exists**." Strata is that standalone value.
+**until standalone value exists**." Channel Strip is that standalone value.
 
 More concretely: **Capacitor2, Point and Distance2 are already vendored, already
 NEON/A8-tuned, and currently ship to nobody.** All three are gated behind Filament
@@ -67,7 +67,7 @@ toward `compThresh/|x|`, an infinite-ratio target; under it, one-poles back to
 phase-based with the `sin` skipped entirely once phase passes π/2. The gate
 triggers off the *uncompressed* signal, independent of the compressor.
 
-Note it has **no makeup gain** - ConsoleX supplies that externally. Strata's Out
+Note it has **no makeup gain** - ConsoleX supplies that externally. Channel Strip's Out
 section covers it.
 
 **Channel9** is the nonlinearity the request asks for, and it is remarkably
@@ -210,16 +210,16 @@ not scale:
 - CStrip's `divisor /= compscale` can push the compressor coefficient above 1.0
   at high rates. Mild at 48 kHz (compscale ≈ 1.088) but clamp it.
 
-Only the first genuinely bites Strata as specified, but the pattern is the point:
+Only the first genuinely bites Channel Strip as specified, but the pattern is the point:
 **check every constant for sample-rate assumptions before trusting it.**
 
 ## Relationship to the other dynamics items
 
 `gesso-glue-compressor` is a dedicated glue bus compressor on a Pressure6 engine.
-Strata's Comp is Pop3 - a different, cheaper, strip-internal compressor with a
+Channel Strip's Comp is Pop3 - a different, cheaper, strip-internal compressor with a
 gate attached. They are not redundant: one is a bus tool with an SSL surface, the
 other is a channel-strip stage. Build Gesso first if only one gets built, since
-it fills the standalone-compressor gap that Strata does not.
+it fills the standalone-compressor gap that Channel Strip does not.
 
 `aw-batch2-ports` is the plan of record for Airwindows porting mechanics; its
 cross-cutting findings apply here and should not be re-derived.

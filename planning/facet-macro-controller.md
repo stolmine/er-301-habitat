@@ -1,12 +1,11 @@
-# Design note: Facet - a normalled macro controller
+# Design note: Macro Controller - a normalled macro controller
 
 Status: design note / not started. Ledger item `facet-macro-controller`.
 
 User request 2026-08-14: a multi-out macro controller, in the manner of Ladik
 J-011 Joystick Math or Mannequins Cold Mac.
 
-Named **Facet**: one stone, many faces, all cut from the same block, each
-showing the same light differently.
+Name: **Macro Controller**. Units outside spreadsheet take descriptive, factual names (user direction 2026-08-14), matching how biome already names things (Fade Mixer, Gridlock, Integrator, Quantoffset). The poetic working title *Facet* is retired; evocative names stay in spreadsheet.
 
 Package: **biome**, with the CV utilities.
 
@@ -44,7 +43,7 @@ easy and the part that matters least.
 The multi-out author guide is explicit: "If outputs are independent and could
 just as well be parallel mono units, don't make them multi-out."
 
-Facet has to answer that, and the answer is not automatic:
+Macro Controller has to answer that, and the answer is not automatic:
 
 - The **combinatorial** outputs mostly *are* derivable downstream. `Fold` and
   `Rectify` already exist as core units. `Offset`, `Slew Limiter` and biome's
@@ -121,7 +120,7 @@ replace an output rather than extend the count.
 - **Audio rate is a feature, not an accident.** Ladik notes J-011 "works in the
   audio range," and min/max/abs/fold at audio rate are waveshapers -
   rectification, folding, and a min/max pair that behaves like a crude ring
-  modulator. Their hard corners will alias. Unlike Sill I would *not* add a BLEP
+  modulator. Their hard corners will alias. Unlike Window Comparator I would *not* add a BLEP
   mode: these are shaping functions rather than gate edges, the aliasing is part
   of the character, and the cost is real. Document it rather than fixing it.
 - **Vanilla**: sub-outs 3+ are invisible on stock firmware, so six of eight

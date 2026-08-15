@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**219 items** — 59 done, 7 wip, 152 todo, 1 blocked. *Rendered 2026-08-14.*
+**220 items** — 59 done, 7 wip, 153 todo, 1 blocked. *Rendered 2026-08-15.*
 
 ## DSP
 
@@ -21,7 +21,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `alembic-userbias-derivations` | Alembic Phases 7-8: per-region user-bias sub-params + Order 2/3 derivations + sample excitation | manual · 2026-07-09 |
 |   | `anamnesis-insert-crash` | Anamnesis am335x insert: data-abort in Event_post (heap corruption from insert path) | manual *(attested)* · 2026-08-13 |
 |   | `anneal-resonance-suppressor` | Anneal: dynamic resonance suppression (soothe-style), self-keyed against a local spectral average | manual · 2026-08-14 |
-|   | `assay-audio-listener` | Assay: audio analysis to CV (env, pitch, centroid, flatness, transient) on the multi-out framework | manual · 2026-08-14 |
+|   | `assay-audio-listener` | Audio Analyzer: audio analysis to CV (env, pitch, centroid, flatness, transient) on the multi-out framework | manual · 2026-08-14 |
 |   | `aw-batch2-ports` | Airwindows batch 2: 11-plugin survey + port (Dynamics3/EverySlew/Mackity first, shared fast-sin atom as the gate) | manual · 2026-08-13 |
 |   | `biome-discont-mix-left-only` | Biome 94 Discont: Mix is tied only to the left DSP instance in a stereo chain | manual · 2026-08-10 |
 |   | `biome-utility-dsp-units` | biome DSP utility units: simple allpass, dome filter, frequency shifter, bitcrush/downsample | manual · 2026-07-09 |
@@ -57,7 +57,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `ngoma-shape-fm-campaign` | Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping) | manual *(attested)* · 2026-08-13 |
 |   | `ngoma-shape0-level-campaign` | Ngoma shape-0 fundamental level structure (oscillator phase coherence at low r) | manual · 2026-08-13 |
 |   | `ngoma-sound-tuning` | Ngoma: careful sound-tuning pass (param cross-couplings, per-partial decay, mode ratios, sub-octave) | manual · 2026-07-09 |
-|   | `ochre-character-eq` | Ochre: characterful four-band EQ on a shared parametric-band atom (SSL 611 reference) | manual · 2026-08-14 |
+|   | `ochre-character-eq` | Parametric EQ: characterful four-band EQ on a shared parametric-band atom (SSL 611 reference) | manual · 2026-08-14 |
 |   | `parfait-shaper-oversampling` | Parfait: per-band shaper oversampling to kill aliasing audible as mix is lowered at high drive | manual · 2026-07-09 |
 |   | `pecto-control-refinements` | Pecto: Doppler slew sub-param, bipolar feedback, density cap at 12 | manual · 2026-07-09 |
 |   | `pecto-neon-gather-opt` | Pecto: further NEON gather optimization for greedy comb mode | manual · 2026-07-09 |
@@ -65,6 +65,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `petrichor-stereo-and-crossfeed` | Petrichor/Pecto: shared-buffer stereo optimization + cross-feedback matrix (stretch) | manual · 2026-07-09 |
 |   | `poly-voice-allocator-atom` | Polyphonic voice-allocation atom: the layer habitat has none of, wanted by three ledgered items | manual · 2026-08-14 |
 |   | `research-audiorate-param-mod` | Research: how firmware native units accept clean audio-rate parameter modulation | manual · 2026-07-09 |
+|   | `sample-swap-downstream-mute` | Swapping a sample under a player mutes downstream units (Larets/Parfait reported); suspect NaN latching in recursive state | manual · 2026-08-15 |
 |   | `shaper-cross-pollination` | Cross-pollinate 94 Discont and Parfait shaper types, via a shared shaper atom | manual · 2026-08-14 |
 |   | `spectral-cross-synthesis` | Palimpsest: spectral cross-synthesis - vocoder, spectral morph and formant shift on one control | manual · 2026-08-14 |
 |   | `spectral-sort-unit` | Spectral sort unit - pixel-sorting for audio: sample player that permutes the spectrogram along frequency or time | manual · 2026-08-13 |
@@ -116,9 +117,9 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `blanda-scan-mixer` | Blanda — 3-input scan mixer (Morph-4-style continuous bell-scan, not a crossover) | manual · 2026-07-09 |
 |   | `catchall-flakes-wrong-module-require` | Catchall Flakes: requires biome.libcatchall, which does not exist — unit cannot load | manual · 2026-08-10 |
 |   | `catchall-sfera-spin-inert` | Catchall Sfera: Spin is visual-only; V/Oct inlet has no control; qScale branch orphaned | manual · 2026-08-10 |
-|   | `diptych-mid-side` | Diptych: stereo-only mid/side splitter with a processing branch per side | manual · 2026-08-14 |
+|   | `diptych-mid-side` | Mid Side: stereo-only mid/side splitter with a processing branch per side | manual · 2026-08-14 |
 |   | `etcher-io-range-and-presets` | Etcher: change I/O ranges to ±1V + add sine/triangle/user presets + hardware deviation verify | manual · 2026-07-09 |
-|   | `facet-macro-controller` | Facet: normalled macro controller on the multi-out framework (Cold Mac / Ladik J-011 reference) | manual · 2026-08-14 |
+|   | `facet-macro-controller` | Macro Controller: one normalled macro into eight derived outputs (Cold Mac / Ladik J-011 reference) | manual · 2026-08-14 |
 |   | `fademixer-6-8-plus-mutesolo-fix` | FadeMixer 6/8-input versions + fix broken mute/solo | manual · 2026-07-21 |
 |   | `jf-phase6-ship` | JF Phase 6: polish + ship (trig-LUT audit, CPU profile, test procedures, vanilla-compat, FM consolidation) | manual · 2026-07-09 |
 |   | `kaleidoscope-slicer` | Kaleidoscope slicer (working name Millefiori) - shard + mirrored folds + transposition fan over a card-loaded sample | manual · 2026-08-13 |
@@ -138,9 +139,9 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `porcelain-microsound-family` | Porcelain microsound/electroacoustic family — DSP kernel set (Raster-Noton + Plumbutter) | manual · 2026-07-09 |
 |   | `port-gplv3-cleanroom` | GPLv3 algorithm-reference clean-room reimplementations (reference only, not code ports) | manual · 2026-07-09 |
 |   | `port-mit-direct` | MIT-compatible direct ports backlog: Stages LFO, Loom, Open303, Faust reverb, ProCo Rat, AW-remaining | manual · 2026-07-09 |
-|   | `sill-window-comparator` | Sill: dual window comparator + logic section on the multi-out framework (Compare 2 reference) | manual · 2026-08-14 |
+|   | `sill-window-comparator` | Window Comparator: two windows + logic section on the multi-out framework (Compare 2 reference) | manual · 2026-08-14 |
 |   | `spreadsheet-larets-compressamt-tie-mismatch` | Spreadsheet Larets: Lua ties 'CompressAmt' but C++ registers the parameter as 'TanhAmt' | manual · 2026-08-10 |
-|   | `strata-channel-strip` | Strata: 7-section channel strip on the house atom bin, with a reusable SectionGate control | manual · 2026-08-14 |
+|   | `strata-channel-strip` | Channel Strip: 7-section strip on the house atom bin, with a reusable SectionGate control | manual · 2026-08-14 |
 |   | `switch-1-to-n-unit` | 1-to-N switch unit: output selection + output count + passthrough, on the multi-out framework | manual · 2026-08-05 |
 |   | `units-4ms-smr` | 4ms Spectral Multiband Resonator port — 6 resonant bandpass filters with rotation/spread | manual · 2026-07-09 |
 |   | `units-device-randomizer-control-forge` | Device Randomizer + Control Forge-alike — chain-neighbor randomizer and multistage envelope | manual · 2026-07-09 |

@@ -1,11 +1,13 @@
-# Design note: Diptych - mid/side splitter with per-side branches
+# Design note: Mid Side - mid/side splitter with per-side branches
 
 Status: design note / not started. Ledger item `diptych-mid-side`.
 
 User request 2026-08-14. Stereo-only unit. Two branch meter controls, one for
 Mid and one for Side, so each side of the matrix has its own insertable chain.
 
-Fills the stereo/imaging gap. Named **Diptych**: one work, two panels.
+Fills the stereo/imaging gap.
+
+Name: **Mid Side**. Units outside spreadsheet take descriptive, factual names (user direction 2026-08-14), matching how biome already names things (Fade Mixer, Tilt EQ, Gated Slew, Spectral Follower). The poetic working title *Diptych* is retired; evocative names stay in spreadsheet.
 
 *Corrected 2026-08-14*: this note originally said stereo/imaging was "a total
 blank in the collection, and the firmware has nothing either." Wrong on both
@@ -13,7 +15,7 @@ counts - see `nacre-quadrature-width.md`. Sujet's Space is a full spectral
 decorrelator, `er-301/mods/core/objects/Spread.{h,cpp}` is a firmware widener
 object that is simply never exposed as a unit, and Filament, Fabula, Galactic,
 Network and Anamnesis all carry width mechanisms. What is missing is a
-*reachable* M/S tool, which is still what Diptych is for.
+*reachable* M/S tool, which is still what Mid Side is for.
 
 Package: **biome**, with the other utility and mixing units. Fade Mixer is the
 closest precedent - it is the existing branch-meter unit in the collection.
@@ -57,7 +59,7 @@ Two mechanisms, both needed:
    (`er-301/mods/core/assets/Delay/SpreadDelayUnit.lua:21`):
 
 ```lua
-function Diptych:onLoadGraph(channelCount)
+function Mid Side:onLoadGraph(channelCount)
   if channelCount ~= 2 then
     app.logError("%s: can only load into a stereo chain.")
   end

@@ -1,11 +1,10 @@
-# Design note: Assay - audio analysis to CV, on the multi-out framework
+# Design note: Audio Analyzer - audio analysis to CV, on the multi-out framework
 
 Status: design note / not started. Ledger item `assay-audio-listener`.
 
 User picked this out of four proposals on 2026-08-14 as the one they liked most.
 
-Named **Assay**: the analysis of an ore to determine what it is made of. Sits
-with Breccia, Sediment, Sill and Strata.
+Name: **Audio Analyzer**. Units outside spreadsheet take descriptive, factual names (user direction 2026-08-14), matching how biome already names things (Spectral Follower, Gated Slew, Constant Random). The poetic working title *Assay* is retired; evocative names stay in spreadsheet.
 
 Package: **biome**, with the CV utilities and next to Spectral Follower, which is
 the closest existing thing.
@@ -22,7 +21,7 @@ One unit that listens to audio and emits five control signals:
 | 4 | `flat` | spectral flatness - tonal vs noisy |
 | 5 | `trig` | transient trigger |
 
-Sill turns voltages into gates. Assay turns *audio* into voltages. Between them
+Window Comparator turns voltages into gates. Audio Analyzer turns *audio* into voltages. Between them
 a patch can respond to what is actually sounding rather than only to what was
 deliberately patched.
 
@@ -47,7 +46,7 @@ it.
 
 So the gating rule from the guide matters more here than in any other unit
 proposed so far: **if none of `pitch`/`cent`/`flat` is connected, skip the FFT
-entirely.** That is a textbook Category C gate, and it means a patch using Assay
+entirely.** That is a textbook Category C gate, and it means a patch using Audio Analyzer
 only as an envelope follower pays almost nothing.
 
 `pffft` is already vendored (spreadsheet, mi, biome) and an STFT already runs on
@@ -155,5 +154,5 @@ worth exposing.
   than being written three times.
 - Sujet's `STFTSpectral.h` already computes a `localRef[k]` ±8-bin spectral
   boxcar and a prominence ratio against it. That is a more sophisticated
-  descriptor than anything Assay needs, and it is the obvious donor if a
+  descriptor than anything Audio Analyzer needs, and it is the obvious donor if a
   "tonality" or "prominence" output is ever wanted.
