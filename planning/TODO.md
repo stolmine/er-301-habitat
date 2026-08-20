@@ -5,18 +5,15 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**220 items** — 59 done, 7 wip, 153 todo, 1 blocked. *Rendered 2026-08-15.*
+**230 items** — 68 done, 5 wip, 156 todo, 1 blocked. *Rendered 2026-08-20.*
 
 ## DSP
 
 | | id | item | verify |
 |---|---|---|---|
-| ~ | `breccia-slice-glitch` | Breccia: port Network's per-tap glitch effects as PER-SLICE glitch effects | manual · 2026-08-13 |
 | ~ | `ca-noise-texture` | Cellular-automata granular noise texture source (Vivary) | manual · 2026-07-16 |
-| ~ | `fabula-am335x` | Fabula reverb am335x port: hybrid-float + pow2-mask + zipper-fix | manual · 2026-07-12 |
 | ~ | `fdn-reverb` | NEON FDN reverb (Householder core + per-line filters + spectral flavor overlay) | manual · 2026-07-16 |
 | ~ | `lane-shear-sorter` | Lane-shear sorter: filterbank pixel sorting - independently permute correlated frequency lanes in time | manual · 2026-08-13 |
-| ~ | `open303-port` | Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit | manual *(attested)* · 2026-08-13 |
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
 |   | `alembic-userbias-derivations` | Alembic Phases 7-8: per-region user-bias sub-params + Order 2/3 derivations + sample excitation | manual · 2026-07-09 |
 |   | `anamnesis-insert-crash` | Anamnesis am335x insert: data-abort in Event_post (heap corruption from insert path) | manual *(attested)* · 2026-08-13 |
@@ -42,8 +39,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `house-hybrid-float-retrofits` | House: hybrid-float retrofits for kWoodRoom (29%→~12-15%) and WoodenBox (14%→~6-8%) | manual · 2026-07-09 |
 |   | `house-suppress-customs-optimize-ports` | House: suppress the original units, keep + optimize (NEON) the ports | manual · 2026-07-21 |
 |   | `house-xyz-engine` | XYZ engine — cryptic 3-param original reverb (X morph, Y saturate+undersample, Z meta-routing) | manual · 2026-07-09 |
-|   | `kryos-load-hang` | Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware | manual · 2026-08-13 |
-|   | `kryos-spectral-freeze-rebuild` | Kryos: replace the biquad-bank engine with a phase-vocoder spectral freeze, single voice | manual · 2026-08-13 |
+|   | `kryos-spectral-freeze-cpu` | Spectral Freeze: measure am335x CPU and run the listening pass | manual · 2026-08-20 |
 |   | `mi-clouds-warps-improvements` | MI: Clouds gain-comp + further NEON (Clouds ShyFFT/SRC, Rings sympathetic/FM); Warps vocoder + drive | manual · 2026-07-09 |
 |   | `mirror-promotion` | Mirror: final habitat name + Voss-McCartney 1/f drift + wavetable frame-inventory audition | manual · 2026-07-09 |
 |   | `multimode-drum-voice-profile` | Profile + emulate multi-engine digital drum voice (per mode) | manual · 2026-07-17 |
@@ -82,14 +78,19 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `biome-expo-envelopes` | Biome: simple exponential envelopes - Expo D and Expo AD with expo-variation controls | manual *(attested)* · 2026-08-06 |
 | ✓ | `biome-flakes` | Flakes — granular shimmer/freeze feedback looper (C++ rewrite of Shards) | manual *(attested)* · 2026-07-09 |
 | ✓ | `biome-pecto` | Pecto — comb resonator (16 tap patterns, 4 slopes, 4 resonator types, NEON 3-pass, zipper-clean) | manual *(attested)* · 2026-07-09 |
+| ✓ | `breccia-slice-glitch` | Breccia: port Network's per-tap glitch effects as PER-SLICE glitch effects | manual *(attested)* · 2026-08-20 |
+| ✓ | `fabula-am335x` | Fabula reverb am335x port: hybrid-float + pow2-mask + zipper-fix | manual *(attested)* · 2026-08-20 |
 | ✓ | `fabula-diffusion-makeup` | Fabula: AGC / intelligent gain control to make up volume lost to diffusion | manual *(attested)* · 2026-08-06 |
 | ✓ | `fabula-dry-under-hpf` | Fabula: dry passthrough underneath the 200Hz wet HPF | manual *(attested)* · 2026-08-06 |
 | ✓ | `fabula-xform` | Fabula: xform (transform/randomize) control, modeled on Pecto/Petrichor | manual *(attested)* · 2026-08-06 |
 | ✓ | `fx-tilt-djfilter` | Tilt EQ + DJ Filter shipped (bipolar LP/HP sweep with resonance) | manual *(attested)* · 2026-07-09 |
 | ✓ | `house-aw-reverbs` | House package — 6 faithful Airwindows reverb ports (kWoodRoom…Galactic), hardware-validated | manual *(attested)* · 2026-07-09 |
 | ✓ | `house-rotcoat` | RotCoat (codename) — first original-design reverb: multi-world per-line reduced-rate FDN | manual *(attested)* · 2026-07-09 |
+| ✓ | `kryos-load-hang` | Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware | manual *(attested)* · 2026-08-20 |
+| ✓ | `kryos-spectral-freeze-rebuild` | Kryos: replace the biquad-bank engine with a phase-vocoder spectral freeze, single voice | manual *(attested)* · 2026-08-20 |
 | ✓ | `network-gain-compensation` | Gain compensation for Network (Fabula's makeup model, tap-weight-energy basis) | manual *(attested)* · 2026-07-15 |
 | ✓ | `ngoma-hardware-hang` | Ngoma hangs hardware on load (post-2.5.1 regression) — am335x-specific, bisect pending hardware test | manual *(attested)* · 2026-07-22 |
+| ✓ | `open303-port` | Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit | manual *(attested)* · 2026-08-20 |
 | ✓ | `pecto-audio-stack-overflow` | Pecto blew the 2048-byte audio task stack: 1072-byte process() frame from 5 stack-local arrays | manual *(attested)* · 2026-08-06 |
 | ✓ | `scope-probe-pool-leak` | Scope timebase leaked into the firmware's MiniScope via the shared FifoProbe pool | manual *(attested)* · 2026-08-06 |
 | ✓ | `spreadsheet-canals` | Canals — Three Sisters clone, DSP refresh + 4-input normalling topology; moved biome→spreadsheet | manual *(attested)* · 2026-07-09 |
@@ -115,7 +116,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `biome-quantoffset-ignores-chain-input` | Biome Quantoffset: never connects its chain input | manual · 2026-08-10 |
 |   | `bionic-lester-clone` | Profiling-informed clone of a switched-capacitor dual filter (target: Bionic Lester Mk1) | manual · 2026-07-15 |
 |   | `blanda-scan-mixer` | Blanda — 3-input scan mixer (Morph-4-style continuous bell-scan, not a crossover) | manual · 2026-07-09 |
-|   | `catchall-flakes-wrong-module-require` | Catchall Flakes: requires biome.libcatchall, which does not exist — unit cannot load | manual · 2026-08-10 |
 |   | `catchall-sfera-spin-inert` | Catchall Sfera: Spin is visual-only; V/Oct inlet has no control; qScale branch orphaned | manual · 2026-08-10 |
 |   | `diptych-mid-side` | Mid Side: stereo-only mid/side splitter with a processing branch per side | manual · 2026-08-14 |
 |   | `etcher-io-range-and-presets` | Etcher: change I/O ranges to ±1V + add sine/triangle/user presets + hardware deviation verify | manual · 2026-07-09 |
@@ -153,7 +153,9 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `units-som` | SOM — 64-node Kohonen self-organizing map with localized learning + icosphere scan viz | screenshot: insert; confirm 6-dim 64-node map learns timbral prototypes from audio/CV features, Scan icosphere ply (Fibonacci sphere, 64 Voronoi cells, BMU glow, CV-modulatable scan) + Plasticity ply (localized learning around scan position), reconstructed output interpolated from neighbors; usable structure in 1-3s, converged ~15s · 2026-07-09 |
 | ✓ | `biome-constant-random` | Constant Random — always-running S&H random CV source (rate + slew) in biome | manual *(attested)* · 2026-07-09 |
 | ✓ | `biome-varishape` | Varishape oscillator + Varishape Voice shipped in biome (POLYBLEP sine→square morph) | manual *(attested)* · 2026-07-09 |
+| ✓ | `breccia-libcore-require-emu` | Breccia fails to construct: module 'core.libcore' not found in the emulator | manual *(attested)* · 2026-08-20 |
 | ✓ | `catchall-alembic` | Alembic — sample-trained SOM 4-op PMM matrix synth (dual FM filter, comb, Ferment chaos macro) | manual *(attested)* · 2026-07-09 |
+| ✓ | `catchall-flakes-wrong-module-require` | Catchall Flakes: requires biome.libcatchall, which does not exist — unit cannot load | manual *(attested)* · 2026-08-20 |
 | ✓ | `fabula-promote-spreadsheet` | Promote Fabula from the zaum package to the spreadsheet package | manual *(attested)* · 2026-07-14 |
 | ✓ | `fade-mixer` | Fade Mixer — 4-input equal-power crossfader with BranchMeter gain/solo/mute controls | manual *(attested)* · 2026-07-09 |
 | ✓ | `fademixer-snap-mode` | Fade Mixer: Smooth/Snap config option so the family works as N-to-1 switches too | manual *(attested)* · 2026-08-06 |
@@ -180,6 +182,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `filterbank-defaults-and-randomize-gates` | Filterbank: better default gain/Q for immediate audibility + band-list randomize gate controls | manual · 2026-07-09 |
 |   | `helicase-polish` | Helicase: wider carrier-shape set, more-reactive overview viz, am335x CPU profile | manual · 2026-07-09 |
 |   | `impasto-stereo-option-state` | Impasto: saved stereo option state can disagree with instantiation if toggled without re-insert | manual · 2026-07-09 |
+|   | `larets-overview-skew-duplicate` | Larets: decide whether the Overview expansion should keep its duplicate Skew fader | manual · 2026-08-20 |
 |   | `larets-stutter-shuffle-viz` | Larets: distinguish stutter vs shuffle viz (both read similar at a glance) | screenshot: confirm stutter telegraphs a boxed fixed-loop window with repeated contour fragments, and shuffle telegraphs rearranged fragment blocks (shifted or source-color-coded) · 2026-07-09 |
 |   | `mi-clouds-quality-labels-misleading` | MI Clouds: Quality labels normal/hifi describe stereo-vs-mono, not fidelity | manual · 2026-08-10 |
 |   | `mi-grids-circle-view-unreachable` | MI Grids: the `circle` view holding all 7 controls is never switched to | manual · 2026-08-10 |
@@ -187,7 +190,10 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `mirror-step-and-viz` | Mirror: fine/coarse/super step audit on all controls + custom overview-ply viz | screenshot: confirm each fader's coarse/fine/super steps match musical granularity (Hz = octave/cents/sub-Hz; 0..1 = 0.1/0.01/0.001; Mirror knob approaches the Nyquist-flip region smoothly); confirm a custom overview viz (concentric fire wheels / rubber-band sphere / L-vs-R Lissajous) renders · 2026-07-09 |
 |   | `mod-gain-default-zero` | Mod gain defaults to 0 on all controls of all units (CV opt-in) - catalog-wide standardization | manual · 2026-07-22 |
 |   | `ngoma-viz-and-docs` | Ngoma: cube viz refinement + documentation refresh | screenshot: confirm cube scaled 0.85x with breathing room, state-driven face-fill textures (Character/Grit/Shape/ampEnv), exaggerated parallax + face-shrink/edge-expand-on-hit; drum-voice.md updated or superseded by the codex reference · 2026-07-09 |
+|   | `peaks-fm-wsm-rate-map-polarity` | Peaks FM LFO / WSM LFO: modulator Rate is unipolar but presented as bipolar [-1,1] | manual · 2026-08-20 |
+|   | `peaks-modseq-four-dials-eight-steps` | Peaks Mod Sequencer: four Step dials drive an eight-step mirrored sequence | manual · 2026-08-20 |
 |   | `peaks-refinements` | Peaks: Tap LFO clock frequency-counter display, PLO continuous phase-increment, step-position viz | manual · 2026-07-09 |
+|   | `peaks-snare-frequency-unipolar-display` | Peaks Snare Drum: Frequency is a signed detune shown as a unipolar 0..1 dial | manual · 2026-08-20 |
 |   | `pecto-expansion-views` | Pecto: add per-control expansion views so submenu params open as full faders on enter (impasto pattern) | manual · 2026-07-14 |
 |   | `petrichor-tap-macros` | Petrichor: CV-modulatable macro filter-cutoff offset + tap-pitch macro + xform spread param | manual · 2026-07-09 |
 |   | `psr-level-control` | PSR (biome): output level control - currently full scale by default, needs the Constant Random treatment | manual · 2026-08-13 |
@@ -201,6 +207,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `units-artsy-visualizers` | Artsy visualizers / generative sound+visual units (Norns/Paratek-inspired eye candy) | screenshot: build generative visual + audio units: glitchy audio/CV-driven visuals and a pseudo-3D serial-wavetable-frame view · 2026-07-09 |
 |   | `viz-offscreen-gate-all` | Bring the offscreen-viz gate to all spreadsheet units with a DSP-side visualization | manual · 2026-07-15 |
 | ✗ | `scope-headerless-research` | Scope: research headerless unit display | manual · 2026-07-09 |
+| ✓ | `control-expansion-coverage-sweep` | Sweep: controls that carry sub-controls on SHIFT but do not expand on ENTER | manual *(attested)* · 2026-08-20 |
 | ✓ | `controls-optioncontrol-hardening` | Controls hardening: OptionControl boolean/indexing fixes, bipolar correctness, passthrough Comparators | manual *(attested)* · 2026-07-09 |
 | ✓ | `fabula-overview-caret` | Fabula overview: default-focus a sub-readout on re-entry WITHOUT breaking navigation (renderer focus==self gate) | manual *(attested)* · 2026-08-06 |
 | ✓ | `mix-control-standards` | Mix-control standards: detents standardized on the built-in map; crossfade-law half still open | manual *(attested)* · 2026-08-06 |
@@ -231,8 +238,10 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+| ~ | `emu-test-coverage-situations` | Emu tests: one per SITUATION not per unit; S1/S2/S3 built, S4-S8 open | manual · 2026-08-20 |
 |   | `audit-passthrough-remaining` | Review remaining units for clean passthrough vs non-passthrough delineation | manual · 2026-07-09 |
 |   | `dsp-neon-audit` | Repo-wide NEON audit — identify hot DSP paths without SIMD and assess vectorization | manual · 2026-07-09 |
+|   | `emu-bulk-unit-load-flake` | Emu suite intermittently stops replying during bulk unit loading | manual · 2026-08-20 |
 |   | `tooling-keyword-metadata-audit` | Normalize per-unit picker `keywords` metadata across all packages | manual · 2026-07-09 |
 |   | `voice-profiling-workflow` | Hardware voice profiling workflow (manual + MIDI + record + sox null-test) | manual · 2026-07-17 |
 | ✓ | `tooling-build-defenses` | am335x build defenses: graphic-vtable lint + NEON-hint lint + -fno-tree-vectorize | manual *(attested)* · 2026-07-09 |
@@ -260,5 +269,6 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `infra-ledger-regime` | Ledger + BDG regime stood up (gate, render, hooks, blessed entrypoint) | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-serialization-audit` | Spreadsheet-package serialization + stale-label audit (ParameterAdapter Bias round-trip, updateLabel) | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-vanilla-compat` | Habitat packages load on vanilla ER-301 firmware (non-stolmine) | manual *(attested)* · 2026-07-09 |
+| ✓ | `libmvec-linux-vectorize-guard` | Package .so files failed to load on linux: -ftree-vectorize emitted libmvec calls | manual *(attested)* · 2026-08-20 |
 | ✓ | `mi-package-consolidation` | 8 separate MI port packages consolidated into single `mi` package (shared stmlib, ABI-safe) | manual *(attested)* · 2026-07-09 |
 

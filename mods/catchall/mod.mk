@@ -74,7 +74,12 @@ CFLAGS += -Wno-unused-variable -Wno-unused-parameter -Wno-sign-compare
 # Append am335x NEON-safety overrides LAST so they win against any
 # -ftree-vectorize that came from CFLAGS.speed earlier in the line.
 # See feedback_disable_tree_vectorize_am335x — TOP-PRIORITY rule.
-ifeq ($(ARCH),am335x)
+# LINUX NEEDS THIS TOO, for a different reason than am335x: GCC vectorizes a
+# loop calling sin/cos/exp into libmvec (_ZGVbN4v_sinf etc.), which a package
+# .so does not link against, so the whole module fails to load with "undefined
+# symbol" the moment a unit is inserted. Found 2026-08-18 by the all-units
+# sweep, which had every scope unit dead in the emulator for exactly this.
+ifneq ($(filter $(ARCH),am335x linux),)
 CFLAGS += -fno-tree-vectorize
 endif
 

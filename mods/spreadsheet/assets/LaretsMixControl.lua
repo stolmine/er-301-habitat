@@ -12,6 +12,21 @@ local col1 = app.BUTTON1_CENTER
 local col2 = app.BUTTON2_CENTER
 local col3 = app.BUTTON3_CENTER
 
+-- Module scope, and exported, so the EXPANDED faders read out identically to
+-- these sub-readouts. Note levelMap spans 0..4, not 0..1 - a fader built with
+-- a [0,1] map would silently clamp at a quarter of the real range.
+local levelMapDef = (function()
+  local m = app.LinearDialMap(0, 4)
+  m:setSteps(0.5, 0.1, 0.01, 0.001)
+  return m
+end)()
+
+local compMapDef = (function()
+  local m = app.LinearDialMap(0, 1)
+  m:setSteps(0.1, 0.01, 0.001, 0.001)
+  return m
+end)()
+
 local LaretsMixControl = Class {}
 LaretsMixControl:include(GainBias)
 
@@ -35,17 +50,7 @@ function LaretsMixControl:init(args)
     return g
   end
 
-  local levelMap = (function()
-    local m = app.LinearDialMap(0, 4)
-    m:setSteps(0.5, 0.1, 0.01, 0.001)
-    return m
-  end)()
-
-  local compMap = (function()
-    local m = app.LinearDialMap(0, 1)
-    m:setSteps(0.1, 0.01, 0.001, 0.001)
-    return m
-  end)()
+  local levelMap, compMap = LaretsMixControl.levelMap, LaretsMixControl.compMap
 
   self.outputReadout = makeReadout(args.outputLevel, levelMap, 2, col1)
   self.compReadout = makeReadout(args.compressAmt, compMap, 2, col2)
@@ -205,5 +210,9 @@ function LaretsMixControl:cancelReleased(shifted)
   end
   return GainBias.cancelReleased(self, shifted)
 end
+
+LaretsMixControl.levelMap = levelMapDef
+LaretsMixControl.compMap = compMapDef
+LaretsMixControl.readoutPrecision = 2
 
 return LaretsMixControl

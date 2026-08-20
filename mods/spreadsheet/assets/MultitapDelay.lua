@@ -3,6 +3,7 @@ local libstolmine = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Fader = require "Unit.ViewControl.Fader"
 local Pitch = require "Unit.ViewControl.Pitch"
 local MixControl = require "spreadsheet.MixControl"
 local TimeControl = require "spreadsheet.TimeControl"
@@ -803,10 +804,26 @@ function MultitapDelay:onLoadViews()
       paramBLabel = "sprd",
       paramBMap = normMap(0, 1),
       paramBPrecision = 2
+    },
+    xformFuncFader = Fader {
+      button = "func", description = "Xform Target",
+      param = self.objects.xformTarget:getParameter("Bias"),
+      map = intMap(0, 20), units = app.unitNone, precision = 0
+    },
+    xformDepthFader = Fader {
+      button = "depth", description = "Xform Depth",
+      param = self.objects.xformDepth:getParameter("Bias"),
+      map = normMap(0, 1), units = app.unitNone, precision = 2
+    },
+    xformSpreadFader = Fader {
+      button = "sprd", description = "Xform Spread",
+      param = self.objects.xformSpread:getParameter("Bias"),
+      map = normMap(0, 1), units = app.unitNone, precision = 2
     }
   }, {
     expanded = { "tune", "taps", "overview", "masterTime", "feedback", "xform", "mix" },
     collapsed = {},
+    xform = { "xform", "xformFuncFader", "xformDepthFader", "xformSpreadFader" },
     taps = { "taps", "filters", "tapCount", "volMacro", "panMacro", "pitchMacro", "cutoffMacro", "qMacro", "typeMacro" },
     overview = { "overview", "grainSize", "tapCount", "stack" },
     masterTime = { "masterTime", "grid", "drift", "reverse", "skew" },

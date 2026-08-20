@@ -3,6 +3,7 @@ local libstolmine = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Fader = require "Unit.ViewControl.Fader"
 local Gate = require "Unit.ViewControl.Gate"
 local StepListControl = require "spreadsheet.StepListControl"
 local SeqInfoControl = require "spreadsheet.SeqInfoControl"
@@ -306,10 +307,22 @@ function TrackerSeq:onLoadViews()
       modeNames = { [0] = "ofst", "len", "dev", "all" },
       discrete = true,
       discreteThreshold = 8
+    },
+    xformFuncFader = Fader {
+      button = "func", description = "Xform Func",
+      param = self.objects.xformFunc:getParameter("Bias"),
+      map = TransformGateControl.defaultFuncMap, units = app.unitNone, precision = 0
+    },
+    xformFactorFader = Fader {
+      button = "fact", description = "Xform Factor",
+      param = self.objects.xformFactor:getParameter("Bias"),
+      map = TransformGateControl.defaultFactorMap, units = app.unitNone,
+      precision = TransformGateControl.defaultFactorPrecision
     }
   }, {
     expanded = { "steps", "info", "clock", "reset", "slew", "xform" },
     collapsed = {},
+    xform = { "xform", "xformFuncFader", "xformFactorFader" },
     info = { "info", "seqLen", "loopLen", "xformScope" }
   }
 end

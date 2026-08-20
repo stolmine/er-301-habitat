@@ -3,6 +3,7 @@ local libstolmine = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Fader = require "Unit.ViewControl.Fader"
 local Pitch = require "Unit.ViewControl.Pitch"
 local MixControl = require "spreadsheet.MixControl"
 local TransformGateControl = require "spreadsheet.TransformGateControl"
@@ -344,10 +345,21 @@ function Pecto:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 2,
       initialBias = 0.0
+    },
+    xformFuncFader = Fader {
+      button = "func", description = "Xform Target",
+      param = self.objects.xformTarget:getParameter("Bias"),
+      map = intMap(0, 8), units = app.unitNone, precision = 0
+    },
+    xformDepthFader = Fader {
+      button = "depth", description = "Xform Depth",
+      param = self.objects.xformDepth:getParameter("Bias"),
+      map = normMap(0, 1), units = app.unitNone, precision = 2
     }
   }, {
     expanded = { "tune", "size", "density", "feedback", "xform", "mix" },
     collapsed = {},
+    xform = { "xform", "xformFuncFader", "xformDepthFader" },
     density = { "densityFader", "patternFader", "slopeFader", "resonatorFader" },
     mix = { "mix", "inputLevel", "outputLevel", "tanhAmt" }
   }

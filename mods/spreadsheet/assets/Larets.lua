@@ -5,6 +5,8 @@ local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
+local Fader = require "Unit.ViewControl.Fader"
+local OptionControl = require "Unit.ViewControl.OptionControl"
 local LaretStepListControl = require "spreadsheet.LaretStepListControl"
 local LaretOverviewControl = require "spreadsheet.LaretOverviewControl"
 local LaretClockControl = require "spreadsheet.LaretClockControl"
@@ -12,6 +14,22 @@ local LaretsMixControl = require "spreadsheet.LaretsMixControl"
 local TransformGateControl = require "spreadsheet.TransformGateControl"
 local MenuHeader = require "Unit.MenuControl.Header"
 local Task = require "Unit.MenuControl.Task"
+
+-- Stepped map for the 7-way Transform function selector. Discrete selectors
+-- belong in expansions as stepped faders (decision 2026-08-18).
+-- Shared by the TransformGateControl sub-readout AND its expanded fader.
+local xformFactorMap = (function()
+  local m = app.LinearDialMap(0, 1)
+  m:setSteps(0.1, 0.01, 0.001, 0.001)
+  return m
+end)()
+
+local xformFuncMap = (function()
+  local m = app.LinearDialMap(0, 6)
+  m:setSteps(1, 1, 1, 1)
+  m:setRounding(1)
+  return m
+end)()
 
 local function floatMap(min, max)
   local map = app.LinearDialMap(min, max)
@@ -202,17 +220,8 @@ function Larets:onLoadViews()
       funcParam = self.objects.xformFunc:getParameter("Bias"),
       factorParam = self.objects.xformDepth:getParameter("Bias"),
       funcNames = { [0] = "all", "t+p", "type", "prm", "tick", "rot", "rev" },
-      funcMap = (function()
-        local m = app.LinearDialMap(0, 6)
-        m:setSteps(1, 1, 1, 1)
-        m:setRounding(1)
-        return m
-      end)(),
-      factorMap = (function()
-        local m = app.LinearDialMap(0, 1)
-        m:setSteps(0.1, 0.01, 0.001, 0.001)
-        return m
-      end)(),
+      funcMap = xformFuncMap,
+      factorMap = xformFactorMap,
       factorPrecision = 2,
       paramALabel = "depth"
     },
@@ -246,12 +255,65 @@ function Larets:onLoadViews()
       biasUnits = app.unitNone,
       biasPrecision = 0,
       initialBias = 1
+    },
+    -- Expansion members. Fader, not GainBias: GainBias REQUIRES a branch, and
+    -- adding branches here would bolt new CV inlets onto the unit just to make
+    -- ENTER work. Fader takes the parameter directly.
+    xformFuncFader = Fader {
+      button = "func",
+      description = "Xform Func",
+      param = self.objects.xformFunc:getParameter("Bias"),
+      map = xformFuncMap,
+      units = app.unitNone,
+      precision = 0
+    },
+    xformDepthFader = Fader {
+      button = "depth",
+      description = "Xform Depth",
+      param = self.objects.xformDepth:getParameter("Bias"),
+      map = xformFactorMap,
+      units = app.unitNone,
+      precision = 2
+    },
+    outputLevelFader = Fader {
+      button = "out",
+      description = "Output Level",
+      param = self.objects.outputLevel:getParameter("Bias"),
+      -- LaretsMixControl.levelMap spans 0..4; a [0,1] map here would clamp the
+      -- fader at a quarter of the range the sub-readout shows.
+      map = LaretsMixControl.levelMap,
+      units = app.unitNone,
+      precision = LaretsMixControl.readoutPrecision
+    },
+    compressAmtFader = Fader {
+      button = "comp",
+      description = "Compress",
+      param = self.objects.compressAmt:getParameter("Bias"),
+      map = LaretsMixControl.compMap,
+      units = app.unitNone,
+      precision = LaretsMixControl.readoutPrecision
+    },
+    autoMakeup = OptionControl {
+      button = "auto",
+      description = "Auto Makeup",
+      option = self.objects.op:getOption("AutoMakeup"),
+      choices = { "on", "off" }
+    },
+    stepMode = OptionControl {
+      button = "step",
+      description = "Step Advance",
+      option = self.objects.op:getOption("StepMode"),
+      choices = { "seq", "rand" }
     }
   }, {
     expanded = { "clock", "steps", "overview", "offset", "xform", "mix" },
     collapsed = {},
     clock = { "clock", "reset", "clockDiv" },
-    overview = { "overview", "skew", "stepCount", "loopLength" }
+    -- stepMode added 2026-08-18: the control carries this toggle on SHIFT but
+    -- the expansion silently dropped it.
+    overview = { "overview", "skew", "stepCount", "loopLength", "stepMode" },
+    xform = { "xform", "xformFuncFader", "xformDepthFader" },
+    mix = { "mix", "outputLevelFader", "compressAmtFader", "autoMakeup" }
   }
 end
 

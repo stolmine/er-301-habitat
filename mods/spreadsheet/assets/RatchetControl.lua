@@ -347,4 +347,8 @@ function RatchetControl:upReleased(shifted)
   return false
 end
 
+-- Exported so the expanded fader matches this control's sub-readout exactly.
+RatchetControl.multMap = multMap
+RatchetControl.multPrecision = 0
+
 return RatchetControl

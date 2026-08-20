@@ -1,5 +1,5 @@
 local app = app
-local libcatchall = require "biome.libcatchall"
+local libcatchall = require "catchall.libcatchall"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"

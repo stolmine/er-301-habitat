@@ -427,4 +427,11 @@ function TransformGateControl:upReleased(shifted)
   return false
 end
 
+-- Exported so a unit's EXPANDED fader can use the identical map and precision
+-- as this control's sub-readout. Duplicating the map in the unit file is how
+-- the two drift apart and the same parameter reads two different ways.
+TransformGateControl.defaultFuncMap = defaultFuncMap
+TransformGateControl.defaultFactorMap = factorMap
+TransformGateControl.defaultFactorPrecision = 0
+
 return TransformGateControl

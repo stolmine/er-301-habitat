@@ -3,6 +3,7 @@ local libspreadsheet = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local OptionControl = require "Unit.ViewControl.OptionControl"
 local CompBandControl = require "spreadsheet.CompBandControl"
 local DriveControl = require "spreadsheet.DriveControl"
 local CompMixControl = require "spreadsheet.CompMixControl"
@@ -380,7 +381,15 @@ function MultibandCompressor:onLoadViews()
     initialBias = 800.0
   }
   -- Mix expansion: mix + output
-  views.mix = { "mix", "mixOutput" }
+  -- autoMakeup added 2026-08-18: CompMixControl carries this toggle on SHIFT
+  -- but the expansion silently dropped it.
+  controls.mixAutoMakeup = OptionControl {
+    button = "auto",
+    description = "Auto Makeup",
+    option = self.objects.op:getOption("AutoMakeup"),
+    choices = { "on", "off" }
+  }
+  views.mix = { "mix", "mixOutput", "mixAutoMakeup" }
   controls.mixOutput = GainBias {
     button = "output",
     description = "Output",

@@ -477,8 +477,9 @@ note = "planning/todo-archive.md 'Bugs/Impasto'. The label re-labels mono/stereo
 [[item]]
 id = "kryos-spectral-freeze-rebuild"
 title = "Kryos: replace the biquad-bank engine with a phase-vocoder spectral freeze, single voice"
-status = "todo"
-stamped = "2026-08-13T23:51:41-05:00"
+attested = "Closed 2026-08-20. Engine replaced wholesale with an STFT phase vocoder and shipped as the biome unit Spectral Freeze (biome 2.2.4.1); the standalone kryos package is retired. Verify criteria met: freeze sustains a full spectrum not 12 partials, all 5 Movement modes differ, and Ether drives 11 partials down to 2 with harmonic share rising 0.23 to 0.76 - all asserted by tools/spectral-freeze-test (7 checks). No user-facing string names any third-party product. NOT MET: am335x CPU is not measured; see kryos-spectral-freeze-cpu."
+status = "done"
+stamped = "2026-08-20T15:56:12-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "freeze sustains a full spectrum rather than 12 partials; Movement audibly differs across all 5 modes; lowering Ether tends the result toward a few pure tones per the reference behaviour; am335x CPU measured and recorded; no user-facing string names any third-party product" }
 note = """Design: planning/kryos-spectral-freeze.md (2026-08-13). User goal: ape the Disting EX Spectral Freeze, SINGLE VOICE (the 4-voice structure is explicitly not wanted). Read from the disting EX user manual 1.26 chapter 24 pp.171-176.
@@ -493,8 +494,9 @@ MOVED INTO BIOME 2026-08-13 as the unit "Spectral Freeze" (moduleName SpectralFr
 [[item]]
 id = "kryos-load-hang"
 title = "Kryos (spectral freeze): hangs hardware on load — isolate emu vs hardware"
-status = "todo"
-stamped = "2026-08-13T23:51:41-05:00"
+attested = "Closed 2026-08-20: DOES NOT REPRODUCE. The user ran it on hardware 2026-08-13 and the unit loaded and ran fine. Emulator was clean too. The static pass ruled out vectorization, NEON hints, stale objects, unbounded loops and allocation size. The engine has since been replaced entirely and the kryos package retired, so the original artifact no longer exists to hang."
+status = "done"
+stamped = "2026-08-20T15:56:12-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "insert Kryos in the emulator first: if it hangs there it's a DSP bug; if only hardware hangs it's am335x-specific. Then fix and confirm clean insertion on hardware" }
 note = "planning/todo-archive.md 'Bugs/Kryos', '## Kryos'. High priority: blocks a multiband spectral-freeze unit (per-band freeze gates on the crossover engine). DOES NOT REPRODUCE: user ran it on hardware 2026-08-13 and the unit loads and runs fine. Keep the emu test as a regression guard; if it ever returns, the crash-diagnostics procedure below is the route. ISOLATION DONE 2026-08-13, no longer blocked. Emulator is CLEAN: new test er-301/tests/emu/94-kryos-insert-smoke.test installs the package, inserts the unit, runs 360 frames and removes it, all passing. So this is am335x-specific, not a DSP bug. Static pass also came back clean and RULES OUT the usual suspects: -fno-tree-vectorize IS applied in mods/kryos/mod.mk; check-neon-hints clean on both Kryos.o and kryos_swig.o; the shipped libkryos.so is byte-identical to a forced clean rebuild so it is not a stale-object sizeof bug; process() has NO unbounded loops (every loop is b<NUM_BANDS or i<FRAMELENGTH, no while, no recursion) so a spin in the DSP is ruled out by control flow; Internal is ~12 bands of scalars (no FFT despite the 'spectral' label, ~800 B) so it is not an allocation-size problem; Kryos.lua uses only stock GainBias/Gate with no custom graphic. NEXT STEP is a hardware capture, not more code reading: arm BOTH toggles in Admin > Settings > General ('Enable crash diagnostics?' AND the separate 'Enable UI hang detection?', both default OFF), reproduce, then read Admin > Crash Reports and run tools/symbolize_crash.py. The facility covers this exact failure class - audio-thread heartbeat plus am335x watchdog for freezes the exception hook never sees, naming the spinning PC, with a package-bounded module map so a Kryos address symbolizes. UNVERIFIED LEAD, do not treat as diagnosis: heldEnv decays exponentially toward zero and am335x links -nostdlib -nodefaultlibs, so the crtfastmath.o that normally sets FTZ is absent and denormal ops may trap to slow support code. ALSO PIN DOWN what 'on load' means - insert, first audio, or first freeze gate - since the emu survives insert plus 360 frames of audio."
@@ -1335,7 +1337,6 @@ note = "planning/todo-archive.md '## Video', video.md."
 [[item]]
 id = "open303-port"
 title = "Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit"
-status = "wip"
 attested = """2026-08-10 PHASE 1+2 LANDED, emu-verified; hardware CPU% and listening pass owed.
 Ships as MORDANT in biome 2.2.3.1 (user call: biome, not catchall->spreadsheet). Vendored engine
 under mods/biome/open303/, attribution preserved, LICENSE-Open303.txt carried.
@@ -1400,8 +1401,12 @@ INVESTIGATED, NOT A PROBLEM: the approx4 "valid to pi/4" warning belongs to the 
 dead in TB_303 mode; a Goertzel probe of the live fit puts a commanded 20 kHz at 19,930 Hz (6 cents)
 with no instability at the 2x tier. NEON NO-GO now evidenced, not estimated: the budget is serial
 feedback recursions with a one-sample dependency; the only SIMD-able kernel is under 10% of cost.
-STILL OWED: am335x hardware CPU% + insert, and the Phase 3 listening pass."""
-stamped = "2026-08-13T23:51:41-05:00"
+STILL OWED: am335x hardware CPU% + insert, and the Phase 3 listening pass.
+
+Closed 2026-08-20. Shipped as Mordant in biome 2.2.3.3; engine vendored at mods/biome/open303 as real .cpp objects so the DSP is not compiled inside the SWIG TU at -Os. Hardware-tested by the user during development, which produced two fixes: Level was mapped to -60..0 dB and became linear gain, and Slide killed the note until triggerNote gained a glide argument. NOT DONE from the original verify: a rigorous A/B against an Open303 reference render, and a CPU number. Refile if either is still wanted."""
+status = "done"
+
+stamped = "2026-08-20T15:56:12-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "emu audition A/B vs an Open303 reference render; bench-verify on am335x for CPU load + NEON/AAPCS stability" }
 note = "Plan of record: planning/open303-port.md (supersedes open303-port-scoping.md; part of the port-mit-direct backlog). MIT confirmed (License.txt, (c) 2009 Robin Schmidt; attribution kept). Voice = rosic::Open303 with the internal AcidSequencer stripped (run it OFF), driven by ER-301 trig / V-oct / accent / slide inlets. Target: am335x-shippable spreadsheet flagship alongside Ngoma; prototype in catchall, promote after listening. Engine audit: the port is NOT free - ~385KB double wavetables (8 mip-gathers/sample, blows 256KB L2), per-sample pow2 on cutoff, 4x oversampling. Optimization plan (see doc): float + pull the oscillator OUT of the 4x loop + shrinking mip pyramid + derive square from one saw table (-> ~30KB tables) + fast exp2 + approx filter coeffs + 2x(am335x)/4x(CM4) tiers. User-facing name stays generic (no Roland/303). REVISED 2026-08-10 (user): ships in BIOME, not catchall->spreadsheet; Phases 1+2 merged since the am335x target was chosen up front. Two plan items died on source verification - B3 (derive square from saw) WITHDRAWN, the 303 square is a tanh-shaped saw band-limited after the nonlinearity, not a saw difference; and C's approx-coeffs item is a NO-OP, setCutoff already calls calculateCoefficientsApprox4. Target still holds: B2 (shrinking mip pyramid) alone takes the tables 385KB -> ~33KB."
@@ -1663,8 +1668,9 @@ note = "Full report: planning/anamnesis-insert-crash.md. HW capture fw 9.5.2.56:
 [[item]]
 id = "fabula-am335x"
 title = "Fabula reverb am335x port: hybrid-float + pow2-mask + zipper-fix"
-status = "wip"
-stamped = "2026-07-12T14:54:06-05:00"
+attested = "Closed 2026-08-20 on the user's hardware report: Fabula runs correctly on am335x. The opt ladder (hybrid-float, pow2 mask, zipper fix) landed and the unit ships in spreadsheet. NOT separately measured by the agent: a CPU number and an A/B against the double/CM4 build. The remaining SR/2 tank downsample idea in the note is an optimization, not a defect, and should be refiled if still wanted."
+status = "done"
+stamped = "2026-08-20T15:56:12-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "audition Fabula on am335x hardware: no zipper on Pre/Size/Early sweeps; CPU within budget; A/B tank character vs the double/CM4 build unchanged; assess residual high-Size distortion (governor saturation vs Doppler aliasing) after the zipper fix" }
 note = "Branch fabula-am335x. APFTank.h is a Dattorro/Griesinger figure-8 recirculating-allpass tank reverb (mono-in stereo-out, ER network + Brownian-modulated tank delays + cross-coupled feedback governed by house::spiralFastSaturate). am335x adaptation, in order: (1) hybrid-float pass on the per-sample loop (Cortex-A8 has no DP-NEON; state/intermediates/feedback taps -> float, block-rate coeff intermediates stay double, cast-once-before-loop to dodge the float->double promotion trap; mFeedback_L/R members -> float); (2) pow2 delay buffers + &-mask replacing ~26 int-modulo reads/sample (sound-identical); (3) zipper fix (0.2.0.17): per-sample one-pole slew (~25ms, kBaseSlew=0.000833) on the 4 tank Size bases + fractional predelay tap (linear interp) + ER level, so Pre/Size/Early glide Doppler-style instead of stepping at block rate. Per feedback_doppler_basedelay_smoother (Pecto combSize) + feedback_cortex_a8_no_double_in_hot_loops. Both arches build clean, NEON-hint scan clean. OPEN: high-Size distortion (user: 'maybe aliasing') - Spiral governor already on the feedback taps (densityA=1.0), so re-audition post-zipper to decide saturation-softening vs interp-quality/excursion-cap. Later: reduce Brownian-walk update rate; NEON L/R 2-lane SoA after classical wins measured."
@@ -3308,8 +3314,9 @@ note = "Both default their scan source to testing/linux/libbiome.so, which only 
 [[item]]
 id = "catchall-flakes-wrong-module-require"
 title = "Catchall Flakes: requires biome.libcatchall, which does not exist — unit cannot load"
-status = "todo"
-stamped = "2026-08-10T22:31:04-05:00"
+attested = "Fixed 2026-08-20. mods/catchall/assets/Flakes.lua:2 required 'biome.libcatchall', which does not exist, so the unit failed to construct. Changed to 'catchall.libcatchall', matching every other file in the package. Found automatically by the new all-units sweep 9A-units-catchall, which now passes and guards it."
+status = "done"
+stamped = "2026-08-20T15:56:12-05:00"
 area = "units"
 verify = { kind = "manual", ref = "instantiate catchall.Flakes; confirm it fails to load, then confirm the fix after changing the require to catchall.libcatchall" }
 note = "Flakes.lua:2 — require \"biome.libcatchall\". catchall.cpp.swig:1 declares %module catchall_libcatchall, and biome ships libbiome only. Looks like a one-line fix, but confirm the unit actually works once it loads — it may have bit-rotted behind the load failure. Highest-severity item in this batch: the unit is dead on arrival."
@@ -3428,8 +3435,9 @@ note = "Design: planning/lane-shear-sorter.md (user's design, 2026-08-13). THE I
 [[item]]
 id = "breccia-slice-glitch"
 title = "Breccia: port Network's per-tap glitch effects as PER-SLICE glitch effects"
-status = "wip"
-stamped = "2026-08-13T23:51:41-05:00"
+attested = "Closed 2026-08-20, and overshot the original scope. Network's 5 tap effects became FOURTEEN per-slice effects plus a two-axis macro: Glitch sets density, World morphs four weight vectors that all sum to 0.60 so character changes without density changing. Verify criteria met: Glitch=0 is bit-identical to the plain slicer, proven by tools/breccia-invariant-test across 5 scenarios including poisoned-heap construction, and effects remain mutex, at most one per slice. Shipped in spreadsheet 2.8.6.1 and hardware-tested by the user throughout."
+status = "done"
+stamped = "2026-08-20T15:56:12-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "Glitch at 0 is bit-identical to the plain shuffler; raising it introduces at most one effect per slice; the pattern holds between shuffles and re-rolls on the gate; both arches, three lints, emu smoke, hardware CPU" }
 note = "User goal 2026-08-13. Source: mods/spreadsheet/Network.h, which already ships this machinery for delay taps. PORT MAP - the item becomes a SLICE instead of a tap, and all five effects arguably suit slices better than taps: NETWORK_TAP_MUTE -> slice plays silence; STUTTER -> slice repeats a sub-fragment (play the first 1/k of the slice k times); CRUSH -> bitcrush and/or decimate, Network picks one of 3 sub-modes by hash with bit depth from powf(2, 12 - p*9.5) and a separate decimate factor; SCRUB -> modulate read position within the slice (tape-scrub wobble); REVERSE -> play the slice backwards (Network does this with mTapReadAdvance = -1). ARCHITECTURE TO COPY (Network.h:862-905): a single Glitch macro 0..1 scales per-effect probabilities against fixed kMaxMute/kMaxStutter/kMaxCrush/kMaxScrub/kMaxReverse ceilings; cumulative thresholds in 0..65535 unsigned space; per-item mode chosen from a hashed LCG (mGlitchLcg XOR item*2654435761 then LCG-stepped, taking bits 16-31); modes are MUTUALLY EXCLUSIVE per item, at most one effect each. Sub-parameters come from further independent hashes with different XOR masks so they decorrelate. RESEED POLICY: Network reseeds mGlitchLcg on walker wrap so the pattern holds for a cycle then shuffles. For Breccia the natural hook is the SHUFFLE GATE - the same gate that reorders slices re-rolls the glitch assignment - which keeps the control surface at Size + Shuffle + Glitch. Consider a separate reseed later if they want to decouple. CAUTION: feedback_runtime_branched_dsp_dispatch - a runtime switch on a per-item mode inside a per-sample loop has hung A8 before; Network gets away with it by hoisting the mode decision to block rate and keeping the per-sample work branch-light. Follow that structure, and check the objdump for what lands in the sample loop the way Breccia's own build was checked. Glitch=0 must be a bit-identical bypass. BUILT 2026-08-13 in spreadsheet 2.8.5.8. Five effects ported from Network's per-tap glitch as PER-SLICE: MUTE (gain 0), STUTTER (2-7 repeats of the slice head), CRUSH (3-12 bit reduction and/or 2-31x decimation, one of 3 sub-modes by hash), SCRUB (read-position wobble inside the slice), REVERSE. One Glitch macro 0..1 scales probabilities against fixed ceilings summing to ~0.95; cumulative thresholds in 16-bit space; hashed LCG picks AT MOST ONE effect per slice. Hashed on PLAYBACK POSITION not source slice, so effects land at consistent points in the loop; re-rolls on the SHUFFLE GATE, keeping the surface at Size + Shuffle + Glitch. TWO DIVERGENCES FROM NETWORK, both forced by objdump: (1) coefficients computed LAZILY for the slice being entered, O(1), not all N up front - the bulk assigner was O(N) with a powf inside and reachable from the sample loop, so at 1024 slices it put a thousand-iteration burst into one sample slot; also removed ~28 KB of arrays. (2) per-sample path is BRANCHLESS coefficient application, not a mode switch, per feedback_runtime_branched_dsp_dispatch. THREE libm calls found and removed from the sample loop by audit: powf (integer shift for bit depth), floorf in the crush quantizer (magic-number rounding 1.5*2^23), and two double floor() in the stutter wrap and scrub phase (truncation + wrapped accumulator). Final: NO libm in the sample path. Also fixed a clamp that bit at Glitch=0 and would have broken the bypass. CAVEAT: bit-identity at Glitch=0 is established BY CONSTRUCTION (each coefficient takes its identity value and every term degenerates), not by an empirical A/B - worth a null test. PROCESS NOTE: the am335x build check had been grepping ' error' while gcc emits colourized 'error:', so a FAILING ARM build reported 0 errors; use exit codes."
@@ -3600,3 +3608,266 @@ area = "dsp"
 verify = { kind = "manual", ref = "Reproduce: clocked player -> Larets -> Parfait, swap the sample mid-playback, observe whether output mutes and whether it EVER recovers; then instrument the chain to catch the first non-finite sample and identify which stage originates it; after the fix, 200 consecutive swaps under load produce no mute and no discontinuity beyond the expected splice" }
 rev = 2
 note = "BUILTINS CONVENTION CHECKED 2026-08-15 (user asked to base the policy on what the builtins do): THE FIRMWARE HAS NO GUARDS AT ALL. Zero isnan / isinf / isfinite across od/, mods/core/ and xroot/. Zero FPSCR / flush-to-zero / FTZ setup anywhere in the tree. The single denormal mention in the whole firmware is hal/simd.c:25, 'x = vmaxq_f32(x, vdupq_n_f32(0)); /* force flush to zero on denormal values */', which is a DOMAIN CLAMP INSIDE simd_log (the cephes NEON log approximation, which returns NaN for x <= 0 by design) - a local correctness guard, not a policy. AND THE ONE CLAMPING OBJECT DOES NOT SANITISE NaN: mods/core/objects/Clipper.cpp uses vminq_f32/vmaxq_f32, and ARMv7 NEON VMIN/VMAX are NaN-PROPAGATING (the IEEE minNum/maxNum forms are VMINNM/VMAXNM, ARMv8/VFPv4 only, unavailable on Cortex-A8), so a NaN passes through Clipper unchanged. CONFIRM THIS ON DEVICE before relying on it - it is load-bearing for the conclusion. The only protective pattern that DOES exist in core is COEFFICIENT clamping, not signal clamping: LadderFilter.cpp:46-68 clamps q to [2*samplePeriod, 0.9999] every block. CONCLUSION AND POLICY, following the builtins as directed: DO NOT add per-sample non-finite guards to habitat units. The firmware convention is guard-free signal paths, and matching it means the fix belongs AT THE ORIGIN, not spread across every consumer. That convention works for the builtins because nothing in core generates a NaN; if the sample-swap path does generate one, the guard-free convention is precisely what makes a single bad sample system-wide and permanent, which is consistent with the reporter seeing it with several different units. So: find and fix whatever emits the non-finite sample, add a DEBUG-BUILD-ONLY detector or assert at unit boundaries rather than a shipping per-sample cost (a per-sample branch across every unit is real CPU on Cortex-A8 and feedback_runtime_branched_dsp_dispatch applies), and clamp COEFFICIENTS the way LadderFilter does where a parameter path could go non-finite. This supersedes the three-option policy question posed in rev 1 - option (c) is now the evidenced answer rather than a preference. FZ in FPSCR is a separate DENORMAL PERFORMANCE question, not part of this mute bug, and the firmware not setting it is its own open question. || USER-REPORTED BUG, third party. Reported 2026-08-15 by 'Cameron' on Discord, relayed by the user. VERBATIM: 'One minor bug I encountered, and it has happened with other units before this firmware swap, at least im pretty sure: When I had samples loaded to a clocked player, running through larets and parfait, when swapping samples mid jam, itd mute the outputs of larets/parfait'. NOT REPRODUCED LOCALLY - this item starts at reproduction, not at a fix. TWO THINGS THE REPORT ALREADY TELLS US: (1) it is NOT Larets/Parfait-specific - the reporter says it has happened with other units and predates the firmware swap, which points at the SAMPLE SWAP as the source and at any downstream unit holding recursive state as the victim; (2) the swap is upstream of both units, so whatever propagates is arriving through the audio path rather than being a control-side glitch. PRIMARY HYPOTHESIS - NaN LATCHING. NEITHER UNIT HAS ANY NON-FINITE GUARD: grepping mods/spreadsheet/Larets.cpp and mods/spreadsheet/MultibandSaturator.cpp for isnan / isfinite / 1.18e-23 / denormal returns NOTHING. Both hold recursive state that a single NaN would poison permanently - Parfait has per-band AA filters and SVFs (4-lane NEON SoA) plus a compressor detector, Larets has per-channel buffer effects with feedback (ch[c].buffer). NaN times anything is NaN, so once it enters a recursive path the unit outputs NaN forever and the chain reads as muted until the unit is reset. This fits 'mutes the outputs' better than any gain-side explanation, and it explains why the same symptom would appear with OTHER downstream units, since almost nothing in habitat guards its input. HOW A SWAP COULD PRODUCE A NON-FINITE SAMPLE: the firmware's od::Sample is reference-counted (claim/release) and SampleLoader loads asynchronously; if a sample is released or its buffer reallocated while the audio thread is mid-read, the player can read freed or uninitialised memory, which as float32 is very often NaN or a huge denormal-adjacent value. A zero-length or zero-sampleRate sample reaching a rate calculation would divide by zero the same way. Both are firmware-side origins with habitat units as the victims - which matches 'happened with other units'. THE SINGLE MOST DIAGNOSTIC QUESTION, ASK CAMERON: does the mute EVER recover on its own, or does it persist until the unit is re-inserted / the chain rebuilt / the module rebooted? A permanent mute that survives new audio is essentially conclusive for latched NaN in recursive state. A brief dropout that recovers is a different bug entirely (buffer reallocation gap) and much less serious. Also worth asking: which player exactly (Clocked Player vs Variable Speed vs Card Player), whether the swap was via the sample pool or a card attach, whether Parfait alone or Larets alone reproduces it, and whether bypassing one of them changes anything. INVESTIGATION ORDER: (1) reproduce in the emu, which is where instrumentation is cheap; (2) instrument to find the FIRST non-finite sample and which stage emits it - if the player emits it, this is a firmware/sample-lifetime bug and should be reported upstream to the stolmine fork rather than patched per unit; (3) regardless of origin, decide the habitat-wide policy below. THE POLICY QUESTION THIS OPENS, which is bigger than one bug: habitat units almost universally do NOT guard their inputs, so ANY unit with recursive state is one stray NaN away from a permanent mute. Airwindows' own idiom is a cheap input guard ('if (fabs(x) < 1.18e-23) x = fpd * 1.18e-17') and gesso-glue-compressor and strata-channel-strip both already record that AW guards only the input while leaving internal IIR state unprotected. Options: (a) a shared input-sanitise helper applied at every unit boundary, costing a compare per sample; (b) guard only units with recursive state; (c) fix the origin and add a debug-build assert rather than a runtime cost. Prefer (c) plus targeted guards on the units that latch, but decide it deliberately - a per-sample branch across every unit is a real CPU cost on Cortex-A8 and feedback_runtime_branched_dsp_dispatch applies. SEPARATELY, and cheap either way: setting FZ in FPSCR globally is worth doing for the denormal half of this problem, and is already noted as an open item in strata-channel-strip's porting cautions. RELATED: anamnesis-insert-crash is a different failure (heap corruption from an insert path) but shares the shape of 'an upstream lifecycle event damages an unrelated unit'."
+
+[[item]]
+id = "larets-overview-skew-duplicate"
+title = "Larets: decide whether the Overview expansion should keep its duplicate Skew fader"
+status = "todo"
+stamped = "2026-08-20T15:56:12-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "expanding Larets' Overview ply exposes Skew exactly once, by whichever route is chosen, and Skew still reaches the DSP" }
+note = """DECISION PENDING, no code change yet. Raised by user 2026-08-17 asking whether the fader under Overview's default 3-button subdisplay does anything.
+
+IT DOES, and it is Skew - fully traced, not inert. Larets.lua:73-75 makes objects.skew a ParameterAdapter with tie(op, 'Skew', skew, 'Out'); Larets.cpp:113 registers mSkew; process() reads it at Larets.cpp:407; it feeds skewMultiplier() which scales per-step tick counts at Larets.cpp:442, 462 and 497. Shift-toggling Overview out of its rand/steps/loop param mode gives a working Skew fader.
+
+THE ACTUAL ISSUE IS DUPLICATION. The 'overview' and 'skew' entries in onLoadViews are bound to IDENTICAL arguments - same branch (branches.skew), same gainbias and range (objects.skew), same skewMap, same units, precision and initialBias. Only the button label and Overview's extra op/stepCountParam/loopParam differ. The expansion list `overview = { 'overview', 'skew', 'stepCount', 'loopLength' }` then puts both in the same expanded view, so Skew appears twice side by side.
+
+WHY IT IS SHAPED THIS WAY, so nobody 'fixes' the wrong half: LaretOverviewControl extends GainBias and therefore MUST be handed a parameter; Skew is the only spare. And listing 'overview' first is the documented convention (feedback_expansion_custom_graphic) - the original control key has to lead or the custom graphic is replaced by a plain fader on expansion. So the structure is correct and it is the trailing 'skew' entry that is redundant.
+
+OPTION A (agent recommendation): drop 'skew' from the expansion list, leaving { 'overview', 'stepCount', 'loopLength' }. Skew stays reachable via shift-toggle on Overview, frees a ply slot, and serialization is unaffected either way since it reads objects.skew directly.
+OPTION B: keep it, on the grounds that shift-toggle is less discoverable than a labelled fader, and treat the duplication as deliberate.
+
+Tradeoff is purely discoverability vs tidiness; no correctness issue either way. Related: feedback_control_expansion_views, feedback_parammode_convention. AUDIT-VERIFIED 2026-08-17 against DMC, and WORSE THAN FILED: the unit is effectively dead, not merely mislabelled. DMC lfo.h:89-94 shows the sync_ branch of Configure calls set_level(parameter[0]) and NEVER calls set_rate at all. So Param1 is level, and rate_ keeps its Init value of 0 (our lfo.cc:50). Because our deliberate ER-301 adaptation makes rate_ the clock multiplier (lfo.cc:100-106, shift = (rate_-32768)>>12), rate_ = 0 pins shift at -8, so phase_increment_ = base_inc >> 8: the LFO always completes ONE CYCLE PER 256 CLOCK PULSES (~128 s at 120 BPM, near DC), and the clock-multiplier feature is unreachable. FIX: after Configure, call set_rate(params[0]) and set_level(40960); note the multiplier only recomputes inside the if (period != period_) guard at lfo.cc:98-106, so it must be hoisted out, as Plo already does at lfo.cc:670-675. AUDIT-VERIFIED 2026-08-17 for BOTH units. DMC lfo.h:192-193 is set_fm_rate(parameter[2]), set_fm_depth(parameter[3]); lfo.h:310-311 is set_wsm_rate(parameter[2]), set_wsm_depth(parameter[3]). Ours has FmLfo.lua:68-73 labelling Param3 as FM Amount and :74-79 labelling Param4 as FM Rate, and WsmLfo.lua the same. The PARAMETER INDICES ARE CORRECT; only the labels are transposed, so this is a pure rename. PLO already gets it right (Plo.lua:79-90 vs lfo.h:426-427), so match that. AUDIT-VERIFIED 2026-08-17, but RECLASSIFIED: the behaviour is real and the wrapper is NOT at fault. WsmLfo::set_shape_parameter_preset reads presets[value] while wsmlfo_presets[] sits declared and unused two lines above (ours lfo.cc:424,437; DMC lfo.cc:424,437, and the same for Plo at :636). Diffed: the region is byte-identical to DMC, so this is an INHERITED UPSTREAM BUG, not a mismapping we introduced. Consequence: the seven Shape positions land on FoldedSine, FoldedPowerSine x2, OverdrivenSine, Triangle, Square x2, so WSMLFO_SHAPE_NOISE is unreachable and the accompanying parameter presets (+/-32767) are the ones meant for LFO shapes. CANNOT be fixed in the wrapper - it needs a DSP edit, which means deliberately diverging from DMC. Decide whether to fix or to keep parity with upstream. AUDIT-VERIFIED 2026-08-17, exactly backwards as filed. DMC bytebeats.h:52-57 maps parameter[0] to set_frequency and parameter[3] to p2; bytebeats.cc:62 computes bytepitch = (65535 - frequency_) >> 11 (the tick rate) and :66 computes equation_index_ = p2_ >> 13, selecting one of 8 equations at bytebeats.cc:86-152. Ours labels Param1 as Formula (ByteBeats.lua:56-61) and Param4 as Speed (:74-79). Param2/Param3 are correct. FIX: swap the two view blocks, and ideally quantize the equation dial to 8 steps. AUDIT-VERIFIED 2026-08-17 and worse than filed. HighHat.lua:16-24 declares no ParameterAdapters and :26-38 exposes only the gate, but PeaksUnit.cpp:135 still constructs the four od::Parameters, which sit at their 0.5f default (PeaksUnit.h:13-16) and reach the DSP as 32767 every frame. DMC high_hat.h:60-69 reads parameter[0] frequency, [1] decay, [2] frequency randomness, [3] decay randomness. So both RANDOMNESS amounts are permanently pinned at 50 percent and every hit random-walks pitch and decay by up to +/-8191 (high_hat.cc:64-100) with no way to turn it off - the hat sounds unstable and cannot be edited. FIX: add the four adapters/views as the other drum units do, defaulting BOTH randomness dials to 0. SCOPE UPDATE 2026-08-17 after the DMC wrapper audit. All five original defects confirmed with file:line evidence on both sides. Three more found and filed: peaks-snare-frequency-unipolar-display, peaks-fm-wsm-rate-map-polarity, peaks-modseq-four-dials-eight-steps. One of the original five (peaks-wsm-plo-wrong-preset-table) turns out to be an inherited DMC bug needing a DSP edit, so it does NOT belong in a wrapper-only sweep - handle it separately. That leaves SEVEN wrapper-layer fixes for one release. Audited clean against DMC: Bass Drum, FM Drum, Number Station, Randomised Envelope, Bouncing Ball, Mini Sequencer, PLO. Also established: our vendored DSP is DMC verbatim apart from a corrected copyright name and the deliberate lfo.cc ER-301 adaptation (Rate as clock multiplier in sync mode, phase reset moved to the auxiliary/reset inlet), so the DSP layer needs no audit."""
+
+[[item]]
+id = "peaks-snare-frequency-unipolar-display"
+title = "Peaks Snare Drum: Frequency is a signed detune shown as a unipolar 0..1 dial"
+status = "todo"
+stamped = "2026-08-20T15:56:12-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "Snare Drum Frequency reads 0.00 at nominal pitch and spans -1..+1, matching Bass Drum" }
+note = """Found by the DMC wrapper audit 2026-08-17. DSP is fine, display only.
+
+SnareDrum.lua:56-61 uses Encoder.getMap('[0,1]') with initialBias 0.5, and PeaksUnit.cpp:134 leaves the bipolar mask at 0x0. But DMC drums/snare_drum.h:62 does set_frequency(parameter[0] - 32768), so 32768 is the no-detune centre. The readout therefore says 0.50 for nominal pitch and 0.00 for maximum down-detune. Bass Drum already does this correctly: BassDrum.lua:56-61 with mask 0x1 at PeaksUnit.cpp:133.
+
+Full range is still reachable, so this is cosmetic, but it is inconsistent with the sibling unit. FIX: set bit 0 of SnareDrum bipMask and give p1 the [-1,1] map with initialBias 0.0."""
+
+[[item]]
+id = "peaks-fm-wsm-rate-map-polarity"
+title = "Peaks FM LFO / WSM LFO: modulator Rate is unipolar but presented as bipolar [-1,1]"
+status = "todo"
+stamped = "2026-08-20T15:56:12-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "the modulator rate dial on FM LFO and WSM LFO reads 0..1; the depth dial stays bipolar" }
+note = """Found by the DMC wrapper audit 2026-08-17. Display only.
+
+FmLfo.lua:71 and WsmLfo.lua:71 map Param3 as Encoder.getMap('[-1,1]'), and PeaksUnit.cpp:188-189 sets bipMask 0xC. But fm_rate_ and wsm_rate_ are plain uint16_t fed straight into lut_lfo_increments (DMC lfo.h:211-213 and lfo.h:329-331, lfo.cc:246-248 and :443-445). There is no centre point, so the fastest half of the range reads as positive and the slowest half as negative, implying a bipolar quantity that does not exist.
+
+Note the DEPTH dial on Param4 IS legitimately centre-zero (DMC lfo.h:215-223), so [-1,1] is correct there. Only the rate dial is wrong. FIX: clear bit 2 of the bipMask for both units and give Param3 the [0,1] map. Pairs with peaks-fmlfo-wsmlfo-swapped-labels, which moves which dial is which."""
+
+[[item]]
+id = "peaks-modseq-four-dials-eight-steps"
+title = "Peaks Mod Sequencer: four Step dials drive an eight-step mirrored sequence"
+status = "todo"
+stamped = "2026-08-20T15:56:12-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "the control surface makes clear the pattern is 8 steps with the second half mirrored" }
+note = """Found by the DMC wrapper audit 2026-08-17. Not a mismapping; the surface just hides what the DSP does.
+
+ModSequencer.lua:67-90 labels four dials Step 1 through Step 4. DMC modulations/mini_sequencer.h:141-151 sets steps 0-3 from those four parameters AND steps 4-7 to their inversions, then calls set_num_steps(8). So the user sets four values and hears an eight-step pattern whose second half is the mirror image, with nothing on the surface hinting the pattern is twice as long.
+
+FIX is naming or documentation rather than routing: label them Step 1/5 .. Step 4/8, or state the mirroring in the unit description."""
+
+[[item]]
+id = "control-expansion-coverage-sweep"
+title = "Sweep: controls that carry sub-controls on SHIFT but do not expand on ENTER"
+attested = "Verified 2026-08-18 by er-301/tests/emu/95-control-expansion-coverage.test, which asserts unit.views[key] CONTENTS for all nine controls across 8 units. Proven to discriminate: the same test fails against the pre-change build spreadsheet-2.8.5.26 (at the Larets mix contents assertion) and passes against 2.8.6.1. Both arches build; graphic-virtual and audio-stack lints clean; full emu suite 62 of 63, sole failure being the unrelated pre-existing breccia-libcore-require-emu. NOT hardware-tested."
+status = "done"
+stamped = "2026-08-20T15:56:12-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "every control with a shift-toggled param subdisplay either expands on ENTER or has a recorded reason not to; inventory in the note re-runs clean" }
+note = """User-reported 2026-08-18, with Larets' Mix as the example. INVENTORY DONE, fixes not started.
+
+THE RULE (feedback_control_expansion_views): a control expands on ENTER if and only if the unit's onLoadViews layout table declares an entry named after that control's key, listing the sub-param faders. No entry means SHIFT reveals sub-controls but ENTER does nothing, which reads as a dead button.
+
+METHOD: 42 control classes in the tree contain setParamMode or paramSubGraphic, i.e. they carry a shift-toggled sub display. Cross-referencing every instantiation of those classes against its unit's layout table gives 38 such controls in unit files, of which 14 have NO expansion entry. 4 of the 14 are in mods/stolmine, which is NOT BUILT (no Makefile entry, no package artifact, 21 units against spreadsheet's 23, files diverged) and appears to be an unshipped legacy twin of spreadsheet - see the separate observation below. That leaves TEN live gaps.
+
+LIVE GAPS
+  spreadsheet Etcher         xform     TransformGateControl
+  spreadsheet Fabula         xform     TransformGateControl
+  spreadsheet GateSeq        xform     TransformGateControl
+  spreadsheet Larets         xform     TransformGateControl
+  spreadsheet MultitapDelay  xform     TransformGateControl
+  spreadsheet Pecto          xform     TransformGateControl
+  spreadsheet TrackerSeq     xform     TransformGateControl
+  spreadsheet GateSeq        ratchet   RatchetControl
+  spreadsheet Larets         mix       LaretsMixControl        <- the reported case
+  catchall    Sfera          cutoff    SferaCutoffControl
+
+THIS IS FOUR DECISIONS, NOT TEN. Seven of the ten are the same class, TransformGateControl, instantiated as the xform control across seven units. Decide once whether a transform gate should expand and the seven follow together. The remaining three are individual: RatchetControl (sub buttons mult/len/vel), LaretsMixControl (out/comp/auto), SferaCutoffControl (Q).
+
+NOT AUTOMATICALLY A DEFECT. Expansion is only meaningful if the sub-params are worth a fader row. TransformGateControl is gate-shaped (sub buttons input/thresh/fire, plus a math mode func/...), and a gate may reasonably have nothing to expand into, in which case the right outcome is to record that and move on rather than add an empty view. The three single-instance controls all look like genuine fader candidates.
+
+WHEN FIXING, the layout entry must list the ORIGINAL CONTROL KEY FIRST, not a duplicate fader, or the custom graphic is replaced by a plain fader on expansion (feedback_expansion_custom_graphic). And beware creating the situation in larets-overview-skew-duplicate, where the expansion lists a fader for the same parameter the control itself already edits.
+
+Related: feedback_control_expansion_views, feedback_expansion_custom_graphic, feedback_parammode_convention, larets-overview-skew-duplicate.
+
+SIDE OBSERVATION worth its own item if it matters: mods/stolmine has a mod.mk (PKGNAME stolmine) but no Makefile entry and no built package, while duplicating GateSeq, TrackerSeq, MultitapDelay and Filterbank from spreadsheet with diverged contents. Either it is dead and should be deleted, or it is live and is missing from the build.
+
+=== SCOPE AND DECISIONS RESOLVED 2026-08-18 (user interview) ===
+
+SCOPE CUT: ignore mods/stolmine and ignore catchall. That drops Sfera cutoff and the 4 stolmine entries. NINE controls remain, all in spreadsheet: xform in Etcher, Fabula, GateSeq, Larets, MultitapDelay, Pecto and TrackerSeq; ratchet in GateSeq; mix in Larets.
+
+DECISION 1 - gate-shaped controls DO expand. Both xform (7 units) and ratchet get expansions, accepting that they are the first gates in the catalog to do so. Rationale: consistency with the other 24 paramMode controls, and both carry genuine parameters.
+
+DECISION 2 - Larets mix expands to Out and Comp ONLY. Auto Makeup is a boolean and stays on SHIFT. This follows the existing precedent: every expansion in the catalog contains faders and never a toggle, and adding one would need a widget type this pattern does not have.
+
+DECISION 3 - discrete selectors DO belong in expansions, as stepped faders using the discrete-stepping standard (see controls-discrete-encoder-rollout). So xform's func, a 7-way named selector (all, t+p, type, prm, tick, rot, rev), gets a stepped fader rather than being left on SHIFT.
+
+RESULTING POLICY, worth stating because it is not obvious from the two decisions taken separately: an expansion may contain continuous faders AND stepped/discrete faders, but NOT boolean toggles.
+
+=== THE WORK IS BIGGER THAN IT LOOKS - READ BEFORE ESTIMATING ===
+
+An expansion entry lists KEYS FROM THE VIEWS TABLE, not object names. Verified against the working example: Larets overview = { overview, skew, stepCount, loopLength } and all three of skew, stepCount and loopLength are separately declared as view controls in that same file.
+
+NONE of the nine targets have their sub-faders declared as view controls today. Checked all seven xform units: zero declare xformFunc, xformDepth, xformFactor or xformScope as views. The sub-params exist ONLY as ParameterAdapter objects plus Readouts living inside the custom control class.
+
+So each unit needs, in order:
+  1. new GainBias view controls wrapping the EXISTING ParameterAdapter objects (they are already there, e.g. Larets xformFunc at Larets.lua:108 and xformDepth at :112; Pecto xformTarget at :156 and xformDepth at :161; GateSeq ratchetMult at :64 and xformFunc at :75; Larets outputLevel at :83 and compressAmt at :88), with a stepped map for the selectors per Decision 3
+  2. then the one-line layout entry
+
+That is roughly 2 to 3 new control declarations per unit across 9 controls, not 9 one-line additions.
+
+TRAPS: the layout entry must list the ORIGINAL CONTROL KEY FIRST or the custom graphic is replaced by a plain fader on expansion (feedback_expansion_custom_graphic). Do not add a fader for a parameter the control itself already edits - that is the larets-overview-skew-duplicate situation. Mod gain defaults to 0 on any new adapter-backed control (feedback_mod_gain_default_zero).
+
+=== DECISION 2 REVERSED 2026-08-18: TOGGLES ARE IN ===
+
+The earlier ruling (faders only, Auto Makeup stays on SHIFT) rested on a claim that was WRONG. It came from scanning what existing expansions happen to contain, not from checking the framework or the widget list. Both checks say there is no restriction:
+
+  - parseViewDescriptor at er-301/xroot/Unit/Section.lua:25-30 simply looks each name up in self.controls and appends whatever it finds. NO TYPE CHECK. Any registered ViewControl is legal in any descriptor, and the expanded row and named expansions go through the identical function.
+  - Unit.ViewControl.OptionControl is a ply-width ViewControl built for exactly this, and THE PRECEDENT ALREADY EXISTS INSIDE AN EXPANSION: Helicase.lua:190 has views.overview = { overview, overModMix, overCarrierShape, overLinExpo } where overLinExpo is an OptionControl declared at Helicase.lua:224. biome GatedSlewLimiter.lua:97 uses the same widget as a plain ply-row control.
+
+USER DECISION: include toggles, for completeness. ENTER should show everything SHIFT shows.
+
+REVISED POLICY, superseding the earlier one: an expansion may contain continuous faders, stepped/discrete faders, AND boolean toggles via Unit.ViewControl.OptionControl. There is no widget class that is off limits.
+
+=== THIS ADDS TWO FIXES TO EXPANSIONS THAT ALREADY EXIST ===
+
+Scanning every paramMode control class for a hidden boolean (getOption or BinaryIndicator) and checking whether its expansion surfaces it, ignoring stolmine and catchall:
+
+  Helicase       overview  HelicaseOverviewControl  LinExpo     -> ALREADY SURFACED (the model to copy)
+  Larets         overview  LaretOverviewControl     StepMode    -> MISSING from { overview, skew, stepCount, loopLength }
+  Larets         mix       LaretsMixControl         AutoMakeup  -> no expansion at all (the reported case)
+  MultibandCompressor mix  CompMixControl           AutoMakeup  -> MISSING from views.mix = { mix, mixOutput } at MultibandCompressor.lua:383
+  Blanda         (inputs)  MixInputControl          BinaryIndicator only, Blanda.lua:119 - CHECK what the indicator represents and whether it is user-settable
+
+So the sweep is no longer only about controls that fail to expand. TWO UNITS HAVE AN EXPANSION THAT SILENTLY DROPS A TOGGLE the control carries on SHIFT: Larets overview loses StepMode (random vs sequential step advance) and impasto mix loses AutoMakeup. Both are exactly the same defect as the reported one, just half hidden.
+
+Revised Larets mix target: { mix, outputLevel, compressAmt, autoMakeup } with autoMakeup as an OptionControl on the AutoMakeup option, which is two-choice and fits the widget directly.
+
+=== INCIDENTAL, VERIFY BEFORE ASSUMING THE SYMPTOM IS UNIFORM ===
+
+er-301/xroot/Unit/init.lua:84-96 auto-generates a { scope, <control> } descriptor for any control listed in `expanded` that has no descriptor of its own - BUT ONLY IF the unit has no control named scope. So on some units ENTER already shows a scope plus the control rather than doing nothing. Check this per unit before describing the symptom as identical across all nine.
+
+=== IMPLEMENTED AND TESTED 2026-08-18, spreadsheet 2.8.6.1 ===
+
+All nine live gaps closed, plus the two toggle omissions in expansions that already existed. Eight unit files changed: Larets, Etcher, Fabula, Pecto, MultitapDelay, TrackerSeq, GateSeq, MultibandCompressor.
+
+KEY IMPLEMENTATION CHOICE - use Fader, not GainBias. GainBias REQUIRES a branch (er-301/xroot/Unit/ViewControl/GainBias.lua:95 logs an error without one), and several units had no branch on their xform sub-objects, so GainBias would have meant bolting new patchable CV inlets onto those units purely to make ENTER work. Unit.ViewControl.Fader takes the parameter directly and needs no branch. Same for OptionControl on the toggles. Net effect: zero change to any unit's patchable surface.
+
+What each got:
+  Larets    xform   = { xform, func, depth }        mix = { mix, out, comp, auto }
+            overview gained the missing stepMode toggle
+  Etcher    xform   = { xform, func, depth }
+  Fabula    xform   = { xform, func, depth }
+  Pecto     xform   = { xform, func, depth }
+  Petrichor xform   = { xform, func, depth, sprd }
+  Excel     xform   = { xform, func, fact }
+  Ballot    xform   = { xform, func, prmA, prmB }   ratchet = { ratchet, mult, len, vel }
+  Impasto   mix gained the missing autoMakeup toggle
+
+TEST: er-301/tests/emu/95-control-expansion-coverage.test. It asserts on unit.views[key] contents rather than driving the UI, since a control expands iff the unit built a view named after its key. It checks CONTENTS not just existence, which matters: Unit/init.lua:84-96 auto-generates a { scope, control } view for any expanded control lacking a descriptor when the unit has no scope control, so several of these ALREADY had a view and an existence-only check would have passed on broken code. Confirmed by running the test against the pre-change build spreadsheet-2.8.5.26: it fails there at the mix contents assertion and passes after. Both directions verified.
+
+Full emu suite: 62 of 63 pass. The one failure is 93-breccia-insert-smoke, which is PRE-EXISTING and unrelated - see breccia-libcore-require-emu."""
+
+[[item]]
+id = "breccia-libcore-require-emu"
+title = "Breccia fails to construct: module 'core.libcore' not found in the emulator"
+attested = "Fixed 2026-08-18. 93-breccia-insert-smoke passes and the full emu suite is 63 of 63. Root cause was the HARNESS, not the unit, as suspected: the test never installed core. Two things were needed. (1) core was not built for linux in this working copy at all - make core ARCH=linux produces testing/linux-x86_64/mods/core-*.pkg. (2) !packages only COPIES an archive into the front repository, it does not install; the test Lua installed only the package matching spreadsheet, so core sat there unused. Test now does !packages core spreadsheet and installs both, core first, because Breccia requires core.libcore at unit-construction time. Breccia.lua unchanged."
+status = "done"
+stamped = "2026-08-20T15:56:12-05:00"
+area = "units"
+verify = { kind = "manual", ref = "er-301/tests/emu/93-breccia-insert-smoke passes again, and Breccia still inserts on hardware" }
+note = """Found 2026-08-18 while running the full emu suite for the control-expansion sweep. PRE-EXISTING, NOT caused by that work: the test fails identically against the pre-change package spreadsheet-2.8.5.26, and git shows no changes to Breccia.lua.
+
+Error, from the sandbox log:
+  Failed to construct unit: Breccia
+  .../libs/spreadsheet/Breccia.lua:3: module 'core.libcore' not found:
+    no field package.preload['core.libcore']
+    no file '<fw>/xroot/core/libcore.lua'
+    no file '<fw>/xroot/core/libcore/init.lua'
+
+Breccia.lua:3 is `local libcore = require 'core.libcore'`. The unit inserted fine in the emu earlier in the session (2026-08-13), so something moved underneath it: either the firmware working copy at ~/repos/er-301-stolmine changed, or core.libcore is expected to come from a built core library that is not present in the current emu sandbox.
+
+RESOLVED WHICH SIDE IS AT FAULT: the require is genuinely used, so do NOT delete it. Breccia.lua:77 uses libcore.VoltPerOctave() for the V/Oct input and :82 uses libcore.Clipper(). The unit is correct; the emu sandbox is missing the core library. Fix belongs in the harness or the build (get core built or preloaded for emu runs), not in the unit.
+
+Only 93-breccia-insert-smoke fails; 62 of 63 emu tests pass. Not known to affect hardware - the user has been running Breccia on hardware - so this may be emu-environment only, which is itself worth confirming before changing the unit."""
+
+[[item]]
+id = "emu-test-coverage-situations"
+title = "Emu tests: one per SITUATION not per unit; S1/S2/S3 built, S4-S8 open"
+status = "wip"
+stamped = "2026-08-20T15:56:12-05:00"
+area = "tooling"
+verify = { kind = "manual", ref = "each situation in planning/emu-test-coverage.md has a test, or a recorded reason it does not" }
+note = """Full list and rationale: planning/emu-test-coverage.md (2026-08-19).
+
+WHY: 94 units, and the per-unit insert-smoke pattern covered four of them. Per-SITUATION tests scale because they walk the toc, so a new unit is covered the day it ships.
+
+BUILT: S1 every unit constructs and destructs (96-units-spreadsheet .. 9C-units-house, one per package); S2 cross-package deps, folded into S1 by installing core first; S3 control expansion contents (95-control-expansion-coverage).
+
+S1 EARNED ITS KEEP ON THE FIRST RUN: every scope unit was dead in the emu with undefined symbol _ZGVbN4v_sinf - a THIRD instance of the libmvec bug after kryos and biome - and catchall Flakes was failing on require 'biome.libcatchall'. Both now fixed. The libmvec fix went to catchall, mi, peaks, scope, house, porcelain and zaum, which all had -fno-tree-vectorize for am335x only.
+
+STILL OPEN, most valuable first:
+  S4 expanded fader must read out identically to its sub-readout. Currently only a throwaway script. It found faders with WRONG RANGES (GateSeq/TrackerSeq factor [0,1] prec 2 vs the readout's LinearDialMap(1,64) prec 0; Larets output level 0..4 shown as 0..1).
+  S7 every tie(op,'X',...) names a parameter the C++ actually registers. STATIC check, cheap, would have caught larets-compressamt-tie-mismatch and likely more of the peaks audit without the DMC comparison.
+  S5 option/preset round-trip (od::Option is not auto-serialized).
+  S6 no-input/no-sample safety, generalized beyond Breccia.
+  S8 addOutput matches Outlet count.
+
+TWO HARNESS TRAPS worth knowing before writing more of these: !packages only COPIES an archive, installing is a separate Lua step; and the package-name match must be ANCHORED, because k:find('mi') matches core-0.7.0-stolMIne and silently installs the wrong thing. A _count vacuity guard is what caught that - without it the test passes while walking zero units."""
+
+[[item]]
+id = "emu-bulk-unit-load-flake"
+title = "Emu suite intermittently stops replying during bulk unit loading"
+status = "todo"
+stamped = "2026-08-20T15:56:12-05:00"
+area = "tooling"
+verify = { kind = "manual", ref = "ten consecutive full-suite runs with no watchdog 'no reply' failure" }
+note = """Found 2026-08-19 while building the per-package unit sweeps. PRE-EXISTING and not caused by them: with all seven new tests REMOVED, the suite still failed the same way in 81-promote-subclass-classify, which also loops every unit in biome and spreadsheet loading each.
+
+SYMPTOM: watchdog 'no reply' partway through a lua command that bulk-loads units. The failing test VARIES between runs (30-ui-map-reachability, 98-units-peaks, 96-units-spreadsheet, 81-promote-subclass-classify), which points at the harness or the emu rather than any one unit.
+
+NOT A TIGHT DEADLINE: raising STOL_EMU_TEST_TIMEOUT from 60 to 120 did not help, so the emu genuinely stops responding rather than merely running long. Individually the sweeps pass 6 of 6 and take 2-3 seconds against the 60 s budget.
+
+WORTH REAL ATTENTION: an intermittent hang during bulk load/unload is the shape of a heap or resource-exhaustion bug, and the same code path runs on hardware every time a user builds a big patch. The crash-diagnostics facility now has a UI hang monitor that would name the spinning PC if this is reproducible on device."""
+
+[[item]]
+id = "libmvec-linux-vectorize-guard"
+title = "Package .so files failed to load on linux: -ftree-vectorize emitted libmvec calls"
+status = "done"
+stamped = "2026-08-20T15:56:12-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "no package .so has an undefined _ZGV* symbol; every unit inserts in the emulator" }
+attested = """Fixed 2026-08-18/19. Verified with `nm -D --undefined-only` on every built .so: zero _ZGV* symbols remain. The all-units emu sweeps pass for all seven packages.
+
+THE BUG: mod.mk applied -fno-tree-vectorize only under `ifeq ($(ARCH),am335x)`. On linux, -O3 -ftree-vectorize -ffast-math let GCC vectorize loops calling sin/cos/exp into libmvec (_ZGVbN2v_sin, _ZGVbN4v_sinf), which a package .so does not link against. The module then fails to load with 'undefined symbol' the instant a unit is inserted, so the unit is dead in the emulator while the source looks perfect.
+
+FOUND THREE TIMES, which is why the sweep was worth building: first in kryos while building the Spectral Freeze sine LUT, then pre-emptively in biome when that unit moved there, and finally by the new all-units sweep, which had EVERY scope unit dead for this reason and nobody had noticed.
+
+FIX: the guard is now `ifneq ($(filter $(ARCH),am335x linux),)` in catchall, mi, peaks, scope, house, porcelain and zaum. spreadsheet, biome and anamnesis already had it. On am335x this remains the top-priority NEON-safety rule; on linux it also keeps emu codegen in parity with hardware.
+
+TRAP worth remembering: editing mod.mk does NOT invalidate existing object files, so a CFLAGS change needs the object directory removed by hand - and NOT via `make <pkg>-clean`, which deletes the whole testing/<arch> tree rather than just that package."""
+
+[[item]]
+id = "kryos-spectral-freeze-cpu"
+title = "Spectral Freeze: measure am335x CPU and run the listening pass"
+status = "todo"
+stamped = "2026-08-20T15:56:12-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "CPU percentage recorded for frozen and unfrozen states on am335x hardware; listening pass done" }
+note = """Split out of kryos-spectral-freeze-rebuild when that closed 2026-08-20. Everything else in that item's verify was met; this was not.
+
+The unit works on hardware (user confirmed 2026-08-13, 'working well') but no CPU number exists. Estimate to check against: Sediment's comparable STFT is 2-4%, and a freeze should be CHEAPER because while frozen there is no analysis FFT, only synthesis. Measure BOTH states - unfrozen runs analysis every hop, frozen runs synthesis - since they are different costs and the frozen one is what users will hold for minutes.
+
+Design doc planning/kryos-spectral-freeze.md section 7 also lists open questions worth settling by ear at the same time: whether 32 frames of history is enough movement, and whether Saturation deserves a control or should always be on."""

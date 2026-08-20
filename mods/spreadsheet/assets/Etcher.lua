@@ -3,11 +3,28 @@ local libstolmine = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Fader = require "Unit.ViewControl.Fader"
 local SegmentListControl = require "spreadsheet.SegmentListControl"
 local TransferCurveControl = require "spreadsheet.TransferCurveControl"
 local ModeSelector = require "spreadsheet.ModeSelector"
 local TransformGateControl = require "spreadsheet.TransformGateControl"
 local Encoder = require "Encoder"
+
+-- Shared by the TransformGateControl sub-readouts AND their expanded faders,
+-- so the same parameter cannot read two different ways.
+local xformFuncMapShared = (function()
+  local m = app.LinearDialMap(0, 7)
+  m:setSteps(1, 1, 1, 1)
+  m:setRounding(1)
+  return m
+end)()
+
+local xformFactorMapShared = (function()
+  local m = app.LinearDialMap(0, 1)
+  m:setSteps(0.1, 0.01, 0.001, 0.001)
+  return m
+end)()
+
 
 local MenuHeader = require "Unit.MenuControl.Header"
 local Task = require "Unit.MenuControl.Task"
@@ -318,23 +335,25 @@ function Etcher:onLoadViews()
       funcParam = self.objects.xformFunc:getParameter("Bias"),
       factorParam = self.objects.xformDepth:getParameter("Bias"),
       funcNames = { [0] = "rnd", "rot", "inv", "rev", "smo", "qnt", "sprd", "fold" },
-      funcMap = (function()
-        local m = app.LinearDialMap(0, 7)
-        m:setSteps(1, 1, 1, 1)
-        m:setRounding(1)
-        return m
-      end)(),
-      factorMap = (function()
-        local m = app.LinearDialMap(0, 1)
-        m:setSteps(0.1, 0.01, 0.001, 0.001)
-        return m
-      end)(),
+      funcMap = xformFuncMapShared,
+      factorMap = xformFactorMapShared,
       factorPrecision = 2,
       paramALabel = "depth"
+    },
+    xformFuncFader = Fader {
+      button = "func", description = "Xform Func",
+      param = self.objects.xformFunc:getParameter("Bias"),
+      map = xformFuncMapShared, units = app.unitNone, precision = 0
+    },
+    xformDepthFader = Fader {
+      button = "depth", description = "Xform Depth",
+      param = self.objects.xformDepth:getParameter("Bias"),
+      map = xformFactorMapShared, units = app.unitNone, precision = 2
     }
   }, {
     expanded = { "input", "segments", "curve", "skew", "xform", "level" },
     collapsed = {},
+    xform = { "xform", "xformFuncFader", "xformDepthFader" },
     curve = { "curve", "deviation", "devScope", "segCount" }
   }
 end

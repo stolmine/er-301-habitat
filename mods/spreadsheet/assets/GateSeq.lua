@@ -3,6 +3,8 @@ local libstolmine = require "spreadsheet.libspreadsheet"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Fader = require "Unit.ViewControl.Fader"
+local OptionControl = require "Unit.ViewControl.OptionControl"
 local Gate = require "Unit.ViewControl.Gate"
 local ChaselightControl = require "spreadsheet.ChaselightControl"
 local GateSeqInfoControl = require "spreadsheet.GateSeqInfoControl"
@@ -10,6 +12,15 @@ local RatchetControl = require "spreadsheet.RatchetControl"
 local TransformGateControl = require "spreadsheet.TransformGateControl"
 local ModeSelector = require "spreadsheet.ModeSelector"
 local Encoder = require "Encoder"
+
+-- Shared by the TransformGateControl sub-readout AND its expanded fader.
+local xformFuncMapShared = (function()
+  local m = app.LinearDialMap(0, 6)
+  m:setSteps(1, 1, 1, 1)
+  m:setRounding(1)
+  return m
+end)()
+
 
 local MenuHeader = require "Unit.MenuControl.Header"
 local Task = require "Unit.MenuControl.Task"
@@ -276,12 +287,7 @@ function GateSeqUnit:onLoadViews()
       paramALabel = "prm A",
       paramBLabel = "prm B",
       funcNames = { [0] = "euc", "nr", "grd", "nkl", "inv", "rot", "den" },
-      funcMap = (function()
-        local m = app.LinearDialMap(0, 6)
-        m:setSteps(1, 1, 1, 1)
-        m:setRounding(1)
-        return m
-      end)()
+      funcMap = xformFuncMapShared
     },
     -- Expanded view controls
     seqLen = GainBias {
@@ -315,10 +321,45 @@ function GateSeqUnit:onLoadViews()
       biasMap = Encoder.getMap("[0,1]"),
       biasPrecision = 2,
       initialBias = 0.5
+    },
+    xformFuncFader = Fader {
+      button = "func", description = "Xform Func",
+      param = self.objects.xformFunc:getParameter("Bias"),
+      map = xformFuncMapShared, units = app.unitNone, precision = 0
+    },
+    xformParamAFader = Fader {
+      button = "prmA", description = "Xform Param A",
+      param = self.objects.xformParamA:getParameter("Bias"),
+      map = TransformGateControl.defaultFactorMap, units = app.unitNone,
+      precision = TransformGateControl.defaultFactorPrecision
+    },
+    xformParamBFader = Fader {
+      button = "prmB", description = "Xform Param B",
+      param = self.objects.xformParamB:getParameter("Bias"),
+      map = TransformGateControl.defaultFactorMap, units = app.unitNone,
+      precision = TransformGateControl.defaultFactorPrecision
+    },
+    ratchetMultFader = Fader {
+      button = "mult", description = "Ratchet Mult",
+      param = self.objects.ratchetMult:getParameter("Bias"),
+      map = RatchetControl.multMap, units = app.unitNone,
+      precision = RatchetControl.multPrecision
+    },
+    ratchetLenToggle = OptionControl {
+      button = "len", description = "Ratchet Len",
+      option = self.objects.op:getOption("RatchetLen"),
+      choices = { "off", "on" }
+    },
+    ratchetVelToggle = OptionControl {
+      button = "vel", description = "Ratchet Vel",
+      option = self.objects.op:getOption("RatchetVel"),
+      choices = { "off", "on" }
     }
   }, {
     expanded = { "steps", "info", "clock", "reset", "ratchet", "xform" },
     collapsed = {},
+    xform = { "xform", "xformFuncFader", "xformParamAFader", "xformParamBFader" },
+    ratchet = { "ratchet", "ratchetMultFader", "ratchetLenToggle", "ratchetVelToggle" },
     info = { "info", "seqLen", "loopLen", "gateWidthFader" }
   }
 end

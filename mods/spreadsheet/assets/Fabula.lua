@@ -19,6 +19,7 @@ local Encoder = require "Encoder"
 local Class = require "Base.Class"
 local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
+local Fader = require "Unit.ViewControl.Fader"
 local FabulaOverviewControl = require "spreadsheet.FabulaOverviewControl"
 local TransformGateControl = require "spreadsheet.TransformGateControl"
 local MixHpfControl = require "spreadsheet.MixHpfControl"
@@ -280,10 +281,21 @@ function Fabula:onLoadViews()
       biasUnits = app.unitHertz,
       biasPrecision = 0,
       initialBias = 60
+    },
+    xformFuncFader = Fader {
+      button = "func", description = "Xform Target",
+      param = self.objects.xformTarget:getParameter("Bias"),
+      map = intMap(0, 9), units = app.unitNone, precision = 0
+    },
+    xformDepthFader = Fader {
+      button = "depth", description = "Xform Depth",
+      param = self.objects.xformDepth:getParameter("Bias"),
+      map = floatMap(0, 1), units = app.unitNone, precision = 2
     }
   }, {
     expanded = { "size", "predelay", "early", "freeze", "xform", "mix" },
     collapsed = {},
+    xform = { "xform", "xformFuncFader", "xformDepthFader" },
     -- Per-control expansion views (enter on the parent toggles into these).
     size = { "size", "decay", "damp", "diffusion" },
     mix = { "mix", "hpf" }
