@@ -1,6 +1,16 @@
 # Design note: Parametric EQ - a characterful four-band EQ
 
-Status: design note / not started. Ledger item `ochre-character-eq`.
+Status: **Phase 1 done** (2026-08-20) - the band atom is built and measured at
+`mods/house/atoms/ParametricBand.h`, harness `tools/parametric-band-test`.
+Phases 2-5 (four-band unit, Colour, band interaction, hardware) not started.
+Ledger items `ochre-character-eq` and `parametric-band-atom`.
+
+Two things changed against this note during Phase 1, both recorded in the atom's
+header comment: only BiquadStack's NONLINEARITY was lifted, not its structure
+(it is a bandpass stack and cannot make the shelves LF/HF need), and the naive
+SVF bell turned out not to be constant-Q until its damping was divided by
+A = 10^(dB/40). The "+/-3 dB points" phrasing in Phase 1 below should read
+HALF-GAIN points; those coincide only at +6 dB.
 
 User request 2026-08-14: characterful EQ, with a stated interest in the SSL 611.
 

@@ -1,6 +1,11 @@
 # Design note: Channel Strip - a channel strip on the house atom bin
 
-Status: design note / not started. Ledger item `strata-channel-strip`.
+Status: **not started, but its Comp section's atom is built** (2026-08-20).
+`mods/house/atoms/Pop3Dynamics.h` with harness `tools/pop3-dynamics-test`;
+ledger item `pop3-dynamics-atom`. The EQ section's atom is built too -
+`mods/house/atoms/ParametricBand.h`, ledger `parametric-band-atom` - so two of
+this note's sections now have their DSP in place and need only the unit shell.
+Ledger item `strata-channel-strip`.
 
 User request 2026-08-14: a channel strip built on sub-controls - top level is
 bypass gates per section, parameters underneath - with nonlinearity throughout,

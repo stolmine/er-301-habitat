@@ -1,4 +1,4 @@
-#include "Mordant.h"
+#include "Bassline.h"
 #include <od/config.h>
 #include <hal/ops.h>
 #include <math.h>
@@ -12,7 +12,7 @@ namespace stolmine
   // i.e. 120 semitones. See CONTEXT.md.
   static const float kVoltsToSemitones = 120.0f;
 
-  Mordant::Mordant()
+  Bassline::Bassline()
   {
     addInput(mVOct);
     addInput(mGate);
@@ -38,12 +38,12 @@ namespace stolmine
     mLastTrackedNote = -1.0e9f;
   }
 
-  Mordant::~Mordant()
+  Bassline::~Bassline()
   {
     delete mpVoice;
   }
 
-  void Mordant::process()
+  void Bassline::process()
   {
     float *voct = mVOct.buffer();
     float *gate = mGate.buffer();

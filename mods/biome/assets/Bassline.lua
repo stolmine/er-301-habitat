@@ -7,12 +7,12 @@ local GainBias = require "Unit.ViewControl.GainBias"
 local Gate = require "Unit.ViewControl.Gate"
 local Encoder = require "Encoder"
 
-local Mordant = Class {}
-Mordant:include(Unit)
+local Bassline = Class {}
+Bassline:include(Unit)
 
-function Mordant:init(args)
-  args.title = "Mordant"
-  args.mnemonic = "Md"
+function Bassline:init(args)
+  args.title = "Bassline"
+  args.mnemonic = "Bl"
   Unit.init(self, args)
 end
 
@@ -25,8 +25,8 @@ local function adapter(self, name, bias)
   return o
 end
 
-function Mordant:onLoadGraph(channelCount)
-  local op = self:addObject("op", libstolmine.Mordant())
+function Bassline:onLoadGraph(channelCount)
+  local op = self:addObject("op", libstolmine.Bassline())
 
   -- Sink the chain input: this is a generator, not a passthrough.
   local sink = self:addObject("sink", app.ConstantGain())
@@ -104,7 +104,7 @@ local views = {
   collapsed = {}
 }
 
-function Mordant:onLoadViews(objects, branches)
+function Bassline:onLoadViews(objects, branches)
   local controls = {}
 
   controls.gate = Gate {
@@ -235,4 +235,4 @@ function Mordant:onLoadViews(objects, branches)
   return controls, views
 end
 
-return Mordant
+return Bassline

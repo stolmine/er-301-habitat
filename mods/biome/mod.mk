@@ -1,5 +1,5 @@
 PKGNAME ?= biome
-PKGVERSION ?= 2.2.4.1
+PKGVERSION ?= 2.2.5.1
 
 include scripts/env.mk
 
@@ -21,7 +21,7 @@ MOD_CPP = $(wildcard $(MOD_DIR)/*.cpp)
 # pffft, for the Spectral Freeze STFT.
 MOD_C = $(wildcard $(MOD_DIR)/*.c)
 
-# Vendored Open303 engine (Mordant). Kept in its own subdirectory for namespace
+# Vendored Open303 engine (Bassline). Kept in its own subdirectory for namespace
 # isolation, so the flat glob above does not reach it. These MUST be listed as
 # real .cpp objects rather than pulled in through a header: anything that only
 # lives in headers gets compiled inside the SWIG wrapper TU at CFLAGS.swig =
@@ -76,7 +76,7 @@ CFLAGS.debug = -g -DBUILDOPT_TESTING
 
 ifeq ($(ARCH),am335x)
 CFLAGS.am335x = -mcpu=cortex-a8 -mfpu=neon -mfloat-abi=hard -mabi=aapcs -Dfar= -D__DYNAMIC_REENT__
-# Mordant / Open303 oversampling tier: 2x on hardware, 4x elsewhere. Set here
+# Bassline / Open303 oversampling tier: 2x on hardware, 4x elsewhere. Set here
 # EXPLICITLY rather than sniffed in o3_config.h - there is no -Dam335x in this
 # build, so a header-side `defined(am335x)` test silently never fires and the
 # hardware build quietly takes the heavier 4x path.

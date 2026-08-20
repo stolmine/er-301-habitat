@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**230 items** — 68 done, 5 wip, 156 todo, 1 blocked. *Rendered 2026-08-20.*
+**234 items** — 72 done, 5 wip, 156 todo, 1 blocked. *Rendered 2026-08-20.*
 
 ## DSP
 
@@ -91,7 +91,9 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `network-gain-compensation` | Gain compensation for Network (Fabula's makeup model, tap-weight-energy basis) | manual *(attested)* · 2026-07-15 |
 | ✓ | `ngoma-hardware-hang` | Ngoma hangs hardware on load (post-2.5.1 regression) — am335x-specific, bisect pending hardware test | manual *(attested)* · 2026-07-22 |
 | ✓ | `open303-port` | Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit | manual *(attested)* · 2026-08-20 |
+| ✓ | `parametric-band-atom` | house: ParametricBand atom - one constant-Q EQ band, bell or shelf, with AW level-dependent nonlinearity | manual *(attested)* · 2026-08-20 |
 | ✓ | `pecto-audio-stack-overflow` | Pecto blew the 2048-byte audio task stack: 1072-byte process() frame from 5 stack-local arrays | manual *(attested)* · 2026-08-06 |
+| ✓ | `pop3-dynamics-atom` | house: Pop3Dynamics atom - linear-domain compressor + phase-based gate, AW Pop3 port | manual *(attested)* · 2026-08-20 |
 | ✓ | `scope-probe-pool-leak` | Scope timebase leaked into the firmware's MiniScope via the shared FifoProbe pool | manual *(attested)* · 2026-08-06 |
 | ✓ | `spreadsheet-canals` | Canals — Three Sisters clone, DSP refresh + 4-input normalling topology; moved biome→spreadsheet | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-filterbank` | Filterbank (FFB/Tomograph) — parallel fixed filter bank, 2-16 bands, Scala scales, radial viz | manual *(attested)* · 2026-07-09 |
@@ -104,6 +106,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `spreadsheet-petrichor` | Petrichor (Multitap Delay) — 8-tap Rainmaker-style, per-tap SVF + granular pitch, xform, viz | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-rauschen` | Rauschen — parametric noise, 11 algorithms (White…Lorenz) with SVF morph + phase-space viz | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-visadhara` | Visadhara — clean-room BIA-style drum voice (Skin/Liquid/Metal configs) + Corona viz | manual *(attested)* · 2026-07-09 |
+| ✓ | `stft-frontend-atom-built` | spreadsheet: StftFrontEnd atom - shared STFT analysis/resynthesis scaffolding, perfect-reconstruction verified | manual *(attested)* · 2026-08-20 |
 | ✓ | `tessera-into-ngoma` | Port Tessera's Trinity-derived innovations into Ngoma | manual *(attested)* · 2026-07-22 |
 | ✓ | `vitrail-unit` | Vitrail - dual switched-capacitor character filter unit | manual *(attested)* · 2026-08-06 |
 
@@ -160,6 +163,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `fade-mixer` | Fade Mixer — 4-input equal-power crossfader with BranchMeter gain/solo/mute controls | manual *(attested)* · 2026-07-09 |
 | ✓ | `fademixer-snap-mode` | Fade Mixer: Smooth/Snap config option so the family works as N-to-1 switches too | manual *(attested)* · 2026-08-06 |
 | ✓ | `mi-ports-shipped` | Mutable Instruments port suite: Plaits/Clouds/Rings/Grids/Warps/Stratos/Commotio/Marbles T+X | manual *(attested)* · 2026-07-09 |
+| ✓ | `parametric-eq-unit` | house: Parametric EQ - four-band unit on the ParametricBand atom | manual *(attested)* · 2026-08-20 |
 | ✓ | `peaks-dmc-ports` | Peaks/DMC port suite: 14 drum/modulation/sequencer/generator units with clock+reset refinements | manual *(attested)* · 2026-07-09 |
 | ✓ | `porcelain-chime-v0` | Chime v0 — first porcelain (microsound/electroacoustic) unit: coupled pulse-excited resonator bank | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-colmatage` | Colmatage — block-cutting rhythmic effect unit shipped in spreadsheet | manual *(attested)* · 2026-07-09 |

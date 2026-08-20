@@ -25,7 +25,7 @@
 #include "Transport.h"
 #include "ConstantRandom.h"
 #include "ExpoEnvelope.h"
-#include "Mordant.h"
+#include "Bassline.h"
 #include "SpectralFreeze.h"
 #define SWIGLUA
 %}
@@ -52,5 +52,5 @@
 %include "Transport.h"
 %include "ConstantRandom.h"
 %include "ExpoEnvelope.h"
-%include "Mordant.h"
+%include "Bassline.h"
 %include "SpectralFreeze.h"

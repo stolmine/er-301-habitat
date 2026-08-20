@@ -8,7 +8,7 @@ namespace rosic { class Open303; }
 namespace stolmine
 {
 
-  // Mordant - monophonic acid bassline voice.
+  // Bassline - monophonic acid bassline voice.
   //
   // DSP is the vendored Open303 engine under mods/biome/open303/ ((c) 2009
   // Robin Schmidt, MIT), with its internal sequencer stripped and the voice
@@ -19,13 +19,13 @@ namespace stolmine
   // The engine is held behind a forward declaration deliberately: its header
   // pulls in the whole rosic tree, and anything that lands in the SWIG wrapper
   // TU compiles at -Os with no -ffast-math. Keeping it out of this header means
-  // the hot path is only ever compiled from Mordant.cpp at CFLAGS.speed. That
+  // the hot path is only ever compiled from Bassline.cpp at CFLAGS.speed. That
   // build-config trap is what made anamnesis' DSP silently slow.
-  class Mordant : public od::Object
+  class Bassline : public od::Object
   {
   public:
-    Mordant();
-    virtual ~Mordant();
+    Bassline();
+    virtual ~Bassline();
 
 #ifndef SWIGLUA
     virtual void process();
@@ -52,7 +52,7 @@ namespace stolmine
     float mLastSampleRate;
     // Last note pushed to the engine by the held-note tracking branch. Guards
     // setNoteNumber() so its double exp() runs on pitch CHANGES, not per
-    // sample. See Mordant.cpp.
+    // sample. See Bassline.cpp.
     float mLastTrackedNote;
   };
 

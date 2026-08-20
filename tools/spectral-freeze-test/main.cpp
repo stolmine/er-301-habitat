@@ -21,6 +21,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cstdint>
 #include <cmath>
 #include <new>
 #include <vector>
@@ -32,6 +33,16 @@ _GlobalConfig globalConfig;
 #include "SpectralFreeze.cpp"
 
 using namespace stolmine;
+
+// std::isfinite is UNRELIABLE under -ffast-math: the compiler is told to
+// assume NaN and Inf never occur, so the check folds to a constant true.
+// This harness reported "finite: YES" on output that was entirely NaN.
+// Inspect the bit pattern instead, which no optimization can elide.
+static inline bool realFinite(float v)
+{
+  uint32_t u; memcpy(&u, &v, 4);
+  return ((u >> 23) & 0xFFu) != 0xFFu;   // exponent all-ones => NaN or Inf
+}
 static const int FR = 128;
 static const float SR = 48000.0f;
 
@@ -80,7 +91,7 @@ static Res run(Rig &r, int blocks, bool gateOn, bool inputOn, long &n)
     for (int i = 0; i < FR; i++)
     {
       const float y = r.out[i];
-      if (!std::isfinite(y)) res.finite = false;
+      if (!realFinite(y)) res.finite = false;
       const float a = y < 0 ? -y : y;
       if (a > res.peak) res.peak = a;
       if (b >= from) { acc += (double)y * y; cnt++; if (res.tail.size() < 8192) res.tail.push_back(y); }
@@ -115,6 +126,8 @@ static int partials(const std::vector<float> &x)
     if (m[k] > m[k - 1] && m[k] > m[k + 1] && m[k] > mx * 0.05) c++;
   return c;
 }
+
+
 
 static int fails = 0;
 static void check(bool ok, const char *what, const char *detail = "")

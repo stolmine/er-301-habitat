@@ -42,6 +42,8 @@
 // Carriage: fourth chain-as-unit, first dynamics-character unit.
 // Inverse-threshold engagement detector drives Point + Distance2.
 #include "atoms/Carriage.h"
+#include "atoms/ParametricBand.h"
+#include "atoms/ParametricEq.h"
 #define SWIGLUA
 %}
 
@@ -63,3 +65,4 @@
 %include "atoms/Point.h"
 %include "atoms/Distance2.h"
 %include "atoms/Carriage.h"
+%include "atoms/ParametricEq.h"
