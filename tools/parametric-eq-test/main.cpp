@@ -105,7 +105,7 @@ int main()
   {
     ParametricEq brown, black;
     brown.mLfShape.set(2); black.mLfShape.set(2);
-    brown.mCharacter.set(2); black.mCharacter.set(3);
+    brown.mCharacter.set(1); black.mCharacter.set(2);
     brown.mLmfGain.hardSet(18.0f); black.mLmfGain.hardSet(18.0f);
     const double b1 = respDb(brown, 500.0), b2 = respDb(black, 500.0);
     snprintf(buf, sizeof buf, "(brown %+.2f dB, black %+.2f dB at a +18 request)", b1, b2);
@@ -128,10 +128,10 @@ int main()
   // 5. bounded with everything boosted
   {
     ParametricEq eq;
-    eq.mCharacter.set(4);
+    eq.mCharacter.set(3);
     eq.mLfGain.hardSet(18.0f); eq.mLmfGain.hardSet(18.0f);
     eq.mHmfGain.hardSet(18.0f); eq.mHfGain.hardSet(18.0f);
-    eq.mLmfQ.hardSet(10.0f); eq.mHmfQ.hardSet(10.0f); eq.mCharacter.set(4);
+    eq.mLmfQ.hardSet(10.0f); eq.mHmfQ.hardSet(10.0f); eq.mCharacter.set(3);
     std::vector<float> l(FR), r(FR), ol(FR), orr(FR);
     eq.mInL.setBuffer(l.data()); eq.mInR.setBuffer(r.data());
     eq.mOutL.setBuffer(ol.data()); eq.mOutR.setBuffer(orr.data());
@@ -183,7 +183,7 @@ int main()
   {
     printf("  character positions, THD%% at +12 dB LMF, -12 dBFS:\n");
     double prev = -1; bool rising = true;
-    for (int c = 1; c <= 4; c++)
+    for (int c = 1; c <= 3; c++)
     {
       const int N = 32768; const double PFc = SR*683.0/N;
       ParametricEq eq; eq.mCharacter.set(c);
@@ -206,13 +206,13 @@ int main()
         for (int i=0;i<N;i++){ double aa=2.0*M_PI*PF*k*i/SR; re+=y[i]*cos(aa); im-=y[i]*sin(aa);} 
         double m=sqrt(re*re+im*im); if(k==1)f1=m; else h+=m*m; }
       const double t = 100.0*sqrt(h)/(f1+1e-30);
-      static const char *nm[4] = {"clean","brown","black","hot"};
+      static const char *nm[3] = {"brown","black","hot"};
       printf("      %-6s %7.3f%%\n", nm[c-1], t);
-      if (c == 1 && t > 0.05) rising = false;          // clean must be clean
+      
       if (c > 1 && t < prev * 1.3) rising = false;     // each step clearly more
       prev = t;
     }
-    chk(rising, "character positions are clean-then-clearly-increasing");
+    chk(rising, "character positions are clearly increasing");
   }
 
   printf("\n%s\n", fails ? "FAILURES PRESENT" : "ALL CHECKS PASS");

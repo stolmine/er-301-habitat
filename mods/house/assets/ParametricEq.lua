@@ -152,16 +152,17 @@ function ParametricEq:onLoadViews()
     lmf  = gb("lmfGain", "LMF Gain", gainMap(), 0.0, 1),
     hmf  = gb("hmfGain", "HMF Gain", gainMap(), 0.0, 1),
     hf   = gb("hfGain",  "HF Gain",  gainMap(), 0.0, 1),
-    -- Character on a PLY, not buried in the menu. It replaces both the
-    -- old Drive fader and the old Colour menu option: Q law, gain range
-    -- and saturation move together, and discrete positions can be
-    -- compared against one another in a way a subtle continuous knob
-    -- could not.
+    -- Character on a PLY, not buried in the menu. Replaces both the old
+    -- Drive fader and the old Colour menu option.
+    --
+    -- THREE choices, not four: OptionControl has exactly three
+    -- sub-buttons, so a fourth is unreachable. A four-position set
+    -- shipped once with its last position unselectable.
     character = OptionControl {
       button = "char",
       description = "Character",
       option = self.objects.op:getOption("Character"),
-      choices = { "clean", "brown", "black", "hot" }
+      choices = { "brown", "black", "hot" }
     },
     mix   = gb("mix",   "Mix",   Encoder.getMap("[0,1]"), 1.0),
 

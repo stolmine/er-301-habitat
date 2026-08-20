@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**234 items** — 72 done, 5 wip, 156 todo, 1 blocked. *Rendered 2026-08-20.*
+**235 items** — 72 done, 5 wip, 157 todo, 1 blocked. *Rendered 2026-08-20.*
 
 ## DSP
 
@@ -29,6 +29,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `compound-dsp-voice-profile` | Profile + emulate on-hand compound DSP module (workflow shakedown) | manual · 2026-07-17 |
 |   | `dross-trash-compressor` | Dross: character 'trash' compressor - feedback detector, no threshold/ratio, vinyl grit | manual · 2026-08-14 |
 |   | `drywet-crossfade-audit` | Audit all wet/dry units for the linear-crossfade center dip; switch decorrelated wets to equal-power | manual · 2026-07-15 |
+|   | `eq-character-curve-laws` | Parametric EQ: rebuild Character around CURVE LAWS (Pultec/API/Neve/SSL), not a saturation ladder | manual · 2026-08-20 |
 |   | `flakes-shards-fidelity` | Flakes: tune self-modulation engine to Shards, steeper LP on feedback, evaluate manual-loops fidelity | manual · 2026-07-09 |
 |   | `fx-delay-units` | Combined Petrichor+Pecto (CPU-efficient) + character-forward Lofi delay | manual · 2026-07-09 |
 |   | `gesso-glue-compressor` | Gesso: SSL-G-style glue bus compressor on an Airwindows Pressure6 engine (MIT) | manual · 2026-08-14 |

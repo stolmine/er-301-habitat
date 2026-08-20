@@ -119,15 +119,25 @@ namespace house
     // which a subtle continuous knob cannot.
     //
     // od::Option values are 1-based; 0 means UNKNOWN.
-    // DEFAULTS TO CLEAN. An EQ should be accurate out of the box and
-    // character should be opt-in: saturating the band tap necessarily
-    // pulls the peak down, so a +12 dB request measures +10.8 dB at
-    // brown. Clean keeps the band landing exactly on its number, and
-    // keeps clean-plus-flat-gains a bit-identical bypass.
-    //   1 Clean  constant-Q, +/-15 dB, no saturation
-    //   2 Brown  constant-Q, +/-15 dB, light
-    //   3 Black  proportional-Q, +/-18 dB, medium
-    //   4 Hot    proportional-Q, +/-18 dB, heavy
+    // THREE POSITIONS, NOT FOUR. Unit.ViewControl.OptionControl draws
+    // Drawings.Sub.ThreeColumns and maps sub-button i straight to choice
+    // i, and there are three sub-buttons - so a fourth choice is placed
+    // off-screen and CANNOT BE SELECTED. The previous four-position set
+    // shipped with "hot" unreachable on hardware.
+    //
+    // Clean was dropped (user call 2026-08-20). It cost nothing to lose:
+    // exact bypass is a property of GAIN, not of character - a band
+    // contributes gain*saturate(tap) and gain is exactly 0 at 0 dB - so
+    // flat gains still bypass bit-identically at every position.
+    //
+    // What it does cost is the accurate-gain position: saturating the
+    // tap pulls the peak down, so a +12 dB request reads about +10.8 dB
+    // at Brown. Accept that, or see eq-character-curve-laws, where the
+    // planned rebuild makes Console a transparent constant-Q position
+    // and moves the differentiation onto curve law instead.
+    //   1 Brown  constant-Q, +/-15 dB, light saturation
+    //   2 Black  proportional-Q, +/-18 dB, medium
+    //   3 Hot    proportional-Q, +/-18 dB, heavy
     od::Option mCharacter{"Character", 1};
     od::Option mLfShape{"LF Shape", 1};   // 1 shelf, 2 bell
     od::Option mHfShape{"HF Shape", 1};   // 1 shelf, 2 bell
@@ -141,16 +151,16 @@ namespace house
 
       const float sr = globalConfig.sampleRate > 0.0f ? globalConfig.sampleRate : 48000.0f;
       int ch = mCharacter.value();
-      if (ch < 1) ch = 1; else if (ch > 4) ch = 4;
-      const bool hotHalf = (ch >= 3);
+      if (ch < 1) ch = 1; else if (ch > 3) ch = 3;
+      const bool hotHalf = (ch >= 2);
       const ParametricBandQLaw law = hotHalf ? PARAM_BAND_Q_PROPORTIONAL
                                              : PARAM_BAND_Q_CONSTANT;
       // Range moves with the Q law, as the two documented circuit
       // revisions do: the extra 3 dB changes how hard people push it.
       const float maxDb = hotHalf ? 18.0f : 15.0f;
-      // Saturation per position. Clean is exactly 0, so Clean plus flat
-      // gains is still a bit-identical bypass.
-      static const float kDrive[4] = { 0.0f, 0.35f, 0.7f, 1.0f };
+      // Saturation per position. Flat gains bypass exactly at every
+      // position regardless, because gain is 0 there.
+      static const float kDrive[3] = { 0.35f, 0.7f, 1.0f };
       const float drive = kDrive[ch - 1];
 
       // Coefficients are baked ONCE PER BLOCK, never per sample: the

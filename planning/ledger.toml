@@ -4008,3 +4008,38 @@ measured at +12 dB, -12 dBFS, at the band centre.
 DEFAULTS TO CLEAN, which is a real behavioural decision: saturating the band tap necessarily pulls the peak down, so a +12 dB request measures +10.8 dB at brown. An EQ should be accurate out of the box with character opt-in, and clean keeps the exact-bypass guarantee as the default state.
 
 THE OFF-CENTRE PROBE MISTAKE RECURRED and was caught again by the same class of check: the new character test first probed an octave off the band centre and reported 0.03-0.05% THD with the positions out of order. Probing AT the centre gives the clean monotonic ladder above. Understating saturation ~40x is what this error does; it has now caused two wrong calibrations, so any THD probe on this unit must set the band centre to the probe frequency."""
+
+[[item]]
+id = "eq-character-curve-laws"
+title = "Parametric EQ: rebuild Character around CURVE LAWS (Pultec/API/Neve/SSL), not a saturation ladder"
+status = "todo"
+stamped = "2026-08-20T18:58:15-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "all four Character positions are audibly distinct in an A/B; the additivity stress test shows series and parallel positions differing by ~10 dB; skirt-pinning verified by swept measurement" }
+note = """Research: planning/eq-character-research.md (2026-08-20). Prompted by the user: "only black seems to have much effect", plus a request to research where EQ tone comes from and model disparate classics.
+
+THE USER IS RIGHT AND IT IS A DESIGN FAULT, NOT TUNING. The Q law changes EXACTLY ONCE across the ladder, at black; every other step moves only saturation, over a span of 0.58% to 1.75% THD. A Q-law change is a far bigger perceptual event than 1% THD, so black is the only step that registers. The ladder was built by calibrating a saturation amount and bolting a Q law onto one step of it, when it should have been built the other way round.
+
+NO RESEARCH WAS DONE BEFORE BUILDING IT. The Q law and gain range came from the ochre note's SSL spec and the saturation ladder was invented by calibration. That is tuning, not research.
+
+WHAT THE LITERATURE SAYS DIFFERENTIATES EQs, in weight order: (1) curve shape and Q law, dominant; (2) additive vs non-additive topology, which sources call "one of the most underrated factors"; (3) passive plus makeup amp vs active; (4) inductor saturation and LC resonance; (5) phase, which is INHERENT and tied to the magnitude curve for minimum-phase designs, so it comes free and must NOT be modelled separately; (6) harmonic and IM distortion. We currently model only (1), and only two laws of it.
+
+MEASURED, the largest single finding: four bands all at 1 kHz +6 dB give +24.00 dB in series (what ships) against +13.95 dB in parallel. TEN DB apart from band routing alone, and the parallel form is what passive designs do. Free to implement - sum the taps against dry instead of chaining.
+
+THE CLASSICS, all concretely modelable from published behaviour:
+  PULTEC EQP-1A - the low-end trick works because boost and cut are NOT mirror images: boost corner sits BELOW the cut corner, boost is broad and soft while cut is narrower and starts slightly ABOVE, and magnitudes differ (+13.5 vs -17.5 dB). Both at 30 Hz gives a boost near 80 Hz and a dip near 200 Hz. No new DSP - a band mode instantiating two offset shelves. Most distinctive and cheapest of the four.
+  API 550 - proportional Q, reciprocal in boost AND cut, and critically SKIRT-PINNED: the 0 dB crossing stays at the same frequency regardless of gain (2 dB at 200 Hz spans 20 Hz-2 kHz; constant-Q spans only 50-800 Hz). Our current "proportional" law narrows Q but does NOT pin the skirt, which is the part that lets an API be pushed.
+  NEVE 1073 - FIXED BANDWIDTH: shape constant, only amplitude scales, +/-16-18 dB. A third law we do not have (constant Q in Hz, not octaves). Large gentle "invisible" moves.
+  SSL 4000 E - what is already implemented; keep as the reference point.
+
+PROPOSED SET, each position changing the CURVE LAW rather than a saturation amount: Clean (constant Q, series, +/-18, exact bypass), Console (SSL, series, +/-15), Punch (skirt-pinned proportional, series, +/-12), Passive (broad asymmetric shelves, PARALLEL, +13.5/-17.5). Saturation becomes a consequence of position, not the thing selected.
+
+COST is small and all in the bake plus the band loop: parallel topology is one line, fixed-bandwidth is one line, skirt-pinning is a different Q-vs-gain expression needing swept verification, Pultec is a band mode over existing shelves. No new per-sample work, so the 6% hardware figure should not move materially.
+
+LIMITS to be honest about: tube and transformer colour, and a specific inductor core material, are not reproducible from published information. Curve shape and topology are, and the sources agree those account for most of the audible difference. Nothing user-facing may claim emulation; position names stay functional (Clean/Console/Punch/Passive), never model numbers.
+
+THREE POSITIONS, NOT FOUR (user, 2026-08-20). Unit.ViewControl.OptionControl draws Drawings.Sub.ThreeColumns and maps sub-button i straight to choice i; there are three sub-buttons, so a FOURTH CHOICE IS UNREACHABLE. The shipped four-position set had "hot" unselectable on hardware, which may be part of why the control read as inert. Swept the catalog: no other unit has an OptionControl ply with more than three choices.
+
+Clean is dropped. It costs nothing structurally - exact bypass is a property of GAIN, not of character, since a band contributes gain*saturate(tap) and gain is exactly 0 at 0 dB, so flat gains bypass bit-identically at every position. Console inherits the transparent role. Target set is Console / Punch / Passive.
+
+INTERIM FIX ALREADY SHIPPED in house 0.1.1.4: the live unit is now brown/black/hot, three reachable positions, pending the curve-law rebuild. Known cost of dropping Clean before that rebuild lands: no accurate-gain position, so a +12 dB request reads about +10.8 dB at brown."""
