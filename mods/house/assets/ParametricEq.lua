@@ -95,19 +95,11 @@ function ParametricEq:onLoadGraph(channelCount)
   adapter("hmfQ", "HMF Q", 1.0)
   adapter("hfFreq", "HF Freq", 8000.0)
   adapter("hfGain", "HF Gain", 0.0)
-  adapter("drive", "Drive", 0.0)
   adapter("mix", "Mix", 1.0)
 end
 
 function ParametricEq:onLoadMenu(objects, branches)
   return {
-    colourHeader = MenuHeader { description = "Colour" },
-    colour = MenuOption {
-      description = "Colour",
-      option = objects.op:getOption("Colour"),
-      choices = { "brown", "black" },
-      boolean = false
-    },
     shapeHeader = MenuHeader { description = "Band Shapes" },
     lfShape = MenuOption {
       description = "LF Shape",
@@ -121,7 +113,7 @@ function ParametricEq:onLoadMenu(objects, branches)
       choices = { "shelf", "bell" },
       boolean = false
     }
-  }, { "colourHeader", "colour", "shapeHeader", "lfShape", "hfShape" }
+  }, { "shapeHeader", "lfShape", "hfShape" }
 end
 
 function ParametricEq:onLoadViews()
@@ -160,7 +152,17 @@ function ParametricEq:onLoadViews()
     lmf  = gb("lmfGain", "LMF Gain", gainMap(), 0.0, 1),
     hmf  = gb("hmfGain", "HMF Gain", gainMap(), 0.0, 1),
     hf   = gb("hfGain",  "HF Gain",  gainMap(), 0.0, 1),
-    drive = gb("drive", "Drive", Encoder.getMap("[0,1]"), 0.0),
+    -- Character on a PLY, not buried in the menu. It replaces both the
+    -- old Drive fader and the old Colour menu option: Q law, gain range
+    -- and saturation move together, and discrete positions can be
+    -- compared against one another in a way a subtle continuous knob
+    -- could not.
+    character = OptionControl {
+      button = "char",
+      description = "Character",
+      option = self.objects.op:getOption("Character"),
+      choices = { "clean", "brown", "black", "hot" }
+    },
     mix   = gb("mix",   "Mix",   Encoder.getMap("[0,1]"), 1.0),
 
     lfFreqF  = fd("lfFreq",  "LF Freq",  freqMap(30, 450), 0),
@@ -170,7 +172,7 @@ function ParametricEq:onLoadViews()
     hmfQF    = fd("hmfQ",    "HMF Q",    qMap()),
     hfFreqF  = fd("hfFreq",  "HF Freq",  freqMap(1500, 16000), 0)
   }, {
-    expanded  = { "lf", "lmf", "hmf", "hf", "drive", "mix" },
+    expanded  = { "lf", "lmf", "hmf", "hf", "character", "mix" },
     collapsed = {},
     -- The original control key leads each expansion, or the custom
     -- graphic is replaced by a plain fader.

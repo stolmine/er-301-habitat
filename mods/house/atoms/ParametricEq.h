@@ -73,13 +73,12 @@ namespace house
       addParameter(mHmfQ);
       addParameter(mHfFreq);
       addParameter(mHfGain);
-      addParameter(mDrive);
       addParameter(mMix);
-      addOption(mColour);
+      addOption(mCharacter);
       addOption(mLfShape);
       addOption(mHfShape);
       // od::Option is NOT auto-serialized.
-      mColour.enableSerialization();
+      mCharacter.enableSerialization();
       mLfShape.enableSerialization();
       mHfShape.enableSerialization();
     }
@@ -102,12 +101,34 @@ namespace house
     od::Parameter mHmfQ{"HMF Q", 1.0f};
     od::Parameter mHfFreq{"HF Freq", 8000.0f};
     od::Parameter mHfGain{"HF Gain", 0.0f};
-    od::Parameter mDrive{"Drive", 0.0f};
     od::Parameter mMix{"Mix", 1.0f};
 
-    // 1 = Brown (constant Q, +/-15 dB), 2 = Black (proportional Q,
-    // +/-18 dB). od::Option values are 1-based; 0 means UNKNOWN.
-    od::Option mColour{"Colour", 1};
+    // CHARACTER, one discrete control replacing the old Colour option
+    // and the separate Drive fader.
+    //
+    // Drive was a continuous ply whose whole range was subtle (0.3% to
+    // 8% THD) and which did nothing at all on a flat EQ, so there was
+    // never anything to A/B against and users could not tell what it
+    // was doing. Colour meanwhile was a second character control buried
+    // in the menu. Two overlapping character controls, one invisible
+    // and one illegible.
+    //
+    // Now one control on a PLY, moving Q law, gain range and saturation
+    // together - which is what the design note said Colour should do
+    // all along. Discrete positions can be compared against each other,
+    // which a subtle continuous knob cannot.
+    //
+    // od::Option values are 1-based; 0 means UNKNOWN.
+    // DEFAULTS TO CLEAN. An EQ should be accurate out of the box and
+    // character should be opt-in: saturating the band tap necessarily
+    // pulls the peak down, so a +12 dB request measures +10.8 dB at
+    // brown. Clean keeps the band landing exactly on its number, and
+    // keeps clean-plus-flat-gains a bit-identical bypass.
+    //   1 Clean  constant-Q, +/-15 dB, no saturation
+    //   2 Brown  constant-Q, +/-15 dB, light
+    //   3 Black  proportional-Q, +/-18 dB, medium
+    //   4 Hot    proportional-Q, +/-18 dB, heavy
+    od::Option mCharacter{"Character", 1};
     od::Option mLfShape{"LF Shape", 1};   // 1 shelf, 2 bell
     od::Option mHfShape{"HF Shape", 1};   // 1 shelf, 2 bell
 
@@ -119,14 +140,18 @@ namespace house
       float *outR = mOutR.buffer();
 
       const float sr = globalConfig.sampleRate > 0.0f ? globalConfig.sampleRate : 48000.0f;
-      const bool black = (mColour.value() == 2);
-      const ParametricBandQLaw law = black ? PARAM_BAND_Q_PROPORTIONAL
-                                           : PARAM_BAND_Q_CONSTANT;
-      // The two circuit revisions differ in range as well as Q law,
-      // and that difference is behavioural rather than cosmetic: the
-      // extra 3 dB changes how hard people push it.
-      const float maxDb = black ? 18.0f : 15.0f;
-      const float drive = CLAMP(0.0f, 1.0f, mDrive.value());
+      int ch = mCharacter.value();
+      if (ch < 1) ch = 1; else if (ch > 4) ch = 4;
+      const bool hotHalf = (ch >= 3);
+      const ParametricBandQLaw law = hotHalf ? PARAM_BAND_Q_PROPORTIONAL
+                                             : PARAM_BAND_Q_CONSTANT;
+      // Range moves with the Q law, as the two documented circuit
+      // revisions do: the extra 3 dB changes how hard people push it.
+      const float maxDb = hotHalf ? 18.0f : 15.0f;
+      // Saturation per position. Clean is exactly 0, so Clean plus flat
+      // gains is still a bit-identical bypass.
+      static const float kDrive[4] = { 0.0f, 0.35f, 0.7f, 1.0f };
+      const float drive = kDrive[ch - 1];
 
       // Coefficients are baked ONCE PER BLOCK, never per sample: the
       // bake contains tan(), pow() and a divide.
@@ -179,8 +204,23 @@ namespace house
         mWetL[i] = inL[i];
         mWetR[i] = inR[i];
       }
+      // SKIP INACTIVE BANDS. A band at 0 dB has gain exactly 0 and
+      // contributes in + 0*tap, i.e. nothing, so running it is pure
+      // waste. Most EQ patches use one or two bands, not four.
+      // Measured 6% stereo CPU on hardware with all four live; this
+      // takes typical use to roughly 1.5-3%.
+      //
+      // The test is at BLOCK rate on a baked coefficient, not per
+      // sample on a parameter, so it is not a sample-loop branch
+      // (feedback_runtime_branched_dsp_dispatch).
+      //
+      // A skipped band's state is deliberately NOT reset: leaving it
+      // frozen means re-enabling the band resumes from where it was
+      // rather than from a discontinuity. Its output was zero either
+      // way, so no energy is trapped.
       for (int b = 0; b < 4; b++)
-        mBand[b].processBlock(mWetL, mWetR, FRAMELENGTH, mC[b]);
+        if (mC[b].gain != 0.0f)
+          mBand[b].processBlock(mWetL, mWetR, FRAMELENGTH, mC[b]);
       for (int i = 0; i < FRAMELENGTH; i++)
       {
         outL[i] = inL[i] * dry + mWetL[i] * mix;
