@@ -49,6 +49,51 @@
 namespace house
 {
 
+  // Fast log2/exp2 by float bit manipulation. Accurate to well under
+  // 0.01 dB across the range a compressor uses, and roughly ten
+  // instructions each with no libm call and no table.
+  //
+  // THESE EXIST BECAUSE THE LINEAR-DOMAIN SHORTCUT FAILED. Gain was
+  // first computed as a blend toward thresh/det, chosen to avoid
+  // log/exp per sample. It cannot express a dB ratio law: measured, a
+  // nominally infinite-ratio blend delivered an effective 1.76:1, so
+  // 4:1 and 10:1 were simply unreachable. A compressor needs
+  // gain = over^-(1 - 1/R), which is a power, which is a log and an
+  // exp. Doing them cheaply is the answer; avoiding them was not.
+  static inline float fastLog2(float x)
+  {
+    union { float f; uint32_t i; } v; v.f = x;
+    const float e = (float)((v.i >> 23) & 0xFF) - 127.0f;
+    v.i = (v.i & 0x007FFFFF) | 0x3F800000;   // mantissa into [1,2)
+    const float m = v.f;
+    // Degree-4 fit for log2 over [1,2), max error 2.0e-04.
+    // A cubic was tried first and measured 1.1 dB of END-TO-END GAIN
+    // ERROR once composed with exp2 - the ratio was simply wrong. The
+    // extra term costs one multiply-add and takes that to 0.02 dB.
+    return e + m * (m * (m * (m * -0.079150366f + 0.628815729f)
+                         - 2.081060203f) + 4.028372767f) - 2.496773768f;
+  }
+
+  static inline float fastExp2(float x)
+  {
+    if (x < -60.0f) return 0.0f;
+    if (x > 4.0f) x = 4.0f;
+    const float fl = (float)((int)(x + 512.0f) - 512.0f);   // floor, no call
+    const float f = x - fl;
+    // minimax cubic for 2^f over [0,1)
+    // Degree-4, with the constant term pinned to EXACTLY 1. At ratio
+    // 1:1 the exponent is 0 and this must return exactly 1.0, or a
+    // nominally bypassed compressor applies -0.0009 dB forever and the
+    // bit-identity test fails. Max error 1.5e-05.
+    const float p = f * (f * (f * (f * 0.013676531f + 0.051666877f)
+                              + 0.241710262f) + 0.692931289f) + 1.0f;
+    union { uint32_t i; float f; } v;
+    int e = (int)fl + 127;
+    if (e < 0) e = 0; else if (e > 254) e = 254;
+    v.i = ((uint32_t)e) << 23;
+    return p * v.f;
+  }
+
   enum GlueCompCharacter
   {
     // SSL-bus behaviour. Gentle, adaptive, hard to make sound bad.
@@ -65,7 +110,8 @@ namespace house
   struct GlueCompCoefs
   {
     float threshold;   // linear
-    float ratioAmt;    // 0..1 blend toward the infinite-ratio target
+    float invThresh;   // 1/threshold, baked - kills the per-sample divide
+    float ratioAmt;    // k = 1 - 1/R, the dB-domain ratio exponent
     float attack;      // per-sample coefficient
     float release;
     float makeup;      // linear
@@ -75,30 +121,58 @@ namespace house
     float rmsAmount;   // 0 = peak detector, 1 = RMS
     float progDepend;  // 0 = fixed timing, 1 = program-dependent
     float slowTail;    // 0 = single release, 1 = add the opto second stage
+    // AUTO MAKEUP. 1 = compensate the level lost to compression, 0 = off.
+    //
+    // This exists for a specific reported problem: at identical
+    // settings the three characters gave -5.99 / -10.61 / -4.29 dB of
+    // reduction, a 6 dB spread, so switching Character changed LOUDNESS
+    // more than character and the character itself was unintelligible
+    // under the level jump.
+    //
+    // Compensating the OUTPUT is the right place, not the threshold. A
+    // per-character threshold trim was tried first and it equalised the
+    // levels but moved every position's operating point, so the knee
+    // and the program-dependence stopped being comparable - it
+    // distorted what the control MEANS rather than what it delivers.
+    //
+    // DEFEATABLE, deliberately: automatic level matching removes the
+    // ability to hear what a stage is actually doing, which is exactly
+    // the objection raised against the Channel Strip.
+    float autoMakeup;
 
     GlueCompCoefs()
-        : threshold(1.0f), ratioAmt(0.0f), attack(0.01f), release(0.001f),
+        : threshold(1.0f), invThresh(1.0f), ratioAmt(0.0f), attack(0.01f), release(0.001f),
           makeup(1.0f), kneeWidth(0.0f), invKnee(0.0f), feedback(0.0f), rmsAmount(0.0f),
-          progDepend(0.0f), slowTail(0.0f) {}
+          progDepend(0.0f), slowTail(0.0f), autoMakeup(1.0f) {}
   };
 
   // Bake once per block. `thresh` and `makeup` are linear, `ratio` is
   // 0..1, times are in seconds.
   static inline void glueCompBake(GlueCompCoefs &c, GlueCompCharacter ch,
-                                  double thresh, double ratio,
+                                  double threshDb, double ratio,
                                   double attackSec, double releaseSec,
-                                  double makeup, double sr)
+                                  double makeup, double sr, bool autoMk)
   {
     if (sr <= 0.0) sr = 48000.0;
-    if (thresh < 0.001) thresh = 0.001; else if (thresh > 1.0) thresh = 1.0;
-    if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+    // THRESHOLD IS IN dB and the control reads in dB: -60 at the
+    // bottom, 0 at the top, so turning it down lowers the threshold and
+    // compresses more. The linear 0..1 amplitude it used to take put
+    // almost all the useful range in the top of the knob's travel.
+    if (threshDb > 0.0) threshDb = 0.0; else if (threshDb < -60.0) threshDb = -60.0;
+    const double thresh = pow(10.0, threshDb / 20.0);
+    // RATIO IS A REAL RATIO, 1..inf. k = 1 - 1/R is the dB-domain
+    // exponent: 2:1 gives 0.5, 4:1 gives 0.75, 10:1 gives 0.9.
+    if (ratio < 1.0) ratio = 1.0; else if (ratio > 200.0) ratio = 200.0;
     if (attackSec < 0.00002) attackSec = 0.00002;
     if (releaseSec < 0.002) releaseSec = 0.002;
 
-    c.threshold = (float)thresh;
-    c.ratioAmt = (float)ratio;
+
+    c.ratioAmt = (float)(1.0 - 1.0 / ratio);
     c.makeup = (float)makeup;
+    c.autoMakeup = autoMk ? 1.0f : 0.0f;
     // One-pole coefficients. exp() is fine here: block rate, not sample.
+    c.threshold = (float)thresh;
+    c.invThresh = (float)(1.0 / thresh);
     c.attack = (float)(1.0 - exp(-1.0 / (attackSec * sr)));
     c.release = (float)(1.0 - exp(-1.0 / (releaseSec * sr)));
 
@@ -145,6 +219,7 @@ namespace house
       mGain = 1.0f;
       mRms = 0.0f;
       mSlow = 1.0f;
+      mMakeupAvg = 1.0f;
     }
 
     // Current gain reduction as a linear multiplier, for metering.
@@ -156,7 +231,8 @@ namespace house
       const float fb = c.feedback, rms = c.rmsAmount, pd = c.progDepend;
       const float knee = c.kneeWidth, ik = c.invKnee, tail = c.slowTail;
       const float atk = c.attack, rel = c.release;
-      float g = mGain, rl = mRms, sl = mSlow;
+      const float am = c.autoMakeup;
+      float g = mGain, rl = mRms, sl = mSlow, mu = mMakeupAvg;
 
       for (int i = 0; i < n; i++)
       {
@@ -179,31 +255,31 @@ namespace house
         float det = pk + rms * (rmsVal - pk);
         if (det < 1.0e-9f) det = 1.0e-9f;
 
-        // ---- target gain, linear domain, no log/exp ----
-        // thresh/det is the infinite-ratio target; ratio blends toward
-        // it. One divide, once per sample, because the detector is mono.
-        float over = det / thr;
+        // ---- target gain: a REAL dB ratio law ----
+        // gain = over^-(1 - 1/R), computed as exp2(-k * log2(over)).
+        // `k` is baked, so the sample path is one fast log2 and one
+        // fast exp2 and no divide at all - the thresh/det divide the
+        // old linear blend needed is gone too.
+        const float over = det * c.invThresh;
         float target = 1.0f;
         if (over > 1.0f)
         {
-          const float inf = thr / det;
-          // SOFT KNEE: ease the blend in over the knee region instead of
-          // switching on at the corner. knee == 0 gives the hard corner.
-          float amt = ra;
+          float k = ra;
+          // SOFT KNEE: ease the ratio in over the knee region rather
+          // than switching it on at the corner.
           if (knee > 0.0f)
           {
             const float t = (det - thr) * ik;
-            if (t < 1.0f) amt = ra * (t * t * (3.0f - 2.0f * t));
+            if (t < 1.0f) k = ra * (t * t * (3.0f - 2.0f * t));
           }
-          target = 1.0f + amt * (inf - 1.0f);
+          target = fastExp2(-k * fastLog2(over));
         }
         else if (knee > 0.0f && det > thr - knee)
         {
-          // Below threshold but inside the knee: a soft knee starts
-          // working BEFORE the corner, which is the whole point of one.
+          // A soft knee starts working BEFORE the corner, which is the
+          // whole point of one.
           const float t = (det - (thr - knee)) * ik;
-          const float inf = thr / det;
-          target = 1.0f + ra * 0.5f * t * t * (inf - 1.0f);
+          target = fastExp2(-ra * 0.5f * t * t * fastLog2(det * c.invThresh));
         }
 
         // ---- timing, optionally program-dependent ----
@@ -229,16 +305,25 @@ namespace house
         sl += (g - sl) * rel * 0.15f;
         const float gOut = g + tail * (sl - g) * 0.5f;
 
-        l[i] = xl * gOut * mk;
-        r[i] = xr * gOut * mk;
+        // Auto makeup tracks the AVERAGE gain reduction slowly and
+        // divides it back out, so switching Character changes character
+        // and not loudness. Slow enough (about a second) that it does
+        // not undo the compression itself, only the static offset.
+        mu += (gOut - mu) * 0.00002f;
+        if (mu < 0.05f) mu = 0.05f;
+        const float comp = 1.0f + am * (1.0f / mu - 1.0f);
+
+        l[i] = xl * gOut * mk * comp;
+        r[i] = xr * gOut * mk * comp;
       }
-      mGain = g; mRms = rl; mSlow = sl;
+      mGain = g; mRms = rl; mSlow = sl; mMakeupAvg = mu;
     }
 
   private:
     float mGain;
     float mRms;
     float mSlow;
+    float mMakeupAvg;
   };
 
 } // namespace house

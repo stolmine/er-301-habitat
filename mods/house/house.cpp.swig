@@ -48,6 +48,7 @@
 #include "atoms/ChannelStrip.h"
 #include "atoms/GlueComp.h"
 #include "atoms/GlueCompUnit.h"
+#include "atoms/GainReductionGraphic.h"
 #define SWIGLUA
 %}
 
@@ -72,3 +73,4 @@
 %include "atoms/ParametricEq.h"
 %include "atoms/ChannelStrip.h"
 %include "atoms/GlueCompUnit.h"
+%include "atoms/GainReductionGraphic.h"

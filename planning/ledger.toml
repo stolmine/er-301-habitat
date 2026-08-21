@@ -3503,7 +3503,25 @@ THREE MEASUREMENT ERRORS MADE AND CORRECTED, all the same class - measuring the 
  (3) a 300 Hz probe gives only 3 cycles inside a 10 ms attack, so detector ripple swamped the envelope. 3 kHz gives 30.
 A fourth assertion was retired rather than fixed: "PEAK's timing must not vary at all" is unachievable for ANY peak detector, because an oscillating detector makes the gain alternate between the attack and release branches every cycle. The meaningful claim is the RATIO of variation between positions, which is what T3 now asserts.
 
-REMAINING: hardware CPU, a listening pass, and the sidechain highpass the note specifies under Mix."""
+REMAINING: hardware CPU, a listening pass, and the sidechain highpass the note specifies under Mix.
+
+USER REVIEW 2026-08-21 AND FIXES, house 0.1.3.2. Four issues raised; three fixed, the meter built.
+
+1. THRESHOLD WAS LINEAR AMPLITUDE, NOT dB. It took a 0..1 linear amplitude, which put nearly all the useful range in the top of the knob's travel and displayed a number nobody thinks in. Now -60..0 dB, dropping as the control drops.
+
+2. RATIO COULD NOT REACH REAL RATIOS AT ALL - a far worse defect than the reported "should be integer steps". Measured: at a nominally infinite-ratio setting the effective ratio was 1.76:1. 4:1 and 10:1 were unreachable. ROOT CAUSE: gain was computed in the LINEAR domain as a blend toward thresh/det, chosen specifically to avoid log/exp per sample. That form cannot express a dB ratio law. Replaced with the real law gain = over^-(1 - 1/R) via fast bit-trick log2/exp2 - and the divide the old form needed is gone too, so it is not even more expensive. Ratio now steps 1/2/4/10/20.
+
+3. CHARACTER WAS UNINTELLIGIBLE BECAUSE AMOUNT SWAMPED IT. Measured: identical settings gave -5.99 / -10.61 / -4.29 dB across glue / peak / opto, a 6.3 dB spread, so switching Character changed LOUDNESS more than character. Fixed with DEFEATABLE AUTO MAKEUP, which brings the spread to 0.15 dB. A per-character threshold TRIM was tried first and rejected: it equalised levels but moved every position's operating point, so the knee and program-dependence stopped being comparable - it distorted what the control MEANS rather than what it delivers. Auto defaults on and can be switched off, because automatic level matching also removes the ability to hear what the stage is doing - the exact objection raised against the Channel Strip.
+
+4. GAIN REDUCTION METER built as GainReductionGraphic.h: a VU dial laid on its SIDE so the needle sweeps top-to-bottom and fits a 42x64 ply, with 0 dB at the top and reduction pulling it down. Asymmetric ballistics (fast rise, slow fall) so peaks register and the eye can follow recovery, plus a numeric readout since a needle cannot be read exactly. No runtime trig - the arc is a compile-time table per feedback_package_trig_lut. It shares the Threshold ply rather than taking a slot, because the reduction is caused by that control and plies are the scarce resource.
+
+FAST log2/exp2 ACCURACY MATTERS AND WAS MEASURED. A first cubic pair gave 1.1 dB of END-TO-END GAIN ERROR - the ratio was simply wrong. Degree-4 fits take that to 0.0012 dB for one extra multiply-add each. The exp2 constant term is pinned to EXACTLY 1 rather than its minimax value, because at 1:1 the exponent is 0 and anything else applies -0.0009 dB forever and breaks the bit-identity test.
+
+THREE GRAPHICS BUGS, all of which built and linked cleanly and failed only at runtime:
+ (1) `static constexpr` member arrays are ODR-USED when indexed at runtime and need an out-of-line definition C++11 headers cannot give. The .so failed to load with "undefined symbol: house::GainReductionGraphic::kArcX" and took ALL ELEVEN house units down, not just Gesso. Tables belong at namespace scope.
+ (2) The same mistake was then only half-fixed - kArcX lifted, kArcY left behind - which the sweep caught again.
+ (3) follow() was declared INSIDE #ifndef SWIGLUA, so SWIG never bound it and the unit failed at construction with "attempt to call a nil value". Every other graphic in the tree puts follow() after the #endif.
+The all-units sweep earned its keep here: a per-unit smoke test for Gesso alone would have reported one broken unit, not eleven."""
 [[item]]
 id = "diptych-mid-side"
 title = "Mid Side: stereo-only mid/side splitter with a processing branch per side"

@@ -29,9 +29,9 @@ static const char *NAME[3] = {"glue","peak","opto"};
 
 // Settled gain reduction in dB for a steady tone of given amplitude.
 static double settledGrDb(GlueCompCharacter ch, double amp, double ratio = 1.0,
-                          double thr = 0.15, double atk = 0.01, double rel = 0.2)
+                          double thrDb = -16.5, double atk = 0.01, double rel = 0.2)
 {
-  GlueCompCoefs c; glueCompBake(c, ch, thr, ratio, atk, rel, 1.0, SR);
+  GlueCompCoefs c; glueCompBake(c, ch, thrDb, ratio, atk, rel, 1.0, SR, false);
   GlueCompStereo g;
   const int N = 2048;
   std::vector<float> l(N), r(N);
@@ -60,7 +60,7 @@ static int attackSamples(GlueCompCharacter ch, double amp, double ratio,
   // SAMPLE resolution, not block. A 10 ms attack is 480 samples; 256-
   // sample blocks quantise that to 2, so a fixed-timing position looked
   // like it was varying when the reading was just rounding.
-  GlueCompCoefs c; glueCompBake(c, ch, 0.15, ratio, atk, rel, 1.0, SR);
+  GlueCompCoefs c; glueCompBake(c, ch, -16.5, ratio, atk, rel, 1.0, SR, false);
   GlueCompStereo g;
   const int N = 64;
   const int BLOCKS = 6000;
@@ -100,7 +100,7 @@ int main()
     bool allOk = true;
     for (int ch = 0; ch < 3; ch++)
     {
-      GlueCompCoefs c; glueCompBake(c, (GlueCompCharacter)ch, 0.15, 0.0, 0.01, 0.2, 1.0, SR);
+      GlueCompCoefs c; glueCompBake(c, (GlueCompCharacter)ch, -16.5, 1.0, 0.01, 0.2, 1.0, SR, false);  // 1:1 = no compression
       GlueCompStereo g;
       const int N = 512; std::vector<float> l(N), r(N); long diff = 0;
       for (int b = 0; b < 100; b++)
@@ -113,27 +113,27 @@ int main()
       }
       if (diff != 0) { allOk = false; printf("      %s: %ld differ\n", NAME[ch], diff); }
     }
-    chk(allOk, "TEST 5: ratio 0 is a bit-identical bypass in every position");
+    chk(allOk, "TEST 5: ratio 1:1 is a bit-identical bypass in every position");
   }
 
   // 1. Feedback resists deep GR; feedforward does not.
   {
-    const double gGlue = settledGrDb(GLUE_COMP_GLUE, 0.9, 1.0);
-    const double gPeak = settledGrDb(GLUE_COMP_PEAK, 0.9, 1.0);
-    const double gOpto = settledGrDb(GLUE_COMP_OPTO, 0.9, 1.0);
-    printf("      settled GR at ratio 1, amp 0.9:  glue %.2f dB  peak %.2f dB  opto %.2f dB\n",
+    const double gGlue = settledGrDb(GLUE_COMP_GLUE, 0.9, 4.0);
+    const double gPeak = settledGrDb(GLUE_COMP_PEAK, 0.9, 4.0);
+    const double gOpto = settledGrDb(GLUE_COMP_OPTO, 0.9, 4.0);
+    printf("      settled GR at 4:1, amp 0.9:  glue %.2f dB  peak %.2f dB  opto %.2f dB\n",
            gGlue, gPeak, gOpto);
-    snprintf(buf, sizeof buf, "(peak reaches %.2f dB vs glue %.2f)", gPeak, gGlue);
+    snprintf(buf, sizeof buf, "(peak %.2f dB vs glue %.2f)", gPeak, gGlue);
     chk(gPeak < gGlue - 2.0, "TEST 1: feedforward PEAK goes deeper than feedback GLUE", buf);
   }
 
   // 2. Feedback timing tracks ratio; feedforward timing does not.
   {
-    const int gLo = attackSamples(GLUE_COMP_GLUE, 0.9, 0.3);
-    const int gHi = attackSamples(GLUE_COMP_GLUE, 0.9, 1.0);
-    const int pLo = attackSamples(GLUE_COMP_PEAK, 0.9, 0.3);
-    const int pHi = attackSamples(GLUE_COMP_PEAK, 0.9, 1.0);
-    printf("      time constant (SAMPLES to 63%%), ratio .3 -> 1.0:  glue %d -> %d   peak %d -> %d\n",
+    const int gLo = attackSamples(GLUE_COMP_GLUE, 0.9, 1.5);
+    const int gHi = attackSamples(GLUE_COMP_GLUE, 0.9, 4.0);
+    const int pLo = attackSamples(GLUE_COMP_PEAK, 0.9, 1.5);
+    const int pHi = attackSamples(GLUE_COMP_PEAK, 0.9, 4.0);
+    printf("      time constant (SAMPLES to 63%%), ratio 1.5 -> 4.0:  glue %d -> %d   peak %d -> %d\n",
            gLo, gHi, pLo, pHi);
     const double gRel = fabs((double)gHi - gLo) / (gLo + 1);
     const double pRel = fabs((double)pHi - pLo) / (pLo + 1);
@@ -157,8 +157,8 @@ int main()
     double var[3];
     for (int ch = 0; ch < 3; ch++)
     {
-      const int small = attackSamples((GlueCompCharacter)ch, 0.25, 1.0);
-      const int big = attackSamples((GlueCompCharacter)ch, 0.95, 1.0);
+      const int small = attackSamples((GlueCompCharacter)ch, 0.25, 4.0);
+      const int big = attackSamples((GlueCompCharacter)ch, 0.95, 4.0);
       var[ch] = (double)small / (big > 0 ? big : 1);
       printf("        %-5s  small %6d   large %6d   speedup %.1fx\n",
              NAME[ch], small, big, var[ch]);
@@ -168,19 +168,53 @@ int main()
         "TEST 3: program-dependent positions chase overshoot far more than PEAK", buf);
   }
 
-  // 4. Knee: soft positions must bend before the corner.
+  // 4. Knee. Probe JUST ABOVE threshold, where a soft knee has eased
+  // the ratio only partway in and a hard corner has applied it fully.
+  //
+  // The first version probed AT and BELOW threshold and read -0.00 dB
+  // for all three, which discriminates nothing: at the corner every
+  // compressor is at unity, and below it a soft knee's contribution is
+  // far too small to see. The knee is visible in the transition, not at
+  // its ends.
   {
-    printf("      transfer curve near threshold (thr 0.15):\n");
-    bool ok = true;
+    printf("      GR just above threshold (soft knee should lag a hard corner):\n");
+    double v[3];
     for (int ch = 0; ch < 3; ch++)
     {
-      const double below = settledGrDb((GlueCompCharacter)ch, 0.12, 1.0);
-      const double at = settledGrDb((GlueCompCharacter)ch, 0.15, 1.0);
-      printf("        %-5s  at 0.8x thresh %+6.2f dB   at thresh %+6.2f dB\n",
-             NAME[ch], below, at);
-      if (ch == 1 && below < -0.5) ok = false;   // PEAK must be flat below
+      v[ch] = settledGrDb((GlueCompCharacter)ch, 0.20, 4.0);
+      printf("        %-5s  %+6.2f dB\n", NAME[ch], v[ch]);
     }
-    chk(ok, "TEST 4: PEAK has a hard corner, no reduction below threshold");
+    snprintf(buf, sizeof buf, "(peak %+.2f dB vs glue %+.2f, opto %+.2f)", v[1], v[0], v[2]);
+    chk(v[1] < v[0] - 0.3 && v[1] < v[2] - 0.3,
+        "TEST 4: hard-corner PEAK compresses more just above threshold", buf);
+  }
+
+  // 6. AUTO MAKEUP must make the three characters comparable in LEVEL,
+  // which is the whole reason it exists: the reported problem was that
+  // switching Character changed loudness more than character, so the
+  // character was unintelligible underneath the jump.
+  {
+    printf("      output level with auto makeup ON (should be close):\n");
+    double lv[3];
+    for (int ch = 0; ch < 3; ch++)
+    {
+      GlueCompCoefs c;
+      glueCompBake(c, (GlueCompCharacter)ch, -16.5, 4.0, 0.01, 0.2, 1.0, SR, true);
+      GlueCompStereo g;
+      const int N = 2048; std::vector<float> l(N), r(N); double pk = 0;
+      for (int b = 0; b < 120; b++)
+      {
+        for (int i = 0; i < N; i++)
+        { const long n=(long)b*N+i; l[i]=r[i]=(float)(sin(2.0*M_PI*300.0*n/SR)*0.9); }
+        g.processBlock(l.data(), r.data(), N, c);
+        if (b >= 110) for (int i = 0; i < N; i++) pk = fmax(pk, fabs((double)l[i]));
+      }
+      lv[ch] = 20.0 * log10(pk / 0.9);
+      printf("        %-5s  %+6.2f dB\n", NAME[ch], lv[ch]);
+    }
+    const double spread = fmax(fmax(lv[0],lv[1]),lv[2]) - fmin(fmin(lv[0],lv[1]),lv[2]);
+    snprintf(buf, sizeof buf, "(spread %.2f dB, was 6.32 dB uncompensated)", spread);
+    chk(spread < 2.5, "TEST 6: auto makeup brings the characters within earshot", buf);
   }
 
   // finite everywhere
@@ -189,7 +223,7 @@ int main()
     for (int ch = 0; ch < 3; ch++)
       for (double amp : {0.01, 0.5, 1.0, 2.0})
       {
-        GlueCompCoefs c; glueCompBake(c, (GlueCompCharacter)ch, 0.05, 1.0, 0.0001, 0.002, 4.0, SR);
+        GlueCompCoefs c; glueCompBake(c, (GlueCompCharacter)ch, -26.0, 10.0, 0.0001, 0.002, 4.0, SR, false);
         GlueCompStereo g;
         const int N = 512; std::vector<float> l(N), r(N);
         for (int b = 0; b < 60; b++)

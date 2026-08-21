@@ -27,6 +27,25 @@ local Unit = require "Unit"
 local GainBias = require "Unit.ViewControl.GainBias"
 local Fader = require "Unit.ViewControl.Fader"
 local OptionControl = require "Unit.ViewControl.OptionControl"
+local GRMeterControl = require "house.GRMeterControl"
+
+-- Ratio steps through the classic settings rather than sweeping. 1:1 is
+-- no compression and an exact bypass; 2 / 4 / 10 are the SSL detents;
+-- 20 is limiting territory.
+local ratioMap = (function()
+  local m = app.LinearDialMap(1, 20)
+  m:setSteps(2, 1, 1, 1)
+  m:setRounding(1)
+  return m
+end)()
+
+-- Threshold in dB, reading -60 at the bottom and 0 at the top, so the
+-- number drops as the control drops.
+local threshMap = (function()
+  local m = app.LinearDialMap(-60, 0)
+  m:setSteps(6, 1, 0.1, 0.1)
+  return m
+end)()
 
 local function lin(min, max, coarse, fine)
   local m = app.LinearDialMap(min, max)
@@ -66,8 +85,8 @@ function Gesso:onLoadGraph(channelCount)
     return o
   end
 
-  adapter("threshold", "Threshold", 0.5)
-  adapter("ratio", "Ratio", 0.0)
+  adapter("threshold", "Threshold", -18.0)
+  adapter("ratio", "Ratio", 1.0)
   adapter("attack", "Attack", 0.01)
   adapter("release", "Release", 0.2)
   adapter("makeup", "Makeup", 1.0)
@@ -93,8 +112,18 @@ function Gesso:onLoadViews()
   end
 
   return {
-    thresh = gb("threshold", "Thresh", Encoder.getMap("[0,1]"), 0.5),
-    ratio  = gb("ratio",  "Ratio",  Encoder.getMap("[0,1]"), 0.0),
+    -- Threshold ply carries the gain-reduction meter: the reduction is
+    -- caused by this control, so they belong together, and plies are
+    -- the scarce resource.
+    thresh = GRMeterControl {
+      button = "thresh", description = "Thresh",
+      branch = self.branches.threshold,
+      gainbias = self.objects.threshold, range = self.objects.threshold,
+      biasMap = threshMap, biasUnits = app.unitNone,
+      biasPrecision = 1, initialBias = -18.0,
+      op = self.objects.op
+    },
+    ratio  = gb("ratio",  "Ratio",  ratioMap, 1.0, 0),
     -- "Char", not "Character": OptionControl renders
     -- "<description>: <choice>" on the ply, split on spaces and sized to
     -- one ply width, and "Character:" is 10 glyphs and overflows.
@@ -106,6 +135,12 @@ function Gesso:onLoadViews()
     makeup = gb("makeup", "Makeup", lin(0, 8, 1, 0.1), 1.0),
     mix    = gb("mix",    "Mix",    Encoder.getMap("[0,1]"), 1.0),
 
+    auto = OptionControl {
+      button = "auto", description = "Auto",
+      option = self.objects.op:getOption("Auto"),
+      choices = { "on", "off" }
+    },
+
     attackF  = fd("attack",  "Attack",  lin(0.00002, 0.1, 0.01, 0.001), 4),
     releaseF = fd("release", "Release", lin(0.002, 2.0, 0.2, 0.02))
   }, {
@@ -113,7 +148,8 @@ function Gesso:onLoadViews()
     collapsed = {},
     -- The original control key leads each expansion, or the custom
     -- graphic is replaced by a plain fader.
-    ratio = { "ratio", "attackF", "releaseF" }
+    ratio = { "ratio", "attackF", "releaseF" },
+    makeup = { "makeup", "auto" }
   }
 end
 
