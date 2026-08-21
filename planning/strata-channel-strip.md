@@ -131,6 +131,58 @@ pedia notes the interleaving that the original ButterComp *didn't* actually use
 a comparable job in 22 lines. If the CStrip gate is ever wanted specifically, lift
 from **Dynamics**, which is that gate standalone in far less source.
 
+## UI: SETTLED 2026-08-20
+
+The ply budget is the binding constraint and it was measured, not assumed:
+`SECTION_PLY` is 42 px against a 256 px main display, so **exactly 6 plies are
+visible** before scrolling. Parfait - the densest precedent in the catalog, 34
+controls - fits its top row into exactly 6 and puts everything else in
+expansions. Units do go over (Bassline and Tessera run 12) but they scroll.
+
+### Six sections, not seven
+
+**Gate and Comp merge into one Dynamics section.** This is justified by the DSP
+rather than by the pixel budget: they are literally the same atom.
+`Pop3Dynamics` shares ONE detector path between them, and the gate deliberately
+reads the uncompressed signal from inside that shared structure. Splitting them
+across two sections would misrepresent the implementation, and a true-bypass
+saving cannot be taken for one without the other anyway.
+
+Independent disable survives without independent bypass: gate ratio 0 and comp
+ratio 0 each switch their half off inside the section.
+
+| ply | section | headline param | built from |
+|---|---|---|---|
+| 1 | **Overview** | Output level | shared meter + bypass map |
+| 2 | **Dynamics** | Compress | Pop3 (gate + comp) |
+| 3 | **Filter** | Cutoff | Capacitor2 HP + LP |
+| 4 | **EQ** | Tilt | ParametricBand x3 |
+| 5 | **Drive** | Drive | Channel9 |
+| 6 | **Punch** | Transient | Point + Distance2 |
+| 7 | **Out** | Level | ClipOnly2 |
+
+### The overview ply, and why its encoder is Output level
+
+Seven plies means one scrolls. In signal-flow order that is **Out** - and Level
+is the control reached for most often on any strip, so leaving it off-screen
+would be the worst possible choice.
+
+Resolution: the Overview ply's **encoder drives output level**. The overview is
+effectively the master ply, master level belongs on it, and the most-used
+control is then always visible without breaking signal-flow order for the
+sections. The Out section keeps its own level plus the clipper parameters in its
+expansion; the two address the same underlying parameter.
+
+The overview also carries the **gain-reduction and level meter** and a **map of
+all six bypass states**, so whole-strip state reads at a glance even though one
+section is scrolled off.
+
+### Bypass indication
+
+Each SectionGate draws its **own on/off indicator** on its ply - state and
+control in the same place, no extra cost. The overview's bypass map is the
+redundant second cue that covers the scrolled-off section.
+
 ## UI: the SectionGate control
 
 The request was "top level all gates, parameters on shift." The shape is right;
