@@ -46,6 +46,8 @@
 #include "atoms/ParametricEq.h"
 #include "atoms/Pop3Dynamics.h"
 #include "atoms/ChannelStrip.h"
+#include "atoms/GlueComp.h"
+#include "atoms/GlueCompUnit.h"
 #define SWIGLUA
 %}
 
@@ -69,3 +71,4 @@
 %include "atoms/Carriage.h"
 %include "atoms/ParametricEq.h"
 %include "atoms/ChannelStrip.h"
+%include "atoms/GlueCompUnit.h"

@@ -17,5 +17,6 @@ return {
     { title = "Lacquer", moduleName = "Lacquer", category = "House", keywords = "lacquer, vinyl, tape, saturate, lo-fi, polished, downsample, oversample, cut, polish, character" },
     { title = "Parametric EQ", moduleName = "ParametricEq", category = "House", keywords = "eq, equalizer, parametric, filter, shelf, bell, band, tone, q, ssl, mixing" },
     { title = "Channel Strip", moduleName = "ChannelStrip", category = "House", keywords = "channel, strip, console, compressor, gate, eq, dynamics, mixing, bus" },
+    { title = "Gesso", moduleName = "Gesso", category = "House", keywords = "compressor, bus, glue, dynamics, mix, opto, peak, feedback, mastering, gesso" },
   }
 }

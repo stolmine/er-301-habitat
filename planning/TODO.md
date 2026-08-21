@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**235 items** — 75 done, 6 wip, 153 todo, 1 blocked. *Rendered 2026-08-21.*
+**235 items** — 75 done, 7 wip, 152 todo, 1 blocked. *Rendered 2026-08-21.*
 
 ## DSP
 
@@ -13,6 +13,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 | ~ | `ca-noise-texture` | Cellular-automata granular noise texture source (Vivary) | manual · 2026-07-16 |
 | ~ | `fdn-reverb` | NEON FDN reverb (Householder core + per-line filters + spectral flavor overlay) | manual · 2026-07-16 |
+| ~ | `gesso-glue-compressor` | Gesso: SSL-G-style glue bus compressor on an Airwindows Pressure6 engine (MIT) | manual · 2026-08-21 |
 | ~ | `lane-shear-sorter` | Lane-shear sorter: filterbank pixel sorting - independently permute correlated frequency lanes in time | manual · 2026-08-13 |
 |   | `alembic-comb-retrofit` | Alembic: Doppler smoother + idx-wrap-ulp guard retrofit on the comb; fix direct sample-swap retrain | manual · 2026-07-09 |
 |   | `alembic-userbias-derivations` | Alembic Phases 7-8: per-region user-bias sub-params + Order 2/3 derivations + sample excitation | manual · 2026-07-09 |
@@ -31,7 +32,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `drywet-crossfade-audit` | Audit all wet/dry units for the linear-crossfade center dip; switch decorrelated wets to equal-power | manual · 2026-07-15 |
 |   | `flakes-shards-fidelity` | Flakes: tune self-modulation engine to Shards, steeper LP on feedback, evaluate manual-loops fidelity | manual · 2026-07-09 |
 |   | `fx-delay-units` | Combined Petrichor+Pecto (CPU-efficient) + character-forward Lofi delay | manual · 2026-07-09 |
-|   | `gesso-glue-compressor` | Gesso: SSL-G-style glue bus compressor on an Airwindows Pressure6 engine (MIT) | manual · 2026-08-14 |
 |   | `gyre-feedback-matrix` | Gyre: an N-by-N feedback matrix as a playable instrument (no-input-mixer in a unit) | manual · 2026-08-14 |
 |   | `helicase-sync-polyblep` | Helicase: PolyBLEP at the carrier reset discontinuity on hard sync | manual · 2026-07-09 |
 |   | `house-atom-library` | House: AW tone-shaping atom library (first-15) + RotCoat/composition component atoms | manual · 2026-07-09 |
