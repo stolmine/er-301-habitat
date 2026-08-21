@@ -25,3 +25,4 @@ tools/parametric-band-test/stub/
 tools/parametric-eq-test/stub/
 tools/pop3-dynamics-test/stub/
 tools/stft-frontend-test/stub/
+tools/channel-strip-test/stub/
