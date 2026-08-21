@@ -16,5 +16,6 @@ return {
     { title = "TickerTape", moduleName = "TickerTape", category = "House", keywords = "tape, saturate, console, drive, lo-fi, color, character, glue, tickertape" },
     { title = "Lacquer", moduleName = "Lacquer", category = "House", keywords = "lacquer, vinyl, tape, saturate, lo-fi, polished, downsample, oversample, cut, polish, character" },
     { title = "Parametric EQ", moduleName = "ParametricEq", category = "House", keywords = "eq, equalizer, parametric, filter, shelf, bell, band, tone, q, ssl, mixing" },
+    { title = "Channel Strip", moduleName = "ChannelStrip", category = "House", keywords = "channel, strip, console, compressor, gate, eq, dynamics, mixing, bus" },
   }
 }

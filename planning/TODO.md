@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**235 items** — 74 done, 5 wip, 155 todo, 1 blocked. *Rendered 2026-08-20.*
+**235 items** — 74 done, 6 wip, 154 todo, 1 blocked. *Rendered 2026-08-20.*
 
 ## DSP
 
@@ -115,6 +115,7 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+| ~ | `strata-channel-strip` | Channel Strip: 7-section strip on the house atom bin, with a reusable SectionGate control | manual · 2026-08-20 |
 | ~ | `units-buffer-shuffler` | Buffer Shuffler / Groovebox — BBCut-style beat-slicing buffer manipulation | manual · 2026-08-13 |
 |   | `biome-codescan-emu-autoload` | Biome Bletchley Park / Station X: auto-load libbiome.so on emulator, silent on hardware | manual · 2026-08-10 |
 |   | `biome-quantoffset-ignores-chain-input` | Biome Quantoffset: never connects its chain input | manual · 2026-08-10 |
@@ -145,7 +146,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `port-mit-direct` | MIT-compatible direct ports backlog: Stages LFO, Loom, Open303, Faust reverb, ProCo Rat, AW-remaining | manual · 2026-07-09 |
 |   | `sill-window-comparator` | Window Comparator: two windows + logic section on the multi-out framework (Compare 2 reference) | manual · 2026-08-14 |
 |   | `spreadsheet-larets-compressamt-tie-mismatch` | Spreadsheet Larets: Lua ties 'CompressAmt' but C++ registers the parameter as 'TanhAmt' | manual · 2026-08-10 |
-|   | `strata-channel-strip` | Channel Strip: 7-section strip on the house atom bin, with a reusable SectionGate control | manual · 2026-08-14 |
 |   | `switch-1-to-n-unit` | 1-to-N switch unit: output selection + output count + passthrough, on the multi-out framework | manual · 2026-08-05 |
 |   | `units-4ms-smr` | 4ms Spectral Multiband Resonator port — 6 resonant bandpass filters with rotation/spread | manual · 2026-07-09 |
 |   | `units-device-randomizer-control-forge` | Device Randomizer + Control Forge-alike — chain-neighbor randomizer and multistage envelope | manual · 2026-07-09 |

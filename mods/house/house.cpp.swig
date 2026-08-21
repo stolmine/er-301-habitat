@@ -44,6 +44,8 @@
 #include "atoms/Carriage.h"
 #include "atoms/ParametricBand.h"
 #include "atoms/ParametricEq.h"
+#include "atoms/Pop3Dynamics.h"
+#include "atoms/ChannelStrip.h"
 #define SWIGLUA
 %}
 
@@ -66,3 +68,4 @@
 %include "atoms/Distance2.h"
 %include "atoms/Carriage.h"
 %include "atoms/ParametricEq.h"
+%include "atoms/ChannelStrip.h"
