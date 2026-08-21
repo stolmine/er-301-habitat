@@ -113,6 +113,14 @@ namespace house
     float a1, a2, a3;
     float gain;     // linear amplitude to add; 0 == exact bypass
     float nonlin;   // 0 == clean; the AW level-dependent term
+    // 1.0 = ADDITIVE, out = in + gain*tap. This is EQ: the band adds a
+    //       bump or dip to the dry signal, and gain 0 is exact bypass.
+    // 0.0 = REPLACING, out = gain*tap. This is a FILTER: the tap IS the
+    //       output, so the same SVF yields a lowpass or a highpass with
+    //       no extra DSP and the same 30-instruction stereo NEON kernel.
+    // One multiply, no branch, and it keeps both behaviours in one
+    // kernel rather than duplicating the filter for the Filter section.
+    float passthru;
     // Tap selectors, BAKED. Exactly one is 1.0f. These used to be
     // `(shape == X) ? 1.0f : 0.0f` evaluated inside the sample loop,
     // which cost 50 vcmpe.f32 per sample across a stereo four-band
@@ -121,7 +129,7 @@ namespace house
 
     ParametricBandCoefs()
         : g(0.0f), k(1.0f), a1(0.0f), a2(0.0f), a3(0.0f),
-          gain(0.0f), nonlin(0.0f),
+          gain(0.0f), nonlin(0.0f), passthru(1.0f),
           selBell(1.0f), selLow(0.0f), selHigh(0.0f) {}
   };
 
@@ -199,6 +207,7 @@ namespace house
     // signal, so 0 dB must map to 0.0 and not 1.0.
     c.gain = (float)(pow(10.0, dB / 20.0) - 1.0);
     c.nonlin = (float)(drive < 0.0 ? 0.0 : (drive > 1.0 ? 1.0 : drive));
+    c.passthru = 1.0f;
     c.selBell = (shape == PARAM_BAND_BELL) ? 1.0f : 0.0f;
     c.selLow = (shape == PARAM_BAND_LOW_SHELF) ? 1.0f : 0.0f;
     c.selHigh = (shape == PARAM_BAND_HIGH_SHELF) ? 1.0f : 0.0f;
@@ -238,6 +247,30 @@ namespace house
     return y;
   }
 
+  // Bake a PURE FILTER rather than an EQ band: the tap becomes the
+  // output instead of being added to it. Used by a channel strip's
+  // Filter section, which wants a plain highpass and lowpass for
+  // removing rumble and hiss.
+  //
+  // WHY NOT Capacitor2, which the design note originally named for this:
+  // measured on real A8 codegen, Capacitor2Mono is 356 instructions with
+  // 223 DOUBLE-precision ops, and that is MONO - roughly 712 for stereo,
+  // against 30 here for both channels. Doubles fall to scalar VFP on A8
+  // (feedback_cortex_a8_no_double_in_hot_loops) and its per-sample
+  // coefficient modulation makes nothing hoistable. It is a fine
+  // character filter and a poor utility filter; the character belongs in
+  // the Drive section.
+  static inline void parametricBandBakeFilter(ParametricBandCoefs &c,
+                                              double freqHz, double q,
+                                              double sr, bool highpass)
+  {
+    parametricBandBake(c, freqHz, 0.0, q, 0.0, sr,
+                       highpass ? PARAM_BAND_HIGH_SHELF : PARAM_BAND_LOW_SHELF,
+                       PARAM_BAND_Q_CONSTANT);
+    c.passthru = 0.0f;   // tap replaces the signal
+    c.gain = 1.0f;       // at unity
+  }
+
   // One band, one channel. A stereo consumer instantiates two.
   class ParametricBandMono
   {
@@ -272,6 +305,7 @@ namespace house
       const float a1 = c.a1, a2 = c.a2, a3 = c.a3, k = c.k;
       const float g = c.gain, nl = c.nonlin;
       const float sB = c.selBell, sL = c.selLow, sH = c.selHigh;
+      const float pt = c.passthru;
       float ic1 = mIc1, ic2 = mIc2;
       for (int i = 0; i < n; i++)
       {
@@ -282,7 +316,7 @@ namespace house
         ic1 = 2.0f * v1 - ic1;
         ic2 = 2.0f * v2 - ic2;
         float tap = sB * (v1 * k) + sL * v2 + sH * (in - k * v1 - v2);
-        io[i] = in + g * parametricBandSaturate(tap, nl);
+        io[i] = in * pt + g * parametricBandSaturate(tap, nl);
       }
       mIc1 = ic1;
       mIc2 = ic2;
@@ -345,7 +379,7 @@ namespace house
       // the EQ's own action, so a flat EQ stays a bit-identical bypass.
       tap = parametricBandSaturate(tap, c.nonlin);
 
-      return in + c.gain * tap;
+      return in * c.passthru + c.gain * tap;
     }
 
   private:
@@ -416,7 +450,7 @@ namespace house
 #ifdef PARAM_BAND_NEON
       const float32x2_t a1 = vdup_n_f32(c.a1), a2 = vdup_n_f32(c.a2);
       const float32x2_t a3 = vdup_n_f32(c.a3), kk = vdup_n_f32(c.k);
-      const float32x2_t gg = vdup_n_f32(c.gain);
+      const float32x2_t gg = vdup_n_f32(c.gain), pt = vdup_n_f32(c.passthru);
       const float32x2_t sB = vdup_n_f32(c.selBell), sL = vdup_n_f32(c.selLow);
       const float32x2_t sH = vdup_n_f32(c.selHigh);
       const float32x2_t two = vdup_n_f32(2.0f), one = vdup_n_f32(1.0f);
@@ -441,7 +475,7 @@ namespace house
         // parametricBandSaturate() exactly; the harness compares the
         // scalar and NEON paths sample for sample.
         const float32x2_t shaped = vmls_f32(tap, vmul_f32(dsc, tap), vabs_f32(tap));
-        const float32x2_t out = vmla_f32(in, gg,
+        const float32x2_t out = vmla_f32(vmul_f32(in, pt), gg,
             vmax_f32(vmin_f32(shaped, lim), vneg_f32(lim)));
         l[i] = vget_lane_f32(out, 0);
         r[i] = vget_lane_f32(out, 1);
@@ -452,6 +486,7 @@ namespace house
       const float a1 = c.a1, a2 = c.a2, a3 = c.a3, k = c.k;
       const float g = c.gain, nl = c.nonlin;
       const float sB = c.selBell, sL = c.selLow, sH = c.selHigh;
+      const float pt = c.passthru;
       float i1l = mS[0], i1r = mS[1], i2l = mS[2], i2r = mS[3];
       for (int i = 0; i < n; i++)
       {
@@ -464,8 +499,8 @@ namespace house
         i2l = 2.0f * v2l - i2l; i2r = 2.0f * v2r - i2r;
         const float tl = sB * (v1l * k) + sL * v2l + sH * (xl - k * v1l - v2l);
         const float tr = sB * (v1r * k) + sL * v2r + sH * (xr - k * v1r - v2r);
-        l[i] = xl + g * parametricBandSaturate(tl, nl);
-        r[i] = xr + g * parametricBandSaturate(tr, nl);
+        l[i] = xl * pt + g * parametricBandSaturate(tl, nl);
+        r[i] = xr * pt + g * parametricBandSaturate(tr, nl);
       }
       mS[0] = i1l; mS[1] = i1r; mS[2] = i2l; mS[3] = i2r;
 #endif

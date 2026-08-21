@@ -1,12 +1,19 @@
 -- Channel Strip -- six sections, each with a headline parameter on the
 -- encoder, its full board on ENTER, and a true bypass on SHIFT.
 --
--- PHASE 2 OF THE BUILD. Three sections are wired here because their DSP
--- exists and is measured: Dynamics (Pop3Dynamics atom), EQ
--- (ParametricBand atom) and Out. Filter, Drive and Punch are specified
--- in planning/strata-channel-strip.md and are NOT wired yet -- shipping
--- three dead plies would be worse than shipping none, so they appear
--- when their DSP does, taking the strip to its planned seven plies.
+-- FIVE SECTIONS WIRED: Dynamics (Pop3Dynamics), Filter (two
+-- ParametricBand in replacing mode), EQ (three more), Drive
+-- (DriveStage) and Out. Punch is specified in
+-- planning/strata-channel-strip.md and is NOT wired yet -- dead plies would be worse than absent ones, so
+-- they appear when their DSP does, taking the strip to its planned
+-- seven plies.
+--
+-- The Filter section deliberately does NOT use Capacitor2, which the
+-- design note originally named. Measured on real A8 codegen,
+-- Capacitor2Mono is 356 instructions with 223 DOUBLE-precision ops and
+-- that is MONO -- roughly 712 stereo, against 30 for a ParametricBand
+-- stereo pass. It is a fine character filter and a poor utility filter;
+-- character belongs in the Drive section.
 --
 -- LAYOUT, and why. SECTION_PLY is 42 px against a 256 px display, so
 -- exactly SIX PLIES ARE VISIBLE. The planned full set is
@@ -75,11 +82,17 @@ function ChannelStrip:onLoadGraph(channelCount)
   adapter("gateThresh", "Gate Thresh", 0.0)
   adapter("gateAmount", "Gate Amount", 0.0)
 
+  adapter("hpFreq", "HP Freq", 10.0)
+  adapter("lpFreq", "LP Freq", 20000.0)
+
   adapter("eqLow", "EQ Low", 0.0)
   adapter("eqMidFreq", "EQ Mid Freq", 1000.0)
   adapter("eqMid", "EQ Mid", 0.0)
   adapter("eqMidQ", "EQ Mid Q", 1.0)
   adapter("eqHigh", "EQ High", 0.0)
+
+  adapter("drive", "Drive", 0.0)
+  adapter("slew", "Slew", 0.0)
 
   adapter("level", "Level", 1.0)
 end
@@ -133,6 +146,19 @@ function ChannelStrip:onLoadViews()
       biasPrecision = 2,
       initialBias = 0.0
     },
+    flt = SectionGate {
+      button = "hp",
+      description = "HP Freq",
+      sectionName = "flt",
+      engageOption = op:getOption("Flt On"),
+      branch = self.branches.hpFreq,
+      gainbias = self.objects.hpFreq,
+      range = self.objects.hpFreq,
+      biasMap = linMap(10, 2000, 100, 10),
+      biasUnits = app.unitNone,
+      biasPrecision = 0,
+      initialBias = 10.0
+    },
     eq = SectionGate {
       button = "eq",
       description = "EQ Mid",
@@ -144,6 +170,19 @@ function ChannelStrip:onLoadViews()
       biasMap = dbMap,
       biasUnits = app.unitNone,
       biasPrecision = 1,
+      initialBias = 0.0
+    },
+    drv = SectionGate {
+      button = "drive",
+      description = "Drive",
+      sectionName = "drv",
+      engageOption = op:getOption("Drv On"),
+      branch = self.branches.drive,
+      gainbias = self.objects.drive,
+      range = self.objects.drive,
+      biasMap = unitMap,
+      biasUnits = app.unitNone,
+      biasPrecision = 2,
       initialBias = 0.0
     },
     out = SectionGate {
@@ -166,16 +205,22 @@ function ChannelStrip:onLoadViews()
     gateThreshF = fd("gateThresh", "Gate Thr", unitMap),
     gateAmountF = fd("gateAmount", "Gate Amt", unitMap),
 
+    lpFreqF = fd("lpFreq", "LP Freq", linMap(1000, 20000, 2000, 200), 0),
+
     eqLowF = fd("eqLow", "Low", dbMap, 1),
     eqMidFreqF = fd("eqMidFreq", "Mid Freq", linMap(120, 8000, 500, 50), 0),
     eqMidQF = fd("eqMidQ", "Mid Q", linMap(0.3, 10, 1, 0.1)),
-    eqHighF = fd("eqHigh", "High", dbMap, 1)
+    eqHighF = fd("eqHigh", "High", dbMap, 1),
+
+    slewF = fd("slew", "Slew", unitMap)
   }, {
-    expanded = { "master", "dyn", "eq", "out" },
+    expanded = { "master", "dyn", "flt", "eq", "drv", "out" },
     collapsed = {},
     -- The original control key leads each expansion, or the custom
     -- graphic is replaced by a plain fader on expansion.
     dyn = { "dyn", "dynThreshF", "dynAttackF", "dynReleaseF", "gateThreshF", "gateAmountF" },
+    flt = { "flt", "lpFreqF" },
+    drv = { "drv", "slewF" },
     eq = { "eq", "eqLowF", "eqMidFreqF", "eqMidQF", "eqHighF" }
   }
 end

@@ -5,9 +5,9 @@
 // whose atoms already exist and are measured.
 //
 //   1 DYNAMICS  Pop3Dynamics       gate + compressor, one shared detector
-//   2 FILTER    (stub)             HP + LP, Capacitor2
+//   2 FILTER    ParametricBand x2  HP + LP, replacing mode
 //   3 EQ        ParametricBand x3  low / mid / high
-//   4 DRIVE     (stub)             Channel9
+//   4 DRIVE     DriveStage         Channel9 saturation + slew clip
 //   5 PUNCH     (stub)             Point + Distance2
 //   6 OUT       level + soft clip
 //
@@ -25,10 +25,17 @@
 // switches per sample inside a section
 // (feedback_runtime_branched_dsp_dispatch).
 //
-// The stub sections are deliberately real bypasses rather than absent:
-// wiring the skeleton first means the null test below can be proven
-// now, and each stub is then replaced in isolation against a test that
-// already passes.
+// Drive and Punch are still stubs, deliberately: wiring the skeleton
+// first means the null test is proven now, and each stub is then
+// replaced in isolation against a test that already passes.
+//
+// FILTER IS NOT Capacitor2, which the design note named. Measured on
+// real A8 codegen, Capacitor2Mono is 356 instructions with 223
+// DOUBLE-precision ops, and that is MONO - roughly 712 stereo, against
+// 30 for a ParametricBand stereo pass. Doubles fall to scalar VFP on
+// A8 and its per-sample coefficient modulation makes nothing
+// hoistable. A utility highpass does not need that; character belongs
+// in the Drive section.
 #pragma once
 
 #include <od/objects/Object.h>
@@ -36,6 +43,7 @@
 #include <hal/ops.h>
 #include "ParametricBand.h"
 #include "Pop3Dynamics.h"
+#include "DriveStage.h"
 
 namespace house
 {
@@ -57,11 +65,17 @@ namespace house
       addParameter(mGateThresh);
       addParameter(mGateAmount);
 
+      addParameter(mHpFreq);
+      addParameter(mLpFreq);
+
       addParameter(mEqLowGain);
       addParameter(mEqMidFreq);
       addParameter(mEqMidGain);
       addParameter(mEqMidQ);
       addParameter(mEqHighGain);
+
+      addParameter(mDrive);
+      addParameter(mSlew);
 
       addParameter(mOutLevel);
 
@@ -95,6 +109,10 @@ namespace house
     od::Parameter mGateThresh{"Gate Thresh", 0.0f};
     od::Parameter mGateAmount{"Gate Amount", 0.0f};
 
+    // Filter. Headline is the highpass, which is what gets reached for.
+    od::Parameter mHpFreq{"HP Freq", 10.0f};
+    od::Parameter mLpFreq{"LP Freq", 20000.0f};
+
     // EQ. Three bands off the shared atom; the strip does not need the
     // standalone unit's four.
     od::Parameter mEqLowGain{"EQ Low", 0.0f};
@@ -102,6 +120,11 @@ namespace house
     od::Parameter mEqMidGain{"EQ Mid", 0.0f};
     od::Parameter mEqMidQ{"EQ Mid Q", 1.0f};
     od::Parameter mEqHighGain{"EQ High", 0.0f};
+
+    // Drive. One knob spanning dry -> Spiral -> Density, plus the
+    // acceleration-limiting slew clipper.
+    od::Parameter mDrive{"Drive", 0.0f};
+    od::Parameter mSlew{"Slew", 0.0f};
 
     od::Parameter mOutLevel{"Level", 1.0f};
 
@@ -151,7 +174,34 @@ namespace house
         }
       }
 
-      // ---- 2. FILTER (stub) ----
+      // ---- 2. FILTER ----
+      // Two SVF bands in REPLACING mode, so the same 30-instruction
+      // stereo NEON kernel that serves the EQ serves this too. Each
+      // side skips itself when parked at its extreme, so a strip using
+      // only the highpass does not pay for a lowpass at 20 kHz.
+      if (mFilterEngage.value() == 1)
+      {
+        // The DEFAULTS ARE THE PARKED POSITIONS, and the skip tests
+        // against the clamp bounds rather than an arbitrary threshold.
+        // Otherwise an engaged-but-untouched Filter still runs a real
+        // filter: the default used to be 20 Hz against a skip at 11 Hz,
+        // so it coloured the signal without the user asking. The
+        // harness caught it.
+        const float kHpMin = 10.0f, kLpMax = 20000.0f;
+        const float hp = CLAMP(kHpMin, 2000.0f, mHpFreq.value());
+        const float lp = CLAMP(1000.0f, kLpMax, mLpFreq.value());
+        if (hp > kHpMin)
+        {
+          parametricBandBakeFilter(mFltC[0], hp, 0.707, sr, true);
+          mFltBand[0].processBlock(mL, mR, FRAMELENGTH, mFltC[0]);
+        }
+        if (lp < kLpMax)
+        {
+          parametricBandBakeFilter(mFltC[1], lp, 0.707, sr, false);
+          mFltBand[1].processBlock(mL, mR, FRAMELENGTH, mFltC[1]);
+        }
+      }
+
 
       // ---- 3. EQ ----
       if (mEqEngage.value() == 1)
@@ -169,7 +219,17 @@ namespace house
             mEqBand[b].processBlock(mL, mR, FRAMELENGTH, mEqC[b]);
       }
 
-      // ---- 4. DRIVE (stub) ----
+      // ---- 4. DRIVE ----
+      if (mDriveEngage.value() == 1)
+      {
+        driveBake(mDrvC, CLAMP(0.0f, 1.0f, mDrive.value()),
+                  CLAMP(0.0f, 1.0f, mSlew.value()));
+        // Skips itself when both controls are at zero, so an engaged
+        // but untouched Drive costs nothing and colours nothing.
+        if (mDrvC.engaged != 0.0f)
+          mDrv.processBlock(mL, mR, FRAMELENGTH, mDrvC);
+      }
+
       // ---- 5. PUNCH (stub) ----
 
       // ---- 6. OUT ----
@@ -201,6 +261,12 @@ namespace house
 
     Pop3Coefs mDynC;
     Pop3Mono mDynL, mDynR;
+
+    DriveCoefs mDrvC;
+    DriveStageStereo mDrv;
+
+    ParametricBandCoefs mFltC[2];
+    ParametricBandStereo mFltBand[2];
 
     ParametricBandCoefs mEqC[3];
     ParametricBandStereo mEqBand[3];

@@ -75,12 +75,14 @@ int main()
   // 2. each implemented section, engaged alone, must change something
   {
     struct S { const char *name; int which; };
-    S secs[3] = {{"Dynamics",1},{"EQ",3},{"Out",6}};
+    S secs[5] = {{"Dynamics",1},{"Filter",2},{"EQ",3},{"Drive",4},{"Out",6}};
     for (auto &sec : secs)
     {
       Rig g; long d; double rms; bool fin;
       if (sec.which == 1) { g.s.mDynEngage.set(1); g.s.mDynAmount.hardSet(1.0f); g.s.mDynThresh.hardSet(0.2f); }
+      if (sec.which == 2) { g.s.mFilterEngage.set(1); g.s.mHpFreq.hardSet(500.0f); }
       if (sec.which == 3) { g.s.mEqEngage.set(1); g.s.mEqMidGain.hardSet(12.0f); g.s.mEqMidFreq.hardSet(220.0f); }
+      if (sec.which == 4) { g.s.mDriveEngage.set(1); g.s.mDrive.hardSet(0.8f); }
       if (sec.which == 6) { g.s.mOutEngage.set(1); g.s.mOutLevel.hardSet(0.5f); }
       g.run(400, d, rms, fin);
       snprintf(buf, sizeof buf, "(%s: %ld samples changed, rms %.4f)", sec.name, d, rms);
@@ -96,6 +98,57 @@ int main()
     g.run(400, d, rms, fin);
     snprintf(buf, sizeof buf, "(%ld differ with EQ engaged but flat)", d);
     chk(d == 0, "engaging EQ at flat gains is still bit-identical", buf);
+  }
+
+  // 3b. the Filter section parked at its extremes must also be free.
+  // Both sides self-skip, so an engaged-but-unused Filter costs nothing
+  // and colours nothing.
+  {
+    Rig g; long d; double rms; bool fin;
+    g.s.mFilterEngage.set(1);   // HP at 20 Hz, LP at 20 kHz - both parked
+    g.run(400, d, rms, fin);
+    snprintf(buf, sizeof buf, "(%ld differ with Filter engaged but parked)", d);
+    chk(d == 0, "engaging Filter at its extremes is still bit-identical", buf);
+  }
+
+  // 3c. Drive engaged with both controls at zero must also be free.
+  {
+    Rig g; long d; double rms; bool fin;
+    g.s.mDriveEngage.set(1);
+    g.run(400, d, rms, fin);
+    snprintf(buf, sizeof buf, "(%ld differ with Drive engaged at zero)", d);
+    chk(d == 0, "engaging Drive at zero is still bit-identical", buf);
+  }
+
+  // 3d. The Drive knob must have an ARC, not just "more": dry to Spiral
+  // over the first half, Spiral to Density over the second. Two
+  // different curves meeting in the middle, so THD should rise
+  // monotonically and the halves should not be the same curve.
+  {
+    printf("  drive arc, THD%% at -6 dBFS:\n");
+    double prev = -1; bool rising = true;
+    for (double dv : {0.0, 0.25, 0.5, 0.75, 1.0})
+    {
+      ChannelStrip s; std::vector<float> l(FR), r(FR), ol(FR), orr(FR);
+      s.mInL.setBuffer(l.data()); s.mInR.setBuffer(r.data());
+      s.mOutL.setBuffer(ol.data()); s.mOutR.setBuffer(orr.data());
+      s.mDriveEngage.set(1); s.mDrive.hardSet((float)dv);
+      const int N = 32768; const double PF = SR*683.0/N;
+      std::vector<double> y; y.reserve(N); long n = 0;
+      for (int b = 0; b < N/FR + 40; b++)
+      { for (int i = 0; i < FR; i++) { l[i]=r[i]=(float)(sin(2.0*M_PI*PF*n/SR)*0.5); n++; }
+        s.process();
+        if (b >= 40) for (int i = 0; i < FR && (int)y.size() < N; i++) y.push_back(ol[i]); }
+      double f1=0,h=0;
+      for (int k=1;k<=8;k++){ double re=0,im=0;
+        for (int i=0;i<N;i++){ double a=2.0*M_PI*PF*k*i/SR; re+=y[i]*cos(a); im-=y[i]*sin(a);} 
+        double m=sqrt(re*re+im*im); if(k==1)f1=m; else h+=m*m; }
+      const double t = 100.0*sqrt(h)/(f1+1e-30);
+      printf("      drive %.2f -> %7.3f%%\n", dv, t);
+      if (dv > 0.0 && t < prev) rising = false;
+      prev = t;
+    }
+    chk(rising, "Drive rises monotonically across its arc");
   }
 
   // 4. Out level is exact below the clip knee

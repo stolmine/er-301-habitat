@@ -3525,7 +3525,21 @@ THREE SECTIONS WIRED, THREE NOT. Dynamics (Pop3Dynamics) and EQ (three Parametri
 
 emu test er-301/tests/emu/9E-channel-strip.test covers insert, both expansions by CONTENTS, that SectionGate really is the control class on those plies, and that toggling bypass actually moves the option and returns.
 
-REMAINING: Filter (Capacitor2 HP+LP), Drive (Channel9), Punch (Point + Distance2), the overview ply's meter and bypass map graphic, and hardware CPU with all sections active versus all bypassed - the difference being the real test of the bypass design."""
+REMAINING: Filter (Capacitor2 HP+LP), Drive (Channel9), Punch (Point + Distance2), the overview ply's meter and bypass map graphic, and hardware CPU with all sections active versus all bypassed - the difference being the real test of the bypass design.
+
+FILTER + DRIVE WIRED 2026-08-20, house 0.1.2.3. Five of six sections live: Dynamics, Filter, EQ, Drive, Out. Only Punch remains.
+
+FILTER IS NOT Capacitor2, against the design note, and the reason is measured. Capacitor2Mono is 356 instructions with 223 DOUBLE-precision ops on real A8 codegen, and that is MONO - roughly 712 stereo, against 30 for a ParametricBand stereo pass. Doubles fall to scalar VFP on A8 and its per-sample coefficient modulation makes nothing hoistable. It is a fine character filter and a poor utility filter, and the strip already has a Drive section for character. Instead the band atom gained a `passthru` field: 1.0 keeps the additive EQ behaviour, 0.0 makes the tap the output, so the SAME 30-instruction stereo NEON kernel serves both EQ bands and plain HP/LP filters. No new DSP at all.
+
+DRIVE is a new atom, DriveStage.h, from Channel9: a crossfade across TWO saturation curves (dry -> Spiral -> Density) plus a slew clipper that limits ACCELERATION via a 3-tap golden-ratio predictor, so steady highs pass while transients are caught. Measured 110 instructions per sample for BOTH channels, zero doubles, zero divides, zero libm calls, NEON hints clean.
+
+TWO WINS IN THE PORT. First, both libm sines are gone: four per stereo sample at 300-500 ns each would have been unaffordable, and both arguments are bounded in [-pi/2, pi/2] by the clamp that precedes them, so one bounded odd polynomial covers both. Second and better, THE SPIRAL DIVIDE CANCELS ANALYTICALLY - substituting sin(u) = u - u^3/6 + ... with u = x*|x|, every term carries a factor of |x| that cancels the denominator, giving sin(x|x|)/|x| = x*(1 - w/6 + w^2/120 - w^3/5040) with w = x^4. The divide AND the |x|==0 branch both disappear, verified against libm at worst error 1.25e-04. The port is CHEAPER than the original, not merely as good.
+
+A DEFECT THE HARNESS CAUGHT: the Filter defaulted to a 20 Hz highpass while its skip threshold was 11 Hz, so an engaged-but-untouched Filter ran a real filter and coloured the signal unasked. Fixed by making the DEFAULTS the parked positions and testing the skip against the clamp bounds rather than an arbitrary number. The harness now asserts that every section engaged-but-neutral is bit-identical - EQ flat, Filter parked, Drive at zero, Out at unity - not just that the whole strip bypassed is.
+
+Drive's arc is verified rather than assumed: THD 0.000 / 0.456 / 0.825 / 1.819 / 2.674 % across the knob, monotonic, which is the two-curves-meeting-in-the-middle behaviour rather than one curve scaled.
+
+REMAINING: Punch (Point + Distance2, both atoms already exist), the overview ply's meter and bypass-map graphic, and hardware CPU with all sections active versus all bypassed."""
 [[item]]
 id = "peaks-cleanup-sweep"
 title = "Peaks cleanup sweep: land the five label/routing defects in one release, with a preset-breakage policy"
