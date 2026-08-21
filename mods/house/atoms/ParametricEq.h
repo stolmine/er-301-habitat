@@ -144,7 +144,7 @@ namespace house
     //
     // NOT AN EMULATION. Behavioural design from published specification;
     // position names are functional and never model numbers.
-    od::Option mCharacter{"Character", 1};
+    od::Option mCharacter{"Char", 1};
     od::Option mLfShape{"LF Shape", 1};   // 1 shelf, 2 bell
     od::Option mHfShape{"HF Shape", 1};   // 1 shelf, 2 bell
 

@@ -160,8 +160,14 @@ function ParametricEq:onLoadViews()
     -- shipped once with its last position unselectable.
     character = OptionControl {
       button = "char",
-      description = "Character",
-      option = self.objects.op:getOption("Character"),
+      -- "Char", not "Character": OptionControl renders
+      -- "<description>: <choice>" on the PLY, split on spaces, each
+      -- piece sized to one ply width. "Character:" is 10 glyphs and
+      -- overflows. Not "Model" either - that reads as a claim to
+      -- emulate specific hardware, which this deliberately does not do
+      -- (see planning/eq-character-research.md).
+      description = "Char",
+      option = self.objects.op:getOption("Char"),
       choices = { "console", "punch", "passive" }
     },
     mix   = gb("mix",   "Mix",   Encoder.getMap("[0,1]"), 1.0),
