@@ -80,7 +80,29 @@ namespace house
     PARAM_BAND_Q_CONSTANT = 0,
     // Proportional-Q: Q tightens as |gain| rises, so a big boost is
     // narrower than a small one. The more aggressive behaviour.
-    PARAM_BAND_Q_PROPORTIONAL = 1
+    PARAM_BAND_Q_PROPORTIONAL = 1,
+    // SKIRT-PINNED proportional, the API 550 behaviour. Q rises with
+    // gain like PROPORTIONAL, but at the specific rate that leaves the
+    // curve's SKIRT where it is: the frequency at which the response
+    // first departs from flat stays put as gain increases, while the
+    // peak narrows around it.
+    //
+    // SOLVED BY MEASUREMENT, not guessed. Sweeping the exponent p in
+    // q *= 10^(|dB|*p/20) and measuring where the response first
+    // exceeds +0.5 dB, across +3/+6/+12/+18 dB:
+    //     p = 0.0 (constant Q)  skirt moves 3.09x
+    //     p = 0.4               1.58x
+    //     p = 0.7               1.13x   <- best
+    //     p = 1.0               1.34x
+    // At 0.7 the peak still lands exactly (3.00 / 6.00 / 12.00 / 17.99
+    // dB) and the half-gain width still narrows 1.10 -> 0.34 octaves,
+    // so it tightens as pushed without the skirt walking inward. That
+    // is what lets an API tolerate aggressive settings.
+    PARAM_BAND_Q_PINNED = 2,
+    // Fixed BANDWIDTH rather than fixed Q - the Neve 1073 mid. Shape is
+    // constant and only amplitude scales. Not yet used by a position;
+    // kept because the research names it as a third distinct law.
+    PARAM_BAND_Q_FIXED_BW = 3
   };
 
   // Baked once per block by the caller, never per sample.
@@ -125,13 +147,26 @@ namespace house
 
     double qq = q;
     if (qq < 0.05) qq = 0.05;
+    const double mag = dB < 0.0 ? -dB : dB;
     if (law == PARAM_BAND_Q_PROPORTIONAL)
     {
       // Q rises with gain magnitude. 12 dB of boost roughly doubles
       // it, which is the audible end of the published behaviour
       // without becoming a resonator.
-      const double mag = dB < 0.0 ? -dB : dB;
       qq *= (1.0 + mag * (1.0 / 12.0));
+    }
+    else if (law == PARAM_BAND_Q_PINNED)
+    {
+      // See the enum: 0.7 is the measured skirt-pinning exponent.
+      qq *= pow(10.0, mag * 0.7 / 20.0);
+    }
+    else if (law == PARAM_BAND_Q_FIXED_BW)
+    {
+      // Constant bandwidth in Hz rather than in octaves: Q must scale
+      // with centre frequency. Referenced to 1 kHz so the caller's Q
+      // still means what it does elsewhere at that frequency.
+      qq *= (f / 1000.0);
+      if (qq < 0.05) qq = 0.05;
     }
     if (qq > 40.0) qq = 40.0;
 
@@ -340,6 +375,42 @@ namespace house
     // Process interleaved-by-array stereo: separate L and R buffers,
     // n samples, one band. Band-major, so this band's coefficients stay
     // resident for the whole block.
+    // add == true  : SERIES. io = io + gain*tap(io). Each band sees the
+    //                previous band's output, so overlapping bands stack
+    //                and four +6 dB bands at one frequency give +24 dB.
+    // add == false : PARALLEL. io += gain*tap(dry), reading `dry`
+    //                instead of the running signal, so bands sum against
+    //                the input rather than chaining. Overlapping bands
+    //                then stay near the intended curve instead of
+    //                compounding - the same four bands give +13.95 dB.
+    //                This is what passive designs do, and sources call
+    //                additive-vs-non-additive one of the most underrated
+    //                reasons EQs sound different.
+    void processBlockParallel(const float *dryL, const float *dryR,
+                              float *l, float *r, int n,
+                              const ParametricBandCoefs &c)
+    {
+      const float a1 = c.a1, a2 = c.a2, a3 = c.a3, k = c.k;
+      const float g = c.gain, nl = c.nonlin;
+      const float sB = c.selBell, sL = c.selLow, sH = c.selHigh;
+      float i1l = mS[0], i1r = mS[1], i2l = mS[2], i2r = mS[3];
+      for (int i = 0; i < n; i++)
+      {
+        const float xl = dryL[i], xr = dryR[i];
+        const float v3l = xl - i2l, v3r = xr - i2r;
+        const float v1l = a1 * i1l + a2 * v3l, v1r = a1 * i1r + a2 * v3r;
+        const float v2l = i2l + a2 * i1l + a3 * v3l;
+        const float v2r = i2r + a2 * i1r + a3 * v3r;
+        i1l = 2.0f * v1l - i1l; i1r = 2.0f * v1r - i1r;
+        i2l = 2.0f * v2l - i2l; i2r = 2.0f * v2r - i2r;
+        const float tl = sB * (v1l * k) + sL * v2l + sH * (xl - k * v1l - v2l);
+        const float tr = sB * (v1r * k) + sL * v2r + sH * (xr - k * v1r - v2r);
+        l[i] += g * parametricBandSaturate(tl, nl);
+        r[i] += g * parametricBandSaturate(tr, nl);
+      }
+      mS[0] = i1l; mS[1] = i1r; mS[2] = i2l; mS[3] = i2r;
+    }
+
     void processBlock(float *l, float *r, int n, const ParametricBandCoefs &c)
     {
 #ifdef PARAM_BAND_NEON

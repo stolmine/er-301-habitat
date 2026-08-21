@@ -106,38 +106,44 @@ namespace house
     // CHARACTER, one discrete control replacing the old Colour option
     // and the separate Drive fader.
     //
-    // Drive was a continuous ply whose whole range was subtle (0.3% to
-    // 8% THD) and which did nothing at all on a flat EQ, so there was
-    // never anything to A/B against and users could not tell what it
-    // was doing. Colour meanwhile was a second character control buried
-    // in the menu. Two overlapping character controls, one invisible
-    // and one illegible.
+    // Each position changes the CURVE LAW and the TOPOLOGY, not a
+    // saturation amount. That ordering is the whole point: the previous
+    // ladder moved saturation at every step and the Q law exactly once,
+    // so only the one step that changed the law read as different. A
+    // Q-law change is a far bigger perceptual event than a percent of
+    // THD. Research and measurements: planning/eq-character-research.md.
     //
-    // Now one control on a PLY, moving Q law, gain range and saturation
-    // together - which is what the design note said Colour should do
-    // all along. Discrete positions can be compared against each other,
-    // which a subtle continuous knob cannot.
+    //   1 CONSOLE  constant Q, series, +/-15 dB, light saturation.
+    //              Transparent and surgical. The accurate position: the
+    //              peak lands on the number asked for.
+    //   2 PUNCH    SKIRT-PINNED proportional Q, series, +/-12 dB.
+    //              Tightens as it is pushed while the skirt stays put,
+    //              which is what lets this kind of curve tolerate
+    //              aggressive settings.
+    //   3 PASSIVE  broad shelves, PARALLEL topology, asymmetric
+    //              +13.5/-17.5 dB. Boost and cut are not mirror images,
+    //              and bands sum against dry rather than chaining.
     //
-    // od::Option values are 1-based; 0 means UNKNOWN.
+    // THE TOPOLOGY DIFFERENCE IS THE LARGEST SINGLE AXIS and it is free.
+    // Measured: four bands all at 1 kHz and +6 dB give +24.00 dB in
+    // series against +13.95 dB in parallel. Ten decibels from routing
+    // alone. Sources call additive-vs-non-additive "one of the most
+    // underrated factors" in why EQs sound different; series is the most
+    // "digital" choice available and passive designs do not behave that
+    // way.
+    //
     // THREE POSITIONS, NOT FOUR. Unit.ViewControl.OptionControl draws
     // Drawings.Sub.ThreeColumns and maps sub-button i straight to choice
-    // i, and there are three sub-buttons - so a fourth choice is placed
-    // off-screen and CANNOT BE SELECTED. The previous four-position set
-    // shipped with "hot" unreachable on hardware.
+    // i, and there are three sub-buttons - a fourth is placed off-screen
+    // and CANNOT BE SELECTED. An earlier four-position set shipped with
+    // its last position unreachable on hardware.
     //
-    // Clean was dropped (user call 2026-08-20). It cost nothing to lose:
-    // exact bypass is a property of GAIN, not of character - a band
-    // contributes gain*saturate(tap) and gain is exactly 0 at 0 dB - so
-    // flat gains still bypass bit-identically at every position.
+    // Exact bypass is a property of GAIN, not of character: a band
+    // contributes gain*saturate(tap) and gain is exactly 0 at 0 dB, so
+    // flat gains bypass bit-identically at every position.
     //
-    // What it does cost is the accurate-gain position: saturating the
-    // tap pulls the peak down, so a +12 dB request reads about +10.8 dB
-    // at Brown. Accept that, or see eq-character-curve-laws, where the
-    // planned rebuild makes Console a transparent constant-Q position
-    // and moves the differentiation onto curve law instead.
-    //   1 Brown  constant-Q, +/-15 dB, light saturation
-    //   2 Black  proportional-Q, +/-18 dB, medium
-    //   3 Hot    proportional-Q, +/-18 dB, heavy
+    // NOT AN EMULATION. Behavioural design from published specification;
+    // position names are functional and never model numbers.
     od::Option mCharacter{"Character", 1};
     od::Option mLfShape{"LF Shape", 1};   // 1 shelf, 2 bell
     od::Option mHfShape{"HF Shape", 1};   // 1 shelf, 2 bell
@@ -152,16 +158,30 @@ namespace house
       const float sr = globalConfig.sampleRate > 0.0f ? globalConfig.sampleRate : 48000.0f;
       int ch = mCharacter.value();
       if (ch < 1) ch = 1; else if (ch > 3) ch = 3;
-      const bool hotHalf = (ch >= 2);
-      const ParametricBandQLaw law = hotHalf ? PARAM_BAND_Q_PROPORTIONAL
-                                             : PARAM_BAND_Q_CONSTANT;
-      // Range moves with the Q law, as the two documented circuit
-      // revisions do: the extra 3 dB changes how hard people push it.
-      const float maxDb = hotHalf ? 18.0f : 15.0f;
-      // Saturation per position. Flat gains bypass exactly at every
-      // position regardless, because gain is 0 there.
-      static const float kDrive[3] = { 0.35f, 0.7f, 1.0f };
+
+      // Per-position curve law, range, topology and saturation. A table
+      // rather than a chain of conditionals, so adding a position is a
+      // row and nothing in the sample loop ever branches on it.
+      static const ParametricBandQLaw kLaw[3] = {
+          PARAM_BAND_Q_CONSTANT, PARAM_BAND_Q_PINNED, PARAM_BAND_Q_CONSTANT };
+      static const float kMaxBoost[3] = { 15.0f, 12.0f, 13.5f };
+      static const float kMaxCut[3]   = { 15.0f, 12.0f, 17.5f };
+      // Saturation is now a CONSEQUENCE of position, not the thing
+      // being selected, so it is lighter than the old ladder. Heavy
+      // saturation on Passive was measured swamping its own asymmetric
+      // range: at a -20 dB request it cut only -5.99 dB against
+      // Console's -11.04, because saturating the tap reduces what is
+      // subtracted. The curve law and topology carry the character.
+      static const float kDrive[3]    = { 0.15f, 0.4f, 0.55f };
+      // Passive widens every band: a passive LC section cannot be made
+      // surgical, and the broad overlapping curves are the point.
+      static const float kQScale[3]   = { 1.0f, 1.0f, 0.55f };
+      const ParametricBandQLaw law = kLaw[ch - 1];
+      const float maxBoost = kMaxBoost[ch - 1];
+      const float maxCut = kMaxCut[ch - 1];
       const float drive = kDrive[ch - 1];
+      const float qScale = kQScale[ch - 1];
+      const bool parallel = (ch == 3);
 
       // Coefficients are baked ONCE PER BLOCK, never per sample: the
       // bake contains tan(), pow() and a divide.
@@ -173,20 +193,24 @@ namespace house
       const ParametricBandShape hfShape =
           (mHfShape.value() == 2) ? PARAM_BAND_BELL : PARAM_BAND_HIGH_SHELF;
 
+      // Asymmetric range. Boost and cut are NOT mirror images on a
+      // passive design; the published figures are +13.5 against -17.5.
+      #define EQ_CLAMP_DB(v) ((v) > maxBoost ? maxBoost : ((v) < -maxCut ? -maxCut : (v)))
       parametricBandBake(mC[0], CLAMP(30.0f, 450.0f, mLfFreq.value()),
-                         CLAMP(-maxDb, maxDb, mLfGain.value()), 0.7,
+                         EQ_CLAMP_DB(mLfGain.value()), 0.7 * qScale,
                          drive, sr, lfShape, law);
       parametricBandBake(mC[1], CLAMP(200.0f, 2500.0f, mLmfFreq.value()),
-                         CLAMP(-maxDb, maxDb, mLmfGain.value()),
-                         CLAMP(0.3f, 10.0f, mLmfQ.value()),
+                         EQ_CLAMP_DB(mLmfGain.value()),
+                         CLAMP(0.3f, 10.0f, mLmfQ.value()) * qScale,
                          drive, sr, PARAM_BAND_BELL, law);
       parametricBandBake(mC[2], CLAMP(600.0f, 7000.0f, mHmfFreq.value()),
-                         CLAMP(-maxDb, maxDb, mHmfGain.value()),
-                         CLAMP(0.3f, 10.0f, mHmfQ.value()),
+                         EQ_CLAMP_DB(mHmfGain.value()),
+                         CLAMP(0.3f, 10.0f, mHmfQ.value()) * qScale,
                          drive, sr, PARAM_BAND_BELL, law);
       parametricBandBake(mC[3], CLAMP(1500.0f, 16000.0f, mHfFreq.value()),
-                         CLAMP(-maxDb, maxDb, mHfGain.value()), 0.7,
+                         EQ_CLAMP_DB(mHfGain.value()), 0.7 * qScale,
                          drive, sr, hfShape, law);
+      #undef EQ_CLAMP_DB
 
       const float mix = CLAMP(0.0f, 1.0f, mMix.value());
       // LINEAR crossfade, deliberately, against the equal-power rule

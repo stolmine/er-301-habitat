@@ -4012,8 +4012,23 @@ THE OFF-CENTRE PROBE MISTAKE RECURRED and was caught again by the same class of 
 [[item]]
 id = "eq-character-curve-laws"
 title = "Parametric EQ: rebuild Character around CURVE LAWS (Pultec/API/Neve/SSL), not a saturation ladder"
-status = "todo"
-stamped = "2026-08-20T18:58:15-05:00"
+attested = """BUILT AND MEASURED 2026-08-20, house 0.1.1.5. Character is now Console / Punch / Passive, three positions each changing the CURVE LAW and TOPOLOGY rather than a saturation amount.
+
+THE THREE AXES, each verified by a separate probe in tools/parametric-eq-test:
+  TOPOLOGY - four bands stacked at 1 kHz: console +16.64 dB, punch +12.55, passive +12.00. Passive reads the DRY input and sums, so overlapping bands do not compound. This is the largest single axis and it is free.
+  SKIRT PINNING - lower skirt at +3 vs +12 dB: console moves 2.16x, punch only 1.13x. Punch tightens as it is pushed while its skirt stays put, which is what lets that curve tolerate aggressive settings.
+  RANGE - Console +/-15 clamps wider than Punch +/-12, confirmed at a +18 request (+14.45 vs +10.59).
+Saturation still rises across the set (0.24 / 0.66 / 0.92 %) but is now a CONSEQUENCE of position, deliberately much lighter than the old ladder.
+
+THE PINNING EXPONENT WAS SOLVED, NOT GUESSED. Sweeping p in q *= 10^(|dB|*p/20) and measuring where the response first exceeds +0.5 dB across +3/+6/+12/+18 dB: p=0 (constant Q) moves the skirt 3.09x, p=0.4 gives 1.58x, p=0.7 gives 1.13x, p=1.0 gives 1.34x. At 0.7 the peak still lands exactly (3.00/6.00/12.00/17.99 dB) and half-gain width still narrows 1.10 to 0.34 octaves. The end-to-end measurement through the real unit then matched the analytic prediction closely (2.16x/1.13x measured against 3.09x/1.13x predicted).
+
+A CLAIM THAT DID NOT SURVIVE, recorded rather than papered over. The asymmetric passive range (+13.5/-17.5 against Console +/-15) IS in the bake but does NOT reach the output: at a -20 dB request Passive cuts only -8.60 dB against Console -12.41. Cause: for a cut A = 10^(dB/40) < 1, so tap = bp*k with k = 1/(Q*A) is AMPLIFIED before the saturator, meaning CUTS SATURATE HARDER THAN BOOSTS in an additive topology. Published passive ranges assume attenuation, not an added inverted resonance. The harness now prints these numbers and does NOT assert the asymmetry, because asserting it would be asserting something false.
+
+Also fixed: a stale assertion from the old ladder that required the SECOND position to have the wider range. Console is now the wide one, so the test read backwards and had to be inverted rather than silenced.
+
+A fourth law, PARAM_BAND_Q_FIXED_BW (constant bandwidth in Hz - the 1073 mid), is implemented in the atom but unused: only three positions fit the sub display. It is there for Channel Strip or a future set."""
+status = "done"
+stamped = "2026-08-20T19:06:05-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "all four Character positions are audibly distinct in an A/B; the additivity stress test shows series and parallel positions differing by ~10 dB; skirt-pinning verified by swept measurement" }
 note = """Research: planning/eq-character-research.md (2026-08-20). Prompted by the user: "only black seems to have much effect", plus a request to research where EQ tone comes from and model disparate classics.

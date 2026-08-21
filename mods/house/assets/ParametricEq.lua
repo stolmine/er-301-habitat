@@ -162,7 +162,7 @@ function ParametricEq:onLoadViews()
       button = "char",
       description = "Character",
       option = self.objects.op:getOption("Character"),
-      choices = { "brown", "black", "hot" }
+      choices = { "console", "punch", "passive" }
     },
     mix   = gb("mix",   "Mix",   Encoder.getMap("[0,1]"), 1.0),
 

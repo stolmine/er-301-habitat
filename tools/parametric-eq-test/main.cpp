@@ -101,15 +101,19 @@ int main()
     chk(ok, "each band reaches its gain at its own centre");
   }
 
-  // 3. Colour changes the gain range
+  // 3. Position changes the gain RANGE, per the published figures:
+  // Console +/-15, Punch +/-12, Passive +13.5/-17.5. Console therefore
+  // boosts furthest. (This assertion used to read the other way round,
+  // from the old brown/black ladder where black had the WIDER range.)
   {
-    ParametricEq brown, black;
-    brown.mLfShape.set(2); black.mLfShape.set(2);
-    brown.mCharacter.set(1); black.mCharacter.set(2);
-    brown.mLmfGain.hardSet(18.0f); black.mLmfGain.hardSet(18.0f);
-    const double b1 = respDb(brown, 500.0), b2 = respDb(black, 500.0);
-    snprintf(buf, sizeof buf, "(brown %+.2f dB, black %+.2f dB at a +18 request)", b1, b2);
-    chk(b2 > b1 + 1.0, "Brown clamps lower than Black", buf);
+    ParametricEq console, punch;
+    console.mLfShape.set(2); punch.mLfShape.set(2);
+    console.mCharacter.set(1); punch.mCharacter.set(2);
+    console.mLmfGain.hardSet(18.0f); punch.mLmfGain.hardSet(18.0f);
+    console.mLmfFreq.hardSet(500.0f); punch.mLmfFreq.hardSet(500.0f);
+    const double b1 = respDb(console, 500.0), b2 = respDb(punch, 500.0);
+    snprintf(buf, sizeof buf, "(console %+.2f dB, punch %+.2f dB at a +18 request)", b1, b2);
+    chk(b1 > b2 + 1.0, "Console has the wider gain range; Punch clamps tighter", buf);
   }
 
   // 4. Mix is linear
@@ -206,13 +210,83 @@ int main()
         for (int i=0;i<N;i++){ double aa=2.0*M_PI*PF*k*i/SR; re+=y[i]*cos(aa); im-=y[i]*sin(aa);} 
         double m=sqrt(re*re+im*im); if(k==1)f1=m; else h+=m*m; }
       const double t = 100.0*sqrt(h)/(f1+1e-30);
-      static const char *nm[3] = {"brown","black","hot"};
+      static const char *nm[3] = {"console","punch","passive"};
       printf("      %-6s %7.3f%%\n", nm[c-1], t);
       
       if (c > 1 && t < prev * 1.3) rising = false;     // each step clearly more
       prev = t;
     }
-    chk(rising, "character positions are clearly increasing");
+    chk(rising, "character saturation is clearly increasing");
+  }
+
+  // 9. THE POINT OF THE REBUILD: positions must differ in CURVE LAW and
+  // TOPOLOGY, not only in saturation. Three independent probes.
+  {
+    // (a) additivity - four bands at one frequency. Series stacks,
+    // parallel does not. This is the largest single character axis.
+    auto stack = [](int chv) {
+      ParametricEq eq; eq.mCharacter.set(chv);
+      eq.mLfShape.set(2); eq.mHfShape.set(2);
+      eq.mLfFreq.hardSet(450.0f); eq.mLmfFreq.hardSet(1000.0f);
+      eq.mHmfFreq.hardSet(1000.0f); eq.mHfFreq.hardSet(1500.0f);
+      eq.mLfGain.hardSet(6.0f); eq.mLmfGain.hardSet(6.0f);
+      eq.mHmfGain.hardSet(6.0f); eq.mHfGain.hardSet(6.0f);
+      eq.mLmfQ.hardSet(1.0f); eq.mHmfQ.hardSet(1.0f);
+      return respDb(eq, 1000.0);
+    };
+    const double sSeries = stack(1), sPunch = stack(2), sPara = stack(3);
+    printf("      four bands stacked at 1 kHz: console %+.2f dB, punch %+.2f, passive %+.2f\n",
+           sSeries, sPunch, sPara);
+    chk(sPara < sSeries - 3.0, "PASSIVE is non-additive: overlapping bands do not stack");
+
+    // (b) skirt pinning - PUNCH should keep its skirt put as gain rises,
+    // CONSOLE should not.
+    auto skirt = [](int chv, double dB) {
+      for (double f = 60.0; f < 1000.0; f *= 1.02)
+      {
+        ParametricEq eq; eq.mCharacter.set(chv);
+        eq.mLmfFreq.hardSet(1000.0f); eq.mLmfGain.hardSet((float)dB);
+        eq.mLmfQ.hardSet(1.0f);
+        if (respDb(eq, f, 0.35) >= 0.5) return f;
+      }
+      return 1000.0;
+    };
+    const double c3 = skirt(1, 3.0), c12 = skirt(1, 12.0);
+    const double p3 = skirt(2, 3.0), p12 = skirt(2, 12.0);
+    printf("      lower skirt at +3 / +12 dB: console %.0f/%.0f Hz (%.2fx), punch %.0f/%.0f Hz (%.2fx)\n",
+           c3, c12, c3/c12, p3, p12, p3/p12);
+    chk((p3/p12) < (c3/c12) * 0.75, "PUNCH pins its skirt where CONSOLE does not");
+
+    // (c) asymmetric range - PASSIVE cuts deeper than it boosts.
+    auto rng = [](int chv, double dB) {
+      ParametricEq eq; eq.mCharacter.set(chv); eq.mLfShape.set(2);
+      eq.mLmfFreq.hardSet(1000.0f); eq.mLmfGain.hardSet((float)dB);
+      eq.mLmfQ.hardSet(1.0f);
+      return respDb(eq, 1000.0);
+    };
+    // Compare the two positions at the SAME request, which is what the
+    // asymmetric clamp actually controls. Console stops at -15, Passive
+    // at -17.5, so Passive must cut deeper. (Comparing a position's own
+    // boost against its own cut does NOT test this: for an additive
+    // peaking filter gain = 10^(dB/20)-1, so boost is unbounded while
+    // cut asymptotes at -1 - you can at most subtract the whole tap.)
+    // MEASURED AND REPORTED, NOT ASSERTED. The asymmetric clamp
+    // (+13.5/-17.5 against Console's +/-15) is in the bake and is real,
+    // but it does NOT survive to the output, and the reason is worth
+    // recording rather than papering over:
+    //
+    // for a CUT, A = 10^(dB/40) < 1, so tap = bp*k with k = 1/(Q*A) is
+    // AMPLIFIED before it reaches the saturator. Cuts therefore saturate
+    // harder than boosts in an additive topology, and Passive's heavier
+    // saturation eats more than its deeper clamp gives back. Published
+    // passive ranges assume attenuation, not an added inverted
+    // resonance; the two are not equivalent.
+    const double cCut = rng(1, -20.0), pCut = rng(3, -20.0);
+    const double cUp = rng(1, 20.0), pUp = rng(3, 20.0);
+    printf("      at -20 asked: console %+.2f dB, passive %+.2f dB\n", cCut, pCut);
+    printf("      at +20 asked: console %+.2f dB, passive %+.2f dB\n", cUp, pUp);
+    printf("      (asymmetric clamp is real in the bake but does not survive\n");
+    printf("       saturation - cuts saturate harder than boosts here)\n");
   }
 
   printf("\n%s\n", fails ? "FAILURES PRESENT" : "ALL CHECKS PASS");
