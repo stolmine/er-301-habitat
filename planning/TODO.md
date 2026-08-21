@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**235 items** — 73 done, 5 wip, 156 todo, 1 blocked. *Rendered 2026-08-20.*
+**235 items** — 74 done, 5 wip, 155 todo, 1 blocked. *Rendered 2026-08-20.*
 
 ## DSP
 
@@ -53,7 +53,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `ngoma-shape-fm-campaign` | Ngoma/Tessera Shape does not reproduce hardware's FM-ish activity (even at low clipping) | manual *(attested)* · 2026-08-13 |
 |   | `ngoma-shape0-level-campaign` | Ngoma shape-0 fundamental level structure (oscillator phase coherence at low r) | manual · 2026-08-13 |
 |   | `ngoma-sound-tuning` | Ngoma: careful sound-tuning pass (param cross-couplings, per-partial decay, mode ratios, sub-octave) | manual · 2026-07-09 |
-|   | `ochre-character-eq` | Parametric EQ: characterful four-band EQ on a shared parametric-band atom (SSL 611 reference) | manual · 2026-08-14 |
 |   | `parfait-shaper-oversampling` | Parfait: per-band shaper oversampling to kill aliasing audible as mix is lowered at high drive | manual · 2026-07-09 |
 |   | `pecto-control-refinements` | Pecto: Doppler slew sub-param, bipolar feedback, density cap at 12 | manual · 2026-07-09 |
 |   | `pecto-neon-gather-opt` | Pecto: further NEON gather optimization for greedy comb mode | manual · 2026-07-09 |
@@ -91,6 +90,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `kryos-spectral-freeze-rebuild` | Kryos: replace the biquad-bank engine with a phase-vocoder spectral freeze, single voice | manual *(attested)* · 2026-08-20 |
 | ✓ | `network-gain-compensation` | Gain compensation for Network (Fabula's makeup model, tap-weight-energy basis) | manual *(attested)* · 2026-07-15 |
 | ✓ | `ngoma-hardware-hang` | Ngoma hangs hardware on load (post-2.5.1 regression) — am335x-specific, bisect pending hardware test | manual *(attested)* · 2026-07-22 |
+| ✓ | `ochre-character-eq` | Parametric EQ: characterful four-band EQ on a shared parametric-band atom (SSL 611 reference) | manual *(attested)* · 2026-08-20 |
 | ✓ | `open303-port` | Port Open303 (MIT-licensed acid bassline emulation) as an ER-301 mono voice unit | manual *(attested)* · 2026-08-20 |
 | ✓ | `parametric-band-atom` | house: ParametricBand atom - one constant-Q EQ band, bell or shelf, with AW level-dependent nonlinearity | manual *(attested)* · 2026-08-20 |
 | ✓ | `pecto-audio-stack-overflow` | Pecto blew the 2048-byte audio task stack: 1072-byte process() frame from 5 stack-local arrays | manual *(attested)* · 2026-08-06 |
