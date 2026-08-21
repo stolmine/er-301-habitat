@@ -61,14 +61,20 @@ end)()
 
 local speedMap = normMap(0, 1)
 
+-- Both maps START AT ZERO, and zero means "follow Speed". Without a
+-- reachable 0 there would be no way to hand a band back to the Speed
+-- macro once its attack or release had been touched.
 local attackMap = (function()
-  local m = app.LinearDialMap(0.0001, 0.1)
+  local m = app.LinearDialMap(0, 0.1)
   m:setSteps(0.01, 0.001, 0.0001, 0.0001)
   return m
 end)()
 
+-- Top raised from 1.0 to 1.5 s. Speed's slowest release is 1.2 s, so a
+-- 1.0 s ceiling meant an override could not reach what the macro itself
+-- does - the control would have been unable to express its own default.
 local releaseMap = (function()
-  local m = app.LinearDialMap(0.001, 1)
+  local m = app.LinearDialMap(0, 1.5)
   m:setSteps(0.1, 0.01, 0.001, 0.001)
   return m
 end)()
@@ -169,12 +175,12 @@ function MultibandCompressor:onLoadGraph(channelCount)
     self:addMonoBranch("bandSpeed" .. i, speed, "In", speed, "Out")
 
     local attack = self:addObject("bandAttack" .. i, app.ParameterAdapter())
-    attack:hardSet("Bias", 0.001)
+    attack:hardSet("Bias", 0)   -- 0 = follow Speed
     tieParam("BandAttack" .. i, attack)
     self:addMonoBranch("bandAttack" .. i, attack, "In", attack, "Out")
 
     local release = self:addObject("bandRelease" .. i, app.ParameterAdapter())
-    release:hardSet("Bias", 0.05)
+    release:hardSet("Bias", 0)  -- 0 = follow Speed
     tieParam("BandRelease" .. i, release)
     self:addMonoBranch("bandRelease" .. i, release, "In", release, "Out")
 
@@ -314,7 +320,7 @@ function MultibandCompressor:onLoadViews()
       biasMap = attackMap,
       biasUnits = app.unitSecs,
       biasPrecision = 4,
-      initialBias = 0.001
+      initialBias = 0.0
     }
     controls[name .. "Release"] = GainBias {
       button = "rel",
@@ -325,7 +331,7 @@ function MultibandCompressor:onLoadViews()
       biasMap = releaseMap,
       biasUnits = app.unitSecs,
       biasPrecision = 3,
-      initialBias = 0.05
+      initialBias = 0.0
     }
   end
 

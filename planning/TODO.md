@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**235 items** — 74 done, 6 wip, 154 todo, 1 blocked. *Rendered 2026-08-20.*
+**235 items** — 75 done, 6 wip, 153 todo, 1 blocked. *Rendered 2026-08-21.*
 
 ## DSP
 
@@ -65,7 +65,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `spectral-cross-synthesis` | Palimpsest: spectral cross-synthesis - vocoder, spectral morph and formant shift on one control | manual · 2026-08-14 |
 |   | `spectral-sort-unit` | Spectral sort unit - pixel-sorting for audio: sample player that permutes the spectrogram along frequency or time | manual · 2026-08-13 |
 |   | `spectrum-ply-versions` | Spectrum (Spectrogram) 2/3/4/6-ply versions with higher spectral resolution | manual · 2026-07-21 |
-|   | `spreadsheet-impasto-attack-release-inert` | Spreadsheet Impasto: per-band Attack/Release plies appear inert | manual · 2026-08-10 |
 |   | `spreadsheet-petrichor-randomize-clamp` | Spreadsheet Petrichor: Randomize gate clamps target index to 16 of 21 | manual · 2026-08-10 |
 |   | `station-x-character` | Station X (codescan FIR): improve output character (currently mostly noise-like filtering) | manual · 2026-07-09 |
 |   | `stft-frontend-atom` | Shared STFT front end atom: one analysis/resynthesis stage for the six units that now want one | manual · 2026-08-14 |
@@ -100,6 +99,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `spreadsheet-filterbank` | Filterbank (FFB/Tomograph) — parallel fixed filter bank, 2-16 bands, Scala scales, radial viz | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-helicase` | Helicase — 2-op FM oscillator (OPL3 waveforms, discontinuity folder, phase-receptivity sync) | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-impasto` | Impasto — 3-band multiband compressor (LR4 crossover, per-band CPR, sidechain, FFT viz) | manual *(attested)* · 2026-07-09 |
+| ✓ | `spreadsheet-impasto-attack-release-inert` | Spreadsheet Impasto: per-band Attack/Release plies appear inert | manual *(attested)* · 2026-08-21 |
 | ✓ | `spreadsheet-jf` | JF — hex-voiced slope-engine voice (clean-room Just Friends map), shipped as open secret | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-larets` | Larets — stepwise multi-effect (dblue-Glitch style) with true internal stereo | manual *(attested)* · 2026-07-09 |
 | ✓ | `spreadsheet-mirror` | Mirror — aliasing-paradigm complex oscillator (wavetable formant + 4-stage crusher, true stereo) | manual *(attested)* · 2026-07-09 |

@@ -38,12 +38,15 @@ namespace stolmine
     od::Parameter mBandSpeed0{"BandSpeed0", 0.3f};
     od::Parameter mBandSpeed1{"BandSpeed1", 0.3f};
     od::Parameter mBandSpeed2{"BandSpeed2", 0.3f};
-    od::Parameter mBandAttack0{"BandAttack0", 0.001f};
-    od::Parameter mBandAttack1{"BandAttack1", 0.001f};
-    od::Parameter mBandAttack2{"BandAttack2", 0.001f};
-    od::Parameter mBandRelease0{"BandRelease0", 0.05f};
-    od::Parameter mBandRelease1{"BandRelease1", 0.05f};
-    od::Parameter mBandRelease2{"BandRelease2", 0.05f};
+    // 0 = follow Speed, which is the default. Any positive value
+    // overrides Speed for that band. See the note in process() - these
+    // were written by the Lua and never read at all before 2026-08-21.
+    od::Parameter mBandAttack0{"BandAttack0", 0.0f};
+    od::Parameter mBandAttack1{"BandAttack1", 0.0f};
+    od::Parameter mBandAttack2{"BandAttack2", 0.0f};
+    od::Parameter mBandRelease0{"BandRelease0", 0.0f};
+    od::Parameter mBandRelease1{"BandRelease1", 0.0f};
+    od::Parameter mBandRelease2{"BandRelease2", 0.0f};
     od::Parameter mBandWeight0{"BandWeight0", 1.0f};
     od::Parameter mBandWeight1{"BandWeight1", 1.0f};
     od::Parameter mBandWeight2{"BandWeight2", 1.0f};

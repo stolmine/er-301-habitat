@@ -358,6 +358,25 @@ namespace stolmine
       float segT = (speed - kSpeedBP[seg]) / (kSpeedBP[seg + 1] - kSpeedBP[seg]);
       attack[b] = kAttackBP[seg] + (kAttackBP[seg + 1] - kAttackBP[seg]) * segT;
       release[b] = kReleaseBP[seg] + (kReleaseBP[seg + 1] - kReleaseBP[seg]) * segT;
+
+      // SPEED IS A MACRO; ATTACK AND RELEASE OVERRIDE IT PER BAND.
+      //
+      // Slots 3 and 4 were previously WRITTEN BY THE LUA AND NEVER READ
+      // HERE, so the Attack and Release plies moved a parameter that
+      // reached the object and was then ignored - the controls did
+      // nothing at all, and Speed was the only thing that changed
+      // envelope timing.
+      //
+      // ZERO MEANS FOLLOW SPEED. It is the one value the plies can hold
+      // that is not a legitimate time, so it needs no extra mode
+      // parameter and no extra state: leave a knob at 0 and Speed drives
+      // that band, move it and it takes over. The two controls override
+      // independently, so a band can follow Speed for attack while
+      // holding its own release.
+      const float aOv = mBandBias[b][3] ? mBandBias[b][3]->value() : 0.0f;
+      const float rOv = mBandBias[b][4] ? mBandBias[b][4]->value() : 0.0f;
+      if (aOv > 0.0f) attack[b] = CLAMP(0.0001f, 0.1f, aOv);
+      if (rOv > 0.0f) release[b] = CLAMP(0.001f, 1.5f, rOv);
     }
 
     // Dirty-check crossovers

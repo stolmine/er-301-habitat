@@ -3351,8 +3351,9 @@ note = "Reported by the reference audit, NOT independently confirmed. Claim: Mul
 [[item]]
 id = "spreadsheet-impasto-attack-release-inert"
 title = "Spreadsheet Impasto: per-band Attack/Release plies appear inert"
-status = "todo"
-stamped = "2026-08-10T22:31:04-05:00"
+attested = """CONFIRMED then FIXED 2026-08-21, spreadsheet 2.8.6.2. The audit report was exactly right and is now independently verified end to end: the Lua wires the plies (MultibandCompressor.lua:171-179, setBandBias(i,3,..) and (i,4,..) at :203-204), the C++ registers mBandAttack0..2 and mBandRelease0..2 (MultibandCompressor.h:41-46), and the DSP read slots 0, 1, 2 and 5 but NEVER 3 OR 4. Both controls moved a parameter that reached the object and was ignored. Envelope timing came solely from Speed via an interpolated G-Bus breakpoint table.\n\nFIX per user decision: Speed stays an easy macro and Attack/Release OVERRIDE it per band. ZERO MEANS FOLLOW SPEED - it is the one value the plies can hold that is not a legitimate time, so it needs no mode parameter and no extra state. The two override independently, so a band can follow Speed for attack while holding its own release.\n\nTWO RANGE BUGS FOUND WHILE FIXING, both of which would have made the override unable to express what the macro already does: the release map topped out at 1.0 s while Speed reaches 1.2 s (raised to 1.5), and neither map could reach 0, so there would have been no way to hand a band back to Speed once touched (both now start at 0).\n\nPROVEN BY MEASUREMENT, not by reading the code - reading is how this survived the audit as "reported, not independently confirmed". tools/impasto-test drives the real object and measures envelope timing through the audio: with Speed held at 0.5, auto settles in 8 blocks against 86 for a 50 ms override. Speed still drives timing when overrides are 0 (4 blocks at speed 0.9, 69 at 0.05), and 0 tracks Speed rather than pinning to zero seconds.\n\nMY OWN PROBE WAS WRONG FIRST and reported 0 blocks for everything: it tested instantaneous samples of a sine, which passes through every value each cycle, so it fired on the first sample regardless of the timing. Per-BLOCK peak envelope is the correct measure for an attack time.\n\nBEHAVIOUR CHANGE FOR EXISTING PATCHES, unavoidable and worth stating: saved patches hold whatever these controls were left at while inert, and those values now TAKE EFFECT. That is the fix working, but a patch that sounded one way may not any more. Anyone hitting it can return the band to 0.\n\nSTILL OPEN in the same unit, the mirror-image defect: BandWeight0..2 set the crossovers and have NO on-screen control at all - a parameter that works but is unreachable."""
+status = "done"
+stamped = "2026-08-21T16:00:46-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "sweep a band's Attack and Release against a transient source; confirm no change in envelope behavior" }
 note = "Reported by the reference audit, NOT independently confirmed. Claim: plies wire to BandAttack{i}/BandRelease{i} but the DSP never reads mBandBias[b][3]/[4]; attack and release derive solely from Speed. Same audit also notes BandWeight0..2 set the crossovers with no on-screen control."
@@ -3539,7 +3540,25 @@ A DEFECT THE HARNESS CAUGHT: the Filter defaulted to a 20 Hz highpass while its 
 
 Drive's arc is verified rather than assumed: THD 0.000 / 0.456 / 0.825 / 1.819 / 2.674 % across the knob, monotonic, which is the two-curves-meeting-in-the-middle behaviour rather than one curve scaled.
 
-REMAINING: Punch (Point + Distance2, both atoms already exist), the overview ply's meter and bypass-map graphic, and hardware CPU with all sections active versus all bypassed."""
+REMAINING: Punch (Point + Distance2, both atoms already exist), the overview ply's meter and bypass-map graphic, and hardware CPU with all sections active versus all bypassed.
+
+=== USER REVIEW 2026-08-21: THE BUILD IS NOT GOOD ENOUGH. STOP AND REDESIGN. ===
+
+Verbatim: "many issues here. we need to come with better UX, shift for bypass is too idiosyncratic compared to the rest of the customs we have built... i think we can do a better design job overall, perhaps with some very graphics work. sound is not really there either, at this point, our individual units sound much better."
+
+DO NOT continue wiring sections. Punch, the overview graphic and the CPU pass are all ON HOLD until the issues below are resolved. Five sections exist and null correctly; that scaffolding is fine and is not what is wrong.
+
+1. SHIFT-FOR-BYPASS IS WRONG. The agent argued for it from gesture availability - shift was free on SectionGate because SectionGate does not use the paramMode sub-display idiom - and that argument was too clever. Every OTHER custom control in the catalog uses shift to swap the sub-display (DensityControl, MixControl, LaretsMixControl, LaretOverviewControl, SferaCutoffControl, the Colmatage set). A control where shift instead flips a bypass is IDIOSYNCRATIC, and consistency with the rest of the catalog beats local cleverness. Needs a different gesture or a different affordance entirely; look at what the catalog does for on/off state before proposing anything.
+
+2. NO MAKEUP GAIN ON THE COMPRESSOR. Pop3 has none by design - ConsoleX supplies it externally - and the Out section was supposed to cover it. In practice it does not: compressing pulls the level down and the only recovery is the master Level, which is the wrong control and is shared with everything else. The Dynamics section needs its own makeup.
+
+3. INPUT/OUTPUT LEVEL COMPENSATION MUST BE DEFEATABLE. There is currently no way to turn it off. Whatever automatic compensation exists between in and out has to become opt-out, because it removes the user's ability to hear what a section is actually doing.
+
+4. IT DOES NOT SOUND AS GOOD AS THE INDIVIDUAL UNITS. This is the most important item and the least diagnosed. The individual atoms measure correctly in isolation and the strip nulls correctly when bypassed, so the problem is in composition, not in any one section. Candidate causes, none yet tested: sections fighting each other for level; the Dynamics gate acting on material the Filter should have removed first; the fixed section ORDER being wrong for real use; saturation stages compounding; or simply that each section's defaults are individually sane but collectively wrong. DIAGNOSE BEFORE CHANGING ANYTHING - A/B the strip against the same processing done with discrete units in a chain, and find where they diverge.
+
+5. THE UI WANTS REAL GRAPHICS WORK, not more plies. The user suggests "some very graphics work". The current design is six SectionGates that each look like a fader; nothing shows signal flow, gain reduction, or how the sections relate. Look at ColmatageOverviewGraphic, LaretOverviewGraphic and the Impasto GR visualisation as precedent.
+
+METHOD NOTE FOR WHOEVER PICKS THIS UP: the agent built five sections in one sitting against passing harnesses and still produced something the user judged worse than the discrete units. Measurement-driven development verified every section in ISOLATION and never once tested the composition. The null test proves the chain is transparent when bypassed; it says nothing about whether the chain is musical when engaged. That gap is the lesson."""
 [[item]]
 id = "peaks-cleanup-sweep"
 title = "Peaks cleanup sweep: land the five label/routing defects in one release, with a preset-breakage policy"
