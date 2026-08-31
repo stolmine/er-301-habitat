@@ -75,7 +75,17 @@ LFLAGS = -nostdlib -nodefaultlibs -r
 endif
 
 ifeq ($(ARCH),linux)
-CFLAGS.linux = -Wno-deprecated-declarations -msse4 -fPIC
+# -msse4 is x86-only and breaks the build outright on aarch64 hosts (the CM4
+# and RPi dev rigs). NEON/ASIMD is baseline on armv8, so no substitute flag is
+# needed there and arm_neon.h intrinsics work directly. Same shape as
+# mods/anamnesis and mods/spreadsheet.
+LINUX_HOST_ARCH := $(shell uname -m)
+ifeq ($(LINUX_HOST_ARCH),x86_64)
+  LINUX_SIMD_FLAGS = -msse4
+else
+  LINUX_SIMD_FLAGS =
+endif
+CFLAGS.linux = -Wno-deprecated-declarations $(LINUX_SIMD_FLAGS) -fPIC
 LFLAGS = -shared
 endif
 
