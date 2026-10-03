@@ -4189,3 +4189,41 @@ THREE POSITIONS, NOT FOUR (user, 2026-08-20). Unit.ViewControl.OptionControl dra
 Clean is dropped. It costs nothing structurally - exact bypass is a property of GAIN, not of character, since a band contributes gain*saturate(tap) and gain is exactly 0 at 0 dB, so flat gains bypass bit-identically at every position. Console inherits the transparent role. Target set is Console / Punch / Passive.
 
 INTERIM FIX ALREADY SHIPPED in house 0.1.1.4: the live unit is now brown/black/hot, three reachable positions, pending the curve-law rebuild. Known cost of dropping Clean before that rebuild lands: no accurate-gain position, so a +12 dB request reads about +10.8 dB at brown."""
+
+[[item]]
+id = "canals-crash-voct-extended-use"
+title = "Canals: reports of crashes after V/Oct manipulation or extended usage (spreadsheet 2.8.5 / fw v0.7-stolmine 9.7.0)"
+status = "todo"
+stamped = "2026-10-03T12:09:57-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "a reporter runs the affected patch for the duration that previously crashed, with heavy V/Oct movement, and it survives" }
+note = """USER REPORT 2026-08-21. Reports of Canals crashing after V/Oct manipulation or after extended usage. Affected: spreadsheet 2.8.5, stolmine firmware v0.7 9.7.0. NOT yet reproduced locally.
+
+Reporter-side detail still wanted: whether it is a hard reboot or a caught error, whether the overview ply was visible at the time, whether Quality/Span were being moved too, and whether it needs audio present or just V/Oct motion.
+
+PRIOR CONTEXT: an audio-rate Canals Span/Quality effort was built and then FULLY REVERTED (58705ce, after 0f36ec4 and aaf3cd7), so this area has a history of instability. See also canals-audiorate-and-cpu and canals-response-tuning.
+
+LEADING CANDIDATE, with code evidence rather than speculation - A DATA RACE IN THE OVERVIEW VIZ CAUSING AN OUT-OF-BOUNDS WRITE. In mods/spreadsheet/CanalsRoutingGraphic.h the draw path reads the audio thread's inputRing TWICE per stripe, and the audio thread keeps writing between those reads:
+
+  1. :129-135 the auto-scale loop scans all 256 ring slots for peak |sample|.
+  2. :136 invPeak = 1/peak.
+  3. :151-159 the per-column loop RE-READS the same ring for each column's min/max.
+
+Because the ring is written concurrently, a sample arriving between step 1 and step 3 can EXCEED the peak measured in step 1, so the normalised values are no longer bounded by +/-1. The clamps at :163-164 are ONE-SIDED - minN is clamped only below -1 and maxN only above +1 - so a maxN of, say, -5 passes through unclamped. Then:
+
+  :168-169  yTop = centerY + maxN*amplitude   -> far BELOW y0
+            yBottom = centerY + minN*amplitude
+  :170-171  yTop is clamped only against y1, yBottom only against y0
+  :172      if (yTop < yBottom) the two are SWAPPED
+            -> and NEITHER is re-clamped after the swap
+  :175-180  the fill loop then indexes mPixels[yy*w + x] with yy < 0
+
+A negative index into the pixel buffer is an out-of-bounds write, which is exactly the shape of a crash that depends on timing and accumulated state rather than on one reproducible gesture.
+
+WHY THIS FITS THE REPORT: V/Oct manipulation drives large rapid excursions through a resonant self-oscillating SVF, which is precisely the condition that makes a newly written sample exceed a peak measured a moment earlier, and "extended usage" is what a race needs in order to line up. It also explains why it is reported as intermittent.
+
+STILL A HYPOTHESIS. The mechanism is real in the code, but reachability depends on the race window actually opening on hardware, which has NOT been demonstrated. Do not present it as the cause until a reproduction confirms it.
+
+CHEAP DEFENSIVE FIX regardless of whether it is this bug, because the current code is only accidentally safe: clamp BOTH sides of both minN and maxN, re-clamp yTop and yBottom AFTER the swap, and skip non-finite and out-of-range values in the PEAK loop too (:132 skips NaN but not infinities, so one inf sets peak = inf and invPeak = 0). That is four lines and removes the whole class.
+
+OTHER AVENUES NOT YET EXAMINED: the 2x oversampling state carried across blocks (Canals.cpp:228, prevV/prevX), whether SVF state is ever checked for divergence (reset() exists at :46-48 but nothing guards the running state), and whether the denormal seeding at :346-362 interacts badly with sustained self-oscillation."""
