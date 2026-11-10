@@ -51,7 +51,7 @@ local Plaits = Class {}
 Plaits:include(Unit)
 
 function Plaits:init(args)
-  args.title = "Plaits"
+  args.title = "Pleats"
   args.mnemonic = "Pl"
   Unit.init(self, args)
 end

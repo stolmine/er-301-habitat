@@ -41,42 +41,43 @@ Full per-unit control reference: [docs/reference/](docs/reference/README.md).
 
 | Package | Version | Units | What's in it |
 |---------|---------|-------|--------------|
-| **mi** | 1.0.4 | 9 | Mutable Instruments ports |
-| **peaks** | 1.0.0 | 14 | Peaks / Dead Man's Catch ports |
+| **mi** | 1.0.4 | 9 | Ports of Émilie Gillet's Eurorack firmware |
+| **peaks** | 1.0.0 | 14 | Hills: ports of Émilie Gillet's and Tim Churches' function-generator firmware |
 | **spreadsheet** | 2.8.5.1 | 21 | Original units -- the flagship package |
 | **biome** | 2.2.3 | 23 | Original units -- utilities, sequencers, small voices |
 | **scope** | 1.2.7 | 7 | Inline visualization |
 | **house** | 0.1.1 | 8 | Airwindows reverb and character ports |
 | **catchall** | 0.4.1 | 5 | Experimental / WIP |
 
-### mi -- Mutable Instruments Ports
+### mi -- Eurorack Firmware Ports
 
 Based on code by Émilie Gillet (MIT License). All nine units ship in the single
-`mi` package.
+`mi` package. Units are renamed from their source modules, per the original
+author's guidelines for derivative works.
 
 | Unit | Description |
 |------|-------------|
-| **Plaits** | Macro-oscillator -- all 24 synthesis engines, V/Oct, engine selector |
-| **Clouds** | Granular processor -- granular, looping delay, and spectral modes. NEON-optimized pffft FFT, rising-edge trigger control |
-| **Rings** | Modal/sympathetic string resonator with NEON-vectorized SVF bank, main/aux output mix control |
-| **Grids** | Topographic drum pattern generator |
-| **Warps** | Meta-modulator -- 6 crossmodulation algorithms with auto gain compensation |
-| **Stratos** | Clouds reverb engine extracted as a standalone effect |
-| **Commotio** | Elements exciter section (bow/blow/strike) at native 48kHz |
-| **Marbles T** | Probabilistic gate generator -- 7 models |
-| **Marbles X** | Random CV generator -- beta distribution, deja vu looping, 3 control modes |
+| **Pleats** | Macro-oscillator -- all 24 synthesis engines, V/Oct, engine selector |
+| **Cirrus** | Granular processor -- granular, looping delay, and spectral modes. NEON-optimized pffft FFT, rising-edge trigger control |
+| **Rota** | Modal/sympathetic string resonator with NEON-vectorized SVF bank, main/aux output mix control |
+| **Gradus** | Topographic drum pattern generator |
+| **Wring** | Meta-modulator -- 6 crossmodulation algorithms with auto gain compensation |
+| **Stratos** | Cirrus reverb engine extracted as a standalone effect |
+| **Commotio** | Modal-voice exciter section (bow/blow/strike) at native 48kHz |
+| **Mica T** | Probabilistic gate generator -- 7 models |
+| **Mica X** | Random CV generator -- beta distribution, deja vu looping, 3 control modes |
 
 **Known issues.**
 
-- **Grids** -- only the pattern display is reachable. Its `circle` view holds
+- **Gradus** -- only the pattern display is reachable. Its `circle` view holds
   Channel, Reset, Map X, Map Y, Density, Chaos and Width, but nothing calls
   `switchView("circle")`, so none of those controls can be brought on screen.
-- **Clouds** -- the Quality labels are misleading. `normal` is 16-bit stereo and
+- **Cirrus** -- the Quality labels are misleading. `normal` is 16-bit stereo and
   `hifi` is 16-bit *mono* -- a longer buffer, not higher fidelity.
-- **Plaits** -- the FM / Timbre / Morph CV-amount parameters and the four
+- **Pleats** -- the FM / Timbre / Morph CV-amount parameters and the four
   modulation inlet branches exist in the DSP but have no on-screen control.
 
-### peaks -- Peaks / Dead Man's Catch
+### peaks -- Hills
 
 Based on code by Émilie Gillet and Tim Churches (MIT License). All 14 are mono
 generators -- single output, no audio input, no V/Oct. These still need some
@@ -100,14 +101,14 @@ what the parameter actually drives. Verified against the DSP, not yet fixed:
 
 | Unit | Category | Description |
 |------|----------|-------------|
-| Bass Drum | Peaks | 808-style kick synthesis |
-| Snare Drum | Peaks | 808-style snare synthesis |
-| High Hat | Peaks | 808-style hi-hat synthesis |
-| FM Drum | Peaks | FM synthesis drum with noise |
-| Tap LFO | Peaks | Clock-synced LFO |
-| Bouncing Ball | Peaks | Physics-based bounce envelope |
-| Mini Sequencer | Peaks | 4-step CV sequencer |
-| Number Station | Peaks | Radio transmission noise generator |
+| Bass Drum | Hills | 808-style kick synthesis |
+| Snare Drum | Hills | 808-style snare synthesis |
+| High Hat | Hills | 808-style hi-hat synthesis |
+| FM Drum | Hills | FM synthesis drum with noise |
+| Tap LFO | Hills | Clock-synced LFO |
+| Bouncing Ball | Hills | Physics-based bounce envelope |
+| Mini Sequencer | Hills | 4-step CV sequencer |
+| Number Station | Hills | Radio transmission noise generator |
 | Randomised Envelope | Dead Man's Catch | Stochastic AD envelope |
 | Mod Sequencer | Dead Man's Catch | 8-step sequencer -- steps 5-8 are inversions of steps 1-4 |
 | FM LFO | Dead Man's Catch | LFO with FM modulation |

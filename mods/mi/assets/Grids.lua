@@ -11,7 +11,7 @@ local Grids = Class {}
 Grids:include(Unit)
 
 function Grids:init(args)
-  args.title = "Grids"
+  args.title = "Gradus"
   args.mnemonic = "Gr"
   Unit.init(self, args)
 end
@@ -80,7 +80,7 @@ end
 function Grids:onLoadViews()
   return {
     circle = GridsCircle {
-      description = "Grids",
+      description = "Gradus",
       width       = 2 * app.SECTION_PLY,
       grids       = self.objects.op,
       mapx        = self.objects.mapx:getParameter("Bias"),

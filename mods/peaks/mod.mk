@@ -1,5 +1,5 @@
 PKGNAME ?= peaks
-PKGVERSION ?= 1.0.0
+PKGVERSION ?= 1.0.1.1
 
 include scripts/env.mk
 

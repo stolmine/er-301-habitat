@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**236 items** — 75 done, 7 wip, 153 todo, 1 blocked. *Rendered 2026-10-03.*
+**237 items** — 75 done, 8 wip, 153 todo, 1 blocked. *Rendered 2026-11-10.*
 
 ## DSP
 
@@ -175,6 +175,7 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+| ~ | `mi-derivative-naming` | Rename MI-derived units per Mutable Instruments' derivative-works guidelines | manual · 2026-11-10 |
 |   | `alembic-phase9-polish` | Alembic Phase 9: naming/defaults/mnemonic polish + serial stacked-waveform viz | screenshot: confirm final names/defaults/control labels + sphere-viz refinements, plus a stacked/cascading render of mWavetableLUT[64][256] with active reagent-scan frames lit and neighbors dimmed · 2026-07-09 |
 |   | `anamnesis-viz-opt` | Anamnesis viz: shared per-frame field cache + bounded metaball build (CM4/am335x perf) | manual *(attested)* · 2026-08-13 |
 |   | `canals-crash-voct-extended-use` | Canals: reports of crashes after V/Oct manipulation or extended usage (spreadsheet 2.8.5 / fw v0.7-stolmine 9.7.0) | manual · 2026-10-03 |

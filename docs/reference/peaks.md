@@ -1,7 +1,9 @@
-# Peaks (`peaks`) -- v1.0.0
+# Hills (`peaks`) -- v1.0.0
 
-Ports of Émilie Gillet's *Peaks* (Mutable Instruments) and Tim Churches' *Dead
-Man's Catch* alternative firmware for Peaks (both MIT licensed). Fourteen mono
+Ports of Émilie Gillet's open-source function-generator firmware and Tim
+Churches' *Dead Man's Catch* alternative firmware for it (both MIT licensed).
+Package title and category are **Hills**, renamed from the source module per
+the original author's guidelines for derivative works. Fourteen mono
 generators: four 808-flavoured drum voices, clocked LFOs and sequencers, a
 number station, and a bytebeat engine. All units are mono and generator-only:
 they have no audio input and a single `Out1`. All parameter dials are plain
@@ -18,7 +20,7 @@ DSP re-centres them. Output is `int16 / 32768`, i.e. roughly ±1.0.
 
 ## Tap LFO
 
-<mnemonic: TL> · Category: Peaks
+<mnemonic: TL> · Category: Hills
 
 A clock-synced LFO. It listens to the Clock input, predicts the incoming tempo
 (including irregular taps) and runs a wavetable oscillator locked to it. Five
@@ -43,9 +45,9 @@ No V/Oct.
 
 ## Bass Drum
 
-<mnemonic: BD> · Category: Peaks
+<mnemonic: BD> · Category: Hills
 
-The Peaks 808-style kick: a resonant bandpass "resonator" struck by a
+The Hills 808-style kick: a resonant bandpass "resonator" struck by a
 pulse-shaped excitation, with a separate transient click. Punch stiffens the
 attack, Tone opens the click's brightness, Decay lengthens the body ring.
 
@@ -65,7 +67,7 @@ attack, Tone opens the click's brightness, Decay lengthens the body ring.
 
 ## Snare Drum
 
-<mnemonic: SD> · Category: Peaks
+<mnemonic: SD> · Category: Hills
 
 Two tuned resonators (body and rim) mixed against a filtered noise burst.
 Tone balances the two resonators against each other; Snappy sets how much noise
@@ -87,9 +89,9 @@ rides on top.
 
 ## High Hat
 
-<mnemonic: HH> · Category: Peaks
+<mnemonic: HH> · Category: Hills
 
-The Peaks hi-hat: a metallic noise source (six detuned square oscillators) run
+The Hills hi-hat: a metallic noise source (six detuned square oscillators) run
 through a bandpass and a fast decay envelope. This port exposes no parameter
 dials: the DSP's frequency, decay, frequency-randomness and decay-randomness
 all sit fixed at their mid values, so every hit varies slightly in pitch and
@@ -107,10 +109,10 @@ length. Trigger it; there is nothing to adjust.
 
 ## FM Drum
 
-<mnemonic: FM> · Category: Peaks
+<mnemonic: FM> · Category: Hills
 
 A two-operator FM percussion voice with a noise component, the "digital" drum
-of the Peaks set. Sweeps from tight FM toms through wooden clicks to metallic
+of the Hills set. Sweeps from tight FM toms through wooden clicks to metallic
 noise hits depending on Frequency, FM index and Noise.
 
 **Controls**
@@ -129,7 +131,7 @@ noise hits depending on Frequency, FM index and Noise.
 
 ## Bouncing Ball
 
-<mnemonic: BB> · Category: Peaks
+<mnemonic: BB> · Category: Hills
 
 A physics envelope: a trigger drops a ball from a height and it bounces,
 losing energy each time it hits the floor. The output is the ball's height.
@@ -151,7 +153,7 @@ Useful for accelerating retrigger ramps and natural-feeling decays.
 
 ## Mini Sequencer
 
-<mnemonic: MS> · Category: Peaks · Unit title on screen: **Mini Seq**
+<mnemonic: MS> · Category: Hills · Unit title on screen: **Mini Seq**
 
 A four-step CV sequencer. Each clock edge advances one step and the output
 holds that step's value. The four step dials are bipolar, so it emits a
@@ -175,7 +177,7 @@ in (trigger).
 
 ## Number Station
 
-<mnemonic: NS> · Category: Peaks
+<mnemonic: NS> · Category: Hills
 
 A shortwave numbers-station simulator: a synthetic voice reading digits,
 buried in radio noise, drift, ringmod interference and distortion. A gate
@@ -419,7 +421,7 @@ Other findings:
 
 Discrepancies vs README.md:
 
-- README's Peaks table lists all 14 units and the categories match toc.lua.
+- README's Hills table lists all 14 units and the categories match toc.lua.
   Descriptions are broadly accurate. Two are loose:
   * README's "4-step CV sequencer" for Mini Sequencer is right, but its
     "Extended step sequencer" for Mod Sequencer undersells/obscures that it is

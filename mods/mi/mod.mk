@@ -1,5 +1,5 @@
 PKGNAME ?= mi
-PKGVERSION ?= 1.0.4
+PKGVERSION ?= 1.0.5.2
 
 include scripts/env.mk
 

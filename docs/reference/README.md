@@ -11,8 +11,8 @@ a verification block at the foot of each page.
 
 | Page | Package | Version | Units |
 |------|---------|---------|-------|
-| [mi.md](mi.md) | `mi` | 1.0.4 | 9 (Mutable Instruments ports) |
-| [peaks.md](peaks.md) | `peaks` | 1.0.0 | 14 (Peaks / Dead Man's Catch ports) |
+| [mi.md](mi.md) | `mi` | 1.0.4 | 9 (Eurorack firmware ports) |
+| [peaks.md](peaks.md) | `peaks` | 1.0.0 | 14 (Hills / Dead Man's Catch ports) |
 | [spreadsheet-generators.md](spreadsheet-generators.md) | `spreadsheet` | 2.8.5.1 | 9 (sources, voices, sequencers) |
 | [spreadsheet-effects.md](spreadsheet-effects.md) | `spreadsheet` | 2.8.5.1 | 12 (effects) |
 | [biome.md](biome.md) | `biome` | 2.2.3 | 23 (utilities, sequencers, small voices) |
@@ -37,7 +37,7 @@ the top-level `README.md`.
 The most consequential:
 
 - **`catchall.Flakes` cannot load**: it requires a module that does not exist.
-- **`mi.Grids` is display-only**: its control view is never switched to.
+- **`mi.Grids` (Gradus) is display-only**: its control view is never switched to.
 - **`peaks` control labels**: Tap LFO, FM LFO, WSM LFO and ByteBeats have
   labels that do not match what the parameter drives.
 - **`spreadsheet.Rauschen` V/Oct** is used by the DSP but bound to no control.

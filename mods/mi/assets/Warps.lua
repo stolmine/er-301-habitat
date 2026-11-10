@@ -30,8 +30,8 @@ local Warps = Class {}
 Warps:include(Unit)
 
 function Warps:init(args)
-  args.title = "Warps"
-  args.mnemonic = "Wp"
+  args.title = "Wring"
+  args.mnemonic = "Wr"
   Unit.init(self, args)
 end
 

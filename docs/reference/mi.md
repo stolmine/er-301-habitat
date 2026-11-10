@@ -1,20 +1,21 @@
 # MI (`mi`) -- v1.0.4
 
-Ports of Mutable Instruments modules to the ER-301. All DSP is based on code by
+Ports of Émilie Gillet's open-source Eurorack firmware to the ER-301. All DSP is based on code by
 Émilie Gillet (MIT License); the ER-301 unit wrappers, UI and 48 kHz adaptations
-are by stolmine. Nine units: three full macro-instruments (Plaits, Clouds,
-Rings), three extracted sub-engines (Stratos, Commotio, Warps), and three
-control-rate generators (Grids, Marbles T, Marbles X).
+are by stolmine. Nine units: three full macro-instruments (Pleats, Cirrus,
+Rota), three extracted sub-engines (Stratos, Commotio, Wring), and three
+control-rate generators (Gradus, Mica T, Mica X). Units are renamed from their
+source modules, per the original author's guidelines for derivative works.
 
 Package title in `toc.lua` is **MI**; every unit sits in the **MI** category.
 
 ---
 
-## Plaits
+## Pleats
 
 <mnemonic: Pl> · Category: MI
 
-The Plaits macro-oscillator with all 24 synthesis engines, from virtual analog
+The Pleats macro-oscillator with all 24 synthesis engines, from virtual analog
 through wavetables, speech, physical models and drum voices. It has two
 personalities selected from the unit menu: **osc**, a free-running oscillator
 whose output is always on, and **trig**, where a gate fires the internal
@@ -77,15 +78,15 @@ this release.
 
 ---
 
-## Clouds
+## Cirrus
 
-<mnemonic: Cl> · Category: MI
+<mnemonic: Ci> · Category: MI
 
-The Clouds granular texture processor, running its granular, looping-delay and
+The Cirrus granular texture processor, running its granular, looping-delay and
 spectral playback modes. Audio is continuously recorded into the buffer; Freeze
 holds the buffer so you can play the frozen material, and the trigger input
 fires individual grains. The internal reverb is disabled; use **Stratos** after
-it if you want the Clouds reverb.
+it if you want the Cirrus reverb.
 
 **Controls** (expanded view order)
 
@@ -117,11 +118,11 @@ internally regardless of the Quality setting.
 
 ---
 
-## Rings
+## Rota
 
-<mnemonic: Rn> · Category: MI
+<mnemonic: Ro> · Category: MI
 
-The Rings resonator. Feed it audio as an exciter, or leave the internal exciter
+The Rota resonator. Feed it audio as an exciter, or leave the internal exciter
 on and strum it. Six resonator models cover modal bars, sympathetic strings,
 plucked strings, an FM voice and a reverberated string. Base pitch is MIDI 48
 (C3) plus the Freq offset plus V/oct. The "String Synth" easter egg replaces the
@@ -172,12 +173,12 @@ is set, which changes how Out Mix behaves (see above).
 
 ---
 
-## Grids
+## Gradus
 
 <mnemonic: Gr> · Category: MI
 
 Topographic drum pattern generator. Clock it from the chain input and it walks a
-32-step pattern read out of the Grids drum map; **Map X** and **Map Y** move
+32-step pattern read out of the Gradus drum map; **Map X** and **Map Y** move
 continuously across a 5×5 grid of interpolated patterns, and **Density** sets
 how many of the map's hits pass the threshold. The unit emits one gate stream
 for the selected instrument channel.
@@ -186,7 +187,7 @@ for the selected instrument channel.
 
 | Control | Type | Range / Options | Default | What it does |
 |---|---|---|---|---|
-| Grids | GridsCircle | n/a | n/a | Two-ply circular step display; follows the running pattern |
+| Gradus | GridsCircle | n/a | n/a | Two-ply circular step display; follows the running pattern |
 | Map X | GainBias / readout | 0 … 1 | 0.5 | Horizontal position in the drum map |
 | Map Y | GainBias / readout | 0 … 1 | 0.5 | Vertical position in the drum map |
 | Density | GainBias / readout | 0 … 1 | 0.5 | Fill amount: threshold applied to the map's step levels |
@@ -210,11 +211,11 @@ length falls back to 48 samples (1 ms).
 
 ---
 
-## Warps
+## Wring
 
-<mnemonic: Wp> · Category: MI
+<mnemonic: Wr> · Category: MI
 
-The Warps meta-modulator. The chain input is the carrier and a branch supplies
+The Wring meta-modulator. The chain input is the carrier and a branch supplies
 the modulator; the **Algorithm** fader crossfades continuously through six
 cross-modulation algorithms rather than stepping between them, so the in-between
 positions are usable. The "Freq Shifter" easter egg replaces the whole
@@ -251,7 +252,7 @@ pending a 96 kHz sample-rate conversion.
 
 **I/O**: In1 is the carrier (via a unity ConstantGain clamped at -59.9 dB); the
 modulator arrives through the `mod` branch. Out1 is the main output, Out2 the
-aux output in a stereo chain. Internally Warps renders in 96-sample blocks
+aux output in a stereo chain. Internally Wring renders in 96-sample blocks
 through a FIFO, so there is a small fixed latency.
 
 ---
@@ -260,7 +261,7 @@ through a FIFO, so there is a small fixed latency.
 
 <mnemonic: St> · Category: MI
 
-The reverb from Clouds, extracted as a standalone stereo effect. It is a dense
+The reverb from Cirrus, extracted as a standalone stereo effect. It is a dense
 diffusion reverb with an adjustable input gain stage, useful both as a plain
 reverb and, with Time near 1.0, as a smearing ambience. The unit defaults to a
 long, fairly diffuse, gently damped setting rather than a neutral one.
@@ -286,11 +287,11 @@ In1 to both reverb inputs and connect only Out1. No trigger or freeze inputs.
 
 <mnemonic: Co> · Category: MI
 
-The exciter section of Elements, running at the ER-301's native 48 kHz, as a
+The exciter section of Gillet's modal voice, running at the ER-301's native 48 kHz, as a
 standalone gate-driven noise/texture source. It layers three excitation types
 (a bowed friction model, a blown/breath model, and a struck/particle model), each
-with its own level and timbre, shaped by a common envelope. Pair it with Rings
-(set to external exciter) to rebuild an Elements-style voice.
+with its own level and timbre, shaped by a common envelope. Pair it with Rota
+(set to external exciter) to rebuild the full modal voice.
 
 **Controls**
 
@@ -317,11 +318,11 @@ it, so Commotio is a pure source.
 
 ---
 
-## Marbles T
+## Mica T
 
 <mnemonic: Mt> · Category: MI
 
-The T (timing) half of Marbles: a probabilistic gate generator locked to an
+The T (timing) half of the Mica pair: a probabilistic gate generator locked to an
 external clock. Seven generative models decide how the incoming clock is turned
 into gates; **Deja Vu** and **Length** control the loop-and-mutate memory that
 turns random streams into repeating-but-drifting patterns.
@@ -352,11 +353,11 @@ a clock edge has been received, so inserting the unit does not pop.
 
 ---
 
-## Marbles X
+## Mica X
 
 <mnemonic: Mx> · Category: MI
 
-The X (voltage) half of Marbles: a clocked random CV generator built on a beta
+The X (voltage) half of the Mica pair: a clocked random CV generator built on a beta
 distribution. **Spread** and **Bias** shape the distribution the voltages are
 drawn from, **Steps** quantises the result from smooth to hard-stepped, and
 Deja Vu/Length loop the sequence. One of the three X outputs (or a blend of two)
@@ -376,7 +377,7 @@ each other.
 | Spread | GainBias | 0 … 1 | 0.5 | Width of the random distribution, from a single value to fully uniform |
 | Bias | GainBias | 0 … 1 | 0.5 | Centre of the distribution |
 | Steps | GainBias | 0 … 1 | 0.5 | Quantisation, from smooth/continuous to a small number of discrete levels |
-| Deja Vu | GainBias | 0 … 1 | 0.0 | Loop-and-mutate amount, as on Marbles T |
+| Deja Vu | GainBias | 0 … 1 | 0.0 | Loop-and-mutate amount, as on Mica T |
 | Length | GainBias | 1 … 16, integer | 8 | Length of the Deja Vu loop |
 | Output | GainBias | 0 … 1 | 0.0 | Selects/blends the output: 0 = X1, 0.5 = X2, 1 = X3 |
 

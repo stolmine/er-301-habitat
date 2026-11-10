@@ -25,8 +25,8 @@ local Clouds = Class {}
 Clouds:include(Unit)
 
 function Clouds:init(args)
-  args.title = "Clouds"
-  args.mnemonic = "Cl"
+  args.title = "Cirrus"
+  args.mnemonic = "Ci"
   Unit.init(self, args)
 end
 

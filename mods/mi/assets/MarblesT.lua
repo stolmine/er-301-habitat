@@ -12,7 +12,7 @@ local MarblesT = Class {}
 MarblesT:include(Unit)
 
 function MarblesT:init(args)
-  args.title = "Marbles T"
+  args.title = "Mica T"
   args.mnemonic = "Mt"
   Unit.init(self, args)
 end

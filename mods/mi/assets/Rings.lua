@@ -31,8 +31,8 @@ local Rings = Class {}
 Rings:include(Unit)
 
 function Rings:init(args)
-  args.title = "Rings"
-  args.mnemonic = "Rn"
+  args.title = "Rota"
+  args.mnemonic = "Ro"
   Unit.init(self, args)
 end
 
