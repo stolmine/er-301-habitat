@@ -1,4 +1,4 @@
-# MI (`mi`) -- v1.0.4
+# MI (`mi`) -- v1.0.5
 
 Ports of Émilie Gillet's open-source Eurorack firmware to the ER-301. All DSP is based on code by
 Émilie Gillet (MIT License); the ER-301 unit wrappers, UI and 48 kHz adaptations

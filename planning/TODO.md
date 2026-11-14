@@ -5,7 +5,7 @@ ER-301-HABITAT TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**237 items** — 75 done, 8 wip, 153 todo, 1 blocked. *Rendered 2026-11-10.*
+**237 items** — 75 done, 8 wip, 153 todo, 1 blocked. *Rendered 2026-11-13.*
 
 ## DSP
 

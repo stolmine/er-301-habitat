@@ -41,8 +41,8 @@ Full per-unit control reference: [docs/reference/](docs/reference/README.md).
 
 | Package | Version | Units | What's in it |
 |---------|---------|-------|--------------|
-| **mi** | 1.0.4 | 9 | Ports of Émilie Gillet's Eurorack firmware |
-| **peaks** | 1.0.0 | 14 | Hills: ports of Émilie Gillet's and Tim Churches' function-generator firmware |
+| **mi** | 1.0.5 | 9 | Ports of Émilie Gillet's Eurorack firmware |
+| **peaks** | 1.0.1 | 14 | Hills: ports of Émilie Gillet's and Tim Churches' function-generator firmware |
 | **spreadsheet** | 2.8.5.1 | 21 | Original units -- the flagship package |
 | **biome** | 2.2.3 | 23 | Original units -- utilities, sequencers, small voices |
 | **scope** | 1.2.7 | 7 | Inline visualization |
@@ -251,6 +251,20 @@ at your own risk.
   is defined but on no view; learned weights are not serialized.
 
 ## Changelog
+
+Entries before v2.8.2 use the old unit names: Plaits = Pleats, Clouds = Cirrus,
+Rings = Rota, Grids = Gradus, Warps = Wring, Marbles T/X = Mica T/X, and the
+Peaks category = Hills.
+
+### v2.8.2
+
+**Unit renames, no DSP changes.** See [RELEASE-2.8.2.md](RELEASE-2.8.2.md).
+mi v1.0.4 -> v1.0.5; peaks v1.0.0 -> v1.0.1; all other packages unchanged.
+Firmware unchanged.
+
+The units derived from Émilie Gillet's Eurorack firmware now carry their own
+names, following the original author's guidelines for derivative works. Saved
+patches keep loading.
 
 ### v2.8.1
 

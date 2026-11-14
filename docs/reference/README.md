@@ -1,7 +1,7 @@
 # ER-301 Habitat: Unit Reference
 
-Complete control reference for every publicly shipping unit, as of **v2.8.1**
-(2026-08-06). 87 units across 7 packages.
+Complete control reference for every publicly shipping unit, as of **v2.8.2**
+(2026-11-13). 87 units across 7 packages.
 
 Each page lists units in `toc.lua` order with their exact on-screen control
 labels, types, ranges, defaults, sub-displays, menus and I/O. Everything is
@@ -11,8 +11,8 @@ a verification block at the foot of each page.
 
 | Page | Package | Version | Units |
 |------|---------|---------|-------|
-| [mi.md](mi.md) | `mi` | 1.0.4 | 9 (Eurorack firmware ports) |
-| [peaks.md](peaks.md) | `peaks` | 1.0.0 | 14 (Hills / Dead Man's Catch ports) |
+| [mi.md](mi.md) | `mi` | 1.0.5 | 9 (Eurorack firmware ports) |
+| [peaks.md](peaks.md) | `peaks` | 1.0.1 | 14 (Hills / Dead Man's Catch ports) |
 | [spreadsheet-generators.md](spreadsheet-generators.md) | `spreadsheet` | 2.8.5.1 | 9 (sources, voices, sequencers) |
 | [spreadsheet-effects.md](spreadsheet-effects.md) | `spreadsheet` | 2.8.5.1 | 12 (effects) |
 | [biome.md](biome.md) | `biome` | 2.2.3 | 23 (utilities, sequencers, small voices) |

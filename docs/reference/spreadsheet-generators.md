@@ -88,8 +88,8 @@ to both channels on a stereo chain. Mono gate branches: `clock`, `reset`,
 A 64-step gate sequencer with a chaselight display. Each step has an on/off
 gate, a length in ticks, and a velocity that scales the gate's output amplitude.
 The Ratchet ply subdivides a step into up to 8 retriggers on demand, and the
-Transform ply applies pattern algorithms (Euclidean, Nord-rack tables, a Grids
-approximation, necklaces, inversion, rotation and density) to the running
+Transform ply applies pattern algorithms (Euclidean, Nord-rack tables, a topographic
+drum-map approximation, necklaces, inversion, rotation and density) to the running
 sequence.
 
 **Controls**
@@ -129,7 +129,7 @@ and `prm B` are the two parameters.
 |---|---|---|---|---|
 | 0 | `euc` | Euclidean distribution of hits across the active steps. | Hits (0 … steps) | Rotation (0 … steps−1) |
 | 1 | `nr` | 16-bit table pattern, repeating every 16 steps. | Table index (0 … 31) | Mask variant (0 … 3) |
-| 2 | `grd` | Grids-style deterministic hash pattern, roughly 50% density. | X (0 … 255) | Y (0 … 255) |
+| 2 | `grd` | Topographic drum-map style deterministic hash pattern, roughly 50% density. | X (0 … 255) | Y (0 … 255) |
 | 3 | `nkl` | Necklace: Euclidean with rotation derived from the index. | Density | Index → rotation |
 | 4 | `inv` | Inverts every gate. | n/a | n/a |
 | 5 | `rot` | Rotates the pattern right. | Rotation amount | n/a |

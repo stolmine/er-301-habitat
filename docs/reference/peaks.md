@@ -1,4 +1,4 @@
-# Hills (`peaks`) -- v1.0.0
+# Hills (`peaks`) -- v1.0.1
 
 Ports of Émilie Gillet's open-source function-generator firmware and Tim
 Churches' *Dead Man's Catch* alternative firmware for it (both MIT licensed).

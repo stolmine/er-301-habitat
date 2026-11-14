@@ -3,7 +3,7 @@
 Biome is the original-units package: gate sequencers, waveshapers, filters, CV
 utilities, envelopes, mixers and oscillators, all authored for this catalog
 rather than ported wholesale. Two units embed third-party DSP: the Varishape
-pair use Émilie Gillet's (Mutable Instruments) variable-shape oscillator and
+pair use Émilie Gillet's (MIT) variable-shape oscillator and
 decay envelope, and 94 Discont / Latch Filter are ports of monokit SuperCollider
 implementations. NR's rhythm table derives from the teletype / Noise Engineering
 Numeric Repetitor idea.
@@ -443,7 +443,7 @@ A minimal one-oscillator synth voice: a PolyBLEP variable-shape oscillator run
 through a gate-triggered exponential decay envelope and an output VCA. Shape is
 a single continuous morph from triangle through saw to square (with pulse width
 opening at the top) rather than a waveform selector. The oscillator core and
-envelope are Émilie Gillet's (Mutable Instruments, MIT).
+envelope are Émilie Gillet's (MIT).
 
 **Controls**
 
@@ -471,7 +471,7 @@ The bare oscillator from Varishape Voice with no envelope: a PolyBLEP
 variable-shape core morphing triangle → saw → square with widening pulse width,
 plus V/Oct and an output level. BLEP correction keeps it clean high in the
 range. Use it as a raw tone source for external envelopes and filters. Core by
-Émilie Gillet (Mutable Instruments, MIT).
+Émilie Gillet (MIT).
 
 **Controls**
 
